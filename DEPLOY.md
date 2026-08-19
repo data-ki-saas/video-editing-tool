@@ -225,10 +225,12 @@ the next push that touches `supabase/migrations/`.
      exact scheme, no trailing slash.
    - Redeploy so `SITE_URL` takes effect (see pitfall #1 below).
 5. Verify:
-   - Load `/` — the editor UI should render (not raw "Trim / Add Artificial
-     Background / Overlay Image" text with no styling — if you see that,
-     the build didn't pick up Tailwind, redeploy).
-   - Upload an asset, confirm it appears in the asset list.
+   - Load `/` — the marketing page with "Sign in"/"Sign up" links should
+     render (styled, not raw unstyled text — if you see that, the build
+     didn't pick up Tailwind, redeploy).
+   - Sign up, land on `/dashboard`. Signing out and hitting `/dashboard`
+     directly should redirect to `/login` (see `src/lib/supabase/middleware.ts`).
+   - Upload a video from the dashboard, confirm it appears in the asset list.
    - Trigger a render, confirm `projects.render_status` moves from
      `planned` → `succeeded` → `completed` and `render_url` ends up pointing
      at your `R2_RENDERS_PUBLIC_URL` domain, not Creatomate's.
@@ -239,8 +241,8 @@ the next push that touches `supabase/migrations/`.
 
 - [ ] `GET /health` on the backend URL returns `{"status": "ok"}`
 - [ ] `GET /health` on the worker URL returns `ok`
-- [ ] Frontend loads and renders the styled editor UI
-- [ ] Asset upload succeeds end-to-end (frontend → backend → R2 uploads bucket + Supabase)
+- [ ] Frontend loads; sign-up/login works; `/dashboard` redirects to `/login` when signed out
+- [ ] Video upload succeeds end-to-end from the dashboard (frontend → backend → R2 uploads bucket + Supabase)
 - [ ] `POST /api/render` returns 202 with a `renderId`
 - [ ] Creatomate's dashboard shows the webhook delivery succeeded (check
       "Recent Deliveries" or similar under your project/webhook settings)

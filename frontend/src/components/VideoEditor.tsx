@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Preview } from "@creatomate/preview";
-import { listAssets, type Asset } from "@/lib/api";
+import { listAssets, uploadAsset, type Asset } from "@/lib/api";
 
 const REEL_WIDTH = 1080;
 const REEL_HEIGHT = 1920;
+const ACCEPTED_FILE_TYPES = "video/mp4,image/jpeg,image/png";
 
 type TemplateElement = Record<string, unknown> & { id: string };
 
@@ -47,12 +48,19 @@ function isMobileDevice(): boolean {
 export function VideoEditor({ projectId }: { projectId: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<Preview | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isMobile, setIsMobile] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [assetsError, setAssetsError] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [template, setTemplate] = useState<TemplateState>(createEmptyReelTemplate);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const videoAssets = assets.filter((asset) => asset.kind === "video");
+  const imageAssets = assets.filter((asset) => asset.kind === "image");
 
   useEffect(() => {
     // navigator is undefined during SSR, so this can't be a lazy useState
@@ -62,11 +70,22 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     setIsMobile(isMobileDevice());
   }, []);
 
-  useEffect(() => {
-    listAssets(projectId)
-      .then((data) => setAssets(data.filter((asset) => asset.kind === "video")))
-      .catch((err) => console.error("[VideoEditor] failed to load assets", err));
+  const refreshAssets = useCallback(async () => {
+    try {
+      const data = await listAssets(projectId);
+      setAssets(data);
+      setAssetsError(null);
+    } catch (err) {
+      setAssetsError(err instanceof Error ? err.message : "Failed to load assets");
+    }
   }, [projectId]);
+
+  useEffect(() => {
+    // refreshAssets() itself only calls setState after its await -- this
+    // fetch-on-mount/projectId-change pattern is what the effect is for.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshAssets();
+  }, [refreshAssets]);
 
   // Initializes the Creatomate Preview plugin inside `containerRef` once the
   // device check above has settled -- the SDK needs real desktop-class video
@@ -103,6 +122,23 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     setTemplate(next);
     if (previewRef.current && isReady) {
       await previewRef.current.setSource(next);
+    }
+  }
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // lets the same file be re-selected later
+    if (!file) return;
+
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const asset = await uploadAsset(projectId, file);
+      setAssets((prev) => [asset, ...prev]);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setIsUploading(false);
     }
   }
 
@@ -153,10 +189,10 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     });
   }
 
-  /** Placeholder: a real implementation would let the user pick one of their
-   * uploaded images (same `assets` list, filtered to kind === "image") to
-   * overlay. This adds a fixed placeholder overlay in the top-right corner
-   * using the first available asset, just to demonstrate the state shape. */
+  /** Placeholder: a real implementation would let the user pick which of
+   * their uploaded images to overlay. This adds a fixed placeholder overlay
+   * in the top-right corner using the first uploaded image, just to
+   * demonstrate the state shape. */
   function handleOverlayImage() {
     if (template.elements.some((el) => el.id === "image-overlay")) return;
     void pushTemplate({
@@ -172,7 +208,7 @@ export function VideoEditor({ projectId }: { projectId: string }) {
           height: "30%",
           x: "80%",
           y: "20%",
-          source: assets[0]?.url ?? null,
+          source: imageAssets[0]?.url ?? null,
         },
       ],
     });
@@ -195,7 +231,7 @@ export function VideoEditor({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button className={buttonClass} onClick={handleTrim} disabled={!isReady || !selectedAssetId}>
           Trim
         </button>
@@ -205,11 +241,35 @@ export function VideoEditor({ projectId }: { projectId: string }) {
         <button
           className={buttonClass}
           onClick={handleOverlayImage}
-          disabled={!isReady || assets.length === 0}
+          disabled={!isReady || imageAssets.length === 0}
         >
           Overlay Image
         </button>
+
+        <span className="mx-1 h-5 w-px bg-neutral-300" aria-hidden="true" />
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPTED_FILE_TYPES}
+          className="hidden"
+          onChange={handleFileSelected}
+          disabled={isUploading}
+        />
+        <button
+          className={
+            "rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700 " +
+            "disabled:cursor-not-allowed disabled:opacity-40"
+          }
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isUploading}
+        >
+          {isUploading ? "Uploading…" : "Upload video or image"}
+        </button>
       </div>
+
+      {uploadError && <p className="text-sm text-red-600">{uploadError}</p>}
+      {assetsError && <p className="text-sm text-red-600">Couldn&apos;t load assets: {assetsError}</p>}
 
       <div
         ref={containerRef}
@@ -217,24 +277,33 @@ export function VideoEditor({ projectId }: { projectId: string }) {
         style={{ aspectRatio: "9 / 16" }}
       />
 
-      <ul className="flex flex-col gap-1">
-        {assets.map((asset) => (
-          <li key={asset.id}>
-            <button
-              className={
-                "w-full rounded-md border px-3 py-1.5 text-left text-sm hover:bg-neutral-100 " +
-                (asset.id === selectedAssetId
-                  ? "border-neutral-900 font-medium"
-                  : "border-neutral-300")
-              }
-              onClick={() => handleSelectAsset(asset)}
-            >
-              {asset.filename}
-              {asset.id === selectedAssetId ? " (selected)" : ""}
-            </button>
-          </li>
-        ))}
-      </ul>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-sm font-medium text-neutral-700">Your videos</h2>
+        {videoAssets.length === 0 ? (
+          <p className="text-sm text-neutral-500">
+            No videos yet — click &quot;Upload video or image&quot; above to get started.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-1">
+            {videoAssets.map((asset) => (
+              <li key={asset.id}>
+                <button
+                  className={
+                    "w-full rounded-md border px-3 py-1.5 text-left text-sm hover:bg-neutral-100 " +
+                    (asset.id === selectedAssetId
+                      ? "border-neutral-900 font-medium"
+                      : "border-neutral-300")
+                  }
+                  onClick={() => handleSelectAsset(asset)}
+                >
+                  {asset.filename}
+                  {asset.id === selectedAssetId ? " (selected)" : ""}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+// A signed-in user hitting one of these gets bounced to /dashboard instead.
+const GUEST_ONLY_PATHS = ["/login", "/signup"];
+
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
@@ -23,12 +26,22 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  // Refreshes the session cookie on every request so a Server Component's
-  // supabase.auth.getUser() never sees an expired access token. No
-  // redirect/gating logic yet -- there's no login page in this app so far
-  // (see lib/api.ts's authHeader(), which degrades to an unauthenticated
-  // request when there's no session).
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { pathname } = request.nextUrl;
+  const isGuestOnlyPath = GUEST_ONLY_PATHS.some((path) => pathname.startsWith(path));
+  const isPublicPath = pathname === "/" || isGuestOnlyPath;
+
+  if (!user && !isPublicPath) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  // Signed-in users don't need the marketing home page or the sign-in/sign-up forms.
+  if (user && (pathname === "/" || isGuestOnlyPath)) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
 
   return response;
 }
