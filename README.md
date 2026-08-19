@@ -5,24 +5,32 @@ and `frontend/` (Next.js) app, following the same structure as the sibling
 `data` project.
 
 - **frontend/** — Next.js App Router UI. Renders the timeline editor
-  (`@creatomate/preview`) and talks to the backend over HTTP.
+  (`@creatomate/preview`), triggers renders and receives Creatomate's webhook
+  (both hold their own server-only secrets — see "Rendering pipeline" below).
 - **backend/** — FastAPI service. Owns Supabase (via the service-role key)
-  and Cloudflare R2, so no storage credential ever reaches the browser.
+  and the private uploads R2 bucket, so no upload storage credential ever
+  reaches the browser.
+- **worker/** — a small standalone Node service that mirrors a finished
+  Creatomate render into a *second*, publicly-served R2 bucket, so playback
+  comes from our own Cloudflare-fronted domain instead of Creatomate's
+  temporary hosted URL. See "Delivering finished videos" below.
 - **supabase/migrations/** — shared schema (`users`, `projects`, `assets`),
-  applied directly to the Supabase project both apps point at.
+  applied directly to the Supabase project every app points at.
 
 ## Hosting
 
-| Piece                | Host       |
-| --------------------- | ---------- |
-| frontend               | Vercel     |
-| backend                | Render     |
-| Postgres + Auth        | Supabase   |
-| media storage (assets) | Cloudflare R2 |
+| Piece                        | Host       |
+| ----------------------------- | ---------- |
+| frontend                      | Vercel     |
+| backend                       | Render     |
+| render-transfer-worker        | Render     |
+| Postgres + Auth                | Supabase   |
+| upload storage (private)       | Cloudflare R2 |
+| finished-render storage (public, CDN) | Cloudflare R2 + custom domain |
 
-`render.yaml` at the repo root defines the backend's Render service
-(`rootDir: backend`). The frontend deploys to Vercel with its project root
-set to `frontend/`.
+`render.yaml` at the repo root defines the backend's and worker's Render
+services (`rootDir: backend` / `rootDir: worker`). The frontend deploys to
+Vercel with its project root set to `frontend/`.
 
 ## Setup
 
@@ -74,3 +82,103 @@ R2 bucket itself is private, so this is the only way a browser ever reads an
 object, and every presign is preceded by the same project-ownership check as
 everything else in this API. Don't cache a `url` past its expiry; re-fetch the
 asset instead.
+
+## Rendering pipeline
+
+```
+browser --(final timeline JSON)--> POST /api/render (frontend, Vercel)
+                                        |
+                                        v
+                                Creatomate.startRender()  -- fire-and-forget,
+                                        |                    not the polling
+                                        |                    render() call
+                                        v
+                          projects.render_id / render_status = 'planned' saved
+                                        |
+                       ... Creatomate renders the video, minutes later ...
+                                        |
+                                        v
+        POST /api/webhooks/creatomate (frontend, Vercel) <-- Creatomate calls back
+                                        |
+                        projects.render_status = 'succeeded'
+                        projects.render_url = Creatomate's temporary URL
+                                        |
+                                        v
+                POST /transfer (render-transfer-worker, Render) -- fire-and-forget
+                                        |
+              downloads the MP4 from Creatomate, streams it into R2,
+              then sets render_status = 'completed', render_url = our own
+              Cloudflare-fronted URL
+```
+
+Two Next.js routes hold their own secrets rather than delegating to the
+FastAPI backend, a deliberate exception to "backend owns all secrets"
+elsewhere in this repo:
+
+- **`POST /api/render`** ([frontend/src/app/api/render/route.ts](frontend/src/app/api/render/route.ts)) —
+  authenticates via the cookie-based Supabase client, checks project
+  ownership, calls `Creatomate.Client.startRender()` with `CREATOMATE_API_KEY`.
+- **`POST /api/webhooks/creatomate`** ([frontend/src/app/api/webhooks/creatomate/route.ts](frontend/src/app/api/webhooks/creatomate/route.ts)) —
+  receives Creatomate's completion callback. This has no user session to
+  authenticate with (Creatomate is calling us, not the browser), so it uses
+  the Supabase **service-role** key instead — duplicated from `backend/`'s
+  copy, an accepted tradeoff of keeping this receiver here instead of in
+  FastAPI. **Security note:** Creatomate does not publish an HMAC-signature
+  scheme for webhooks (checked their Node SDK source and public docs — there
+  isn't one). Instead, `webhook_url` carries a `secret` query param we
+  generate ourselves (`CREATOMATE_WEBHOOK_SECRET`) and the receiver checks
+  with a timing-safe comparison. Treat that secret like an API key, and
+  rotate it if the URL is ever exposed somewhere it shouldn't be (logs,
+  error trackers, etc).
+
+`projects.render_status` moves through Creatomate's own states
+(`planned`/`waiting`/`rendering`/`succeeded`/`failed`) and then, only once the
+`worker/` transfer finishes, our own app-level `completed` — deliberately not
+the same thing as Creatomate's `succeeded`, since `succeeded` only means
+Creatomate finished rendering, not that the video lives anywhere we control
+yet.
+
+## Delivering finished videos
+
+Creatomate's hosted render URL isn't meant as permanent storage or a
+CDN you control — it's why the pipeline above always mirrors a finished
+render into R2 before calling it `completed`. Recommended DNS/bucket setup
+for that:
+
+1. **Use a second, separate R2 bucket for finished renders** — do not reuse
+   the private uploads bucket from "Asset URLs" above. A Cloudflare custom
+   domain makes an *entire* bucket publicly readable; finished renders are
+   meant to be shared/played back publicly, raw user uploads are not, and
+   R2 doesn't offer prefix-scoped public access to split one bucket safely.
+2. In Cloudflare: **R2 → your renders bucket → Settings → Public access →
+   Custom Domains**, and connect a subdomain, e.g. `videos.yourapp.com`.
+   Cloudflare adds the DNS record for you (a proxied `CNAME`, orange-clouded)
+   — you don't hand-write one. Once connected, every object in that bucket is
+   served from Cloudflare's edge under your own domain, cached globally, with
+   **zero egress fees** (R2 has no egress charge, and Cloudflare-to-Cloudflare
+   traffic never leaves their network).
+3. Scope the R2 API token the worker uses to *only* that bucket — it never
+   needs to touch the private uploads bucket, and vice versa.
+4. Point `R2_RENDERS_PUBLIC_URL` (worker/.env) at that custom domain. That's
+   the value stored in `projects.render_url` once a transfer finishes.
+
+**Why a separate worker service instead of doing the transfer inline in the
+webhook** (`worker/src/server.js`, a small standalone Node HTTP service,
+deployed as its own Render service via `render.yaml`'s `render-transfer-worker`):
+a finished render can be a multi-hundred-MB video. Streaming that from
+Creatomate's URL into R2 inside a Vercel serverless function risks hitting
+its execution-time and payload limits — Vercel functions are built for quick
+request/response cycles, not minutes-long file transfers. Render's worker
+runs as a long-lived process with no such ceiling, so the webhook route just
+fires a small JSON request at it (`{projectId, renderId, sourceUrl}`) and
+returns immediately; the worker does the actual streaming download → streaming
+multipart upload → final DB write on its own time.
+
+**Known limitation of this "basic" version, worth upgrading before this
+carries real traffic:** the worker acknowledges the transfer request before
+the transfer finishes, with no retry and no durable queue — a crash or
+redeploy mid-transfer loses that job silently (Creatomate's webhook itself
+won't refire once already acknowledged). A production version should push
+`{projectId, renderId, sourceUrl}` onto a durable queue (even a `pending_transfers`
+Postgres table polled by the worker would do) instead of a single in-memory
+HTTP request, so an interrupted transfer can be retried.

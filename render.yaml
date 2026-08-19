@@ -21,3 +21,28 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+
+  - type: web
+    name: render-transfer-worker
+    runtime: node
+    plan: free
+    rootDir: worker
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: WORKER_INTERNAL_SECRET
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_RENDERS_BUCKET_NAME
+        sync: false
+      - key: R2_RENDERS_PUBLIC_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false

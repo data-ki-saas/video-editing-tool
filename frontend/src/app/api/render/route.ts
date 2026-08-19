@@ -26,17 +26,18 @@ function parseRequestBody(body: unknown): RenderRequestBody | null {
   return { projectId, timeline: timeline as Record<string, unknown> };
 }
 
-/** Where Creatomate POSTs render completion/failure. This has to be the
- * backend (Render), not this Next.js app: Creatomate's callback carries no
- * Supabase user session, so updating the projects row requires the
- * service-role client -- which only exists in backend/, by design (see
- * README.md's "Asset URLs" section for the same reasoning applied to R2).
- * NOTE: the backend doesn't implement this receiver yet -- this only wires
- * up where it will live. */
+/** Where Creatomate POSTs render completion/failure -- see
+ * app/api/webhooks/creatomate/route.ts. Creatomate doesn't support signed
+ * webhooks, so `secret` in the query string IS the security boundary the
+ * receiver checks; treat CREATOMATE_WEBHOOK_SECRET like an API key. */
 function buildWebhookUrl(): string | null {
-  const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-  if (!backendUrl) return null;
-  return `${backendUrl.replace(/\/$/, "")}/api/renders/webhook`;
+  const siteUrl = process.env.SITE_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+  const secret = process.env.CREATOMATE_WEBHOOK_SECRET;
+  if (!siteUrl || !secret) return null;
+
+  const url = new URL("/api/webhooks/creatomate", siteUrl);
+  url.searchParams.set("secret", secret);
+  return url.toString();
 }
 
 export async function POST(request: Request) {
@@ -91,7 +92,7 @@ export async function POST(request: Request) {
 
   const webhookUrl = buildWebhookUrl();
   if (!webhookUrl) {
-    console.error("[api/render] NEXT_PUBLIC_API_BASE_URL is not set -- cannot build a webhook URL");
+    console.error("[api/render] SITE_URL/VERCEL_URL or CREATOMATE_WEBHOOK_SECRET is not set");
     return NextResponse.json({ error: "Render service is not configured" }, { status: 500 });
   }
 
