@@ -178,9 +178,13 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     });
   }
 
+  const buttonClass =
+    "rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium " +
+    "hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
+
   if (isMobile) {
     return (
-      <div role="alert">
+      <div role="alert" className="m-4 rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900">
         The video editor requires a desktop browser — the Creatomate Preview
         SDK needs hardware video decoding that mobile browsers don&apos;t
         reliably support. Please switch to a desktop device to continue
@@ -190,25 +194,41 @@ export function VideoEditor({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button onClick={handleTrim} disabled={!isReady || !selectedAssetId}>
+    <div className="flex flex-col gap-4 p-4">
+      <div className="flex flex-wrap gap-2">
+        <button className={buttonClass} onClick={handleTrim} disabled={!isReady || !selectedAssetId}>
           Trim
         </button>
-        <button onClick={handleAddArtificialBackground} disabled={!isReady}>
+        <button className={buttonClass} onClick={handleAddArtificialBackground} disabled={!isReady}>
           Add Artificial Background
         </button>
-        <button onClick={handleOverlayImage} disabled={!isReady || assets.length === 0}>
+        <button
+          className={buttonClass}
+          onClick={handleOverlayImage}
+          disabled={!isReady || assets.length === 0}
+        >
           Overlay Image
         </button>
       </div>
 
-      <div ref={containerRef} style={{ width: "100%", maxWidth: 405, aspectRatio: "9 / 16" }} />
+      <div
+        ref={containerRef}
+        className="w-full max-w-[405px] overflow-hidden rounded-md border border-neutral-300 bg-neutral-900"
+        style={{ aspectRatio: "9 / 16" }}
+      />
 
-      <ul>
+      <ul className="flex flex-col gap-1">
         {assets.map((asset) => (
           <li key={asset.id}>
-            <button onClick={() => handleSelectAsset(asset)}>
+            <button
+              className={
+                "w-full rounded-md border px-3 py-1.5 text-left text-sm hover:bg-neutral-100 " +
+                (asset.id === selectedAssetId
+                  ? "border-neutral-900 font-medium"
+                  : "border-neutral-300")
+              }
+              onClick={() => handleSelectAsset(asset)}
+            >
               {asset.filename}
               {asset.id === selectedAssetId ? " (selected)" : ""}
             </button>
