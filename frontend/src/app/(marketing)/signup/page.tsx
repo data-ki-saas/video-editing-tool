@@ -12,18 +12,42 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [checkEmailMessage, setCheckEmailMessage] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setCheckEmailMessage(null);
     setLoading(true);
 
     const supabase = createClient();
-    const { error } = await supabase.auth.signUp({ email: email.trim(), password });
+    const { data, error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        // Without this, Supabase falls back to whatever "Site URL" happens
+        // to be configured in the dashboard -- often still the default
+        // localhost, regardless of which environment signup actually
+        // happened from. This always points the confirmation link back at
+        // wherever the user actually is. Still requires this origin to be
+        // listed in Supabase's Auth > URL Configuration > Redirect URLs
+        // allow-list, or Supabase will reject it and fall back anyway.
+        emailRedirectTo: `${window.location.origin}/login`,
+      },
+    });
     setLoading(false);
 
     if (error) {
       setError(error.message);
+      return;
+    }
+
+    if (!data.session) {
+      // Email confirmation is required -- signUp() returns a user but no
+      // session until the confirmation link is clicked. Redirecting to
+      // /dashboard here would just bounce straight back to /login with no
+      // explanation (see src/lib/supabase/middleware.ts).
+      setCheckEmailMessage("Check your email to confirm your account, then sign in.");
       return;
     }
 
@@ -55,6 +79,7 @@ export default function SignupPage() {
         />
 
         {error && <p className="text-sm text-red-600">{error}</p>}
+        {checkEmailMessage && <p className="text-sm text-green-700">{checkEmailMessage}</p>}
 
         <button
           type="submit"
