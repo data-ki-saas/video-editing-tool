@@ -1,34 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Media timeline storage
 
-## Getting Started
+Next.js App Router utilities for a timeline editor. Supabase stores users,
+projects, timeline JSON, and asset metadata. Cloudflare R2 stores the uploaded
+media bytes.
 
-First, run the development server:
+## Setup
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+1. Create a Supabase project and run `supabase/migrations/0001_create_media_schema.sql`.
+2. Create an R2 bucket and an R2 API token with object read/write access.
+3. Copy `.env.example` to `.env.local` and fill in the Supabase and R2 values.
+4. Run `npm install` and `npm run dev`.
+
+`R2_PUBLIC_URL` must point to the public bucket URL or a custom domain. The
+database trigger creates a `public.users` row whenever Supabase Auth creates a
+user. Existing Auth users can be synchronized once with:
+
+```sql
+insert into public.users (id, email)
+select id, email from auth.users
+on conflict (id) do nothing;
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Upload API
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`POST /api/assets` accepts a multipart form request with `projectId`, a `file`,
+and an `Authorization: Bearer <supabase access token>` header. Files must be
+`.mp4`, `.jpg`, or `.png` and are limited to 500 MB.
 
-## Learn More
+```bash
+curl -X POST http://localhost:3000/api/assets \
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+  -F "projectId=$PROJECT_ID" \
+  -F "file=@./clip.mp4;type=video/mp4"
+```
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The route verifies the token, uploads to `projects/<project-id>/` in R2, and
+inserts the corresponding `assets` row through the user-scoped Supabase client.
+RLS enforces that only the project owner can add, view, or delete assets. If
+the metadata insert fails, the uploaded R2 object is deleted.
