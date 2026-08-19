@@ -66,7 +66,10 @@ export interface Asset {
   kind: AssetKind;
   mime_type: "video/mp4" | "image/jpeg" | "image/png";
   size_bytes: number;
-  public_url: string;
+  // A presigned R2 URL, valid for a limited time (see the backend's
+  // R2_SIGNED_URL_EXPIRES_SECONDS) -- not a permanent link. Re-fetch the
+  // asset (listAssets/uploadAsset) rather than caching this past expiry.
+  url: string;
   created_at: string;
 }
 

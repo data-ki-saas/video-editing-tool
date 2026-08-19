@@ -19,7 +19,5 @@ services:
         sync: false
       - key: R2_BUCKET_NAME
         sync: false
-      - key: R2_PUBLIC_URL
-        sync: false
       - key: CORS_ORIGINS
         sync: false

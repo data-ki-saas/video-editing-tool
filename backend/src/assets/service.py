@@ -32,7 +32,7 @@ def _to_asset_info(record: repository.AssetRecord) -> AssetInfo:
         kind=record.kind,
         mime_type=record.mime_type,
         size_bytes=record.size_bytes,
-        public_url=record.public_url,
+        url=r2_client.presigned_get_url(record.storage_key),
         created_at=record.created_at,
     )
 
@@ -61,7 +61,7 @@ async def upload_asset(project_id: str, file: UploadFile, user: CurrentUser) -> 
         tmp_path = Path(tmp.name)
 
     try:
-        public_url = r2_client.upload_file(tmp_path, storage_key, file.content_type)
+        r2_client.upload_file(tmp_path, storage_key, file.content_type)
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -74,7 +74,6 @@ async def upload_asset(project_id: str, file: UploadFile, user: CurrentUser) -> 
             mime_type=file.content_type,
             size_bytes=len(body),
             storage_key=storage_key,
-            public_url=public_url,
         )
     except Exception as exc:
         logger.exception(

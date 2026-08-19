@@ -17,16 +17,25 @@ def get_r2_client():
     )
 
 
-def upload_file(local_path: Path, key: str, content_type: str) -> str:
+def upload_file(local_path: Path, key: str, content_type: str) -> None:
     get_r2_client().upload_file(
         str(local_path), settings.r2_bucket_name, key, ExtraArgs={"ContentType": content_type}
     )
-    return public_url(key)
 
 
 def delete_object(key: str) -> None:
     get_r2_client().delete_object(Bucket=settings.r2_bucket_name, Key=key)
 
 
-def public_url(key: str) -> str:
-    return f"{settings.r2_public_url.rstrip('/')}/{key}"
+def presigned_get_url(key: str) -> str:
+    """A time-limited, signed read URL for a private R2 object -- the bucket
+    itself must NOT be public. Every caller re-checks Supabase ownership
+    (see assets/repository.py) before this is ever generated, so a leaked
+    link only grants read access for `r2_signed_url_expires_seconds`, not
+    forever. Pure local HMAC signing (no network call to R2), so generating
+    one per asset in a list response is cheap."""
+    return get_r2_client().generate_presigned_url(
+        "get_object",
+        Params={"Bucket": settings.r2_bucket_name, "Key": key},
+        ExpiresIn=settings.r2_signed_url_expires_seconds,
+    )

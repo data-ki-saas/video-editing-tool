@@ -111,7 +111,7 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     void pushTemplate({
       ...template,
       elements: template.elements.map((el) =>
-        el.id === "main-video" ? { ...el, source: asset.public_url } : el
+        el.id === "main-video" ? { ...el, source: asset.url } : el
       ),
     });
   }
@@ -172,7 +172,7 @@ export function VideoEditor({ projectId }: { projectId: string }) {
           height: "30%",
           x: "80%",
           y: "20%",
-          source: assets[0]?.public_url ?? null,
+          source: assets[0]?.url ?? null,
         },
       ],
     });

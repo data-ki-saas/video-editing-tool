@@ -16,7 +16,6 @@ class AssetRecord:
     mime_type: str
     size_bytes: int
     storage_key: str
-    public_url: str
     created_at: str
 
 
@@ -42,7 +41,6 @@ def create_asset(
     mime_type: str,
     size_bytes: int,
     storage_key: str,
-    public_url: str,
 ) -> AssetRecord:
     payload = {
         "id": str(uuid.uuid4()),
@@ -53,7 +51,6 @@ def create_asset(
         "mime_type": mime_type,
         "size_bytes": size_bytes,
         "storage_key": storage_key,
-        "public_url": public_url,
     }
     result = get_supabase_client().table(_TABLE).insert(payload).execute()
     return AssetRecord(**result.data[0])

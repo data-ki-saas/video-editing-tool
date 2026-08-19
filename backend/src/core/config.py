@@ -15,10 +15,14 @@ class Settings(BaseSettings):
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
     r2_bucket_name: str = ""
-    r2_public_url: str = ""
     # Overrides the computed R2 endpoint — set only in tests, to point boto3's
     # S3 client at a local mock server instead of real R2.
     r2_endpoint_override: str = ""
+    # How long a presigned asset read URL stays valid -- the R2 bucket is
+    # private, so this is the only way a browser ever reads an object. Kept
+    # short-ish since a leaked link is live for this long; refresh by
+    # re-fetching the asset (list/upload response), not by caching the URL.
+    r2_signed_url_expires_seconds: int = 3600
 
     @property
     def max_upload_size_bytes(self) -> int:

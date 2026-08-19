@@ -38,7 +38,6 @@ def r2_settings(moto_r2_server, monkeypatch):
     monkeypatch.setattr(settings, "r2_access_key_id", "test")
     monkeypatch.setattr(settings, "r2_secret_access_key", "test")
     monkeypatch.setattr(settings, "r2_bucket_name", "test-bucket")
-    monkeypatch.setattr(settings, "r2_public_url", "https://cdn.test")
 
 
 class FakeAssetsTable:
