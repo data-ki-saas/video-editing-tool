@@ -4,6 +4,7 @@ export function RenderPanel({
   renderStatus,
   renderUrl,
   renderError,
+  isStuck,
   isTerminal,
   onRender,
 }: {
@@ -12,6 +13,7 @@ export function RenderPanel({
   renderStatus: string | null;
   renderUrl: string | null;
   renderError: string | null;
+  isStuck: boolean;
   isTerminal: boolean;
   onRender: () => void;
 }) {
@@ -32,7 +34,26 @@ export function RenderPanel({
       >
         {isRendering ? "Starting render…" : "Render"}
       </button>
-      {renderError && <p className="text-sm text-red-600">{renderError}</p>}
+
+      {renderError && (
+        <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p className="font-medium">Render failed</p>
+          <p>{renderError}</p>
+        </div>
+      )}
+
+      {!renderError && isStuck && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <p className="font-medium">This is taking longer than usual</p>
+          <p>
+            Most renders finish within a few minutes. This one has been in progress well past that, which
+            usually means the final storage step failed silently on our end. You can keep waiting -- this
+            will update automatically if it completes -- or start a new render if it doesn&apos;t resolve
+            soon.
+          </p>
+        </div>
+      )}
+
       {renderStatus && (
         <p className="flex items-center gap-2 text-sm text-muted">
           {isProcessing && (

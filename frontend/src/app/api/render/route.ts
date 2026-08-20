@@ -208,7 +208,12 @@ export async function POST(request: Request) {
 
     const { error: updateError } = await supabase
       .from("projects")
-      .update({ render_id: render.id, render_status: render.status })
+      .update({
+        render_id: render.id,
+        render_status: render.status,
+        render_started_at: new Date().toISOString(),
+        render_error: null,
+      })
       .eq("id", projectId)
       .eq("owner_id", user.id);
 

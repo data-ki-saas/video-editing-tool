@@ -2,6 +2,8 @@ import { timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/serviceRole";
 
+type ServiceRoleClient = ReturnType<typeof createServiceRoleClient>;
+
 export const runtime = "nodejs";
 
 /** Creatomate doesn't publish an HMAC-signature scheme for webhooks (nothing
@@ -52,30 +54,92 @@ function extractPayload(body: unknown): CreatomatePayload | null {
   };
 }
 
+const NOTIFY_WORKER_MAX_ATTEMPTS = 3;
+const NOTIFY_WORKER_RETRY_DELAY_MS = 1000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Marks a render 'failed' with a specific reason -- used when this route
+ * can't even hand the job off to the worker (below). worker/src/server.js
+ * has its own equivalent for when the R2 mirror step itself exhausts its
+ * retries after the worker HAS accepted the job. Without either of these,
+ * both failure modes left render_status stuck at its prior value forever,
+ * with zero indication anything went wrong. */
+async function markTransferFailed(
+  supabase: ServiceRoleClient,
+  projectId: string,
+  renderId: string,
+  message: string
+): Promise<void> {
+  console.error("[webhooks/creatomate] marking render failed", projectId, renderId, message);
+  const { error } = await supabase
+    .from("projects")
+    .update({ render_status: "failed", render_error: message })
+    .eq("id", projectId)
+    .eq("render_id", renderId);
+  if (error) {
+    console.error("[webhooks/creatomate] failed to record transfer failure", projectId, renderId, error);
+  }
+}
+
 /** Hands the finished render off to the transfer worker (see worker/) so the
  * MP4 gets mirrored into R2 and served from our own Cloudflare-fronted
  * domain instead of Creatomate's temporary hosted URL. Deliberately NOT
  * awaited by the caller beyond firing the request -- streaming a
  * multi-hundred-MB video is well outside what should happen inside this
  * webhook's own execution window, and the worker updates render_status to
- * 'completed' itself once it's done. */
-async function notifyTransferWorker(projectId: string, renderId: string, sourceUrl: string): Promise<void> {
+ * 'completed' itself once it's done.
+ *
+ * Retries a few times before giving up, since this is the ONE handoff point
+ * between "Creatomate finished" and "the worker is on it" -- if it silently
+ * failed here (worker down, transient network blip), nothing else would ever
+ * pick the render back up, and it would sit at 'succeeded' forever with no
+ * explanation. This does NOT cover the worker itself failing mid-transfer
+ * after accepting the job -- that's handled worker-side. */
+async function notifyTransferWorker(
+  supabase: ServiceRoleClient,
+  projectId: string,
+  renderId: string,
+  sourceUrl: string
+): Promise<void> {
   const workerUrl = process.env.RENDER_WORKER_URL;
   const workerSecret = process.env.WORKER_INTERNAL_SECRET;
   if (!workerUrl || !workerSecret) {
-    console.error("[webhooks/creatomate] RENDER_WORKER_URL/WORKER_INTERNAL_SECRET not set -- cannot mirror to R2");
+    const message = "The render-transfer worker is not configured (RENDER_WORKER_URL/WORKER_INTERNAL_SECRET unset).";
+    console.error("[webhooks/creatomate]", message);
+    await markTransferFailed(supabase, projectId, renderId, message);
     return;
   }
 
-  try {
-    await fetch(workerUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-internal-secret": workerSecret },
-      body: JSON.stringify({ projectId, renderId, sourceUrl }),
-    });
-  } catch (err) {
-    console.error("[webhooks/creatomate] failed to notify transfer worker", renderId, err);
+  let lastError = "unknown error";
+  for (let attempt = 1; attempt <= NOTIFY_WORKER_MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(workerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-internal-secret": workerSecret },
+        body: JSON.stringify({ projectId, renderId, sourceUrl }),
+      });
+      if (response.ok) return; // worker accepted the job -- it owns render_status from here on
+      lastError = `transfer worker responded with HTTP ${response.status}`;
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+    console.error(
+      `[webhooks/creatomate] attempt ${attempt}/${NOTIFY_WORKER_MAX_ATTEMPTS} to notify transfer worker failed`,
+      renderId,
+      lastError
+    );
+    if (attempt < NOTIFY_WORKER_MAX_ATTEMPTS) await delay(NOTIFY_WORKER_RETRY_DELAY_MS * attempt);
   }
+
+  await markTransferFailed(
+    supabase,
+    projectId,
+    renderId,
+    `Could not hand the finished render off to the transfer worker after ${NOTIFY_WORKER_MAX_ATTEMPTS} attempts: ${lastError}`
+  );
 }
 
 export async function POST(request: Request) {
@@ -117,10 +181,11 @@ export async function POST(request: Request) {
   // there's still SOMETHING playable if the mirror step is slow or fails.
   const dbStatus = status;
   const finalCreatomateUrl = payload.url ?? payload.snapshot_url ?? null;
+  const dbError = dbStatus === "failed" ? payload.error_message ?? "Render failed for an unspecified reason" : null;
 
   const { data, error } = await supabase
     .from("projects")
-    .update({ render_status: dbStatus, render_url: finalCreatomateUrl })
+    .update({ render_status: dbStatus, render_url: finalCreatomateUrl, render_error: dbError })
     .eq("id", projectId)
     .eq("render_id", renderId)
     .select("id")
@@ -141,7 +206,7 @@ export async function POST(request: Request) {
   }
 
   if (dbStatus === "succeeded" && finalCreatomateUrl) {
-    void notifyTransferWorker(projectId, renderId, finalCreatomateUrl);
+    void notifyTransferWorker(supabase, projectId, renderId, finalCreatomateUrl);
   }
 
   return NextResponse.json({ ok: true }, { status: 200 });

@@ -35,6 +35,14 @@ export interface Project {
   render_id: string | null;
   render_status: string | null;
   render_url: string | null;
+  // render_error: set once render_status = 'failed' -- a human-readable
+  // reason from either Creatomate itself or the render-transfer worker (see
+  // app/api/webhooks/creatomate/route.ts and worker/src/server.js).
+  // render_started_at: when the current render attempt began; used
+  // client-side (see lib/useRenderStatus.ts) to warn if a render has been
+  // non-terminal for far longer than normal.
+  render_error: string | null;
+  render_started_at: string | null;
   created_at: string;
   updated_at: string;
 }

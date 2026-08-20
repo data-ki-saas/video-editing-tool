@@ -41,7 +41,7 @@ export function VideoEditor({ projectId }: { projectId: string }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  const { isRendering, renderStatus, renderUrl, renderError, isTerminal, applyProjectStatus, startRender } =
+  const { isRendering, renderStatus, renderUrl, renderError, isStuck, isTerminal, applyProjectStatus, startRender } =
     useRenderStatus(projectId);
 
   const videoAssets = assets.filter((asset) => asset.kind === "video");
@@ -186,7 +186,10 @@ export function VideoEditor({ projectId }: { projectId: string }) {
         { key: "trim", label: "Trim", disabled: !isReady || !selectedAssetId },
         { key: "background", label: "Add Background", disabled: !isReady },
         { key: "overlay", label: "Overlay Image", disabled: !isReady || imageAssets.length === 0 },
-        { key: "render", label: "Render", disabled: isRenderProcessing || !selectedAssetId, busy: isRenderProcessing },
+        // Only gates whether there's a video to render at all -- NOT
+        // isRenderProcessing, or there'd be no way to click back into this
+        // panel and see the in-progress status once a render has started.
+        { key: "render", label: "Render", disabled: !selectedAssetId, busy: isRenderProcessing },
       ],
     });
   }, [isReady, selectedAssetId, imageAssets.length, isUploading, isRenderProcessing, setCapabilities]);
@@ -342,6 +345,7 @@ export function VideoEditor({ projectId }: { projectId: string }) {
             renderStatus={renderStatus}
             renderUrl={renderUrl}
             renderError={renderError}
+            isStuck={isStuck}
             isTerminal={isTerminal}
             onRender={() => startRender(template)}
           />
