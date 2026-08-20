@@ -1,7 +1,7 @@
 [project]
 name = "backend"
 version = "0.1.0"
-description = "Timeline editor backend: FastAPI + Supabase + Cloudflare R2"
+description = "Reel Creator backend: FastAPI + Supabase + Cloudflare R2"
 authors = [
     { name = "Abhinandan Prateek", email = "aprateek@smart-structures.com" }
 ]

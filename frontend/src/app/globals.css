@@ -1,1 +1,153 @@
 @import "tailwindcss";
+
+/* Dark mode is toggled explicitly (light/dark/system) via a `dark` class on
+   <html>, set by ThemeProvider -- not left to the OS media query. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f0f5fa;
+  --foreground: #16222f;
+  --surface: #ffffff;
+  --border: #d3e0ec;
+  --accent: #2563eb;
+  --accent-foreground: #ffffff;
+  --muted: #5b7083;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
+}
+
+/* Same 6 themes as ../data/frontend/src/app/globals.css -- reused, not
+   reinvented (see lib/theme.ts). */
+
+/* Winter (default) */
+[data-color-theme="winter"] {
+  --background: #f0f5fa;
+  --foreground: #16222f;
+  --surface: #ffffff;
+  --border: #d3e0ec;
+  --accent: #2563eb;
+  --accent-foreground: #ffffff;
+  --muted: #5b7083;
+}
+[data-color-theme="winter"].dark {
+  --background: #0b1620;
+  --foreground: #dce8f2;
+  --surface: #101f2c;
+  --border: #223243;
+  --accent: #60a5fa;
+  --accent-foreground: #06131f;
+  --muted: #7f97ab;
+}
+
+/* Pastel */
+[data-color-theme="pastel"] {
+  --background: #fdf6fb;
+  --foreground: #3a2e3d;
+  --surface: #ffffff;
+  --border: #f0dcee;
+  --accent: #c98bd0;
+  --accent-foreground: #2b1630;
+  --muted: #8a7690;
+}
+[data-color-theme="pastel"].dark {
+  --background: #201a24;
+  --foreground: #f0e6f2;
+  --surface: #2a2230;
+  --border: #3d3345;
+  --accent: #d9a5df;
+  --accent-foreground: #241428;
+  --muted: #a595ab;
+}
+
+/* Photochromatic */
+[data-color-theme="photochromatic"] {
+  --background: #faf5ff;
+  --foreground: #1e1b2e;
+  --surface: #ffffff;
+  --border: #e4d9f7;
+  --accent: #8b5cf6;
+  --accent-foreground: #ffffff;
+  --muted: #6b6280;
+}
+[data-color-theme="photochromatic"].dark {
+  --background: #120c1e;
+  --foreground: #ece7fb;
+  --surface: #1c1430;
+  --border: #34254a;
+  --accent: #a78bfa;
+  --accent-foreground: #140a26;
+  --muted: #9186ab;
+}
+
+/* Warm */
+[data-color-theme="warm"] {
+  --background: #fdf8f1;
+  --foreground: #3a2a1a;
+  --surface: #ffffff;
+  --border: #eddcc4;
+  --accent: #d97706;
+  --accent-foreground: #ffffff;
+  --muted: #8a7154;
+}
+[data-color-theme="warm"].dark {
+  --background: #201509;
+  --foreground: #f3e6d3;
+  --surface: #2b1d0f;
+  --border: #4a3418;
+  --accent: #f59e0b;
+  --accent-foreground: #241703;
+  --muted: #b39a76;
+}
+
+/* Spring */
+[data-color-theme="spring"] {
+  --background: #f3faf3;
+  --foreground: #1c2e1c;
+  --surface: #ffffff;
+  --border: #d5ecd2;
+  --accent: #16a34a;
+  --accent-foreground: #ffffff;
+  --muted: #5f7a5a;
+}
+[data-color-theme="spring"].dark {
+  --background: #0d1b10;
+  --foreground: #dcf2dc;
+  --surface: #142616;
+  --border: #234a2a;
+  --accent: #4ade80;
+  --accent-foreground: #0b2010;
+  --muted: #7fa382;
+}
+
+/* Contrast (high-contrast, accessibility-oriented) */
+[data-color-theme="contrast"] {
+  --background: #ffffff;
+  --foreground: #000000;
+  --surface: #ffffff;
+  --border: #000000;
+  --accent: #ffcc00;
+  --accent-foreground: #000000;
+  --muted: #333333;
+}
+[data-color-theme="contrast"].dark {
+  --background: #000000;
+  --foreground: #ffffff;
+  --surface: #000000;
+  --border: #ffffff;
+  --accent: #ffe066;
+  --accent-foreground: #000000;
+  --muted: #cccccc;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}

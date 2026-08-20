@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Documentation",
-  description: "How Timeline Editor works: create a reel, upload photos or clips, and render a finished video.",
+  description: "How Reel Creator works: create a reel, upload photos or clips, and render a finished video.",
   alternates: { canonical: "/docs" },
 };
 
@@ -43,7 +43,7 @@ export default function DocsPage() {
         <h2 className="text-lg font-medium">Works on your phone too</h2>
         <p className="text-neutral-600">
           {/* Mobile quick-create -- see frontend/src/components/QuickCreate.tsx */}
-          Creating a reel doesn&apos;t require a desktop. On a phone, Timeline Editor
+          Creating a reel doesn&apos;t require a desktop. On a phone, Reel Creator
           switches to a simplified flow: add your photos, tap create, and get your
           reel — perfect for adding a listing or a new arrival on the go.
         </p>

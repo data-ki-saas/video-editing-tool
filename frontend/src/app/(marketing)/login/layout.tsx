@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Sign In",
-  description: "Sign in to your Timeline Editor account to upload and edit videos.",
+  description: "Sign in to your Reel Creator account to upload and edit videos.",
   alternates: { canonical: "/login" },
 };
 

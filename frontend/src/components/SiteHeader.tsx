@@ -29,13 +29,13 @@ export function SiteHeader() {
   }, []);
 
   return (
-    <header className="border-b border-neutral-200">
+    <header className="border-b border-border">
       <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-2 px-4 py-4 sm:gap-4">
         <Link href="/" className="flex min-w-0 items-center gap-2 text-base font-semibold sm:text-lg">
           <span className="h-6 w-6 shrink-0">
             <ReelIcon />
           </span>
-          <span className="truncate">Timeline Editor</span>
+          <span className="truncate">Reel Creator</span>
         </Link>
 
         <nav className="flex shrink-0 items-center gap-2 text-sm sm:gap-4">
@@ -48,7 +48,7 @@ export function SiteHeader() {
           {hasSession ? (
             <Link
               href="/dashboard"
-              className="rounded-md bg-neutral-900 px-3 py-1.5 text-white hover:bg-neutral-700"
+              className="rounded-md bg-accent px-3 py-1.5 text-accent-foreground hover:opacity-90"
             >
               Dashboard
             </Link>
@@ -59,7 +59,7 @@ export function SiteHeader() {
               </Link>
               <Link
                 href="/signup"
-                className="rounded-md bg-neutral-900 px-3 py-1.5 text-white hover:bg-neutral-700"
+                className="rounded-md bg-accent px-3 py-1.5 text-accent-foreground hover:opacity-90"
               >
                 <span className="sm:hidden">Sign up</span>
                 <span className="hidden sm:inline">Sign up free</span>
@@ -69,7 +69,7 @@ export function SiteHeader() {
         </nav>
       </div>
 
-      <nav className="flex items-center gap-4 border-t border-neutral-200 px-4 py-2 text-sm sm:hidden">
+      <nav className="flex items-center gap-4 border-t border-border px-4 py-2 text-sm sm:hidden">
         {NAV_LINKS.map((link) => (
           <Link key={link.href} href={link.href} className="underline">
             {link.label}

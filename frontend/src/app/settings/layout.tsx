@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 // crawlers would just hit a redirect.
 export const metadata: Metadata = {
   title: "Settings",
-  description: "Manage your Timeline Editor account.",
+  description: "Manage your Reel Creator account.",
   robots: { index: false, follow: false },
 };
 

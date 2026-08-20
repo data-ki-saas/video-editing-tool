@@ -1,6 +1,6 @@
-# Timeline editor
+# Reel Creator
 
-A Reel-format (9:16) video timeline editor. Split into a `backend/` (FastAPI)
+A Reel-format (9:16) video reel maker. Split into a `backend/` (FastAPI)
 and `frontend/` (Next.js) app, following the same structure as the sibling
 `data` project.
 

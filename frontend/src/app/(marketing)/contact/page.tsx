@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Contact Us",
-  description: "Get in touch with the Timeline Editor team.",
+  description: "Get in touch with the Reel Creator team.",
   alternates: { canonical: "/contact" },
 };
 

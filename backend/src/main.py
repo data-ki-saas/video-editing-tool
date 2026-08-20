@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Timeline Editor")
+    app = FastAPI(title="Reel Creator")
 
     # Logged at startup so a misconfigured/empty CORS_ORIGINS on Render (the
     # most common cause of a browser-side "Failed to fetch" on upload) shows

@@ -3,7 +3,7 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Pricing",
-  description: "Timeline Editor is free during early access. Paid plans are coming later.",
+  description: "Reel Creator is free during early access. Paid plans are coming later.",
   alternates: { canonical: "/pricing" },
 };
 
@@ -17,7 +17,7 @@ export default function PricingPage() {
         <p className="text-neutral-600">
           {/* Placeholder -- this app has no billing yet by design (see the
               project's own README). Replace this section once real plans exist. */}
-          Timeline Editor is currently free to use while we&apos;re in early access.
+          Reel Creator is currently free to use while we&apos;re in early access.
           Create an account, pick your business niche, and start making reels — no
           credit card required.
         </p>

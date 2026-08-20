@@ -11,8 +11,8 @@ const FOOTER_LINKS = [
 
 export function SiteFooter() {
   return (
-    <footer className="mt-16 border-t border-neutral-200">
-      <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-3 px-4 py-8 text-sm text-neutral-500 sm:flex-row sm:justify-between">
+    <footer className="mt-16 border-t border-border">
+      <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-3 px-4 py-8 text-sm text-muted sm:flex-row sm:justify-between">
         <nav className="flex flex-wrap items-center justify-center gap-4">
           {FOOTER_LINKS.map((link) => (
             <Link key={link.href} href={link.href} className="underline">
@@ -20,7 +20,7 @@ export function SiteFooter() {
             </Link>
           ))}
         </nav>
-        <p>&copy; {new Date().getFullYear()} Timeline Editor. All rights reserved.</p>
+        <p>&copy; {new Date().getFullYear()} Reel Creator. All rights reserved.</p>
       </div>
     </footer>
   );

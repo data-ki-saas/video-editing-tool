@@ -15,16 +15,16 @@ export const metadata: Metadata = {
     "Turn your photos and clips into a share-ready video reel — for real estate, hotels, auto dealers, garment and gift shops, hardware stores, or any business. Works on desktop and mobile. Free to start.",
   alternates: { canonical: "/" },
   openGraph: {
-    title: "Timeline Editor — Video Reel Maker for Any Business",
+    title: "Reel Creator — Video Reel Maker for Any Business",
     description:
       "Turn your photos and clips into a share-ready video reel, for any business niche. Works on desktop and mobile.",
     url: SITE_URL,
-    siteName: "Timeline Editor",
+    siteName: "Reel Creator",
     type: "website",
   },
   twitter: {
     card: "summary",
-    title: "Timeline Editor — Video Reel Maker for Any Business",
+    title: "Reel Creator — Video Reel Maker for Any Business",
     description: "Turn your photos and clips into a share-ready video reel, for any business niche.",
   },
 };
@@ -41,7 +41,7 @@ const EXAMPLE_NICHES = [
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  name: "Timeline Editor",
+  name: "Reel Creator",
   applicationCategory: "MultimediaApplication",
   operatingSystem: "Web",
   description:

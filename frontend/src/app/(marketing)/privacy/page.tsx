@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
-  description: "How Timeline Editor handles your data.",
+  description: "How Reel Creator handles your data.",
   alternates: { canonical: "/privacy" },
 };
 

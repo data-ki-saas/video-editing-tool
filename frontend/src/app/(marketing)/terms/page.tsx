@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Terms of Use",
-  description: "Terms for using Timeline Editor.",
+  description: "Terms for using Reel Creator.",
   alternates: { canonical: "/terms" },
 };
 
@@ -38,7 +38,7 @@ export default function TermsPage() {
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">Early access</h2>
         <p className="text-neutral-600">
-          Timeline Editor is under active development. Features may change, and we
+          Reel Creator is under active development. Features may change, and we
           can&apos;t guarantee uninterrupted availability during this stage.
         </p>
       </section>
