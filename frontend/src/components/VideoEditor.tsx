@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Preview } from "@creatomate/preview";
-import { listAssets, triggerRender, uploadAsset, type Asset } from "@/lib/api";
+import { listAssets, uploadAsset, type Asset } from "@/lib/api";
 import { getProject, saveTimeline, type Timeline } from "@/lib/projects";
 import { createEmptyReelTimeline, resolveTimelineSources } from "@/lib/timeline/resolve";
+import { useRenderStatus } from "@/lib/useRenderStatus";
+import { QuickCreate } from "@/components/QuickCreate";
 
 const ACCEPTED_FILE_TYPES = "video/mp4,image/jpeg,image/png";
 const AUTOSAVE_DEBOUNCE_MS = 800;
-const RENDER_POLL_INTERVAL_MS = 5000;
-const TERMINAL_RENDER_STATUSES = new Set(["completed", "failed"]);
 
 function isMobileDevice(): boolean {
   if (typeof navigator === "undefined") return false;
@@ -34,10 +34,9 @@ export function VideoEditor({ projectId }: { projectId: string }) {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [isRendering, setIsRendering] = useState(false);
-  const [renderStatus, setRenderStatus] = useState<string | null>(null);
-  const [renderUrl, setRenderUrl] = useState<string | null>(null);
-  const [renderError, setRenderError] = useState<string | null>(null);
+
+  const { isRendering, renderStatus, renderUrl, renderError, isTerminal, applyProjectStatus, startRender } =
+    useRenderStatus(projectId);
 
   const videoAssets = assets.filter((asset) => asset.kind === "video");
   const imageAssets = assets.filter((asset) => asset.kind === "image");
@@ -63,8 +62,7 @@ export function VideoEditor({ projectId }: { projectId: string }) {
           setTemplate(project.timeline);
           setSelectedAssetId(project.timeline._appMeta["main-video"]?.assetId ?? null);
         }
-        setRenderStatus(project.render_status);
-        setRenderUrl(project.render_url);
+        applyProjectStatus(project);
         hasLoadedRef.current = true;
         setIsLoaded(true);
       })
@@ -75,6 +73,10 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     return () => {
       cancelled = true;
     };
+    // applyProjectStatus (from useRenderStatus) is stable in behavior for
+    // the lifetime of this component -- only projectId should re-trigger
+    // this load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const refreshAssets = useCallback(async () => {
@@ -112,26 +114,6 @@ export function VideoEditor({ projectId }: { projectId: string }) {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
   }, [projectId, template]);
-
-  // Polls render status while a render is in flight -- the webhook + worker
-  // pipeline updates projects.render_status/render_url asynchronously, with
-  // no push channel back to this tab.
-  useEffect(() => {
-    if (!renderStatus || TERMINAL_RENDER_STATUSES.has(renderStatus)) return;
-
-    const interval = setInterval(() => {
-      getProject(projectId)
-        .then((project) => {
-          setRenderStatus(project.render_status);
-          setRenderUrl(project.render_url);
-        })
-        .catch(() => {
-          // A transient poll failure isn't worth surfacing -- the next tick retries.
-        });
-    }, RENDER_POLL_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, [projectId, renderStatus]);
 
   // Initializes the Creatomate Preview plugin inside `containerRef` once the
   // device check above has settled -- the SDK needs real desktop-class video
@@ -265,33 +247,16 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     });
   }
 
-  async function handleRender() {
-    setIsRendering(true);
-    setRenderError(null);
-    try {
-      const result = await triggerRender(projectId, template);
-      setRenderStatus(result.status);
-      if (result.warning) setRenderError(result.warning);
-    } catch (err) {
-      setRenderError(err instanceof Error ? err.message : "Failed to start render");
-    } finally {
-      setIsRendering(false);
-    }
-  }
-
   const buttonClass =
     "rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium " +
     "hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
 
+  // The Preview SDK needs real desktop-class video decoding, so it's never
+  // constructed on a mobile browser -- QuickCreate is the mobile-first
+  // counterpart: same upload/persist/render pipeline, no live preview, no
+  // manual clip/track editing. See the mobile-quick-create plan.
   if (isMobile) {
-    return (
-      <div role="alert" className="m-4 rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-900">
-        The video editor requires a desktop browser — the Creatomate Preview
-        SDK needs hardware video decoding that mobile browsers don&apos;t
-        reliably support. Please switch to a desktop device to continue
-        editing.
-      </div>
-    );
+    return <QuickCreate projectId={projectId} />;
   }
 
   if (loadError) {
@@ -346,8 +311,8 @@ export function VideoEditor({ projectId }: { projectId: string }) {
             "rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600 " +
             "disabled:cursor-not-allowed disabled:opacity-40"
           }
-          onClick={handleRender}
-          disabled={isRendering || !selectedAssetId || (!!renderStatus && !TERMINAL_RENDER_STATUSES.has(renderStatus))}
+          onClick={() => startRender(template)}
+          disabled={isRendering || !selectedAssetId || (renderStatus !== null && !isTerminal)}
         >
           {isRendering ? "Starting render…" : "Render"}
         </button>
