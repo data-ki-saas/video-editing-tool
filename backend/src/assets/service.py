@@ -62,6 +62,14 @@ async def upload_asset(project_id: str, file: UploadFile, user: CurrentUser) -> 
 
     try:
         r2_client.upload_file(tmp_path, storage_key, file.content_type)
+    except Exception as exc:
+        logger.exception(
+            "asset upload failed to store file in R2: user=%s project=%s filename=%r",
+            user.id,
+            project_id,
+            file.filename,
+        )
+        raise HTTPException(status_code=502, detail="Failed to store the uploaded file") from exc
     finally:
         tmp_path.unlink(missing_ok=True)
 

@@ -3,6 +3,7 @@ import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from src.assets.router import router as assets_router
 from src.core.config import settings
@@ -45,6 +46,19 @@ def create_app() -> FastAPI:
             duration_ms,
         )
         return response
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        """A truly unhandled exception is caught by Starlette's outermost
+        error-handling layer, which sits OUTSIDE CORSMiddleware -- so the
+        response it generates never gets a CORS header attached, and the
+        browser reports "blocked by CORS policy" for what is actually a
+        500. Registering a handler here keeps the response inside the
+        normal middleware stack instead, so CORSMiddleware still runs on
+        it -- the frontend gets a real error message instead of a
+        misleading CORS symptom for whatever crashed."""
+        logger.exception("Unhandled exception for %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     app.include_router(assets_router)
 
