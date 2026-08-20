@@ -14,8 +14,13 @@ and `frontend/` (Next.js) app, following the same structure as the sibling
   Creatomate render into a *second*, publicly-served R2 bucket, so playback
   comes from our own Cloudflare-fronted domain instead of Creatomate's
   temporary hosted URL. See "Delivering finished videos" below.
-- **supabase/migrations/** — shared schema (`users`, `projects`, `assets`),
-  applied directly to the Supabase project every app points at.
+- **supabase/migrations/** — shared schema (`users`, `projects`, `assets`,
+  `niche_configs`, `usage_events`), applied directly to the Supabase project
+  every app points at.
+
+This is a niche-generic reel generator, not a real-estate-specific tool —
+`projects.niche` + `projects.attributes` (freeform jsonb) hold whatever
+fields matter for whichever business created that reel; see "Niches" below.
 
 ## Hosting
 
@@ -82,6 +87,25 @@ R2 bucket itself is private, so this is the only way a browser ever reads an
 object, and every presign is preceded by the same project-ownership check as
 everything else in this API. Don't cache a `url` past its expiry; re-fetch the
 asset instead.
+
+## Niches (LLM-driven, generic forms)
+
+`GET/POST /api/niches` (backend). A "New Reel" is always for some business
+niche (real estate, hospitality, auto, garments, gifts, hardware, or
+literally anything a user types) — rather than hardcoding fields per
+vertical, the first time a niche name is used, the backend asks its
+configured LLM provider (`backend/src/llm/`, DeepSeek by default,
+Anthropic as an alternative, switched via `LLM_PROVIDER`) to design a short
+field schema (3-6 fields) and a voiceover script template for it, then
+caches the result in `niche_configs` (shared across every user — the field
+schema for "auto dealership" isn't personal, and sharing avoids a redundant
+LLM call the next time someone picks the same niche). Every call after the
+first for that niche is an instant cache hit.
+
+The generated fields are a UI scaffold for the "New Reel" form only —
+`projects.attributes` stays a freeform jsonb column regardless, never an
+enforced schema. If niche generation ever returns something malformed, the
+whole request fails with a 502 rather than silently caching a broken form.
 
 ## Rendering pipeline
 
@@ -182,3 +206,19 @@ won't refire once already acknowledged). A production version should push
 `{projectId, renderId, sourceUrl}` onto a durable queue (even a `pending_transfers`
 Postgres table polled by the worker would do) instead of a single in-memory
 HTTP request, so an interrupted transfer can be retried.
+
+## Abuse guardrails (not billing)
+
+Login-gating alone doesn't stop a signed-in user from running up render or
+storage costs. `usage_events` (one row per render/voiceover/upload) backs a
+plain fixed-daily-cap check in `app/api/render/route.ts` (`RENDER_DAILY_LIMIT`,
+currently 10/day) — a 429 past the cap, not a metering/billing system. No
+plans or tiers exist; don't build them into a feature request unless
+explicitly asked for.
+
+## Sharing (schema only, not yet wired up)
+
+`project_shares` (migration 0007) exists in the schema — a token, a
+project reference, a `revoked_at` for revocation — but no route or UI
+creates, lists, or serves a share link yet. Treat "share a reel" as a
+planned feature, not a working one, until that lands.

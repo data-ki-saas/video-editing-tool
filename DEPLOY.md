@@ -25,6 +25,9 @@ earlier one.
 - [ ] Vercel account, connected to this repo
 - [ ] A Creatomate account + API key (Settings > API Keys) and a project
       public token (Settings > Preview SDK, or your project's dashboard)
+- [ ] A DeepSeek account + API key (platform.deepseek.com) — powers the
+      niche-config generation feature (see README.md's "Niches" section);
+      swap for Anthropic instead by setting `LLM_PROVIDER=anthropic`
 
 ---
 
@@ -39,6 +42,18 @@ earlier one.
      went from a permanent public link to a backend-generated presigned URL).
    - `0003_add_render_tracking_to_projects.sql` — adds `render_id`,
      `render_status`, `render_url` to `projects`.
+   - `0004_add_listing_fields_and_timeline_shape.sql` — adds generic
+     `niche`/`attributes` (jsonb) to `projects` (never real-estate-specific
+     columns — see README.md), and fixes `timeline`'s default to the shape
+     actually used by the editor.
+   - `0005_widen_assets_for_voiceover.sql` — widens `assets.kind`/`mime_type`
+     to allow `'audio'`/`'audio/mpeg'` (voiceover, once that feature lands).
+   - `0006_create_usage_events.sql` — `usage_events` table, the abuse-rate-limit
+     guardrail (not billing — see README.md's "Abuse guardrails").
+   - `0007_create_project_shares.sql` — `project_shares` table (schema only;
+     no route/UI uses it yet).
+   - `0008_create_niche_configs.sql` — `niche_configs`, the shared, LLM-generated
+     per-niche form-field cache (see README.md's "Niches").
 3. **Auth settings** (Authentication > Providers > Email): if you leave
    "Confirm email" ON (the default) and haven't configured SMTP, sign-up
    will silently require a confirmation email that never arrives — either
@@ -173,6 +188,11 @@ the next push that touches `supabase/migrations/`.
    | `R2_SECRET_ACCESS_KEY` | ✅ | `<R2_SECRET_ACCESS_KEY>` |
    | `R2_BUCKET_NAME` | ✅ | `<R2_BUCKET_NAME>` |
    | `CORS_ORIGINS` | ✅ | `<YOUR_VERCEL_URL>` (exact scheme, no trailing slash; comma-separate multiple origins) |
+   | `DEEPSEEK_API_KEY` | ✅ (unless using Anthropic) | `<DEEPSEEK_API_KEY>` |
+   | `LLM_PROVIDER` | optional | `deepseek` (or `anthropic`) |
+   | `DEEPSEEK_MODEL` | optional | `deepseek-chat` |
+   | `ANTHROPIC_API_KEY` | required if `LLM_PROVIDER=anthropic` | `<ANTHROPIC_API_KEY>` |
+   | `ANTHROPIC_MODEL` | optional | `claude-sonnet-5` |
    | `MAX_UPLOAD_SIZE_MB` | optional | `500` |
    | `R2_SIGNED_URL_EXPIRES_SECONDS` | optional | `3600` |
 
@@ -265,6 +285,7 @@ the next push that touches `supabase/migrations/`.
 - [ ] `GET /health` on the backend URL returns `{"status": "ok"}`
 - [ ] `GET /health` on the worker URL returns `ok`
 - [ ] Frontend loads; sign-up/login works; `/dashboard` redirects to `/login` when signed out
+- [ ] Creating a "New Reel" with a niche you haven't used before returns a generated form within a few seconds (confirms `LLM_PROVIDER`/`DEEPSEEK_API_KEY` work) and is instant the second time (confirms `niche_configs` caching)
 - [ ] Video upload succeeds end-to-end from the dashboard (frontend → backend → R2 uploads bucket + Supabase)
 - [ ] `POST /api/render` returns 202 with a `renderId`
 - [ ] Creatomate's dashboard shows the webhook delivery succeeded (check
@@ -345,6 +366,11 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | `R2_BUCKET_NAME` | `""` | The name you gave the uploads bucket when you created it (step 2a) |
 | `R2_ENDPOINT_OVERRIDE` | `""` | **Don't set this** — tests only |
 | `R2_SIGNED_URL_EXPIRES_SECONDS` | `3600` | Not fetched — pick a number, optional to set |
+| `LLM_PROVIDER` | `deepseek` | Not fetched — `deepseek` or `anthropic`, optional to set |
+| `DEEPSEEK_API_KEY` | `""` | DeepSeek dashboard > **API Keys** (platform.deepseek.com) |
+| `DEEPSEEK_MODEL` | `deepseek-chat` | Not fetched — optional to set |
+| `ANTHROPIC_API_KEY` | `""` | Only needed if `LLM_PROVIDER=anthropic` — Anthropic Console > **API Keys** |
+| `ANTHROPIC_MODEL` | `claude-sonnet-5` | Not fetched — optional to set |
 
 ### Render-transfer worker (Render), from `worker/.env.example`
 
@@ -384,6 +410,7 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | Cloudflare > R2 > uploads bucket > Manage API Tokens | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` |
 | Cloudflare > R2 > renders bucket > Manage API Tokens + Custom Domains | renders-bucket access/secret keys, `R2_RENDERS_BUCKET_NAME`, `R2_RENDERS_PUBLIC_URL` |
 | Creatomate > Settings > API Keys | `CREATOMATE_API_KEY` |
+| DeepSeek dashboard > API Keys | `DEEPSEEK_API_KEY` |
 | Creatomate > project > Preview SDK | `NEXT_PUBLIC_CREATOMATE_PUBLIC_TOKEN` |
 | Render > timeline-editor-backend service page | `NEXT_PUBLIC_API_BASE_URL` (the service's own URL) |
 | Render > render-transfer-worker service page | `RENDER_WORKER_URL` (the service's own URL + `/transfer`) |
