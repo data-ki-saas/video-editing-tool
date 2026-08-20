@@ -27,8 +27,9 @@ export function VideoEditor({ projectId }: { projectId: string }) {
   const previewRef = useRef<Preview | null>(null);
   const hasLoadedRef = useRef(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushPendingSaveRef = useRef<() => Promise<void>>(async () => {});
 
-  const { activePanel, setActivePanel, setCapabilities } = useEditorPanel();
+  const { activePanel, setActivePanel, setCapabilities, setFlushPendingSave } = useEditorPanel();
 
   const [isMobile, setIsMobile] = useState(false);
   const [isReady, setIsReady] = useState(false);
@@ -129,17 +130,38 @@ export function VideoEditor({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (!hasLoadedRef.current) return;
 
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(() => {
+    const doSave = () =>
       saveTimeline(projectId, template)
         .then(() => setSaveError(null))
         .catch((err) => setSaveError(err instanceof Error ? err.message : "Failed to save changes"));
-    }, AUTOSAVE_DEBOUNCE_MS);
+
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(doSave, AUTOSAVE_DEBOUNCE_MS);
+
+    // Lets flushPendingSaveRef below send this exact save immediately
+    // (skipping the debounce) instead of losing it if something -- e.g. a
+    // sign-out -- unmounts this component before the timer fires.
+    flushPendingSaveRef.current = () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      return doSave();
+    };
 
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
   }, [projectId, template]);
+
+  // Registered once (not per-template-change) so the sidebar's sign-out
+  // handler always has a stable function to call -- it dereferences
+  // flushPendingSaveRef.current at call time, which the effect above keeps
+  // pointed at the latest pending save.
+  useEffect(() => {
+    setFlushPendingSave(() => flushPendingSaveRef.current());
+    return () => setFlushPendingSave(null);
+  }, [setFlushPendingSave]);
 
   // Initializes the Creatomate Preview plugin inside `containerRef` once the
   // device check above has settled -- the SDK needs real desktop-class video
@@ -303,53 +325,55 @@ export function VideoEditor({ projectId }: { projectId: string }) {
       {assetsError && <p className="text-sm text-red-600">Couldn&apos;t load assets: {assetsError}</p>}
       {saveError && <p className="text-sm text-red-600">Couldn&apos;t save changes: {saveError}</p>}
 
-      <div
-        ref={containerRef}
-        className="w-full max-w-[405px] overflow-hidden rounded-md border border-border bg-neutral-900"
-        style={{ aspectRatio: "9 / 16" }}
-      />
+      <div className="flex gap-6">
+        <div
+          ref={containerRef}
+          className="w-full max-w-[405px] shrink-0 overflow-hidden rounded-md border border-border bg-neutral-900"
+          style={{ aspectRatio: "9 / 16" }}
+        />
 
-      <div className="max-w-md">
-        {activePanel === "assets" && (
-          <AssetsPanel videoAssets={videoAssets} selectedAssetId={selectedAssetId} onSelect={handleSelectAsset} />
-        )}
-        {activePanel === "upload" && (
-          <UploadPanel
-            projectId={projectId}
-            onUploaded={(asset) => setAssets((prev) => [asset, ...prev])}
-            onUploadingChange={setIsUploading}
-          />
-        )}
-        {activePanel === "trim" && (
-          <TrimPanel disabled={!isReady || !selectedAssetId} trim={mainVideoTrim} onApply={handleTrim} />
-        )}
-        {activePanel === "background" && (
-          <BackgroundPanel
-            disabled={!isReady}
-            added={hasArtificialBackground}
-            onAdd={handleAddArtificialBackground}
-          />
-        )}
-        {activePanel === "overlay" && (
-          <OverlayPanel
-            disabled={!isReady}
-            imageAssets={imageAssets}
-            added={hasImageOverlay}
-            onAdd={handleOverlayImage}
-          />
-        )}
-        {activePanel === "render" && (
-          <RenderPanel
-            disabled={isRenderProcessing || !selectedAssetId}
-            isRendering={isRendering}
-            renderStatus={renderStatus}
-            renderUrl={renderUrl}
-            renderError={renderError}
-            isStuck={isStuck}
-            isTerminal={isTerminal}
-            onRender={() => startRender(template)}
-          />
-        )}
+        <div className="min-w-0 flex-1 max-w-md">
+          {activePanel === "assets" && (
+            <AssetsPanel videoAssets={videoAssets} selectedAssetId={selectedAssetId} onSelect={handleSelectAsset} />
+          )}
+          {activePanel === "upload" && (
+            <UploadPanel
+              projectId={projectId}
+              onUploaded={(asset) => setAssets((prev) => [asset, ...prev])}
+              onUploadingChange={setIsUploading}
+            />
+          )}
+          {activePanel === "trim" && (
+            <TrimPanel disabled={!isReady || !selectedAssetId} trim={mainVideoTrim} onApply={handleTrim} />
+          )}
+          {activePanel === "background" && (
+            <BackgroundPanel
+              disabled={!isReady}
+              added={hasArtificialBackground}
+              onAdd={handleAddArtificialBackground}
+            />
+          )}
+          {activePanel === "overlay" && (
+            <OverlayPanel
+              disabled={!isReady}
+              imageAssets={imageAssets}
+              added={hasImageOverlay}
+              onAdd={handleOverlayImage}
+            />
+          )}
+          {activePanel === "render" && (
+            <RenderPanel
+              disabled={isRenderProcessing || !selectedAssetId}
+              isRendering={isRendering}
+              renderStatus={renderStatus}
+              renderUrl={renderUrl}
+              renderError={renderError}
+              isStuck={isStuck}
+              isTerminal={isTerminal}
+              onRender={() => startRender(template)}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

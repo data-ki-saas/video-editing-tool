@@ -93,8 +93,15 @@ export async function createProject(input: NewProjectInput): Promise<Project> {
 
 export async function saveTimeline(projectId: string, timeline: Timeline): Promise<void> {
   const supabase = createClient();
-  const { error } = await supabase.from("projects").update({ timeline }).eq("id", projectId);
+  // .select("id") forces PostgREST to return the updated row(s) -- without
+  // it, an update that matches zero rows (e.g. the session was cleared by a
+  // sign-out racing this call, so RLS filters the write to nothing) still
+  // reports success with no `error`, and the save would silently no-op.
+  const { data, error } = await supabase.from("projects").update({ timeline }).eq("id", projectId).select("id");
   if (error) throw new Error(error.message);
+  if (!data || data.length === 0) {
+    throw new Error("Save didn't apply -- your session may have expired");
+  }
 }
 
 export async function deleteProject(projectId: string): Promise<void> {

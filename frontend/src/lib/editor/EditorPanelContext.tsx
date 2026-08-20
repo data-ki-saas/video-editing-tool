@@ -26,6 +26,11 @@ interface EditorPanelContextValue {
   // show and whether each is enabled. null outside a project editor.
   capabilities: EditorCapabilities | null;
   setCapabilities: (capabilities: EditorCapabilities | null) => void;
+  // Lets the sidebar's sign-out flush VideoEditor's debounced autosave
+  // before it clears the session -- otherwise a sign-out mid-debounce can
+  // drop (or silently no-op) the last edit. null outside a project editor.
+  flushPendingSave: (() => Promise<void>) | null;
+  setFlushPendingSave: (flush: (() => Promise<void>) | null) => void;
 }
 
 const EditorPanelContext = createContext<EditorPanelContextValue | null>(null);
@@ -33,10 +38,11 @@ const EditorPanelContext = createContext<EditorPanelContextValue | null>(null);
 export function EditorPanelProvider({ children }: { children: React.ReactNode }) {
   const [activePanel, setActivePanel] = useState<PanelKind>("assets");
   const [capabilities, setCapabilities] = useState<EditorCapabilities | null>(null);
+  const [flushPendingSave, setFlushPendingSave] = useState<(() => Promise<void>) | null>(null);
 
   const value = useMemo(
-    () => ({ activePanel, setActivePanel, capabilities, setCapabilities }),
-    [activePanel, capabilities]
+    () => ({ activePanel, setActivePanel, capabilities, setCapabilities, flushPendingSave, setFlushPendingSave }),
+    [activePanel, capabilities, flushPendingSave]
   );
 
   return <EditorPanelContext.Provider value={value}>{children}</EditorPanelContext.Provider>;

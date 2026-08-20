@@ -10,7 +10,7 @@ import { useEditorPanel } from "@/lib/editor/EditorPanelContext";
 export function DashboardSidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { activePanel, setActivePanel, capabilities } = useEditorPanel();
+  const { activePanel, setActivePanel, capabilities, flushPendingSave } = useEditorPanel();
 
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [projectsError, setProjectsError] = useState<string | null>(null);
@@ -24,6 +24,10 @@ export function DashboardSidebar() {
 
   async function handleSignOut() {
     setSigningOut(true);
+    // Must resolve before signOut() clears the session -- otherwise a
+    // pending debounced save either never fires (unmounted) or fires against
+    // an already-cleared session, which RLS silently turns into a no-op.
+    await flushPendingSave?.();
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push("/");
