@@ -2,43 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Preview } from "@creatomate/preview";
-import { listAssets, uploadAsset, type Asset } from "@/lib/api";
+import { listAssets, triggerRender, uploadAsset, type Asset } from "@/lib/api";
+import { getProject, saveTimeline, type Timeline } from "@/lib/projects";
+import { createEmptyReelTimeline, resolveTimelineSources } from "@/lib/timeline/resolve";
 
-const REEL_WIDTH = 1080;
-const REEL_HEIGHT = 1920;
 const ACCEPTED_FILE_TYPES = "video/mp4,image/jpeg,image/png";
-
-type TemplateElement = Record<string, unknown> & { id: string };
-
-type TemplateState = {
-  output_format: "mp4";
-  width: number;
-  height: number;
-  elements: TemplateElement[];
-};
-
-function createEmptyReelTemplate(): TemplateState {
-  return {
-    output_format: "mp4",
-    width: REEL_WIDTH,
-    height: REEL_HEIGHT,
-    elements: [
-      {
-        id: "main-video",
-        name: "Main Video",
-        type: "video",
-        track: 1,
-        time: 0,
-        width: "100%",
-        height: "100%",
-        x: "50%",
-        y: "50%",
-        fit: "cover",
-        source: null,
-      },
-    ],
-  };
-}
+const AUTOSAVE_DEBOUNCE_MS = 800;
+const RENDER_POLL_INTERVAL_MS = 5000;
+const TERMINAL_RENDER_STATUSES = new Set(["completed", "failed"]);
 
 function isMobileDevice(): boolean {
   if (typeof navigator === "undefined") return false;
@@ -49,15 +20,24 @@ export function VideoEditor({ projectId }: { projectId: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<Preview | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const hasLoadedRef = useRef(false);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [isMobile, setIsMobile] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [assetsError, setAssetsError] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  const [template, setTemplate] = useState<TemplateState>(createEmptyReelTemplate);
+  const [template, setTemplate] = useState<Timeline>(createEmptyReelTimeline);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isRendering, setIsRendering] = useState(false);
+  const [renderStatus, setRenderStatus] = useState<string | null>(null);
+  const [renderUrl, setRenderUrl] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
 
   const videoAssets = assets.filter((asset) => asset.kind === "video");
   const imageAssets = assets.filter((asset) => asset.kind === "image");
@@ -69,6 +49,33 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMobile(isMobileDevice());
   }, []);
+
+  // Loads this reel's persisted timeline once on mount. Guarded by
+  // hasLoadedRef so the autosave effect below never fires against the
+  // just-created default template before the real one arrives (which would
+  // silently overwrite a saved reel with a blank one).
+  useEffect(() => {
+    let cancelled = false;
+    getProject(projectId)
+      .then((project) => {
+        if (cancelled) return;
+        if (project.timeline.elements.length > 0) {
+          setTemplate(project.timeline);
+          setSelectedAssetId(project.timeline._appMeta["main-video"]?.assetId ?? null);
+        }
+        setRenderStatus(project.render_status);
+        setRenderUrl(project.render_url);
+        hasLoadedRef.current = true;
+        setIsLoaded(true);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(err instanceof Error ? err.message : "Failed to load this reel");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const refreshAssets = useCallback(async () => {
     try {
@@ -87,6 +94,45 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     void refreshAssets();
   }, [refreshAssets]);
 
+  // Autosaves the timeline (debounced) whenever it changes, once the initial
+  // load has completed. The stored template never contains a resolved asset
+  // URL (see lib/timeline/resolve.ts) -- only _appMeta assetId references --
+  // so this can save `template` directly with nothing to strip out first.
+  useEffect(() => {
+    if (!hasLoadedRef.current) return;
+
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      saveTimeline(projectId, template)
+        .then(() => setSaveError(null))
+        .catch((err) => setSaveError(err instanceof Error ? err.message : "Failed to save changes"));
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [projectId, template]);
+
+  // Polls render status while a render is in flight -- the webhook + worker
+  // pipeline updates projects.render_status/render_url asynchronously, with
+  // no push channel back to this tab.
+  useEffect(() => {
+    if (!renderStatus || TERMINAL_RENDER_STATUSES.has(renderStatus)) return;
+
+    const interval = setInterval(() => {
+      getProject(projectId)
+        .then((project) => {
+          setRenderStatus(project.render_status);
+          setRenderUrl(project.render_url);
+        })
+        .catch(() => {
+          // A transient poll failure isn't worth surfacing -- the next tick retries.
+        });
+    }, RENDER_POLL_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [projectId, renderStatus]);
+
   // Initializes the Creatomate Preview plugin inside `containerRef` once the
   // device check above has settled -- the SDK needs real desktop-class video
   // decoding, so it's never constructed on a mobile browser (see the
@@ -103,7 +149,7 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     const preview = new Preview(containerRef.current, "player", token);
     preview.onReady = () => {
       setIsReady(true);
-      void preview.setSource(template);
+      void preview.setSource(resolveTimelineSources(template, assets));
     };
     previewRef.current = preview;
 
@@ -112,16 +158,16 @@ export function VideoEditor({ projectId }: { projectId: string }) {
       previewRef.current = null;
       preview.dispose();
     };
-    // Only re-initializes when the mobile check settles -- `template` is
-    // intentionally excluded, it's pushed via setSource() on demand instead
-    // of by tearing down and recreating the whole plugin instance.
+    // Only re-initializes when the mobile check settles -- `template`/`assets`
+    // are intentionally excluded, they're pushed via setSource() on demand
+    // instead of by tearing down and recreating the whole plugin instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile]);
 
-  async function pushTemplate(next: TemplateState) {
+  async function pushTemplate(next: Timeline) {
     setTemplate(next);
     if (previewRef.current && isReady) {
-      await previewRef.current.setSource(next);
+      await previewRef.current.setSource(resolveTimelineSources(next, assets));
     }
   }
 
@@ -146,15 +192,15 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     setSelectedAssetId(asset.id);
     void pushTemplate({
       ...template,
-      elements: template.elements.map((el) =>
-        el.id === "main-video" ? { ...el, source: asset.url } : el
-      ),
+      elements: template.elements.map((el) => (el.id === "main-video" ? { ...el, source: null } : el)),
+      _appMeta: { ...template._appMeta, "main-video": { role: "clip", assetId: asset.id } },
     });
   }
 
   /** Placeholder: a real trim tool would read in/out points from a timeline
    * scrubber. This just sets a fixed 5-second clip starting at 0 on the main
-   * video element, to show the JSON shape setSource() expects. */
+   * video element, to show the JSON shape setSource() expects. Real
+   * clip/track editing lands in the next phase. */
   function handleTrim() {
     void pushTemplate({
       ...template,
@@ -195,12 +241,14 @@ export function VideoEditor({ projectId }: { projectId: string }) {
    * demonstrate the state shape. */
   function handleOverlayImage() {
     if (template.elements.some((el) => el.id === "image-overlay")) return;
+    const overlayAsset = imageAssets[0];
+    const elementId = "image-overlay";
     void pushTemplate({
       ...template,
       elements: [
         ...template.elements,
         {
-          id: "image-overlay",
+          id: elementId,
           name: "Image Overlay",
           type: "image",
           track: 2,
@@ -208,10 +256,27 @@ export function VideoEditor({ projectId }: { projectId: string }) {
           height: "30%",
           x: "80%",
           y: "20%",
-          source: imageAssets[0]?.url ?? null,
+          source: null,
         },
       ],
+      _appMeta: overlayAsset
+        ? { ...template._appMeta, [elementId]: { role: "clip", assetId: overlayAsset.id } }
+        : template._appMeta,
     });
+  }
+
+  async function handleRender() {
+    setIsRendering(true);
+    setRenderError(null);
+    try {
+      const result = await triggerRender(projectId, template);
+      setRenderStatus(result.status);
+      if (result.warning) setRenderError(result.warning);
+    } catch (err) {
+      setRenderError(err instanceof Error ? err.message : "Failed to start render");
+    } finally {
+      setIsRendering(false);
+    }
   }
 
   const buttonClass =
@@ -227,6 +292,13 @@ export function VideoEditor({ projectId }: { projectId: string }) {
         editing.
       </div>
     );
+  }
+
+  if (loadError) {
+    return <p className="p-4 text-sm text-red-600">Couldn&apos;t load this reel: {loadError}</p>;
+  }
+  if (!isLoaded) {
+    return <p className="p-4 text-sm text-neutral-500">Loading…</p>;
   }
 
   return (
@@ -266,10 +338,38 @@ export function VideoEditor({ projectId }: { projectId: string }) {
         >
           {isUploading ? "Uploading…" : "Upload video or image"}
         </button>
+
+        <span className="mx-1 h-5 w-px bg-neutral-300" aria-hidden="true" />
+
+        <button
+          className={
+            "rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600 " +
+            "disabled:cursor-not-allowed disabled:opacity-40"
+          }
+          onClick={handleRender}
+          disabled={isRendering || !selectedAssetId || (!!renderStatus && !TERMINAL_RENDER_STATUSES.has(renderStatus))}
+        >
+          {isRendering ? "Starting render…" : "Render"}
+        </button>
       </div>
 
       {uploadError && <p className="text-sm text-red-600">{uploadError}</p>}
       {assetsError && <p className="text-sm text-red-600">Couldn&apos;t load assets: {assetsError}</p>}
+      {saveError && <p className="text-sm text-red-600">Couldn&apos;t save changes: {saveError}</p>}
+      {renderError && <p className="text-sm text-red-600">{renderError}</p>}
+      {renderStatus && (
+        <p className="text-sm text-neutral-600">
+          Render status: <span className="font-medium">{renderStatus}</span>
+          {renderStatus === "completed" && renderUrl && (
+            <>
+              {" — "}
+              <a href={renderUrl} target="_blank" rel="noreferrer" className="underline">
+                view finished video
+              </a>
+            </>
+          )}
+        </p>
+      )}
 
       <div
         ref={containerRef}

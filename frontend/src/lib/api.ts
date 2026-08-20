@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import type { Timeline } from "@/lib/projects";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -105,4 +106,26 @@ export async function deleteAsset(assetId: string) {
     const body = await response.json().catch(() => ({}));
     throw new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${response.status})`);
   }
+}
+
+export interface RenderTriggerResult {
+  renderId: string;
+  status: string;
+  warning?: string;
+}
+
+/** Calls this Next.js app's own /api/render route (not the FastAPI
+ * backend) -- same-origin, so no CORS/API_BASE_URL involved. That route
+ * authenticates via the browser's Supabase cookie session directly. */
+export async function triggerRender(projectId: string, timeline: Timeline) {
+  const response = await fetch("/api/render", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId, timeline }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Request failed (HTTP ${response.status})`);
+  }
+  return body as RenderTriggerResult;
 }

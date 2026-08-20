@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from src.assets.router import router as assets_router
 from src.core.config import settings
+from src.niches.router import router as niches_router
 
 # Render's log stream is the only visibility into a deployed failure -- there's
 # no APM/observability stack here, so a plain root logger configured once at
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     app.include_router(assets_router)
+    app.include_router(niches_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

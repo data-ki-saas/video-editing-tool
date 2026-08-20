@@ -9,9 +9,15 @@ import {
   RateLimitExceededError,
   TimeoutError,
 } from "creatomate";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
+
+// Abuse guardrail, not billing/metering -- a fixed daily cap per user,
+// checked against usage_events (see supabase/migrations/0006). Easy to
+// tune once real usage exists; not meant to model plans/tiers.
+const RENDER_DAILY_LIMIT = 10;
 
 interface RenderRequestBody {
   projectId: string;
@@ -38,6 +44,66 @@ function buildWebhookUrl(): string | null {
   const url = new URL("/api/webhooks/creatomate", siteUrl);
   url.searchParams.set("secret", secret);
   return url.toString();
+}
+
+/** A signed-in-but-not-yet-abusive check: counts this user's renders in the
+ * last 24h against a fixed cap. Fails OPEN on a read error -- a usage_events
+ * hiccup shouldn't block the render feature entirely. */
+async function isUnderRenderRateLimit(supabase: SupabaseClient, userId: string): Promise<boolean> {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count, error } = await supabase
+    .from("usage_events")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("event_type", "render")
+    .gte("created_at", since);
+
+  if (error) {
+    console.error("[api/render] failed to check render rate limit", error);
+    return true;
+  }
+  return (count ?? 0) < RENDER_DAILY_LIMIT;
+}
+
+/** The persisted timeline never contains a real playable URL -- only
+ * `_appMeta[id].assetId` references (see lib/timeline/resolve.ts and
+ * supabase/migrations/0004's comment on why: assets are private, presigned
+ * URLs expire, so a URL saved into the DB would be dead by render time).
+ * This is the server-side half of that design: resolve every referenced
+ * asset to a FRESH presigned URL, by asking the backend (which holds the
+ * R2 credentials), right before handing the compiled elements to
+ * Creatomate. Never persisted -- only ever used for this one render call. */
+async function resolveAssetSources(
+  timeline: Record<string, unknown>,
+  projectId: string,
+  accessToken: string
+): Promise<Record<string, unknown>> {
+  const appMeta = (timeline._appMeta ?? {}) as Record<string, { assetId?: string }>;
+  const assetIds = new Set(Object.values(appMeta).map((meta) => meta.assetId).filter(Boolean));
+  if (assetIds.size === 0) return timeline;
+
+  const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (!backendUrl) throw new Error("NEXT_PUBLIC_API_BASE_URL is not set");
+
+  const url = new URL(`${backendUrl.replace(/\/$/, "")}/api/assets`);
+  url.searchParams.set("project_id", projectId);
+  const response = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) {
+    throw new Error(`Failed to resolve asset URLs for render (HTTP ${response.status})`);
+  }
+  const assets = (await response.json()) as Array<{ id: string; url: string }>;
+  const urlByAssetId = new Map(assets.map((asset) => [asset.id, asset.url]));
+
+  const elements = Array.isArray(timeline.elements) ? (timeline.elements as Array<Record<string, unknown>>) : [];
+  const resolvedElements = elements.map((el) => {
+    const elementId = el.id as string | undefined;
+    const assetId = elementId ? appMeta[elementId]?.assetId : undefined;
+    if (!assetId) return el;
+    const resolvedUrl = urlByAssetId.get(assetId);
+    return resolvedUrl ? { ...el, source: resolvedUrl } : el;
+  });
+
+  return { ...timeline, elements: resolvedElements };
 }
 
 export async function POST(request: Request) {
@@ -84,6 +150,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
+  if (!(await isUnderRenderRateLimit(supabase, user.id))) {
+    return NextResponse.json(
+      { error: `You've reached the limit of ${RENDER_DAILY_LIMIT} renders per day. Try again tomorrow.` },
+      { status: 429 }
+    );
+  }
+
   const apiKey = process.env.CREATOMATE_API_KEY;
   if (!apiKey) {
     console.error("[api/render] CREATOMATE_API_KEY is not set");
@@ -96,6 +169,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Render service is not configured" }, { status: 500 });
   }
 
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  let resolvedTimeline: Record<string, unknown>;
+  try {
+    resolvedTimeline = await resolveAssetSources(timeline, projectId, session.access_token);
+  } catch (err) {
+    console.error("[api/render] failed to resolve asset URLs", projectId, err);
+    return NextResponse.json({ error: "Failed to resolve one or more assets for this render" }, { status: 502 });
+  }
+
   try {
     const client = new Client(apiKey);
 
@@ -104,7 +192,7 @@ export async function POST(request: Request) {
     // 15 minutes by default), which would blow well past this route's
     // execution limit. Creatomate notifies `webhookUrl` when it's done.
     const renders = await client.startRender({
-      source: timeline,
+      source: resolvedTimeline,
       outputFormat: "mp4",
       webhookUrl,
       // Lets the (session-less) webhook receiver find the right project
@@ -123,6 +211,15 @@ export async function POST(request: Request) {
       .update({ render_id: render.id, render_status: render.status })
       .eq("id", projectId)
       .eq("owner_id", user.id);
+
+    // Best-effort usage record for the rate-limit check above -- a failure
+    // here shouldn't fail a render that already started.
+    const { error: usageError } = await supabase
+      .from("usage_events")
+      .insert({ user_id: user.id, event_type: "render" });
+    if (usageError) {
+      console.error("[api/render] failed to record usage event", projectId, usageError);
+    }
 
     if (updateError) {
       // The render is already running at Creatomate -- there's no undoing

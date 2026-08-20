@@ -8,6 +8,18 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:3000"
 
+    # Which LLMProvider src.llm.client.get_llm_provider() returns: "deepseek"
+    # or "anthropic". Defaults to deepseek here (unlike the sibling ../data
+    # project, which defaults to anthropic) -- override per environment via
+    # the LLM_PROVIDER env var.
+    llm_provider: str = "deepseek"
+
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-5"
+
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-chat"
+
     supabase_url: str = ""
     supabase_service_role_key: str = ""
 
