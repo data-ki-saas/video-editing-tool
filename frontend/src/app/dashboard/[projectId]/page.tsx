@@ -44,7 +44,7 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
           {details && <p className="text-sm text-neutral-500">{details}</p>}
         </div>
       </div>
-      <VideoEditor projectId={project.id} />
+      <VideoEditor key={project.id} projectId={project.id} />
     </div>
   );
 }

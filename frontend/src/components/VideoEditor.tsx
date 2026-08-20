@@ -2,13 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Preview } from "@creatomate/preview";
-import { listAssets, uploadAsset, type Asset } from "@/lib/api";
+import { listAssets, type Asset } from "@/lib/api";
 import { getProject, saveTimeline, type Timeline } from "@/lib/projects";
 import { createEmptyReelTimeline, resolveTimelineSources } from "@/lib/timeline/resolve";
 import { useRenderStatus } from "@/lib/useRenderStatus";
 import { QuickCreate } from "@/components/QuickCreate";
+import { useEditorPanel } from "@/lib/editor/EditorPanelContext";
+import { AssetsPanel } from "@/components/editor-panels/AssetsPanel";
+import { UploadPanel } from "@/components/editor-panels/UploadPanel";
+import { TrimPanel } from "@/components/editor-panels/TrimPanel";
+import { BackgroundPanel } from "@/components/editor-panels/BackgroundPanel";
+import { OverlayPanel } from "@/components/editor-panels/OverlayPanel";
+import { RenderPanel } from "@/components/editor-panels/RenderPanel";
 
-const ACCEPTED_FILE_TYPES = "video/mp4,image/jpeg,image/png";
 const AUTOSAVE_DEBOUNCE_MS = 800;
 
 function isMobileDevice(): boolean {
@@ -19,9 +25,10 @@ function isMobileDevice(): boolean {
 export function VideoEditor({ projectId }: { projectId: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<Preview | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const hasLoadedRef = useRef(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const { activePanel, setActivePanel, setCapabilities } = useEditorPanel();
 
   const [isMobile, setIsMobile] = useState(false);
   const [isReady, setIsReady] = useState(false);
@@ -31,15 +38,25 @@ export function VideoEditor({ projectId }: { projectId: string }) {
   const [assetsError, setAssetsError] = useState<string | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [template, setTemplate] = useState<Timeline>(createEmptyReelTimeline);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   const { isRendering, renderStatus, renderUrl, renderError, isTerminal, applyProjectStatus, startRender } =
     useRenderStatus(projectId);
 
   const videoAssets = assets.filter((asset) => asset.kind === "video");
   const imageAssets = assets.filter((asset) => asset.kind === "image");
+
+  const mainVideoElement = template.elements.find((el) => el.id === "main-video");
+  const mainVideoTrim =
+    mainVideoElement && typeof mainVideoElement.trim_duration === "number"
+      ? {
+          trim_start: (mainVideoElement.trim_start as number | undefined) ?? 0,
+          trim_duration: mainVideoElement.trim_duration as number,
+        }
+      : null;
+  const hasArtificialBackground = template.elements.some((el) => el.id === "artificial-background");
+  const hasImageOverlay = template.elements.some((el) => el.id === "image-overlay");
 
   useEffect(() => {
     // navigator is undefined during SSR, so this can't be a lazy useState
@@ -48,6 +65,15 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMobile(isMobileDevice());
   }, []);
+
+  // Defaults the sidebar to the "assets" panel for this project. The parent
+  // page keys this component by projectId (see [projectId]/page.tsx), so a
+  // fresh mount here really does mean "the user switched reels" -- resetting
+  // this inside the async load below instead would race a click the user
+  // makes on another sidebar action while that fetch is still in flight.
+  useEffect(() => {
+    setActivePanel("assets");
+  }, [setActivePanel]);
 
   // Loads this reel's persisted timeline once on mount. Guarded by
   // hasLoadedRef so the autosave effect below never fires against the
@@ -146,27 +172,37 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile]);
 
+  // Publishes which actions the sidebar should show (and whether each is
+  // enabled) -- the sidebar lives in the shared dashboard layout, a sibling
+  // of this component rather than an ancestor/descendant, so it can't read
+  // this state directly.
+  const isRenderProcessing = isRendering || (renderStatus !== null && !isTerminal);
+
+  useEffect(() => {
+    setCapabilities({
+      actions: [
+        { key: "assets", label: "Your videos", disabled: false },
+        { key: "upload", label: "Upload", disabled: false, busy: isUploading },
+        { key: "trim", label: "Trim", disabled: !isReady || !selectedAssetId },
+        { key: "background", label: "Add Background", disabled: !isReady },
+        { key: "overlay", label: "Overlay Image", disabled: !isReady || imageAssets.length === 0 },
+        { key: "render", label: "Render", disabled: isRenderProcessing || !selectedAssetId, busy: isRenderProcessing },
+      ],
+    });
+  }, [isReady, selectedAssetId, imageAssets.length, isUploading, isRenderProcessing, setCapabilities]);
+
+  // Clears the sidebar's action list once this editor is no longer on
+  // screen (navigating back to /dashboard or away from it entirely) --
+  // deliberately separate from the effect above, which should update the
+  // list in place rather than blanking it between every state change.
+  useEffect(() => {
+    return () => setCapabilities(null);
+  }, [setCapabilities]);
+
   async function pushTemplate(next: Timeline) {
     setTemplate(next);
     if (previewRef.current && isReady) {
       await previewRef.current.setSource(resolveTimelineSources(next, assets));
-    }
-  }
-
-  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // lets the same file be re-selected later
-    if (!file) return;
-
-    setIsUploading(true);
-    setUploadError(null);
-    try {
-      const asset = await uploadAsset(projectId, file);
-      setAssets((prev) => [asset, ...prev]);
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setIsUploading(false);
     }
   }
 
@@ -197,7 +233,7 @@ export function VideoEditor({ projectId }: { projectId: string }) {
    * new background element. This just inserts a solid-color shape behind the
    * video on track 0. */
   function handleAddArtificialBackground() {
-    if (template.elements.some((el) => el.id === "artificial-background")) return;
+    if (hasArtificialBackground) return;
     void pushTemplate({
       ...template,
       elements: [
@@ -217,13 +253,12 @@ export function VideoEditor({ projectId }: { projectId: string }) {
     });
   }
 
-  /** Placeholder: a real implementation would let the user pick which of
-   * their uploaded images to overlay. This adds a fixed placeholder overlay
-   * in the top-right corner using the first uploaded image, just to
+  /** Placeholder: a real implementation would support full overlay
+   * positioning/sizing. This adds a fixed placeholder overlay in the
+   * top-right corner using whichever uploaded image the user picked, just to
    * demonstrate the state shape. */
-  function handleOverlayImage() {
-    if (template.elements.some((el) => el.id === "image-overlay")) return;
-    const overlayAsset = imageAssets[0];
+  function handleOverlayImage(overlayAsset: Asset) {
+    if (hasImageOverlay) return;
     const elementId = "image-overlay";
     void pushTemplate({
       ...template,
@@ -241,15 +276,9 @@ export function VideoEditor({ projectId }: { projectId: string }) {
           source: null,
         },
       ],
-      _appMeta: overlayAsset
-        ? { ...template._appMeta, [elementId]: { role: "clip", assetId: overlayAsset.id } }
-        : template._appMeta,
+      _appMeta: { ...template._appMeta, [elementId]: { role: "clip", assetId: overlayAsset.id } },
     });
   }
-
-  const buttonClass =
-    "rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium " +
-    "hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent";
 
   // The Preview SDK needs real desktop-class video decoding, so it's never
   // constructed on a mobile browser -- QuickCreate is the mobile-first
@@ -268,105 +297,54 @@ export function VideoEditor({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <button className={buttonClass} onClick={handleTrim} disabled={!isReady || !selectedAssetId}>
-          Trim
-        </button>
-        <button className={buttonClass} onClick={handleAddArtificialBackground} disabled={!isReady}>
-          Add Artificial Background
-        </button>
-        <button
-          className={buttonClass}
-          onClick={handleOverlayImage}
-          disabled={!isReady || imageAssets.length === 0}
-        >
-          Overlay Image
-        </button>
-
-        <span className="mx-1 h-5 w-px bg-neutral-300" aria-hidden="true" />
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={ACCEPTED_FILE_TYPES}
-          className="hidden"
-          onChange={handleFileSelected}
-          disabled={isUploading}
-        />
-        <button
-          className={
-            "rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700 " +
-            "disabled:cursor-not-allowed disabled:opacity-40"
-          }
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isUploading}
-        >
-          {isUploading ? "Uploading…" : "Upload video or image"}
-        </button>
-
-        <span className="mx-1 h-5 w-px bg-neutral-300" aria-hidden="true" />
-
-        <button
-          className={
-            "rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-600 " +
-            "disabled:cursor-not-allowed disabled:opacity-40"
-          }
-          onClick={() => startRender(template)}
-          disabled={isRendering || !selectedAssetId || (renderStatus !== null && !isTerminal)}
-        >
-          {isRendering ? "Starting render…" : "Render"}
-        </button>
-      </div>
-
-      {uploadError && <p className="text-sm text-red-600">{uploadError}</p>}
       {assetsError && <p className="text-sm text-red-600">Couldn&apos;t load assets: {assetsError}</p>}
       {saveError && <p className="text-sm text-red-600">Couldn&apos;t save changes: {saveError}</p>}
-      {renderError && <p className="text-sm text-red-600">{renderError}</p>}
-      {renderStatus && (
-        <p className="text-sm text-neutral-600">
-          Render status: <span className="font-medium">{renderStatus}</span>
-          {renderStatus === "completed" && renderUrl && (
-            <>
-              {" — "}
-              <a href={renderUrl} target="_blank" rel="noreferrer" className="underline">
-                view finished video
-              </a>
-            </>
-          )}
-        </p>
-      )}
 
       <div
         ref={containerRef}
-        className="w-full max-w-[405px] overflow-hidden rounded-md border border-neutral-300 bg-neutral-900"
+        className="w-full max-w-[405px] overflow-hidden rounded-md border border-border bg-neutral-900"
         style={{ aspectRatio: "9 / 16" }}
       />
 
-      <div className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-neutral-700">Your videos</h2>
-        {videoAssets.length === 0 ? (
-          <p className="text-sm text-neutral-500">
-            No videos yet — click &quot;Upload video or image&quot; above to get started.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-1">
-            {videoAssets.map((asset) => (
-              <li key={asset.id}>
-                <button
-                  className={
-                    "w-full rounded-md border px-3 py-1.5 text-left text-sm hover:bg-neutral-100 " +
-                    (asset.id === selectedAssetId
-                      ? "border-neutral-900 font-medium"
-                      : "border-neutral-300")
-                  }
-                  onClick={() => handleSelectAsset(asset)}
-                >
-                  {asset.filename}
-                  {asset.id === selectedAssetId ? " (selected)" : ""}
-                </button>
-              </li>
-            ))}
-          </ul>
+      <div className="max-w-md">
+        {activePanel === "assets" && (
+          <AssetsPanel videoAssets={videoAssets} selectedAssetId={selectedAssetId} onSelect={handleSelectAsset} />
+        )}
+        {activePanel === "upload" && (
+          <UploadPanel
+            projectId={projectId}
+            onUploaded={(asset) => setAssets((prev) => [asset, ...prev])}
+            onUploadingChange={setIsUploading}
+          />
+        )}
+        {activePanel === "trim" && (
+          <TrimPanel disabled={!isReady || !selectedAssetId} trim={mainVideoTrim} onApply={handleTrim} />
+        )}
+        {activePanel === "background" && (
+          <BackgroundPanel
+            disabled={!isReady}
+            added={hasArtificialBackground}
+            onAdd={handleAddArtificialBackground}
+          />
+        )}
+        {activePanel === "overlay" && (
+          <OverlayPanel
+            disabled={!isReady}
+            imageAssets={imageAssets}
+            added={hasImageOverlay}
+            onAdd={handleOverlayImage}
+          />
+        )}
+        {activePanel === "render" && (
+          <RenderPanel
+            disabled={isRenderProcessing || !selectedAssetId}
+            isRendering={isRendering}
+            renderStatus={renderStatus}
+            renderUrl={renderUrl}
+            renderError={renderError}
+            isTerminal={isTerminal}
+            onRender={() => startRender(template)}
+          />
         )}
       </div>
     </div>

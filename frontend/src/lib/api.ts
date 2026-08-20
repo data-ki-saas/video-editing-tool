@@ -3,7 +3,7 @@ import type { Timeline } from "@/lib/projects";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-async function authHeader(): Promise<HeadersInit> {
+async function authHeader(): Promise<Record<string, string>> {
   const supabase = createClient();
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -87,6 +87,64 @@ export async function uploadAsset(projectId: string, file: File) {
     body: formData,
   });
   return handleResponse<Asset>(response);
+}
+
+/** Same upload as uploadAsset() above, but over XMLHttpRequest instead of
+ * fetch() so onProgress can report real upload progress via xhr.upload's
+ * progress event -- fetch() has no cross-browser-reliable way to observe
+ * request body upload progress. Used by the Upload panel's progress bar. */
+export function uploadAssetWithProgress(
+  projectId: string,
+  file: File,
+  onProgress: (fraction: number) => void
+): Promise<Asset> {
+  return authHeader().then(
+    (headers) =>
+      new Promise<Asset>((resolve, reject) => {
+        const url = new URL(`${API_BASE_URL}/api/assets`);
+        url.searchParams.set("project_id", projectId);
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", url.toString());
+        for (const [key, value] of Object.entries(headers)) {
+          xhr.setRequestHeader(key, value);
+        }
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(e.loaded / e.total);
+        };
+
+        xhr.onload = () => {
+          let body: { detail?: unknown } = {};
+          try {
+            body = JSON.parse(xhr.responseText);
+          } catch {
+            // Non-JSON response body -- fall through to the generic message below.
+          }
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(body as unknown as Asset);
+          } else {
+            console.error(`[api] upload to ${url} failed: HTTP ${xhr.status}`, body);
+            reject(new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${xhr.status})`));
+          }
+        };
+
+        xhr.onerror = () => {
+          console.error(`[api] network error uploading to ${url} (backend base URL: ${API_BASE_URL})`);
+          reject(
+            new Error(
+              `Could not reach the API at ${API_BASE_URL} -- this usually means a CORS or network ` +
+                `configuration issue, not a problem with your file.`
+            )
+          );
+        };
+
+        xhr.send(formData);
+      })
+  );
 }
 
 export async function listAssets(projectId: string) {
