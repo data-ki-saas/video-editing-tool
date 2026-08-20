@@ -2,8 +2,16 @@ from functools import lru_cache
 from pathlib import Path
 
 import boto3
+from boto3.s3.transfer import TransferConfig
 
 from src.core.config import settings
+
+# R2 API tokens commonly allow PutObject but deny CreateMultipartUpload even
+# under "Object Read & Write" scoping. Since uploads are already capped at
+# settings.max_upload_size_bytes (well under S3/R2's 5 GiB single-PUT limit),
+# raising the multipart threshold above that cap forces every upload through
+# a plain PutObject and avoids the multipart permission entirely.
+_UPLOAD_TRANSFER_CONFIG = TransferConfig(multipart_threshold=settings.max_upload_size_bytes + 1)
 
 
 @lru_cache
@@ -19,7 +27,11 @@ def get_r2_client():
 
 def upload_file(local_path: Path, key: str, content_type: str) -> None:
     get_r2_client().upload_file(
-        str(local_path), settings.r2_bucket_name, key, ExtraArgs={"ContentType": content_type}
+        str(local_path),
+        settings.r2_bucket_name,
+        key,
+        ExtraArgs={"ContentType": content_type},
+        Config=_UPLOAD_TRANSFER_CONFIG,
     )
 
 
