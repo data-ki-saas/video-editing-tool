@@ -17,6 +17,7 @@ class AssetRecord:
     size_bytes: int
     storage_key: str
     created_at: str
+    content_hash: str | None = None
 
 
 def project_owned_by(project_id: str, owner_id: str) -> bool:
@@ -41,6 +42,7 @@ def create_asset(
     mime_type: str,
     size_bytes: int,
     storage_key: str,
+    content_hash: str,
 ) -> AssetRecord:
     payload = {
         "id": str(uuid.uuid4()),
@@ -51,9 +53,35 @@ def create_asset(
         "mime_type": mime_type,
         "size_bytes": size_bytes,
         "storage_key": storage_key,
+        "content_hash": content_hash,
     }
     result = get_supabase_client().table(_TABLE).insert(payload).execute()
     return AssetRecord(**result.data[0])
+
+
+def find_by_content_hash(uploaded_by: str, content_hash: str) -> AssetRecord | None:
+    """An existing asset of this uploader's with identical bytes, regardless
+    of which project it belongs to -- lets upload_asset() reuse its
+    storage_key instead of writing the same bytes to R2 again. Scoped to
+    uploaded_by rather than checked globally so this can't be used to probe
+    whether some other user has uploaded a given file."""
+    result = (
+        get_supabase_client()
+        .table(_TABLE)
+        .select("*")
+        .eq("uploaded_by", uploaded_by)
+        .eq("content_hash", content_hash)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return None
+    return AssetRecord(**result.data[0])
+
+
+def count_assets_with_storage_key(storage_key: str) -> int:
+    result = get_supabase_client().table(_TABLE).select("id", count="exact").eq("storage_key", storage_key).execute()
+    return result.count or 0
 
 
 def list_assets_for_project(project_id: str, owner_id: str) -> list[AssetRecord]:

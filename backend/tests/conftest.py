@@ -83,6 +83,15 @@ class FakeAssetsTable:
             del self.assets[asset_id]
         return record
 
+    def find_by_content_hash(self, uploaded_by: str, content_hash: str) -> repository.AssetRecord | None:
+        for row in self.assets.values():
+            if row["uploaded_by"] == uploaded_by and row.get("content_hash") == content_hash:
+                return repository.AssetRecord(**row)
+        return None
+
+    def count_with_storage_key(self, storage_key: str) -> int:
+        return sum(1 for row in self.assets.values() if row["storage_key"] == storage_key)
+
 
 @pytest.fixture
 def fake_assets_table(monkeypatch):
@@ -92,6 +101,8 @@ def fake_assets_table(monkeypatch):
     monkeypatch.setattr(repository, "list_assets_for_project", table.list_for_project)
     monkeypatch.setattr(repository, "get_asset", table.get)
     monkeypatch.setattr(repository, "delete_asset", table.delete)
+    monkeypatch.setattr(repository, "find_by_content_hash", table.find_by_content_hash)
+    monkeypatch.setattr(repository, "count_assets_with_storage_key", table.count_with_storage_key)
     return table
 
 

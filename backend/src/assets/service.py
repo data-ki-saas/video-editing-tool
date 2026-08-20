@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 import tempfile
@@ -53,25 +54,38 @@ async def upload_asset(project_id: str, file: UploadFile, user: CurrentUser) -> 
             status_code=413, detail=f"File exceeds the {settings.max_upload_size_mb} MB upload limit"
         )
 
-    safe_filename = _UNSAFE_FILENAME_CHARS.sub("_", file.filename)
-    storage_key = f"projects/{project_id}/{uuid.uuid4().hex}-{safe_filename}"
+    content_hash = hashlib.md5(body).hexdigest()
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp.write(body)
-        tmp_path = Path(tmp.name)
+    # If this user has already uploaded these exact bytes (to this project or
+    # any other of theirs), reuse that object instead of writing it to R2
+    # again -- a new asset row still gets created below so this project's
+    # asset list/timeline can reference it, but the storage_key (and the R2
+    # object it points at) is shared. delete_asset() below reference-counts
+    # by storage_key before ever deleting the underlying object.
+    existing = repository.find_by_content_hash(user.id, content_hash)
 
-    try:
-        r2_client.upload_file(tmp_path, storage_key, file.content_type)
-    except Exception as exc:
-        logger.exception(
-            "asset upload failed to store file in R2: user=%s project=%s filename=%r",
-            user.id,
-            project_id,
-            file.filename,
-        )
-        raise HTTPException(status_code=502, detail="Failed to store the uploaded file") from exc
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    if existing is not None:
+        storage_key = existing.storage_key
+    else:
+        safe_filename = _UNSAFE_FILENAME_CHARS.sub("_", file.filename)
+        storage_key = f"projects/{project_id}/{uuid.uuid4().hex}-{safe_filename}"
+
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(body)
+            tmp_path = Path(tmp.name)
+
+        try:
+            r2_client.upload_file(tmp_path, storage_key, file.content_type)
+        except Exception as exc:
+            logger.exception(
+                "asset upload failed to store file in R2: user=%s project=%s filename=%r",
+                user.id,
+                project_id,
+                file.filename,
+            )
+            raise HTTPException(status_code=502, detail="Failed to store the uploaded file") from exc
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     try:
         record = repository.create_asset(
@@ -82,6 +96,7 @@ async def upload_asset(project_id: str, file: UploadFile, user: CurrentUser) -> 
             mime_type=file.content_type,
             size_bytes=len(body),
             storage_key=storage_key,
+            content_hash=content_hash,
         )
     except Exception as exc:
         logger.exception(
@@ -90,10 +105,14 @@ async def upload_asset(project_id: str, file: UploadFile, user: CurrentUser) -> 
             project_id,
             file.filename,
         )
-        try:
-            r2_client.delete_object(storage_key)
-        except Exception:
-            logger.exception("failed to clean up orphaned R2 object %r after a failed upload", storage_key)
+        if existing is None:
+            # Only clean up the R2 object if this call is the one that just
+            # created it -- never delete a storage_key a deduped-in object
+            # (existing is not None) or another asset row still points at.
+            try:
+                r2_client.delete_object(storage_key)
+            except Exception:
+                logger.exception("failed to clean up orphaned R2 object %r after a failed upload", storage_key)
         raise HTTPException(status_code=502, detail="Asset metadata insert failed") from exc
 
     return _to_asset_info(record)
@@ -109,6 +128,13 @@ def delete_asset(asset_id: str, user: CurrentUser) -> None:
     record = repository.delete_asset(asset_id, user.id)
     if record is None:
         raise HTTPException(status_code=404, detail="Asset not found")
+
+    # A deduped upload (see upload_asset above) can leave more than one asset
+    # row pointing at the same storage_key -- only delete the R2 object once
+    # this was the last row referencing it.
+    if repository.count_assets_with_storage_key(record.storage_key) > 0:
+        return
+
     try:
         r2_client.delete_object(record.storage_key)
     except Exception:
