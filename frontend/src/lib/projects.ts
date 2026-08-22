@@ -13,14 +13,16 @@ export interface AppMetaEntry {
   presetId?: string;
 }
 
-// A snapshot of the editor-v2 selections (template/clip-rectangle/
-// background-track) at some point in the edit history -- see
+// A snapshot of the editor-v2 selections that actually change what the
+// frames look like, at some point in the edit history -- see
 // lib/useEditHistory.ts. Kept generic there; named here since this is the
-// one concrete shape actually persisted.
+// one concrete shape actually persisted. Template and background-track
+// choices are NOT part of this: they don't affect frames (yet), so they're
+// plain persisted fields on Timeline below rather than history entries --
+// only actions that change frames belong in the visible change list.
+// Grows as more frame-affecting actions (crop/zoom/pan/flip/trim/...) land.
 export interface EditSelectionsSnapshot {
-  templateId: string | null;
   clipRectId: string | null;
-  backgroundTrackId: string;
 }
 
 export interface EditHistoryEntrySnapshot {
@@ -41,6 +43,10 @@ export interface Timeline {
   // any timeline saved before this existed.
   editHistory?: EditHistoryEntrySnapshot[];
   editHistoryIndex?: number;
+  // Cosmetic-only selections (see EditSelectionsSnapshot's comment above) --
+  // persisted directly rather than through the change history.
+  selectedTemplateId?: string | null;
+  selectedBackgroundTrackId?: string;
 }
 
 // Generic on purpose -- what fields matter for a "listing" varies entirely

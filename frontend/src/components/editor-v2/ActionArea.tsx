@@ -39,6 +39,7 @@ export function ActionArea({
   onSelectTemplate,
   selectedClipRectId,
   onSelectClipRect,
+  selectedClipRectRatio,
   playerRef,
   onPlayerTimeUpdate,
 }: {
@@ -55,6 +56,9 @@ export function ActionArea({
   onSelectTemplate: (id: string) => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
+  // Drives ClipRectOverlay inside CanvasPlayer -- null until a ratio's
+  // been picked, in which case no crop guide is shown.
+  selectedClipRectRatio: number | null;
   // Lets ThreePaneEditor's Playground scrub this player and track a
   // playhead against it -- see CanvasPlayer.tsx's seekTo/onTimeUpdate.
   playerRef: RefObject<CanvasPlayerHandle | null>;
@@ -94,7 +98,13 @@ export function ActionArea({
       <div className="flex min-w-0 flex-1 items-center justify-end overflow-hidden rounded-md border border-border bg-neutral-950 p-2">
         <div className="h-full max-w-full" style={{ aspectRatio: `${WIDEST_CLIP_RATIO} / 1` }}>
           {selectedAsset?.kind === "video" ? (
-            <CanvasPlayer key={selectedAsset.id} ref={playerRef} asset={selectedAsset} onTimeUpdate={onPlayerTimeUpdate} />
+            <CanvasPlayer
+              key={selectedAsset.id}
+              ref={playerRef}
+              asset={selectedAsset}
+              clipRectRatio={selectedClipRectRatio}
+              onTimeUpdate={onPlayerTimeUpdate}
+            />
           ) : selectedAsset?.kind === "image" ? (
             // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset
             <img

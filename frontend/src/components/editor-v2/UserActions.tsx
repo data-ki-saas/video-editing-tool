@@ -1,14 +1,35 @@
 "use client";
 
 /**
- * "User actions": pick a template style and a clip aspect ratio to apply to
- * the current reel. Sits between the asset gallery and the play area.
- * Selection-only for now (baby step) -- wiring these choices into the
- * actual timeline/render instructions is a later step.
+ * "User actions": three stacked sections --
+ *  1. Template style picker
+ *  2. Clip-rectangle aspect-ratio picker (drives ClipRectOverlay on the
+ *     play area, and is the only one of these three that's frame-affecting
+ *     -- see ThreePaneEditor for why only its changes land in the change
+ *     history)
+ *  3. Action buttons, grouped Arrange (Delete/Trim/Drag) and Transform
+ *     (Crop/Zoom/Pan & Tilt/Flip/Mirror) -- all still disabled scaffolding;
+ *     Crop is called out as automatic (driven by the clip-rectangle above)
+ *     rather than a button, since there's no separate action to take for it.
  */
 import { TEMPLATE_OPTIONS } from "@/lib/templates";
 import { TEMPLATE_ICONS } from "./icons/TemplateIcons";
+import { ACTION_ICONS } from "./icons/ActionIcons";
 import { CLIP_RECT_OPTIONS, ClipRectIcon } from "./ClipRectIcon";
+
+const ARRANGE_ACTIONS = [
+  { id: "delete", label: "Delete" },
+  { id: "trim", label: "Trim" },
+  { id: "drag", label: "Drag" },
+];
+
+const TRANSFORM_ACTIONS = [
+  { id: "zoom-in", label: "Zoom In" },
+  { id: "zoom-out", label: "Zoom Out" },
+  { id: "pan-tilt", label: "Pan & Tilt" },
+  { id: "flip", label: "Flip" },
+  { id: "mirror", label: "Mirror" },
+];
 
 function TemplateRow({
   selectedTemplateId,
@@ -18,7 +39,7 @@ function TemplateRow({
   onSelectTemplate: (id: string) => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-1">
+    <div className="flex h-24 shrink-0 flex-col gap-1">
       <span className="text-xs text-muted">Template</span>
       <div className="flex flex-1 gap-2 overflow-x-auto">
         {TEMPLATE_OPTIONS.map((template) => {
@@ -53,7 +74,7 @@ function ClipRectRow({
   onSelectClipRect: (id: string) => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-1">
+    <div className="flex h-20 shrink-0 flex-col gap-1">
       <span className="text-xs text-muted">Clip rectangle</span>
       <div className="flex flex-1 items-center gap-2 overflow-x-auto">
         {CLIP_RECT_OPTIONS.map((option) => {
@@ -79,6 +100,48 @@ function ClipRectRow({
   );
 }
 
+function ActionButton({ id, label }: { id: string; label: string }) {
+  const Icon = ACTION_ICONS[id];
+  return (
+    <button
+      type="button"
+      disabled
+      title="Coming soon"
+      className="flex w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-transparent p-1 opacity-40"
+    >
+      <Icon className="h-5 w-5 text-foreground" />
+      <span className="w-full truncate text-center text-[10px] text-muted">{label}</span>
+    </button>
+  );
+}
+
+function ActionButtonsSection() {
+  return (
+    <div className="flex shrink-0 flex-col gap-2">
+      <span className="text-xs text-muted">Action buttons</span>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted">Arrange</span>
+        <div className="flex gap-2 overflow-x-auto">
+          {ARRANGE_ACTIONS.map((action) => (
+            <ActionButton key={action.id} id={action.id} label={action.label} />
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted">Transform</span>
+        <p className="text-[10px] text-accent">Crop -- applied automatically from the clip rectangle above</p>
+        <div className="flex gap-2 overflow-x-auto">
+          {TRANSFORM_ACTIONS.map((action) => (
+            <ActionButton key={action.id} id={action.id} label={action.label} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function UserActions({
   selectedTemplateId,
   onSelectTemplate,
@@ -91,10 +154,11 @@ export function UserActions({
   onSelectClipRect: (id: string) => void;
 }) {
   return (
-    <div className="flex h-full flex-col gap-2">
+    <div className="flex h-full flex-col gap-3 overflow-y-auto">
       <h2 className="shrink-0 text-sm font-medium text-foreground">User actions</h2>
       <TemplateRow selectedTemplateId={selectedTemplateId} onSelectTemplate={onSelectTemplate} />
       <ClipRectRow selectedClipRectId={selectedClipRectId} onSelectClipRect={onSelectClipRect} />
+      <ActionButtonsSection />
     </div>
   );
 }

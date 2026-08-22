@@ -106,6 +106,41 @@ export function frameIndexAtTime(elapsedSeconds: number, frameRate: number, fram
   return Math.min(Math.max(index, 0), frameCount - 1);
 }
 
+export interface CropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The largest `targetRatio` (width/height) rectangle that fits centered
+ * inside a `sourceWidth` x `sourceHeight` frame -- i.e. the crop that
+ * maximizes coverage of the source for that target ratio, not an arbitrary
+ * fixed-size center-crop. Used by ClipRectOverlay.tsx as the default clip
+ * rectangle whenever a new ratio is picked ("the initial clip rectangle
+ * maximizes the coverage of the video" per spec).
+ */
+export function computeMaxCoverageCropRect(sourceWidth: number, sourceHeight: number, targetRatio: number): CropRect {
+  if (sourceWidth <= 0 || sourceHeight <= 0 || targetRatio <= 0) {
+    return { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
+  }
+
+  const sourceRatio = sourceWidth / sourceHeight;
+  let width: number;
+  let height: number;
+  if (targetRatio > sourceRatio) {
+    // Target is relatively wider than the source -- width is the
+    // constraining dimension, height shrinks to hit the target ratio.
+    width = sourceWidth;
+    height = width / targetRatio;
+  } else {
+    height = sourceHeight;
+    width = height * targetRatio;
+  }
+  return { x: (sourceWidth - width) / 2, y: (sourceHeight - height) / 2, width, height };
+}
+
 /**
  * Root-mean-square loudness of `samples` (mono, -1..1 range), one value per
  * `bucketSeconds` window, normalized so the loudest bucket in the clip is

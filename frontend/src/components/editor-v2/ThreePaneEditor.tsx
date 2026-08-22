@@ -9,9 +9,15 @@
  *
  * Three fixed horizontal bands per spec: 30% action area, 50% playground,
  * 20% feedback area. This component owns the cross-band state (the full
- * asset list, which one is selected, the edit-selections history, playback
- * position) and the thumbnail/volume extraction pipeline; each band below
- * is otherwise a plain, mostly-stateless view.
+ * asset list, which one is selected, the frame-affecting edit history,
+ * playback position) and the thumbnail/volume extraction pipeline; each
+ * band below is otherwise a plain, mostly-stateless view.
+ *
+ * Template and background-track choices are plain persisted state, not
+ * part of the edit history -- they don't change what the frames look like
+ * (yet), and the change list (FeedbackArea) is meant to show only actions
+ * that do. Only the clip-rectangle choice goes through useEditHistory,
+ * since it drives the crop overlay on the play area.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listAssets, type Asset } from "@/lib/api";
@@ -19,8 +25,7 @@ import { extractThumbnails, getVideoDuration } from "@/lib/video/video";
 import { extractVolumeProfile } from "@/lib/video/audio";
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
-import { TEMPLATE_OPTIONS } from "@/lib/templates";
-import { BACKGROUND_TRACK_OPTIONS } from "@/lib/backgroundTracks";
+import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { ActionArea } from "./ActionArea";
 import { Playground } from "./Playground";
 import { FeedbackArea } from "./FeedbackArea";
@@ -30,7 +35,7 @@ const THUMBNAIL_INTERVAL_SECONDS = 1;
 const VOLUME_BUCKET_SECONDS = 1;
 const SAVE_DEBOUNCE_MS = 600;
 
-const DEFAULT_SELECTIONS: EditSelectionsSnapshot = { templateId: null, clipRectId: null, backgroundTrackId: "none" };
+const DEFAULT_SELECTIONS: EditSelectionsSnapshot = { clipRectId: null };
 
 export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: string; initialTimeline: Timeline }) {
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -48,10 +53,18 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
 
   const canvasPlayerRef = useRef<CanvasPlayerHandle>(null);
 
-  // Selection-only (see UserActions.tsx/BackgroundTrackSelector.tsx), but
-  // every change is kept as a revertible entry (FeedbackArea's change list)
-  // and persisted into Timeline.editHistory below, so reopening this reel
-  // resumes exactly where it was left, not from a blank slate.
+  // Cosmetic-only, persisted but not history-tracked (see this file's
+  // module comment).
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    initialTimeline.selectedTemplateId ?? null
+  );
+  const [selectedBackgroundTrackId, setSelectedBackgroundTrackId] = useState(
+    initialTimeline.selectedBackgroundTrackId ?? "none"
+  );
+
+  // Frame-affecting, history-tracked -- every change is a revertible entry
+  // in FeedbackArea's change list, persisted into Timeline.editHistory so
+  // reopening this reel resumes with the same history intact.
   const {
     state: selections,
     entries: editHistoryEntries,
@@ -59,6 +72,11 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     pushChange,
     revertTo,
   } = useEditHistory<EditSelectionsSnapshot>(DEFAULT_SELECTIONS, initialTimeline.editHistory, initialTimeline.editHistoryIndex);
+
+  const selectedClipRectRatio = (() => {
+    const option = CLIP_RECT_OPTIONS.find((candidate) => candidate.id === selections.clipRectId);
+    return option ? option.widthRatio / option.heightRatio : null;
+  })();
 
   const refreshAssets = useCallback(async () => {
     try {
@@ -143,11 +161,10 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     };
   }, [selectedAsset]);
 
-  // Persists the edit-selections history into Timeline.editHistory
-  // whenever it changes, debounced -- and flushes any pending save
-  // immediately on unmount (see the second effect below) rather than
-  // silently dropping a change made just before switching reels or
-  // navigating away.
+  // Persists selections into Timeline whenever any of them change,
+  // debounced -- and flushes any pending save immediately on unmount (see
+  // the second effect below) rather than silently dropping a change made
+  // just before switching reels or navigating away.
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flushSaveRef = useRef<() => void>(() => {});
   const hasSkippedInitialSaveRef = useRef(false);
@@ -163,6 +180,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
         ...initialTimeline,
         editHistory: editHistoryEntries,
         editHistoryIndex,
+        selectedTemplateId,
+        selectedBackgroundTrackId,
       };
       saveTimeline(projectId, nextTimeline)
         .then(() => setSaveError(null))
@@ -182,7 +201,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [projectId, initialTimeline, editHistoryEntries, editHistoryIndex]);
+  }, [projectId, initialTimeline, editHistoryEntries, editHistoryIndex, selectedTemplateId, selectedBackgroundTrackId]);
 
   useEffect(() => {
     return () => flushSaveRef.current();
@@ -198,18 +217,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     setSelectedAsset((prev) => (prev?.id === assetId ? null : prev));
   }
 
-  function handleSelectTemplate(id: string) {
-    const name = TEMPLATE_OPTIONS.find((option) => option.id === id)?.name ?? id;
-    pushChange(`Template: ${name}`, { ...selections, templateId: id });
-  }
-
   function handleSelectClipRect(id: string) {
     pushChange(`Clip rectangle: ${id}`, { ...selections, clipRectId: id });
-  }
-
-  function handleSelectBackgroundTrack(id: string) {
-    const name = BACKGROUND_TRACK_OPTIONS.find((option) => option.id === id)?.name ?? id;
-    pushChange(`Background track: ${name}`, { ...selections, backgroundTrackId: id });
   }
 
   function handleSeek(seconds: number) {
@@ -227,12 +236,13 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           onUploaded={handleUploaded}
           onUploadingChange={setIsUploading}
           onAssetDeleted={handleAssetDeleted}
-          selectedBackgroundTrackId={selections.backgroundTrackId}
-          onSelectBackgroundTrack={handleSelectBackgroundTrack}
-          selectedTemplateId={selections.templateId}
-          onSelectTemplate={handleSelectTemplate}
+          selectedBackgroundTrackId={selectedBackgroundTrackId}
+          onSelectBackgroundTrack={setSelectedBackgroundTrackId}
+          selectedTemplateId={selectedTemplateId}
+          onSelectTemplate={setSelectedTemplateId}
           selectedClipRectId={selections.clipRectId}
           onSelectClipRect={handleSelectClipRect}
+          selectedClipRectRatio={selectedClipRectRatio}
           playerRef={canvasPlayerRef}
           onPlayerTimeUpdate={setCurrentTimeSeconds}
         />
@@ -240,7 +250,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
 
       <section style={{ flexBasis: "50%" }} className="shrink-0 overflow-hidden border-b border-border">
         <Playground
-          selectedBackgroundTrackId={selections.backgroundTrackId}
+          selectedBackgroundTrackId={selectedBackgroundTrackId}
           videoDurationSeconds={videoDurationSeconds}
           thumbnails={thumbnails}
           volumeLevels={volumeLevels}
