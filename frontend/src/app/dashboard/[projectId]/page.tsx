@@ -43,6 +43,9 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
           <h1 className="text-lg font-semibold">{project.name}</h1>
           {details && <p className="text-sm text-neutral-500">{details}</p>}
         </div>
+        <Link href={`/dashboard/${project.id}/editor-v2`} className="text-sm text-neutral-500 hover:underline">
+          Try new editor (beta) →
+        </Link>
       </div>
       <VideoEditor key={project.id} projectId={project.id} />
     </div>

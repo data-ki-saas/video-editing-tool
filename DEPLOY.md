@@ -129,6 +129,22 @@ the next push that touches `supabase/migrations/`.
    | Secret Access Key (shown once — save it immediately) | `<R2_SECRET_ACCESS_KEY>` |
    | Bucket name | `<R2_BUCKET_NAME>` |
 
+5. **After the backend's env vars are set** (step 6 below), apply a CORS
+   policy to this bucket — presigned GET URLs point straight at R2's own
+   origin, so the backend's `CORS_ORIGINS`/CORSMiddleware setting has *no*
+   effect on them; without this, the browser's client-side video editor
+   (canvas frame extraction, Web Audio decode) fails with a tainted-canvas
+   or blocked-fetch error even though `<video>` playback still works fine:
+
+   ```
+   cd backend && uv run python scripts/configure_r2_cors.py
+   ```
+
+   This applies GET/HEAD access for whatever origins are already in
+   `CORS_ORIGINS` (frontend origins only — never re-run this against the
+   public renders bucket, which needs no CORS policy of its own). Re-run it
+   whenever `CORS_ORIGINS` changes (e.g. adding a new Vercel URL).
+
 ### 2b. Finished-renders bucket (public, CDN-fronted)
 
 1. Create a **second, separate** bucket, e.g. `<R2_RENDERS_BUCKET_NAME>`.
