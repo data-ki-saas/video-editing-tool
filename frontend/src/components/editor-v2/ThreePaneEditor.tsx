@@ -105,13 +105,28 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
   // in FeedbackArea's change list, persisted into Timeline.editHistory so
   // reopening this reel resumes with the same history intact.
   const {
-    state: selections,
+    state: rawSelections,
     entries: editHistoryEntries,
     currentIndex: editHistoryIndex,
     pushChange,
     undo,
     redo,
   } = useEditHistory<EditSelectionsSnapshot>(DEFAULT_SELECTIONS, initialTimeline.editHistory, initialTimeline.editHistoryIndex);
+
+  // Timeline.editHistory is untyped JSON from Supabase -- an entry saved
+  // before a shape change (e.g. the flipHorizontal/flipVertical booleans
+  // that predate the toggle-list model) is missing fields the rest of this
+  // component assumes exist. This isn't a migration -- it makes no attempt
+  // to read what an old field meant -- it's just a crash guard: a missing
+  // field defaults to empty/unset rather than leaving `undefined` for the
+  // first .length/.filter/.findIndex on it to throw on.
+  const selections: EditSelectionsSnapshot = {
+    clipRectId: rawSelections.clipRectId ?? null,
+    cropRect: rawSelections.cropRect ?? null,
+    zoomEffects: rawSelections.zoomEffects ?? [],
+    flipHorizontalToggles: rawSelections.flipHorizontalToggles ?? [],
+    flipVerticalToggles: rawSelections.flipVerticalToggles ?? [],
+  };
 
   // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to redo (both redo
   // conventions are common enough -- Windows apps mostly use Ctrl+Y, Mac
