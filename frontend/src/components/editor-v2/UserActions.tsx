@@ -1,15 +1,22 @@
 "use client";
 
 /**
- * "User actions": three stacked sections --
+ * Three side-by-side sections (spread horizontally, not stacked, per
+ * feedback -- there's no separate heading either, the content is
+ * self-explanatory):
  *  1. Template style picker
- *  2. Clip-rectangle aspect-ratio picker (drives ClipRectOverlay on the
- *     play area, and is the only one of these three that's frame-affecting
- *     -- see ThreePaneEditor for why only its changes land in the change
- *     history)
+ *  2. Clip-rectangle aspect-ratio picker (drives the crop overlay on the
+ *     play area/timeline -- the only frame-affecting choice here, along
+ *     with Zoom In/Out below, so only their changes land in the change
+ *     history -- see ThreePaneEditor)
  *  3. Action buttons, grouped Arrange (Delete/Trim/Drag) and Transform
- *     (Crop/Zoom/Pan & Tilt/Flip/Mirror) -- all still disabled scaffolding;
- *     Crop is called out as automatic (driven by the clip-rectangle above)
+ *     (Zoom In/Zoom Out/Pan & Tilt/Flip/Mirror). Zoom In/Out are wired up
+ *     (they reuse the clip rectangle's crop-rect mechanism, scaled toward
+ *     or away from center over a default time range you can then drag to
+ *     resize on the timeline below); the rest are still disabled
+ *     scaffolding ("Coming soon") -- each needs its own real interaction
+ *     design (region selection, drag-to-timeline, pan/flip mechanics).
+ *     Crop is called out as automatic (driven by the clip-rectangle picker)
  *     rather than a button, since there's no separate action to take for it.
  */
 import { TEMPLATE_OPTIONS } from "@/lib/templates";
@@ -23,15 +30,13 @@ const ARRANGE_ACTIONS = [
   { id: "drag", label: "Drag" },
 ];
 
-const TRANSFORM_ACTIONS = [
-  { id: "zoom-in", label: "Zoom In" },
-  { id: "zoom-out", label: "Zoom Out" },
+const DISABLED_TRANSFORM_ACTIONS = [
   { id: "pan-tilt", label: "Pan & Tilt" },
   { id: "flip", label: "Flip" },
   { id: "mirror", label: "Mirror" },
 ];
 
-function TemplateRow({
+function TemplateSection({
   selectedTemplateId,
   onSelectTemplate,
 }: {
@@ -39,9 +44,9 @@ function TemplateRow({
   onSelectTemplate: (id: string) => void;
 }) {
   return (
-    <div className="flex h-24 shrink-0 flex-col gap-1">
+    <div className="flex h-full w-40 shrink-0 flex-col gap-1">
       <span className="text-xs text-muted">Template</span>
-      <div className="flex flex-1 gap-2 overflow-x-auto">
+      <div className="grid flex-1 grid-cols-3 gap-1 overflow-y-auto">
         {TEMPLATE_OPTIONS.map((template) => {
           const Icon = TEMPLATE_ICONS[template.id];
           const isSelected = template.id === selectedTemplateId;
@@ -52,7 +57,7 @@ function TemplateRow({
               title={`${template.name} -- ${template.useCases}`}
               onClick={() => onSelectTemplate(template.id)}
               className={
-                "flex h-full w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 " +
+                "flex flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 " +
                 (isSelected ? "border-accent bg-accent/10" : "border-transparent hover:bg-background")
               }
             >
@@ -66,7 +71,7 @@ function TemplateRow({
   );
 }
 
-function ClipRectRow({
+function ClipRectSection({
   selectedClipRectId,
   onSelectClipRect,
 }: {
@@ -74,9 +79,9 @@ function ClipRectRow({
   onSelectClipRect: (id: string) => void;
 }) {
   return (
-    <div className="flex h-20 shrink-0 flex-col gap-1">
+    <div className="flex h-full w-28 shrink-0 flex-col gap-1">
       <span className="text-xs text-muted">Clip rectangle</span>
-      <div className="flex flex-1 items-center gap-2 overflow-x-auto">
+      <div className="flex flex-1 flex-col gap-1 overflow-y-auto">
         {CLIP_RECT_OPTIONS.map((option) => {
           const isSelected = option.id === selectedClipRectId;
           return (
@@ -86,7 +91,7 @@ function ClipRectRow({
               title={option.name}
               onClick={() => onSelectClipRect(option.id)}
               className={
-                "flex shrink-0 flex-col items-center gap-0.5 rounded-md border-2 p-1 text-foreground " +
+                "flex items-center gap-1.5 rounded-md border-2 px-1 py-0.5 text-foreground " +
                 (isSelected ? "border-accent bg-accent/10" : "border-transparent hover:bg-background")
               }
             >
@@ -100,14 +105,28 @@ function ClipRectRow({
   );
 }
 
-function ActionButton({ id, label }: { id: string; label: string }) {
+function ActionButton({
+  id,
+  label,
+  disabled,
+  onClick,
+}: {
+  id: string;
+  label: string;
+  disabled: boolean;
+  onClick?: () => void;
+}) {
   const Icon = ACTION_ICONS[id];
   return (
     <button
       type="button"
-      disabled
-      title="Coming soon"
-      className="flex w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-transparent p-1 opacity-40"
+      disabled={disabled}
+      onClick={onClick}
+      title={disabled ? "Coming soon" : label}
+      className={
+        "flex w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-transparent p-1 " +
+        (disabled ? "opacity-40" : "hover:bg-background")
+      }
     >
       <Icon className="h-5 w-5 text-foreground" />
       <span className="w-full truncate text-center text-[10px] text-muted">{label}</span>
@@ -115,28 +134,49 @@ function ActionButton({ id, label }: { id: string; label: string }) {
   );
 }
 
-function ActionButtonsSection() {
+function ActionButtonsSection({
+  canZoom,
+  onZoomIn,
+  onZoomOut,
+}: {
+  canZoom: boolean;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+}) {
   return (
-    <div className="flex shrink-0 flex-col gap-2">
-      <span className="text-xs text-muted">Action buttons</span>
-
+    <div className="flex h-full flex-1 flex-col gap-2 overflow-y-auto">
       <div className="flex flex-col gap-1">
         <span className="text-[10px] font-medium uppercase tracking-wide text-muted">Arrange</span>
         <div className="flex gap-2 overflow-x-auto">
           {ARRANGE_ACTIONS.map((action) => (
-            <ActionButton key={action.id} id={action.id} label={action.label} />
+            <ActionButton key={action.id} id={action.id} label={action.label} disabled />
           ))}
         </div>
       </div>
 
       <div className="flex flex-col gap-1">
         <span className="text-[10px] font-medium uppercase tracking-wide text-muted">Transform</span>
-        <p className="text-[10px] text-accent">Crop -- applied automatically from the clip rectangle above</p>
+        <p className="text-[10px] text-accent">Crop -- applied automatically from the clip rectangle</p>
         <div className="flex gap-2 overflow-x-auto">
-          {TRANSFORM_ACTIONS.map((action) => (
-            <ActionButton key={action.id} id={action.id} label={action.label} />
+          <ActionButton
+            id="zoom-in"
+            label="Zoom In"
+            disabled={!canZoom}
+            onClick={onZoomIn}
+          />
+          <ActionButton
+            id="zoom-out"
+            label="Zoom Out"
+            disabled={!canZoom}
+            onClick={onZoomOut}
+          />
+          {DISABLED_TRANSFORM_ACTIONS.map((action) => (
+            <ActionButton key={action.id} id={action.id} label={action.label} disabled />
           ))}
         </div>
+        {!canZoom && (
+          <p className="text-[10px] text-muted">Pick a clip rectangle first to enable Zoom In/Out.</p>
+        )}
       </div>
     </div>
   );
@@ -147,18 +187,23 @@ export function UserActions({
   onSelectTemplate,
   selectedClipRectId,
   onSelectClipRect,
+  canZoom,
+  onZoomIn,
+  onZoomOut,
 }: {
   selectedTemplateId: string | null;
   onSelectTemplate: (id: string) => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
+  canZoom: boolean;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto">
-      <h2 className="shrink-0 text-sm font-medium text-foreground">User actions</h2>
-      <TemplateRow selectedTemplateId={selectedTemplateId} onSelectTemplate={onSelectTemplate} />
-      <ClipRectRow selectedClipRectId={selectedClipRectId} onSelectClipRect={onSelectClipRect} />
-      <ActionButtonsSection />
+    <div className="flex h-full gap-3 overflow-x-auto">
+      <TemplateSection selectedTemplateId={selectedTemplateId} onSelectTemplate={onSelectTemplate} />
+      <ClipRectSection selectedClipRectId={selectedClipRectId} onSelectClipRect={onSelectClipRect} />
+      <ActionButtonsSection canZoom={canZoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} />
     </div>
   );
 }

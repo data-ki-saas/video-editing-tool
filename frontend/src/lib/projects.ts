@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import type { CropRect, ZoomEffect } from "@/lib/video/video_math";
 
 export interface TemplateElement {
   id: string;
@@ -23,6 +24,14 @@ export interface AppMetaEntry {
 // Grows as more frame-affecting actions (crop/zoom/pan/flip/trim/...) land.
 export interface EditSelectionsSnapshot {
   clipRectId: string | null;
+  // The clip rectangle's actual position/size (fractions of the frame --
+  // see video_math.ts's CropRect), independent of clipRectId once the user
+  // drags/resizes it away from that ratio's default max-coverage position.
+  cropRect: CropRect | null;
+  // At most one for now -- see components/editor-v2/ZoomEffectRow.tsx's
+  // comment about showing only the selected effect if/when this becomes a
+  // list.
+  zoomEffect: ZoomEffect | null;
 }
 
 export interface EditHistoryEntrySnapshot {

@@ -22,16 +22,20 @@
  * `onTimeUpdate` every tick so that timeline can draw a moving playhead --
  * see ThreePaneEditor for how the two are wired together.
  *
- * `clipRectRatio`, when set, draws the ClipRectOverlay crop guide over the
- * canvas -- a visual guide only for now, not yet burned into the rendered
- * pixels (see UserActions.tsx's Transform group).
+ * `cropRect`, when set, draws the CropRectOverlay crop guide over the
+ * canvas -- interactive (draggable/resizable) only when `onCropRectChange`
+ * *and* `onCropRectCommit` are both given; ThreePaneEditor omits them
+ * whenever a zoom effect is actively interpolating the displayed rect at
+ * the current time, so a drag can't fight with that.
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Asset } from "@/lib/api";
 import { extractPreviewFrames, getVideoDuration } from "@/lib/video/video";
 import { decodeAudioBuffer } from "@/lib/video/audio";
-import { frameIndexAtTime, pickPreviewFrameRate } from "@/lib/video/video_math";
-import { ClipRectOverlay } from "./ClipRectOverlay";
+import { frameIndexAtTime, pickPreviewFrameRate, type CropRect } from "@/lib/video/video_math";
+import { CropRectOverlay } from "./CropRectOverlay";
+import { ReelLoader } from "@/components/ReelLoader";
+import { PlayIcon, PauseIcon } from "./icons/PlayerIcons";
 
 export interface CanvasPlayerHandle {
   seekTo(seconds: number): void;
@@ -48,8 +52,15 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 export const CanvasPlayer = forwardRef<
   CanvasPlayerHandle,
-  { asset: Asset; clipRectRatio?: number | null; onTimeUpdate?: (seconds: number) => void }
->(function CanvasPlayer({ asset, clipRectRatio = null, onTimeUpdate }, ref) {
+  {
+    asset: Asset;
+    cropRect?: CropRect | null;
+    onCropRectChange?: (next: CropRect) => void;
+    onCropRectCommit?: (next: CropRect) => void;
+    onFrameDimensions?: (dimensions: { width: number; height: number }) => void;
+    onTimeUpdate?: (seconds: number) => void;
+  }
+>(function CanvasPlayer({ asset, cropRect = null, onCropRectChange, onCropRectCommit, onFrameDimensions, onTimeUpdate }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imagesRef = useRef<HTMLImageElement[]>([]);
   const frameRateRef = useRef(0);
@@ -66,6 +77,7 @@ export const CanvasPlayer = forwardRef<
   const playStartedAtCtxTimeRef = useRef(0);
 
   const [isLoading, setIsLoading] = useState(true);
+  const [loadingStage, setLoadingStage] = useState("Loading video…");
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -178,6 +190,7 @@ export const CanvasPlayer = forwardRef<
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
+    setLoadingStage("Loading video…");
     setIsReady(false);
     setError(null);
     setIsPlaying(false);
@@ -193,6 +206,7 @@ export const CanvasPlayer = forwardRef<
       frameRateRef.current = frameRate;
       durationRef.current = duration;
 
+      setLoadingStage("Loading frames & audio…");
       const [images, audioBuffer] = await Promise.all([
         extractPreviewFrames(asset.url, frameRate).then((frames) => Promise.all(frames.map(loadImage))),
         decodeAudioBuffer(asset.url),
@@ -201,7 +215,9 @@ export const CanvasPlayer = forwardRef<
       if (cancelled) return;
       imagesRef.current = images;
       audioBufferRef.current = audioBuffer;
-      setFrameDimensions({ width: images[0].naturalWidth, height: images[0].naturalHeight });
+      const dimensions = { width: images[0].naturalWidth, height: images[0].naturalHeight };
+      setFrameDimensions(dimensions);
+      onFrameDimensions?.(dimensions);
       setIsReady(true);
       drawFrameAt(0);
     }
@@ -218,7 +234,7 @@ export const CanvasPlayer = forwardRef<
       cancelled = true;
       stopPlaybackLoop();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onTimeUpdate is a stable setter from the parent, not worth re-running this for
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onTimeUpdate/onFrameDimensions are stable setters from the parent, not worth re-running this for
   }, [asset.url]);
 
   useEffect(() => {
@@ -238,9 +254,9 @@ export const CanvasPlayer = forwardRef<
   }
 
   return (
-    <div className="flex h-full w-full items-center justify-center gap-2 p-2">
+    <div className="flex h-full w-full items-center justify-center gap-1 p-2">
       {/* Sized via aspect-ratio (not flex centering alone) so its box
-          exactly matches the canvas -- ClipRectOverlay's percentage
+          exactly matches the canvas -- CropRectOverlay's percentage
           positioning needs to align with that box precisely, not with
           whatever extra space a plain centered flex child might leave. */}
       <div
@@ -249,28 +265,26 @@ export const CanvasPlayer = forwardRef<
       >
         <canvas ref={canvasRef} className="h-full w-full" />
         {isLoading && (
-          <p className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs text-white">
-            Preparing preview…
-          </p>
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+            <ReelLoader stage={loadingStage} className="text-white" />
+          </div>
         )}
-        {frameDimensions && clipRectRatio && (
-          <ClipRectOverlay
-            sourceWidth={frameDimensions.width}
-            sourceHeight={frameDimensions.height}
-            clipRectRatio={clipRectRatio}
-          />
+        {frameDimensions && cropRect && (
+          <CropRectOverlay cropRect={cropRect} onChange={onCropRectChange} onCommit={onCropRectCommit} />
         )}
       </div>
 
-      {/* Beside the video, not below it -- keeps the video's own box at
-          full available height instead of sharing it with a button row. */}
+      {/* Icon-only, transparent background -- reads as a video-player
+          control rather than a generic form button -- and sits beside the
+          video instead of below it, so the video keeps the full height. */}
       {isReady && (
         <button
           type="button"
           onClick={handlePlayPause}
-          className="shrink-0 rounded-md bg-accent px-3 py-1 text-xs font-medium text-accent-foreground hover:opacity-90"
+          aria-label={isPlaying ? "Pause" : "Play"}
+          className="shrink-0 rounded-full p-2 text-foreground hover:bg-foreground/10"
         >
-          {isPlaying ? "Pause" : "Play"}
+          {isPlaying ? <PauseIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
         </button>
       )}
     </div>

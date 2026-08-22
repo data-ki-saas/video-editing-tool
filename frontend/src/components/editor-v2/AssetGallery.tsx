@@ -10,16 +10,22 @@
 import { useEffect, useState } from "react";
 import { deleteAsset, type Asset } from "@/lib/api";
 import { captureSingleFrame } from "@/lib/video/video";
+import { ReelLoader } from "@/components/ReelLoader";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 
 export function AssetGallery({
   assets,
+  isLoading,
   selectedAssetId,
   onSelect,
   onAddAsset,
   onDeleted,
 }: {
   assets: Asset[];
+  // Distinguishes "still fetching the list" from "fetched, there really
+  // are none" -- showing "No assets yet" during the former read as a bug
+  // (assets that clearly exist appearing to not exist, briefly).
+  isLoading: boolean;
   selectedAssetId: string | null;
   onSelect: (asset: Asset) => void;
   onAddAsset: () => void;
@@ -72,8 +78,9 @@ export function AssetGallery({
         </button>
       </div>
 
-      <div className="flex flex-1 gap-2 overflow-x-auto">
-        {assets.length === 0 && <p className="self-center text-xs text-muted">No assets yet</p>}
+      <div className="flex flex-1 items-center gap-2 overflow-x-auto">
+        {isLoading && assets.length === 0 && <ReelLoader stage="Loading assets…" className="p-0" />}
+        {!isLoading && assets.length === 0 && <p className="self-center text-xs text-muted">No assets yet</p>}
         {assets.map((asset) => {
           const thumbnailSrc = asset.kind === "image" ? asset.url : videoThumbnails[asset.id];
           return (

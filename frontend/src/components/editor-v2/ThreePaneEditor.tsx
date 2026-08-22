@@ -10,19 +10,27 @@
  * Three fixed horizontal bands per spec: 30% action area, 50% playground,
  * 20% feedback area. This component owns the cross-band state (the full
  * asset list, which one is selected, the frame-affecting edit history,
- * playback position) and the thumbnail/volume extraction pipeline; each
- * band below is otherwise a plain, mostly-stateless view.
+ * playback position, the crop rect + zoom effect) and the thumbnail/volume
+ * extraction pipeline; each band below is otherwise a plain,
+ * mostly-stateless view.
  *
  * Template and background-track choices are plain persisted state, not
  * part of the edit history -- they don't change what the frames look like
  * (yet), and the change list (FeedbackArea) is meant to show only actions
- * that do. Only the clip-rectangle choice goes through useEditHistory,
- * since it drives the crop overlay on the play area.
+ * that do. Clip rectangle (+ its crop rect) and zoom in/out both go
+ * through useEditHistory, since both are frame-affecting.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listAssets, type Asset } from "@/lib/api";
 import { extractThumbnails, getVideoDuration } from "@/lib/video/video";
 import { extractVolumeProfile } from "@/lib/video/audio";
+import {
+  computeEffectiveCropRect,
+  computeMaxCoverageCropFraction,
+  scaleCropRectCentered,
+  FULL_FRAME_CROP_RECT,
+  type CropRect,
+} from "@/lib/video/video_math";
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
@@ -34,11 +42,14 @@ import type { CanvasPlayerHandle } from "./CanvasPlayer";
 const THUMBNAIL_INTERVAL_SECONDS = 1;
 const VOLUME_BUCKET_SECONDS = 1;
 const SAVE_DEBOUNCE_MS = 600;
+const DEFAULT_ZOOM_SCALE = 0.65;
+const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
-const DEFAULT_SELECTIONS: EditSelectionsSnapshot = { clipRectId: null };
+const DEFAULT_SELECTIONS: EditSelectionsSnapshot = { clipRectId: null, cropRect: null, zoomEffect: null };
 
 export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: string; initialTimeline: Timeline }) {
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [assetsLoaded, setAssetsLoaded] = useState(false);
   const [assetsError, setAssetsError] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -47,9 +58,15 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
   const [volumeLevels, setVolumeLevels] = useState<number[]>([]);
   const [videoDurationSeconds, setVideoDurationSeconds] = useState(0);
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
+  const [frameDimensions, setFrameDimensions] = useState<{ width: number; height: number } | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Live position of the crop rect while actively dragging, before it's
+  // committed to history -- kept separate from `selections.cropRect` so a
+  // drag-in-progress doesn't spam the change list (see handleCropRectCommit).
+  const [liveCropRect, setLiveCropRect] = useState<CropRect | null>(null);
 
   const canvasPlayerRef = useRef<CanvasPlayerHandle>(null);
 
@@ -73,10 +90,22 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     revertTo,
   } = useEditHistory<EditSelectionsSnapshot>(DEFAULT_SELECTIONS, initialTimeline.editHistory, initialTimeline.editHistoryIndex);
 
-  const selectedClipRectRatio = (() => {
-    const option = CLIP_RECT_OPTIONS.find((candidate) => candidate.id === selections.clipRectId);
-    return option ? option.widthRatio / option.heightRatio : null;
-  })();
+  // Whether a zoom effect is actively interpolating the crop rect right
+  // now -- if so, the overlay shown is a computed, temporary value, not
+  // something a drag should be allowed to fight with (see
+  // CanvasPlayer/ActionArea's comments on why onCropRectChange/Commit get
+  // omitted rather than passed as no-ops in that case).
+  const isZoomActiveNow = Boolean(
+    selections.zoomEffect &&
+      currentTimeSeconds > selections.zoomEffect.startTimeSeconds &&
+      currentTimeSeconds < selections.zoomEffect.endTimeSeconds
+  );
+
+  const displayedCropRect = liveCropRect
+    ? liveCropRect
+    : selections.cropRect
+      ? computeEffectiveCropRect(selections.cropRect, selections.zoomEffect, currentTimeSeconds)
+      : null;
 
   const refreshAssets = useCallback(async () => {
     try {
@@ -89,6 +118,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
       setSelectedAsset((prev) => prev ?? data.find((asset) => asset.kind === "video") ?? null);
     } catch (err) {
       setAssetsError(err instanceof Error ? err.message : "Failed to load assets");
+    } finally {
+      setAssetsLoaded(true);
     }
   }, [projectId]);
 
@@ -114,6 +145,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
       setVolumeLevels([]);
       setVideoDurationSeconds(0);
       setCurrentTimeSeconds(0);
+      setFrameDimensions(null);
       setAnalysisError(null);
       return;
     }
@@ -218,12 +250,64 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
   }
 
   function handleSelectClipRect(id: string) {
-    pushChange(`Clip rectangle: ${id}`, { ...selections, clipRectId: id });
+    const option = CLIP_RECT_OPTIONS.find((candidate) => candidate.id === id);
+    const targetRatio = option ? option.widthRatio / option.heightRatio : 1;
+    const sourceAspectRatio = frameDimensions ? frameDimensions.width / frameDimensions.height : targetRatio;
+    const cropRect = computeMaxCoverageCropFraction(sourceAspectRatio, targetRatio);
+    pushChange(`Clip rectangle: ${id}`, { ...selections, clipRectId: id, cropRect, zoomEffect: null });
+  }
+
+  function handleCropRectChange(next: CropRect) {
+    setLiveCropRect(next);
+  }
+
+  function handleCropRectCommit(next: CropRect) {
+    setLiveCropRect(null);
+    pushChange("Adjusted crop", { ...selections, cropRect: next });
+  }
+
+  function createZoomEffect(direction: "in" | "out") {
+    const baseCropRect = selections.cropRect ?? FULL_FRAME_CROP_RECT;
+    const scaledRect = scaleCropRectCentered(baseCropRect, DEFAULT_ZOOM_SCALE);
+    const startTimeSeconds = currentTimeSeconds;
+    const endTimeSeconds = Math.min(
+      currentTimeSeconds + DEFAULT_ZOOM_DURATION_SECONDS,
+      videoDurationSeconds > 0 ? videoDurationSeconds : currentTimeSeconds + DEFAULT_ZOOM_DURATION_SECONDS
+    );
+    const zoomEffect = {
+      startTimeSeconds,
+      endTimeSeconds,
+      startRect: direction === "in" ? baseCropRect : scaledRect,
+      endRect: direction === "in" ? scaledRect : baseCropRect,
+    };
+    pushChange(direction === "in" ? "Zoom in" : "Zoom out", { ...selections, zoomEffect });
+  }
+
+  // Live position of the zoom effect's time range while actively dragging
+  // one of its edges, before it's committed to history -- same "change vs.
+  // commit" split as liveCropRect above, so a drag doesn't spam the change
+  // list with an entry per pixel of movement.
+  const [liveZoomEffect, setLiveZoomEffect] = useState<EditSelectionsSnapshot["zoomEffect"]>(null);
+
+  function handleChangeZoomRange(startTimeSeconds: number, endTimeSeconds: number) {
+    if (!selections.zoomEffect) return;
+    setLiveZoomEffect({ ...selections.zoomEffect, startTimeSeconds, endTimeSeconds });
+  }
+
+  function handleCommitZoomRange(startTimeSeconds: number, endTimeSeconds: number) {
+    if (!selections.zoomEffect) return;
+    setLiveZoomEffect(null);
+    pushChange("Adjusted zoom range", {
+      ...selections,
+      zoomEffect: { ...selections.zoomEffect, startTimeSeconds, endTimeSeconds },
+    });
   }
 
   function handleSeek(seconds: number) {
     canvasPlayerRef.current?.seekTo(seconds);
   }
+
+  const displayedZoomEffect = liveZoomEffect ?? selections.zoomEffect;
 
   return (
     <div className="flex h-full flex-col">
@@ -231,6 +315,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
         <ActionArea
           projectId={projectId}
           assets={assets}
+          assetsLoaded={assetsLoaded}
           selectedAsset={selectedAsset}
           onSelectAsset={setSelectedAsset}
           onUploaded={handleUploaded}
@@ -242,7 +327,12 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           onSelectTemplate={setSelectedTemplateId}
           selectedClipRectId={selections.clipRectId}
           onSelectClipRect={handleSelectClipRect}
-          selectedClipRectRatio={selectedClipRectRatio}
+          effectiveCropRect={displayedCropRect}
+          onCropRectChange={isZoomActiveNow ? undefined : handleCropRectChange}
+          onCropRectCommit={isZoomActiveNow ? undefined : handleCropRectCommit}
+          onFrameDimensions={setFrameDimensions}
+          onZoomIn={() => createZoomEffect("in")}
+          onZoomOut={() => createZoomEffect("out")}
           playerRef={canvasPlayerRef}
           onPlayerTimeUpdate={setCurrentTimeSeconds}
         />
@@ -257,6 +347,10 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           isAnalyzing={isAnalyzing}
           currentTimeSeconds={currentTimeSeconds}
           onSeek={handleSeek}
+          baseCropRect={selections.cropRect}
+          zoomEffect={displayedZoomEffect}
+          onChangeZoomRange={handleChangeZoomRange}
+          onCommitZoomRange={handleCommitZoomRange}
         />
       </section>
 

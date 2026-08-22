@@ -5,6 +5,7 @@ import { getProject, renameProject, type Project } from "@/lib/projects";
 import { setLastProjectId } from "@/lib/lastProject";
 import { ThreePaneEditor } from "@/components/editor-v2/ThreePaneEditor";
 import { InlineEditableText } from "@/components/InlineEditableText";
+import { ReelLoader } from "@/components/ReelLoader";
 
 function formatNicheLabel(niche: string | null): string | null {
   if (!niche) return null;
@@ -32,7 +33,7 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
     return <p className="p-6 text-sm text-red-600">Couldn&apos;t load this reel: {error}</p>;
   }
   if (!project) {
-    return <p className="p-6 text-sm text-neutral-500">Loading…</p>;
+    return <ReelLoader stage="Loading your reel…" className="h-full p-6" />;
   }
 
   const details = [formatNicheLabel(project.niche), ...Object.values(project.attributes).map(String)]

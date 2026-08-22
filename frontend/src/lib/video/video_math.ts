@@ -106,6 +106,11 @@ export function frameIndexAtTime(elapsedSeconds: number, frameRate: number, fram
   return Math.min(Math.max(index, 0), frameCount - 1);
 }
 
+// All CropRect fields are FRACTIONS (0..1) of the frame's width/height --
+// resolution-independent, so the same rect applies unchanged to the live
+// canvas, every thumbnail, and any future re-extraction at a different
+// preview size, with no pixel-dimension bookkeeping required at the call
+// site (see CropRectOverlay.tsx, which renders these as plain percentages).
 export interface CropRect {
   x: number;
   y: number;
@@ -113,13 +118,20 @@ export interface CropRect {
   height: number;
 }
 
+// The identity crop -- the whole frame, uncropped. Used as the fallback
+// wherever a CropRect is needed but no clip rectangle has been chosen yet.
+export const FULL_FRAME_CROP_RECT: CropRect = { x: 0, y: 0, width: 1, height: 1 };
+
 /**
  * The largest `targetRatio` (width/height) rectangle that fits centered
  * inside a `sourceWidth` x `sourceHeight` frame -- i.e. the crop that
  * maximizes coverage of the source for that target ratio, not an arbitrary
- * fixed-size center-crop. Used by ClipRectOverlay.tsx as the default clip
- * rectangle whenever a new ratio is picked ("the initial clip rectangle
- * maximizes the coverage of the video" per spec).
+ * fixed-size center-crop. Used as the default clip rectangle whenever a new
+ * ratio is picked ("the initial clip rectangle maximizes the coverage of
+ * the video" per spec). Returns pixel-scale values in whatever units
+ * sourceWidth/sourceHeight were given in -- see
+ * computeMaxCoverageCropFraction below for the normalized (0..1) version
+ * actually used/persisted by the editor.
  */
 export function computeMaxCoverageCropRect(sourceWidth: number, sourceHeight: number, targetRatio: number): CropRect {
   if (sourceWidth <= 0 || sourceHeight <= 0 || targetRatio <= 0) {
@@ -139,6 +151,82 @@ export function computeMaxCoverageCropRect(sourceWidth: number, sourceHeight: nu
     width = height * targetRatio;
   }
   return { x: (sourceWidth - width) / 2, y: (sourceHeight - height) / 2, width, height };
+}
+
+/**
+ * Same as computeMaxCoverageCropRect above, but normalized to fractions
+ * (0..1) of the frame -- the actual form CropRect is stored/persisted in
+ * (see Timeline.editHistory in lib/projects.ts). `sourceAspectRatio` is
+ * just width/height; computed by reusing the pixel-based algorithm against
+ * a 1-unit-tall stand-in frame, then dividing back down to fractions.
+ */
+export function computeMaxCoverageCropFraction(sourceAspectRatio: number, targetRatio: number): CropRect {
+  const rect = computeMaxCoverageCropRect(sourceAspectRatio, 1, targetRatio);
+  return { x: rect.x / sourceAspectRatio, y: rect.y, width: rect.width / sourceAspectRatio, height: rect.height };
+}
+
+/**
+ * Linearly interpolates between two CropRects (both fractions, see above)
+ * at progress `t` (0 = start, 1 = end, clamped) -- the "algorithm
+ * calculates the sizes and position of intermediate clip rectangles"
+ * driving a zoom in/out effect's live preview (see ZoomTimelineTrack.tsx
+ * and CanvasPlayer's effective-crop-rect-at-time logic). Pure lerp on each
+ * field independently -- width/height interpolate at the same rate as x/y
+ * so the rect visually scales and moves smoothly together, not in two
+ * separate motions.
+ */
+export function interpolateCropRect(start: CropRect, end: CropRect, t: number): CropRect {
+  const clampedT = Math.min(Math.max(t, 0), 1);
+  return {
+    x: start.x + (end.x - start.x) * clampedT,
+    y: start.y + (end.y - start.y) * clampedT,
+    width: start.width + (end.width - start.width) * clampedT,
+    height: start.height + (end.height - start.height) * clampedT,
+  };
+}
+
+/**
+ * Scales a CropRect by `scale` around its own center -- e.g. scale=0.65
+ * shrinks it to 65% of its size while keeping the same midpoint, which is
+ * exactly "resizing the clip rectangle in the same aspect ratio" that a
+ * zoom in/out's start or end rect needs (scale preserves width/height's
+ * ratio automatically, since both shrink/grow by the same factor).
+ */
+export function scaleCropRectCentered(rect: CropRect, scale: number): CropRect {
+  const width = rect.width * scale;
+  const height = rect.height * scale;
+  const centerX = rect.x + rect.width / 2;
+  const centerY = rect.y + rect.height / 2;
+  return { x: centerX - width / 2, y: centerY - height / 2, width, height };
+}
+
+export interface ZoomEffect {
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  startRect: CropRect;
+  endRect: CropRect;
+}
+
+/**
+ * The crop rect that should actually be shown at `timeSeconds`, given a
+ * base (static, from the clip-rectangle picker) crop rect and an optional
+ * zoom effect layered on top. Before the effect starts, the base rect
+ * applies (nothing has happened yet); during it, the interpolated rect;
+ * after it ends, its endRect persists -- a zoom holds its post-zoom state
+ * for the rest of the clip, it doesn't snap back.
+ */
+export function computeEffectiveCropRect(
+  baseCropRect: CropRect,
+  zoomEffect: ZoomEffect | null,
+  timeSeconds: number
+): CropRect {
+  if (!zoomEffect) return baseCropRect;
+  if (timeSeconds <= zoomEffect.startTimeSeconds) return baseCropRect;
+  if (timeSeconds >= zoomEffect.endTimeSeconds) return zoomEffect.endRect;
+
+  const duration = zoomEffect.endTimeSeconds - zoomEffect.startTimeSeconds;
+  const t = duration > 0 ? (timeSeconds - zoomEffect.startTimeSeconds) / duration : 1;
+  return interpolateCropRect(zoomEffect.startRect, zoomEffect.endRect, t);
 }
 
 /**

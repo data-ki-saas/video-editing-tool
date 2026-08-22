@@ -5,8 +5,8 @@
  * (replaces the removed left navigation sidebar), this project's asset
  * gallery (replaces the always-visible upload dropzone -- "+ Asset" opens
  * UploadDialog instead), a background-track picker, the user-actions panel
- * (template + clip-rectangle pickers), and a play area showing whichever
- * asset is currently selected.
+ * (templates / clip rectangles / action buttons), and a play area showing
+ * whichever asset is currently selected.
  */
 import { useState } from "react";
 import { ProjectList } from "./ProjectList";
@@ -17,6 +17,7 @@ import { UserActions } from "./UserActions";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import type { Asset } from "@/lib/api";
+import type { CropRect } from "@/lib/video/video_math";
 import type { RefObject } from "react";
 
 // Caps the play area to the widest ratio in the clip-rectangle catalogue
@@ -28,6 +29,7 @@ const WIDEST_CLIP_RATIO = Math.max(...CLIP_RECT_OPTIONS.map((option) => option.w
 export function ActionArea({
   projectId,
   assets,
+  assetsLoaded,
   selectedAsset,
   onSelectAsset,
   onUploaded,
@@ -39,12 +41,18 @@ export function ActionArea({
   onSelectTemplate,
   selectedClipRectId,
   onSelectClipRect,
-  selectedClipRectRatio,
+  effectiveCropRect,
+  onCropRectChange,
+  onCropRectCommit,
+  onFrameDimensions,
+  onZoomIn,
+  onZoomOut,
   playerRef,
   onPlayerTimeUpdate,
 }: {
   projectId: string;
   assets: Asset[];
+  assetsLoaded: boolean;
   selectedAsset: Asset | null;
   onSelectAsset: (asset: Asset) => void;
   onUploaded: (asset: Asset) => void;
@@ -56,9 +64,17 @@ export function ActionArea({
   onSelectTemplate: (id: string) => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
-  // Drives ClipRectOverlay inside CanvasPlayer -- null until a ratio's
-  // been picked, in which case no crop guide is shown.
-  selectedClipRectRatio: number | null;
+  // The crop rect to actually display right now (already resolved for any
+  // active zoom effect at the current time) -- null until a ratio's been
+  // picked, in which case no crop guide is shown at all.
+  effectiveCropRect: CropRect | null;
+  // Omitted (rather than passed as no-ops) whenever dragging shouldn't be
+  // allowed right now -- see CanvasPlayer's module comment.
+  onCropRectChange?: (next: CropRect) => void;
+  onCropRectCommit?: (next: CropRect) => void;
+  onFrameDimensions: (dimensions: { width: number; height: number }) => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
   // Lets ThreePaneEditor's Playground scrub this player and track a
   // playhead against it -- see CanvasPlayer.tsx's seekTo/onTimeUpdate.
   playerRef: RefObject<CanvasPlayerHandle | null>;
@@ -75,6 +91,7 @@ export function ActionArea({
       <div className="w-56 shrink-0 overflow-hidden border-r border-border pr-4">
         <AssetGallery
           assets={assets}
+          isLoading={!assetsLoaded}
           selectedAssetId={selectedAsset?.id ?? null}
           onSelect={onSelectAsset}
           onAddAsset={() => setIsUploadDialogOpen(true)}
@@ -86,12 +103,15 @@ export function ActionArea({
         <BackgroundTrackSelector selectedTrackId={selectedBackgroundTrackId} onSelectTrack={onSelectBackgroundTrack} />
       </div>
 
-      <div className="w-72 shrink-0 overflow-hidden border-r border-border pr-4">
+      <div className="w-[30rem] shrink-0 overflow-hidden border-r border-border pr-4">
         <UserActions
           selectedTemplateId={selectedTemplateId}
           onSelectTemplate={onSelectTemplate}
           selectedClipRectId={selectedClipRectId}
           onSelectClipRect={onSelectClipRect}
+          canZoom={Boolean(selectedClipRectId)}
+          onZoomIn={onZoomIn}
+          onZoomOut={onZoomOut}
         />
       </div>
 
@@ -102,7 +122,10 @@ export function ActionArea({
               key={selectedAsset.id}
               ref={playerRef}
               asset={selectedAsset}
-              clipRectRatio={selectedClipRectRatio}
+              cropRect={effectiveCropRect}
+              onCropRectChange={onCropRectChange}
+              onCropRectCommit={onCropRectCommit}
+              onFrameDimensions={onFrameDimensions}
               onTimeUpdate={onPlayerTimeUpdate}
             />
           ) : selectedAsset?.kind === "image" ? (
