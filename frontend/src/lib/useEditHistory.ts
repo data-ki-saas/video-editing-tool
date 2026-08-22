@@ -3,12 +3,16 @@
 /**
  * Tracks a linear history of edit "snapshots" for some piece of state --
  * generic over T so it isn't tied to any one editor's fields (currently
- * used for the template/clip-rectangle/background-track selections in
- * ThreePaneEditor, but doesn't know anything about them). Reverting to an
- * earlier entry restores its snapshot as the current state and discards
- * every entry after it -- standard undo semantics: diverging from a
- * reverted-to point starts a fresh branch, it doesn't keep the discarded
- * future sitting around waiting to be redone.
+ * used for the clip-rectangle/crop-rect/zoom-effect selections in
+ * ThreePaneEditor, but doesn't know anything about them).
+ *
+ * `revertTo`/`undo`/`redo` just move a pointer over `entries` -- they never
+ * discard anything, so redoing after an undo works. Only `pushChange`
+ * truncates: making a new change while `currentIndex` isn't at the tip
+ * drops every entry after it first, standard undo/redo-stack semantics
+ * (the same as a text editor's undo history -- undo/redo freely, but
+ * typing something new after undoing starts a fresh branch instead of
+ * keeping the discarded future around).
  *
  * `entries`/`currentIndex` are also exactly the shape persisted into
  * Timeline.editHistory/editHistoryIndex (see lib/projects.ts) -- pass them
@@ -29,6 +33,10 @@ export interface UseEditHistoryResult<T> {
   currentIndex: number;
   pushChange: (label: string, nextState: T) => void;
   revertTo: (index: number) => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 export function useEditHistory<T>(
@@ -59,5 +67,18 @@ export function useEditHistory<T>(
     setHistoryState((prev) => ({ ...prev, currentIndex: Math.min(Math.max(index, 0), prev.entries.length - 1) }));
   }, []);
 
-  return { state: entries[currentIndex].state, entries, currentIndex, pushChange, revertTo };
+  const undo = useCallback(() => revertTo(currentIndex - 1), [revertTo, currentIndex]);
+  const redo = useCallback(() => revertTo(currentIndex + 1), [revertTo, currentIndex]);
+
+  return {
+    state: entries[currentIndex].state,
+    entries,
+    currentIndex,
+    pushChange,
+    revertTo,
+    undo,
+    redo,
+    canUndo: currentIndex > 0,
+    canRedo: currentIndex < entries.length - 1,
+  };
 }

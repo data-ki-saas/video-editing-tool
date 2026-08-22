@@ -88,7 +88,39 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     currentIndex: editHistoryIndex,
     pushChange,
     revertTo,
+    undo,
+    redo,
   } = useEditHistory<EditSelectionsSnapshot>(DEFAULT_SELECTIONS, initialTimeline.editHistory, initialTimeline.editHistoryIndex);
+
+  // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to redo (both redo
+  // conventions are common enough -- Windows apps mostly use Ctrl+Y, Mac
+  // and many web apps use Cmd+Shift+Z -- that it's not worth picking just
+  // one). Skipped while focus is in a text input/textarea/contenteditable
+  // (e.g. renaming the reel) so this doesn't fight with the browser's own
+  // undo inside that field.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const isModifierPressed = e.ctrlKey || e.metaKey;
+      if (!isModifierPressed) return;
+
+      const key = e.key.toLowerCase();
+      const isUndo = key === "z" && !e.shiftKey;
+      const isRedo = key === "y" || (key === "z" && e.shiftKey);
+      if (!isUndo && !isRedo) return;
+
+      const target = e.target as HTMLElement | null;
+      const isEditingText =
+        target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
+      if (isEditingText) return;
+
+      e.preventDefault();
+      if (isUndo) undo();
+      else redo();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [undo, redo]);
 
   // Whether a zoom effect is actively interpolating the crop rect right
   // now -- if so, the overlay shown is a computed, temporary value, not
