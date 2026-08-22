@@ -222,12 +222,14 @@ export interface ZoomEffect {
 }
 
 /**
- * The crop rect that should actually be shown at `timeSeconds`, given a
- * base (static, from the clip-rectangle picker) crop rect and an optional
- * zoom effect layered on top. Before the effect starts, the base rect
- * applies (nothing has happened yet); during it, the interpolated rect;
- * after it ends, its endRect persists -- a zoom holds its post-zoom state
- * for the rest of the clip, it doesn't snap back.
+ * The crop rect that should actually be shown at `timeSeconds`, given the
+ * clip rectangle -- the clip's fixed, ongoing property -- and an optional
+ * zoom/pan effect layered on top of it. A zoom/pan is a LOCALIZED,
+ * temporary deviation, only ever in effect strictly between its own
+ * start/end times (the range shown by ZoomEffectRow below the timeline):
+ * outside that range, on either side, the fixed clip rectangle applies --
+ * it does not persist the effect's end state past where the effect
+ * actually ends.
  */
 export function computeEffectiveCropRect(
   baseCropRect: CropRect,
@@ -235,8 +237,7 @@ export function computeEffectiveCropRect(
   timeSeconds: number
 ): CropRect {
   if (!zoomEffect) return baseCropRect;
-  if (timeSeconds <= zoomEffect.startTimeSeconds) return baseCropRect;
-  if (timeSeconds >= zoomEffect.endTimeSeconds) return zoomEffect.endRect;
+  if (timeSeconds <= zoomEffect.startTimeSeconds || timeSeconds >= zoomEffect.endTimeSeconds) return baseCropRect;
 
   const duration = zoomEffect.endTimeSeconds - zoomEffect.startTimeSeconds;
   const t = duration > 0 ? (timeSeconds - zoomEffect.startTimeSeconds) / duration : 1;

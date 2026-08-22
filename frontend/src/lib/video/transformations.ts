@@ -17,9 +17,8 @@
  * other the same way crop and zoom already do.
  */
 import type { EditSelectionsSnapshot } from "@/lib/projects";
-import { computeMaxCoverageCropFraction, scaleCropRectCentered, FULL_FRAME_CROP_RECT, type CropRect } from "./video_math";
+import { computeMaxCoverageCropFraction, type CropRect } from "./video_math";
 
-export const DEFAULT_ZOOM_SCALE = 0.65;
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
 export interface TransformationResult {
@@ -84,36 +83,6 @@ export function applyCropRectCommit(
     state: {
       ...selections,
       zoomEffect: { startTimeSeconds, endTimeSeconds, startRect: selections.cropRect, endRect: nextRect },
-    },
-  };
-}
-
-/** The explicit Zoom In/Out buttons -- create a fresh transition scaled
- * toward/away from the current crop's own center, over a default window
- * starting at the playhead. */
-export function applyZoomButtonClick(
-  selections: EditSelectionsSnapshot,
-  currentTimeSeconds: number,
-  videoDurationSeconds: number,
-  direction: "in" | "out"
-): TransformationResult {
-  const baseCropRect = selections.cropRect ?? FULL_FRAME_CROP_RECT;
-  const scaledRect = scaleCropRectCentered(baseCropRect, DEFAULT_ZOOM_SCALE);
-  const startTimeSeconds = currentTimeSeconds;
-  const endTimeSeconds = Math.min(
-    currentTimeSeconds + DEFAULT_ZOOM_DURATION_SECONDS,
-    videoDurationSeconds > 0 ? videoDurationSeconds : currentTimeSeconds + DEFAULT_ZOOM_DURATION_SECONDS
-  );
-  return {
-    label: direction === "in" ? "Zoom in" : "Zoom out",
-    state: {
-      ...selections,
-      zoomEffect: {
-        startTimeSeconds,
-        endTimeSeconds,
-        startRect: direction === "in" ? baseCropRect : scaledRect,
-        endRect: direction === "in" ? scaledRect : baseCropRect,
-      },
     },
   };
 }

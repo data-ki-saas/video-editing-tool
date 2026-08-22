@@ -1,25 +1,24 @@
 "use client";
 
 /**
- * Three side-by-side sections (spread horizontally, not stacked, per
+ * Two side-by-side sections (spread horizontally, not stacked, per
  * feedback -- there's no separate heading either, the content is
  * self-explanatory):
  *  1. Template style picker
  *  2. Clip-rectangle aspect-ratio picker (drives the crop overlay on the
- *     play area/timeline -- the only frame-affecting choice here, along
- *     with Zoom In/Out below, so only their changes land in the change
- *     history -- see ThreePaneEditor)
- *  3. Action buttons, grouped Arrange (Delete/Trim/Drag, still disabled
- *     scaffolding -- each needs its own real interaction design for region
- *     selection/drag-to-timeline) and Transform. Crop, Zoom In/Out, Pan &
- *     Tilt, Flip, and Mirror are all just manipulations of the ONE clip
- *     rectangle now, not separate buttons -- Crop is automatic (picking a
- *     ratio places it), Zoom In/Out create a transition from here (a
- *     default scale toward/away from center), and Flip/Mirror/Pan/Tilt all
- *     happen by dragging/resizing/toggling directly on the rectangle
- *     itself (see CropRectOverlay.tsx's edge handles and
- *     ThreePaneEditor's handleCropRectCommit). That's why there's no
- *     separate Flip/Mirror/Pan/Tilt button here.
+ *     play area/timeline -- the only frame-affecting choice here, so only
+ *     its changes land in the change history -- see ThreePaneEditor)
+ *
+ * There is no separate "Transform" menu (Zoom In/Out, Pan & Tilt, Flip,
+ * Mirror) -- the clip rectangle is the clip's fixed property, and every
+ * transform is a manipulation of it directly: Crop is automatic (picking
+ * a ratio places it), Zoom/Pan happen by dragging/resizing it at a
+ * different point on the timeline (see ThreePaneEditor's
+ * handleCropRectCommit -- the resulting transition only ever applies
+ * within its own range on ZoomEffectRow below the frames, not past it),
+ * and Flip/Mirror toggle from CropRectOverlay's own edge handles. Arrange
+ * (Delete/Trim/Drag) is still disabled scaffolding -- each needs its own
+ * real interaction design for region selection/drag-to-timeline.
  */
 import { TEMPLATE_OPTIONS } from "@/lib/templates";
 import { TEMPLATE_ICONS } from "./icons/TemplateIcons";
@@ -33,7 +32,6 @@ const ARRANGE_ACTIONS = [
   { id: "trim", label: "Trim" },
   { id: "drag", label: "Drag" },
 ];
-
 
 function TemplateSection({
   selectedTemplateId,
@@ -98,28 +96,14 @@ function ClipRectSection({
   );
 }
 
-function ActionButton({
-  id,
-  label,
-  disabled,
-  onClick,
-}: {
-  id: string;
-  label: string;
-  disabled: boolean;
-  onClick?: () => void;
-}) {
+function ActionButton({ id, label }: { id: string; label: string }) {
   const Icon = ACTION_ICONS[id];
   return (
     <button
       type="button"
-      disabled={disabled}
-      onClick={onClick}
-      title={disabled ? "Coming soon" : label}
-      className={
-        "flex w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-transparent p-1 " +
-        (disabled ? "opacity-40" : "hover:bg-background")
-      }
+      disabled
+      title="Coming soon"
+      className="flex w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-transparent p-1 opacity-40"
     >
       <Icon className="h-5 w-5 text-foreground" />
       <span className="w-full truncate text-center text-[10px] text-muted">{label}</span>
@@ -127,37 +111,18 @@ function ActionButton({
   );
 }
 
-function ActionButtonsSection({
-  canZoom,
-  onZoomIn,
-  onZoomOut,
-}: {
-  canZoom: boolean;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-}) {
+function ArrangeSection() {
   return (
-    <div className="flex h-full flex-1 flex-col gap-2 overflow-y-auto">
-      <div className="flex flex-col gap-1">
-        <span className="text-[10px] font-medium uppercase tracking-wide text-muted">Arrange</span>
-        <div className="flex gap-2 overflow-x-auto">
-          {ARRANGE_ACTIONS.map((action) => (
-            <ActionButton key={action.id} id={action.id} label={action.label} disabled />
-          ))}
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-1">
-        <span className="text-[10px] font-medium uppercase tracking-wide text-muted">Transform</span>
-        <p className="text-[10px] text-accent">
-          Crop, Pan/Tilt, and Flip/Mirror all happen on the clip rectangle itself (drag, resize, or use its edge
-          handles)
-        </p>
-        <div className="flex gap-2 overflow-x-auto">
-          <ActionButton id="zoom-in" label="Zoom In" disabled={!canZoom} onClick={onZoomIn} />
-          <ActionButton id="zoom-out" label="Zoom Out" disabled={!canZoom} onClick={onZoomOut} />
-        </div>
-        {!canZoom && <p className="text-[10px] text-muted">Pick a clip rectangle first to enable Zoom In/Out.</p>}
+    <div className="flex h-full flex-1 flex-col gap-1">
+      <span className="text-[10px] font-medium uppercase tracking-wide text-muted">Arrange</span>
+      <p className="text-[10px] text-accent">
+        Crop, Zoom/Pan, and Flip/Mirror all happen on the clip rectangle itself, not from a menu -- drag or resize
+        it, or use its edge handles
+      </p>
+      <div className="flex gap-2 overflow-x-auto">
+        {ARRANGE_ACTIONS.map((action) => (
+          <ActionButton key={action.id} id={action.id} label={action.label} />
+        ))}
       </div>
     </div>
   );
@@ -168,17 +133,11 @@ export function UserActions({
   onSelectTemplate,
   selectedClipRectId,
   onSelectClipRect,
-  canZoom,
-  onZoomIn,
-  onZoomOut,
 }: {
   selectedTemplateId: string | null;
   onSelectTemplate: (id: string) => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
-  canZoom: boolean;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
 }) {
   return (
     <div className="flex h-full gap-3 overflow-x-auto">
@@ -188,7 +147,7 @@ export function UserActions({
       <CollapsiblePanel label="Clip rectangle" icon={<CropToolIcon className="h-4 w-4" />} expandedClassName="w-28">
         <ClipRectSection selectedClipRectId={selectedClipRectId} onSelectClipRect={onSelectClipRect} />
       </CollapsiblePanel>
-      <ActionButtonsSection canZoom={canZoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} />
+      <ArrangeSection />
     </div>
   );
 }

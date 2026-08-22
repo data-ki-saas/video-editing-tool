@@ -28,13 +28,7 @@ import { listAssets, type Asset } from "@/lib/api";
 import { extractThumbnails, getVideoDuration } from "@/lib/video/video";
 import { extractVolumeProfile } from "@/lib/video/audio";
 import type { CropRect } from "@/lib/video/video_math";
-import {
-  applySelectClipRect,
-  applyCropRectCommit,
-  applyZoomButtonClick,
-  applyZoomRangeChange,
-  applyFlipToggle,
-} from "@/lib/video/transformations";
+import { applySelectClipRect, applyCropRectCommit, applyZoomRangeChange, applyFlipToggle } from "@/lib/video/transformations";
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
@@ -307,11 +301,6 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     pushChange(label, state);
   }
 
-  function handleZoomButtonClick(direction: "in" | "out") {
-    const { label, state } = applyZoomButtonClick(selections, currentTimeSeconds, videoDurationSeconds, direction);
-    pushChange(label, state);
-  }
-
   function handleChangeZoomRange(startTimeSeconds: number, endTimeSeconds: number) {
     if (!selections.zoomEffect) return;
     setLiveZoomEffect({ ...selections.zoomEffect, startTimeSeconds, endTimeSeconds });
@@ -354,8 +343,6 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           flipHorizontal={selections.flipHorizontal}
           flipVertical={selections.flipVertical}
           onFrameDimensions={setFrameDimensions}
-          onZoomIn={() => handleZoomButtonClick("in")}
-          onZoomOut={() => handleZoomButtonClick("out")}
           playerRef={canvasPlayerRef}
           onPlayerTimeUpdate={setCurrentTimeSeconds}
         />

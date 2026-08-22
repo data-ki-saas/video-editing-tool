@@ -77,11 +77,16 @@ const FrameTile = memo(function FrameTile({
     // reads as going dark ("frames disappearing" while scrolling further
     // into it, since more tiles compounding the bleed come into view).
     <div className="relative h-full shrink-0 overflow-hidden" style={{ width: widthPx }}>
+      {/* object-contain, not object-cover -- each tile shows the video's
+          full, uncropped frame (letterboxed if its aspect ratio doesn't
+          match the fixed-width tile), not a portion cropped/stretched to
+          fill it. The crop rectangle overlay is what shows what will
+          actually be kept; the thumbnail underneath it stays whole. */}
       {/* eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image */}
       <img
         src={src}
         alt={`Frame at ${index}s`}
-        className="h-full w-full object-cover"
+        className="h-full w-full object-contain"
         style={scaleX !== 1 || scaleY !== 1 ? { transform: `scale(${scaleX}, ${scaleY})` } : undefined}
       />
       {cropRect && (

@@ -51,8 +51,6 @@ export function ActionArea({
   flipHorizontal,
   flipVertical,
   onFrameDimensions,
-  onZoomIn,
-  onZoomOut,
   playerRef,
   onPlayerTimeUpdate,
 }: {
@@ -76,8 +74,6 @@ export function ActionArea({
   flipHorizontal: boolean;
   flipVertical: boolean;
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
   // Lets ThreePaneEditor's Playground scrub this player and track a
   // playhead against it -- see CanvasPlayer.tsx's seekTo/onTimeUpdate.
   playerRef: RefObject<CanvasPlayerHandle | null>;
@@ -112,9 +108,6 @@ export function ActionArea({
           onSelectTemplate={onSelectTemplate}
           selectedClipRectId={selectedClipRectId}
           onSelectClipRect={onSelectClipRect}
-          canZoom={Boolean(selectedClipRectId)}
-          onZoomIn={onZoomIn}
-          onZoomOut={onZoomOut}
         />
       </div>
 
