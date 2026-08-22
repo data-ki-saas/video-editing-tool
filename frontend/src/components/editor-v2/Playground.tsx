@@ -61,10 +61,11 @@ export function Playground({
   onCommitZoomRange,
   onChangeZoomEpicenter,
   onCommitZoomEpicenter,
+  onDeleteZoomEffect,
   onCropRectChange,
   onCropRectCommit,
-  flipHorizontal,
-  flipVertical,
+  flipHorizontalToggles,
+  flipVerticalToggles,
   onFlipHorizontal,
   onFlipVertical,
 }: {
@@ -82,10 +83,11 @@ export function Playground({
   onCommitZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onChangeZoomEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
   onCommitZoomEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
+  onDeleteZoomEffect: (effectIndex: number) => void;
   onCropRectChange: (next: CropRect) => void;
   onCropRectCommit: (next: CropRect) => void;
-  flipHorizontal: boolean;
-  flipVertical: boolean;
+  flipHorizontalToggles: number[];
+  flipVerticalToggles: number[];
   onFlipHorizontal: () => void;
   onFlipVertical: () => void;
 }) {
@@ -117,10 +119,11 @@ export function Playground({
           onCommitZoomRange={onCommitZoomRange}
           onChangeZoomEpicenter={onChangeZoomEpicenter}
           onCommitZoomEpicenter={onCommitZoomEpicenter}
+          onDeleteZoomEffect={onDeleteZoomEffect}
           onCropRectChange={onCropRectChange}
           onCropRectCommit={onCropRectCommit}
-          flipHorizontal={flipHorizontal}
-          flipVertical={flipVertical}
+          flipHorizontalToggles={flipHorizontalToggles}
+          flipVerticalToggles={flipVerticalToggles}
           onFlipHorizontal={onFlipHorizontal}
           onFlipVertical={onFlipVertical}
           pixelsPerSecond={PIXELS_PER_SECOND}

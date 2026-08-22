@@ -48,8 +48,8 @@ export function ActionArea({
   baseCropRect,
   zoomEffects,
   liveCropRectOverride,
-  flipHorizontal,
-  flipVertical,
+  flipHorizontalToggles,
+  flipVerticalToggles,
   onFrameDimensions,
   playerRef,
   onPlayerTimeUpdate,
@@ -71,8 +71,8 @@ export function ActionArea({
   baseCropRect: CropRect | null;
   zoomEffects: ZoomEffect[];
   liveCropRectOverride: CropRect | null;
-  flipHorizontal: boolean;
-  flipVertical: boolean;
+  flipHorizontalToggles: number[];
+  flipVerticalToggles: number[];
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
   // Lets ThreePaneEditor's Playground scrub this player and track a
   // playhead against it -- see CanvasPlayer.tsx's seekTo/onTimeUpdate.
@@ -121,8 +121,8 @@ export function ActionArea({
               baseCropRect={baseCropRect}
               zoomEffects={zoomEffects}
               liveCropRectOverride={liveCropRectOverride}
-              flipHorizontal={flipHorizontal}
-              flipVertical={flipVertical}
+              flipHorizontalToggles={flipHorizontalToggles}
+              flipVerticalToggles={flipVerticalToggles}
               onFrameDimensions={onFrameDimensions}
               onTimeUpdate={onPlayerTimeUpdate}
             />

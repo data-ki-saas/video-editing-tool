@@ -1,11 +1,14 @@
 "use client";
 
 /**
- * Top-level layout for the client-side video editor (baby-steps rebuild of
- * the reel editor) -- rendered directly by /dashboard/[projectId]. The old
- * Creatomate-based VideoEditor.tsx is kept in the codebase but unreferenced,
- * for a possible future re-hook rather than a full rebuild of render/trim/
- * background/overlay.
+ * Top-level layout for the client-side video editor -- the one and only
+ * editor, rendered directly by /dashboard/[projectId]. The pre-editor-v2
+ * Creatomate-based dashboard (VideoEditor.tsx/QuickCreate.tsx and their
+ * EditorPanelContext/useRenderStatus plumbing) has been removed entirely --
+ * nothing routed to it any more. The Creatomate render backend itself
+ * (api/render/route.ts, the webhook, worker/) is untouched: editor-v2 has
+ * no render pipeline of its own yet, so that's still what a future "render
+ * this reel" action would hook into.
  *
  * Three fixed horizontal bands per spec: 30% action area, 50% playground,
  * 20% feedback area. This component owns the cross-band state (the full
@@ -33,9 +36,10 @@ import {
   applyCropRectCommit,
   applyZoomRangeChange,
   applyZoomEpicenterChange,
+  applyDeleteZoomEffect,
   applyFlipToggle,
 } from "@/lib/video/transformations";
-import { saveTimeline, normalizeEditHistory, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
+import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { ActionArea } from "./ActionArea";
@@ -51,8 +55,8 @@ const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
   clipRectId: null,
   cropRect: null,
   zoomEffects: [],
-  flipHorizontal: false,
-  flipVertical: false,
+  flipHorizontalToggles: [],
+  flipVerticalToggles: [],
 };
 
 export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: string; initialTimeline: Timeline }) {
@@ -105,14 +109,9 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     entries: editHistoryEntries,
     currentIndex: editHistoryIndex,
     pushChange,
-    revertTo,
     undo,
     redo,
-  } = useEditHistory<EditSelectionsSnapshot>(
-    DEFAULT_SELECTIONS,
-    normalizeEditHistory(initialTimeline.editHistory),
-    initialTimeline.editHistoryIndex
-  );
+  } = useEditHistory<EditSelectionsSnapshot>(DEFAULT_SELECTIONS, initialTimeline.editHistory, initialTimeline.editHistoryIndex);
 
   // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to redo (both redo
   // conventions are common enough -- Windows apps mostly use Ctrl+Y, Mac
@@ -295,7 +294,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
   }
 
   function handleFlip(axis: "horizontal" | "vertical") {
-    const { label, state } = applyFlipToggle(selections, axis);
+    const { label, state } = applyFlipToggle(selections, axis, currentTimeSeconds);
     pushChange(label, state);
   }
 
@@ -339,6 +338,12 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     pushChange(label, state);
   }
 
+  function handleDeleteZoomEffect(effectIndex: number) {
+    setLiveZoomEffectEdit((prev) => (prev?.index === effectIndex ? null : prev));
+    const { label, state } = applyDeleteZoomEffect(selections, effectIndex);
+    pushChange(label, state);
+  }
+
   function handleSeek(seconds: number) {
     canvasPlayerRef.current?.seekTo(seconds);
   }
@@ -373,8 +378,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           baseCropRect={selections.cropRect}
           zoomEffects={displayedZoomEffects}
           liveCropRectOverride={liveCropRect}
-          flipHorizontal={selections.flipHorizontal}
-          flipVertical={selections.flipVertical}
+          flipHorizontalToggles={selections.flipHorizontalToggles}
+          flipVerticalToggles={selections.flipVerticalToggles}
           onFrameDimensions={setFrameDimensions}
           playerRef={canvasPlayerRef}
           onPlayerTimeUpdate={setCurrentTimeSeconds}
@@ -397,10 +402,11 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           onCommitZoomRange={handleCommitZoomRange}
           onChangeZoomEpicenter={handleChangeZoomEpicenter}
           onCommitZoomEpicenter={handleCommitZoomEpicenter}
+          onDeleteZoomEffect={handleDeleteZoomEffect}
           onCropRectChange={handleCropRectChange}
           onCropRectCommit={handleCropRectCommit}
-          flipHorizontal={selections.flipHorizontal}
-          flipVertical={selections.flipVertical}
+          flipHorizontalToggles={selections.flipHorizontalToggles}
+          flipVerticalToggles={selections.flipVerticalToggles}
           onFlipHorizontal={() => handleFlip("horizontal")}
           onFlipVertical={() => handleFlip("vertical")}
         />
@@ -413,9 +419,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           saveError={saveError}
           isAnalyzing={isAnalyzing}
           isUploading={isUploading}
-          editHistoryEntries={editHistoryEntries}
-          editHistoryIndex={editHistoryIndex}
-          onRevertEdit={revertTo}
+          selections={{ ...selections, zoomEffects: displayedZoomEffects }}
+          videoDurationSeconds={videoDurationSeconds}
         />
       </section>
     </div>

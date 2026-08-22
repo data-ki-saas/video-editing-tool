@@ -37,6 +37,7 @@ import {
   frameIndexAtTime,
   pickPreviewFrameRate,
   computeEffectiveCropRect,
+  computeEffectiveFlip,
   FULL_FRAME_CROP_RECT,
   type CropRect,
   type ZoomEffect,
@@ -68,11 +69,14 @@ export const CanvasPlayer = forwardRef<
     // active tile live, before it's committed. Never applied during
     // playback (dragging and playing at once isn't a real scenario).
     liveCropRectOverride?: CropRect | null;
-    // "Flip" (horizontal) / "Mirror" (vertical) -- applied uniformly to
-    // the whole clip, toggled from CropRectOverlay's edge handles on
-    // FrameStrip's active tile (the player itself is playback-only).
-    flipHorizontal?: boolean;
-    flipVertical?: boolean;
+    // "Flip" (horizontal) / "Mirror" (vertical) -- sorted toggle
+    // timestamps, not a uniform whole-clip boolean, toggled from
+    // CropRectOverlay's edge handles on FrameStrip's active tile (the
+    // player itself is playback-only). Evaluated per-frame inside
+    // drawFrameAt (see computeEffectiveFlip) since which way is "on" can
+    // change mid-playback.
+    flipHorizontalToggles: number[];
+    flipVerticalToggles: number[];
     onFrameDimensions?: (dimensions: { width: number; height: number }) => void;
     onTimeUpdate?: (seconds: number) => void;
   }
@@ -82,8 +86,8 @@ export const CanvasPlayer = forwardRef<
     baseCropRect,
     zoomEffects,
     liveCropRectOverride = null,
-    flipHorizontal = false,
-    flipVertical = false,
+    flipHorizontalToggles,
+    flipVerticalToggles,
     onFrameDimensions,
     onTimeUpdate,
   },
@@ -150,6 +154,9 @@ export const CanvasPlayer = forwardRef<
       canvas.width = targetWidth;
       canvas.height = targetHeight;
     }
+
+    const flipHorizontal = computeEffectiveFlip(flipHorizontalToggles, elapsedSeconds);
+    const flipVertical = computeEffectiveFlip(flipVerticalToggles, elapsedSeconds);
 
     // Flip/mirror via the canvas transform, not by touching sx/sy/sWidth/
     // sHeight -- scale(-1) + translate the origin to the far edge maps the
@@ -292,7 +299,7 @@ export const CanvasPlayer = forwardRef<
   useEffect(() => {
     if (isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
-  }, [baseCropRect, zoomEffects, liveCropRectOverride, flipHorizontal, flipVertical, isReady, isPlaying]);
+  }, [baseCropRect, zoomEffects, liveCropRectOverride, flipHorizontalToggles, flipVerticalToggles, isReady, isPlaying]);
 
   useEffect(() => {
     return () => {

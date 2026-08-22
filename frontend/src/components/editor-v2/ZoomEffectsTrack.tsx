@@ -18,9 +18,11 @@
  * it); both the edges and the dot are ALWAYS draggable regardless of where
  * the playhead currently is -- direct manipulation of the segment itself,
  * not gated by an "active tile" concept the crop rectangle's own drag
- * handles use.
+ * handles use. Right-clicking the dot opens a context menu (same one
+ * ProjectList/AssetGallery use) to delete that whole transition.
  */
 import { useRef } from "react";
+import { ContextMenu, useContextMenu } from "./ContextMenu";
 import type { ZoomEffect } from "@/lib/video/video_math";
 
 const MIN_DURATION_SECONDS = 0.2;
@@ -32,6 +34,7 @@ function ZoomEffectSegment({
   onCommitRange,
   onChangeEpicenter,
   onCommitEpicenter,
+  onEpicenterContextMenu,
 }: {
   zoomEffect: ZoomEffect;
   videoDurationSeconds: number;
@@ -39,6 +42,7 @@ function ZoomEffectSegment({
   onCommitRange: (startTimeSeconds: number, endTimeSeconds: number) => void;
   onChangeEpicenter: (epicenterTimeSeconds: number) => void;
   onCommitEpicenter: (epicenterTimeSeconds: number) => void;
+  onEpicenterContextMenu: (e: React.MouseEvent) => void;
 }) {
   const segmentRef = useRef<HTMLDivElement>(null);
   const isZoomingIn = zoomEffect.epicenterRect.width < zoomEffect.startRect.width;
@@ -153,7 +157,8 @@ function ZoomEffectSegment({
           next to one. */}
       <div
         onPointerDown={startEpicenterDrag}
-        title="Drag to move the peak of this transition"
+        onContextMenu={onEpicenterContextMenu}
+        title="Drag to move the peak of this transition, right-click to delete it"
         className="absolute top-1/2 z-10 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full border border-green-900 bg-green-500"
         style={{ left: `${epicenterPercentWithinSegment}%` }}
       />
@@ -168,6 +173,7 @@ export function ZoomEffectsTrack({
   onCommitRange,
   onChangeEpicenter,
   onCommitEpicenter,
+  onDeleteEffect,
 }: {
   zoomEffects: ZoomEffect[];
   videoDurationSeconds: number;
@@ -175,7 +181,10 @@ export function ZoomEffectsTrack({
   onCommitRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onChangeEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
   onCommitEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
+  onDeleteEffect: (effectIndex: number) => void;
 }) {
+  const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
+
   if (zoomEffects.length === 0) return null;
 
   return (
@@ -189,8 +198,12 @@ export function ZoomEffectsTrack({
           onCommitRange={(start, end) => onCommitRange(index, start, end)}
           onChangeEpicenter={(epicenter) => onChangeEpicenter(index, epicenter)}
           onCommitEpicenter={(epicenter) => onCommitEpicenter(index, epicenter)}
+          onEpicenterContextMenu={(e) =>
+            openContextMenu(e, [{ label: "Delete transition", danger: true, onSelect: () => onDeleteEffect(index) }])
+          }
         />
       ))}
+      <ContextMenu state={contextMenuState} onClose={closeContextMenu} />
     </div>
   );
 }

@@ -287,6 +287,68 @@ export function computeEffectiveCropRect(
   return interpolateCropRect(zoomEffect.epicenterRect, zoomEffect.endRect, t);
 }
 
+// Toggle points within this distance (seconds) of an existing one collapse
+// into it (removing it) instead of adding a redundant second one right next
+// to it -- lets "click flip again at the same frame" cleanly undo the
+// toggle just placed there rather than leaving two adjacent no-op toggles.
+const FLIP_TOGGLE_EPSILON_SECONDS = 0.05;
+
+/**
+ * Inserts a flip toggle at `timeSeconds` into a sorted list of toggle
+ * timestamps -- or removes one already sitting within
+ * FLIP_TOGGLE_EPSILON_SECONDS of it. A flip axis starts OFF at time 0;
+ * each toggle in the (sorted) list flips it, so an odd number of toggles
+ * at-or-before a given time means it's ON then (see computeEffectiveFlip
+ * below). "Flip starts from the frame I clicked, and clicking a later
+ * frame flips it back" is exactly this insert -- no explicit end time is
+ * ever needed, since the NEXT toggle (or the clip's end, if there isn't
+ * one) defines where this one's window stops.
+ */
+export function toggleFlipAt(toggles: number[], timeSeconds: number): number[] {
+  const existingIndex = toggles.findIndex((t) => Math.abs(t - timeSeconds) < FLIP_TOGGLE_EPSILON_SECONDS);
+  if (existingIndex !== -1) {
+    return toggles.filter((_, index) => index !== existingIndex);
+  }
+  return [...toggles, timeSeconds].sort((a, b) => a - b);
+}
+
+/**
+ * Whether a flip axis is engaged at `timeSeconds`, given its sorted list of
+ * toggle timestamps -- ON exactly when an odd number of toggles fall
+ * at-or-before this instant. Unlike a zoom/pan ZoomEffect, this is a plain
+ * step function, never eased -- there's no meaningful "half-flipped" frame
+ * to interpolate toward.
+ */
+export function computeEffectiveFlip(toggles: number[], timeSeconds: number): boolean {
+  const toggleCount = toggles.filter((t) => t <= timeSeconds).length;
+  return toggleCount % 2 === 1;
+}
+
+/** One contiguous "flipped" time range -- for FlipTrack's readout below the
+ * timeline, see computeFlipSegments. */
+export interface FlipSegment {
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+}
+
+/**
+ * Every contiguous ON window implied by a sorted toggle list -- pairs
+ * consecutive toggles into (start, end), with an unpaired final toggle's
+ * window running to the end of the clip (an odd toggle count means the
+ * flip is still engaged when the clip ends).
+ */
+export function computeFlipSegments(toggles: number[], durationSeconds: number): FlipSegment[] {
+  if (toggles.length === 0) return [];
+  const sorted = [...toggles].sort((a, b) => a - b);
+  const segments: FlipSegment[] = [];
+  for (let i = 0; i < sorted.length; i += 2) {
+    const startTimeSeconds = sorted[i];
+    const endTimeSeconds = i + 1 < sorted.length ? sorted[i + 1] : durationSeconds;
+    segments.push({ startTimeSeconds, endTimeSeconds });
+  }
+  return segments;
+}
+
 /**
  * Root-mean-square loudness of `samples` (mono, -1..1 range), one value per
  * `bucketSeconds` window, normalized so the loudest bucket in the clip is

@@ -74,7 +74,7 @@ export function BackgroundTrackStrip({
   const loopCount = Math.max(1, Math.ceil(videoDurationSeconds / trackDurationSeconds));
 
   return (
-    <div ref={scrollContainerRef} onScroll={onScroll} className="h-full overflow-x-auto bg-neutral-900 px-2 py-1">
+    <div ref={scrollContainerRef} onScroll={onScroll} className="hide-scrollbar h-full overflow-x-auto bg-neutral-900 px-2 py-1">
       <div className="flex h-full gap-px" style={{ width: videoDurationSeconds * pixelsPerSecond }}>
         {Array.from({ length: loopCount }, (_, index) => {
           // The final loop is usually cut short by the video ending

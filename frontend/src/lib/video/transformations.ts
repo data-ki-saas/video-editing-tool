@@ -21,7 +21,13 @@
  * to avoid overlapping this one).
  */
 import type { EditSelectionsSnapshot } from "@/lib/projects";
-import { computeMaxCoverageCropFraction, findActiveZoomEffectIndex, type CropRect, type ZoomEffect } from "./video_math";
+import {
+  computeMaxCoverageCropFraction,
+  findActiveZoomEffectIndex,
+  toggleFlipAt,
+  type CropRect,
+  type ZoomEffect,
+} from "./video_math";
 
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
@@ -116,19 +122,28 @@ export function applyCropRectCommit(
   };
 }
 
-/** Toggles a flip axis from CropRectOverlay's edge handles -- "Flip"
- * (horizontal, left/right edges) or "Mirror" (vertical, top/bottom edges).
- * Applied uniformly to the whole clip, not time-varying like a
- * zoom/pan transition, and fully independent of one -- both can be active
- * at once (e.g. panning while flipped). */
+/** Toggles a flip axis at `currentTimeSeconds`, from CropRectOverlay's edge
+ * handles on the active tile -- "Flip" (horizontal, left/right edges) or
+ * "Mirror" (vertical, top/bottom edges). "Flip starts from the frame I
+ * clicked" -- clicking again at a later frame toggles it back (see
+ * video_math.ts's toggleFlipAt). Independent of zoomEffects (a rect
+ * transition) and of the other axis -- both can be toggled at different
+ * times on the same clip. */
 export function applyFlipToggle(
   selections: EditSelectionsSnapshot,
-  axis: "horizontal" | "vertical"
+  axis: "horizontal" | "vertical",
+  currentTimeSeconds: number
 ): TransformationResult {
   if (axis === "horizontal") {
-    return { label: "Flip", state: { ...selections, flipHorizontal: !selections.flipHorizontal } };
+    return {
+      label: "Flip",
+      state: { ...selections, flipHorizontalToggles: toggleFlipAt(selections.flipHorizontalToggles, currentTimeSeconds) },
+    };
   }
-  return { label: "Mirror", state: { ...selections, flipVertical: !selections.flipVertical } };
+  return {
+    label: "Mirror",
+    state: { ...selections, flipVerticalToggles: toggleFlipAt(selections.flipVerticalToggles, currentTimeSeconds) },
+  };
 }
 
 /** Prolonging/shortening one transition by dragging its
@@ -147,6 +162,18 @@ export function applyZoomRangeChange(
   const nextZoomEffects = [...selections.zoomEffects];
   nextZoomEffects[effectIndex] = { ...zoomEffect, startTimeSeconds, endTimeSeconds };
   return { label: "Adjusted transition range", state: { ...selections, zoomEffects: nextZoomEffects } };
+}
+
+/** Deletes one transition outright -- from the "Delete transition" context
+ * menu on ZoomEffectsTrack's green epicenter dot. Everything outside its
+ * time range simply reverts to showing the fixed clip rectangle, same as
+ * always happens outside any transition's range. */
+export function applyDeleteZoomEffect(selections: EditSelectionsSnapshot, effectIndex: number): TransformationResult {
+  if (!selections.zoomEffects[effectIndex]) return { label: "Deleted transition", state: selections };
+  return {
+    label: "Deleted transition",
+    state: { ...selections, zoomEffects: selections.zoomEffects.filter((_, index) => index !== effectIndex) },
+  };
 }
 
 /** Moving a transition's epicenter -- the green dot on ZoomEffectsTrack --

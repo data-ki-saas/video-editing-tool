@@ -36,21 +36,33 @@
  * whole clip -- every thumbnail mirrors via a CSS transform, not just the
  * active tile.
  *
- * Each tile's crop rect only depends on baseCropRect/zoomEffects (its own
- * fixed timestamp never changes), NOT on currentTimeSeconds -- FrameTile is
- * memoized so the ~60/sec playhead updates during playback don't re-render
- * every thumbnail, only the active one (as it hands off between tiles) and
- * the separate playhead line element.
+ * Each tile's crop rect and flip state only depend on
+ * baseCropRect/zoomEffects/flip toggle lists (its own fixed timestamp never
+ * changes), NOT on currentTimeSeconds -- FrameTile is memoized so the
+ * ~60/sec playhead updates during playback don't re-render every
+ * thumbnail, only the active one (as it hands off between tiles) and the
+ * separate playhead line element. Flip, like crop, is now itself a
+ * timeline action (see video_math.ts's computeEffectiveFlip) -- each tile
+ * shows whichever flip state is in effect at its own instant, not one
+ * uniform whole-clip value.
  *
- * ZoomEffectsTrack (every transition's own indicator) renders in the SAME
- * scrollable track as the thumbnails, directly below them, so both share
- * one scroll position and one pixel-accurate timeline width with no
+ * ZoomEffectsTrack (every transition's own indicator) and FlipTrack (one
+ * per flip axis, when either has any toggles) render in the SAME
+ * scrollable track as the thumbnails, directly below them, so all of them
+ * share one scroll position and one pixel-accurate timeline width with no
  * manual measurement needed.
  */
 import { memo, useMemo, useRef } from "react";
 import { CropRectOverlay } from "./CropRectOverlay";
 import { ZoomEffectsTrack } from "./ZoomEffectsTrack";
-import { computeEffectiveCropRect, type CropRect, type ZoomEffect } from "@/lib/video/video_math";
+import { FlipTrack } from "./FlipTrack";
+import {
+  computeEffectiveCropRect,
+  computeEffectiveFlip,
+  computeFlipSegments,
+  type CropRect,
+  type ZoomEffect,
+} from "@/lib/video/video_math";
 
 const FrameTile = memo(function FrameTile({
   src,
@@ -131,10 +143,11 @@ export function FrameStrip({
   onCommitZoomRange,
   onChangeZoomEpicenter,
   onCommitZoomEpicenter,
+  onDeleteZoomEffect,
   onCropRectChange,
   onCropRectCommit,
-  flipHorizontal,
-  flipVertical,
+  flipHorizontalToggles,
+  flipVerticalToggles,
   onFlipHorizontal,
   onFlipVertical,
   pixelsPerSecond,
@@ -153,10 +166,11 @@ export function FrameStrip({
   onCommitZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onChangeZoomEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
   onCommitZoomEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
+  onDeleteZoomEffect: (effectIndex: number) => void;
   onCropRectChange: (next: CropRect) => void;
   onCropRectCommit: (next: CropRect) => void;
-  flipHorizontal: boolean;
-  flipVertical: boolean;
+  flipHorizontalToggles: number[];
+  flipVerticalToggles: number[];
   onFlipHorizontal: () => void;
   onFlipVertical: () => void;
   pixelsPerSecond: number;
@@ -175,6 +189,26 @@ export function FrameStrip({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, durationSeconds, baseCropRect, zoomEffects]);
+
+  const tileFlips = useMemo(() => {
+    return thumbnails.map((_, index) => {
+      const timestamp = thumbnails.length > 1 ? (index / (thumbnails.length - 1)) * durationSeconds : 0;
+      return {
+        flipHorizontal: computeEffectiveFlip(flipHorizontalToggles, timestamp),
+        flipVertical: computeEffectiveFlip(flipVerticalToggles, timestamp),
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, durationSeconds, flipHorizontalToggles, flipVerticalToggles]);
+
+  const flipHorizontalSegments = useMemo(
+    () => computeFlipSegments(flipHorizontalToggles, durationSeconds),
+    [flipHorizontalToggles, durationSeconds]
+  );
+  const flipVerticalSegments = useMemo(
+    () => computeFlipSegments(flipVerticalToggles, durationSeconds),
+    [flipVerticalToggles, durationSeconds]
+  );
 
   // The tile nearest the playhead -- this DOES change every tick, but only
   // this one tile's memo identity flips (false->true / true->false) as a
@@ -207,7 +241,11 @@ export function FrameStrip({
     durationSeconds > 0 ? Math.min(Math.max(currentTimeSeconds / durationSeconds, 0), 1) * 100 : 0;
 
   return (
-    <div ref={scrollContainerRef} onScroll={onScroll} className="max-h-full overflow-x-auto bg-neutral-950 px-2">
+    <div
+      ref={scrollContainerRef}
+      onScroll={onScroll}
+      className="hide-scrollbar max-h-full overflow-x-auto bg-neutral-950 px-2"
+    >
       {/* w-max so this div's own width is the strip's true total length --
           the playhead and ZoomEffectsTrack below both size/position
           relative to THIS box, so they stay aligned with the right
@@ -225,8 +263,8 @@ export function FrameStrip({
               widthPx={pixelsPerSecond}
               frameAspectRatio={frameAspectRatio}
               cropRect={tileCropRects[index]}
-              flipHorizontal={flipHorizontal}
-              flipVertical={flipVertical}
+              flipHorizontal={tileFlips[index].flipHorizontal}
+              flipVertical={tileFlips[index].flipVertical}
               onChange={index === activeTileIndex ? onCropRectChange : undefined}
               onCommit={index === activeTileIndex ? onCropRectCommit : undefined}
               onFlipHorizontal={index === activeTileIndex ? onFlipHorizontal : undefined}
@@ -247,6 +285,19 @@ export function FrameStrip({
           onCommitRange={onCommitZoomRange}
           onChangeEpicenter={onChangeZoomEpicenter}
           onCommitEpicenter={onCommitZoomEpicenter}
+          onDeleteEffect={onDeleteZoomEffect}
+        />
+        <FlipTrack
+          segments={flipHorizontalSegments}
+          videoDurationSeconds={durationSeconds}
+          colorClassName="bg-red-500/50 border border-red-500"
+          title="Flipped"
+        />
+        <FlipTrack
+          segments={flipVerticalSegments}
+          videoDurationSeconds={durationSeconds}
+          colorClassName="bg-purple-500/50 border border-purple-500"
+          title="Mirrored"
         />
       </div>
     </div>
