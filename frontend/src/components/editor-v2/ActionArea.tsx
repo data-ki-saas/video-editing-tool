@@ -14,6 +14,7 @@ import { useState } from "react";
 import { ProjectList } from "./ProjectList";
 import { AssetGallery } from "./AssetGallery";
 import { UploadDialog } from "./UploadDialog";
+import { StockMediaDialog } from "./StockMediaDialog";
 import { BackgroundTrackSelector } from "./BackgroundTrackSelector";
 import { UserActions } from "./UserActions";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
@@ -82,6 +83,7 @@ export function ActionArea({
   onPlayerTimeUpdate: (seconds: number) => void;
 }) {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
 
   return (
     <div className="flex h-full gap-4 overflow-x-auto p-4">
@@ -96,6 +98,7 @@ export function ActionArea({
           selectedAssetId={selectedAsset?.id ?? null}
           onSelect={onSelectAsset}
           onAddAsset={() => setIsUploadDialogOpen(true)}
+          onBrowseStock={() => setIsStockDialogOpen(true)}
           onDeleted={onAssetDeleted}
         />
       </div>
@@ -154,6 +157,15 @@ export function ActionArea({
           }}
           onUploadingChange={onUploadingChange}
           onClose={() => setIsUploadDialogOpen(false)}
+        />
+      )}
+
+      {isStockDialogOpen && (
+        <StockMediaDialog
+          projectId={projectId}
+          onImported={onUploaded}
+          onImportingChange={onUploadingChange}
+          onClose={() => setIsStockDialogOpen(false)}
         />
       )}
     </div>

@@ -57,7 +57,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return response.json();
 }
 
-export type AssetKind = "video" | "image";
+export type AssetKind = "video" | "image" | "audio";
 
 export interface Asset {
   id: string;
@@ -65,7 +65,7 @@ export interface Asset {
   uploaded_by: string;
   filename: string;
   kind: AssetKind;
-  mime_type: "video/mp4" | "image/jpeg" | "image/png";
+  mime_type: "video/mp4" | "image/jpeg" | "image/png" | "audio/mpeg";
   size_bytes: number;
   // A presigned R2 URL, valid for a limited time (see the backend's
   // R2_SIGNED_URL_EXPIRES_SECONDS) -- not a permanent link. Re-fetch the
@@ -164,6 +164,50 @@ export async function deleteAsset(assetId: string) {
     const body = await response.json().catch(() => ({}));
     throw new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${response.status})`);
   }
+}
+
+export type StockMediaKind = "photo" | "video" | "music";
+
+export interface StockSearchResult {
+  id: string;
+  kind: StockMediaKind;
+  title: string;
+  thumbnail_url: string;
+  preview_url: string;
+  duration_seconds: number | null;
+  attribution: string;
+  width: number | null;
+  height: number | null;
+}
+
+export interface StockSearchResponse {
+  results: StockSearchResult[];
+  page: number;
+  has_more: boolean;
+}
+
+export async function searchStockMedia(kind: StockMediaKind, query: string, page: number) {
+  const url = new URL(`${API_BASE_URL}/api/stock-media/search`);
+  url.searchParams.set("kind", kind);
+  url.searchParams.set("query", query);
+  url.searchParams.set("page", String(page));
+
+  const response = await apiFetch(url.toString(), { headers: await authHeader() });
+  return handleResponse<StockSearchResponse>(response);
+}
+
+export async function importStockAsset(
+  projectId: string,
+  kind: StockMediaKind,
+  sourceId: string,
+  filename: string
+) {
+  const response = await apiFetch(`${API_BASE_URL}/api/stock-media/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ project_id: projectId, kind, source_id: sourceId, filename }),
+  });
+  return handleResponse<Asset>(response);
 }
 
 export interface RenderTriggerResult {

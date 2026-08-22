@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { deleteAsset, type Asset } from "@/lib/api";
 import { captureSingleFrame } from "@/lib/video/video";
 import { ReelLoader } from "@/components/ReelLoader";
+import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 
 export function AssetGallery({
@@ -19,6 +20,7 @@ export function AssetGallery({
   selectedAssetId,
   onSelect,
   onAddAsset,
+  onBrowseStock,
   onDeleted,
 }: {
   assets: Asset[];
@@ -29,6 +31,7 @@ export function AssetGallery({
   selectedAssetId: string | null;
   onSelect: (asset: Asset) => void;
   onAddAsset: () => void;
+  onBrowseStock: () => void;
   onDeleted: (assetId: string) => void;
 }) {
   const [videoThumbnails, setVideoThumbnails] = useState<Record<string, string>>({});
@@ -69,9 +72,14 @@ export function AssetGallery({
     <div className="flex h-full flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-medium text-foreground">Your assets</h2>
-        <button type="button" onClick={onAddAsset} className="shrink-0 text-xs text-accent hover:underline">
-          + Asset
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button type="button" onClick={onBrowseStock} className="text-xs text-accent hover:underline">
+            + Stock
+          </button>
+          <button type="button" onClick={onAddAsset} className="text-xs text-accent hover:underline">
+            + Asset
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-1 items-center gap-2 overflow-x-auto">
@@ -93,7 +101,11 @@ export function AssetGallery({
                 (selectedAssetId === asset.id ? "border-accent" : "border-transparent")
               }
             >
-              {thumbnailSrc ? (
+              {asset.kind === "audio" ? (
+                <span className="flex h-full w-full items-center justify-center bg-neutral-800">
+                  <MusicNoteIcon className="h-5 w-5 text-muted" />
+                </span>
+              ) : thumbnailSrc ? (
                 // eslint-disable-next-line @next/next/no-img-element -- short-lived data:/presigned URL, not a Next-optimizable static asset
                 <img src={thumbnailSrc} alt={asset.filename} className="h-full w-full object-cover" />
               ) : (
