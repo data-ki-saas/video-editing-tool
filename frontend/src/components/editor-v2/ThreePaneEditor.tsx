@@ -27,7 +27,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listAssets, type Asset } from "@/lib/api";
 import { extractThumbnails, getVideoDuration } from "@/lib/video/video";
 import { extractVolumeProfile } from "@/lib/video/audio";
-import type { CropRect } from "@/lib/video/video_math";
+import type { CropRect, ZoomEffect } from "@/lib/video/video_math";
 import { applySelectClipRect, applyCropRectCommit, applyZoomRangeChange, applyFlipToggle } from "@/lib/video/transformations";
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
@@ -44,7 +44,7 @@ const SAVE_DEBOUNCE_MS = 600;
 const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
   clipRectId: null,
   cropRect: null,
-  zoomEffect: null,
+  zoomEffects: [],
   flipHorizontal: false,
   flipVertical: false,
 };
@@ -73,10 +73,12 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
   // itself happens.
   const [liveCropRect, setLiveCropRect] = useState<CropRect | null>(null);
 
-  // Live position of the zoom effect's time range while actively dragging
-  // one of ZoomEffectRow's edges, before it's committed -- same
-  // change-vs-commit split as liveCropRect above.
-  const [liveZoomEffect, setLiveZoomEffect] = useState<EditSelectionsSnapshot["zoomEffect"]>(null);
+  // Live position of one zoom effect's time range while actively dragging
+  // one of ZoomEffectsTrack's segment edges, before it's committed -- same
+  // change-vs-commit split as liveCropRect above. Tracks which effect
+  // (by index into selections.zoomEffects) is being dragged, since any of
+  // several can be.
+  const [liveZoomEffectEdit, setLiveZoomEffectEdit] = useState<{ index: number; effect: ZoomEffect } | null>(null);
 
   const canvasPlayerRef = useRef<CanvasPlayerHandle>(null);
 
@@ -301,15 +303,16 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     pushChange(label, state);
   }
 
-  function handleChangeZoomRange(startTimeSeconds: number, endTimeSeconds: number) {
-    if (!selections.zoomEffect) return;
-    setLiveZoomEffect({ ...selections.zoomEffect, startTimeSeconds, endTimeSeconds });
+  function handleChangeZoomRange(effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
+    const zoomEffect = selections.zoomEffects[effectIndex];
+    if (!zoomEffect) return;
+    setLiveZoomEffectEdit({ index: effectIndex, effect: { ...zoomEffect, startTimeSeconds, endTimeSeconds } });
   }
 
-  function handleCommitZoomRange(startTimeSeconds: number, endTimeSeconds: number) {
-    if (!selections.zoomEffect) return;
-    setLiveZoomEffect(null);
-    const { label, state } = applyZoomRangeChange(selections, startTimeSeconds, endTimeSeconds);
+  function handleCommitZoomRange(effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
+    if (!selections.zoomEffects[effectIndex]) return;
+    setLiveZoomEffectEdit(null);
+    const { label, state } = applyZoomRangeChange(selections, effectIndex, startTimeSeconds, endTimeSeconds);
     pushChange(label, state);
   }
 
@@ -317,7 +320,14 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     canvasPlayerRef.current?.seekTo(seconds);
   }
 
-  const displayedZoomEffect = liveZoomEffect ?? selections.zoomEffect;
+  // Splices the in-progress drag (if any) into the persisted array at its
+  // own index -- everything else in the array is unaffected, only the one
+  // effect being dragged shows its live position.
+  const displayedZoomEffects = liveZoomEffectEdit
+    ? selections.zoomEffects.map((effect, index) => (index === liveZoomEffectEdit.index ? liveZoomEffectEdit.effect : effect))
+    : selections.zoomEffects;
+
+  const frameAspectRatio = frameDimensions ? frameDimensions.width / frameDimensions.height : null;
 
   return (
     <div className="flex h-full flex-col">
@@ -338,7 +348,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           selectedClipRectId={selections.clipRectId}
           onSelectClipRect={handleSelectClipRect}
           baseCropRect={selections.cropRect}
-          zoomEffect={displayedZoomEffect}
+          zoomEffects={displayedZoomEffects}
           liveCropRectOverride={liveCropRect}
           flipHorizontal={selections.flipHorizontal}
           flipVertical={selections.flipVertical}
@@ -358,7 +368,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           currentTimeSeconds={currentTimeSeconds}
           onSeek={handleSeek}
           baseCropRect={selections.cropRect}
-          zoomEffect={displayedZoomEffect}
+          zoomEffects={displayedZoomEffects}
+          frameAspectRatio={frameAspectRatio}
           onChangeZoomRange={handleChangeZoomRange}
           onCommitZoomRange={handleCommitZoomRange}
           onCropRectChange={handleCropRectChange}

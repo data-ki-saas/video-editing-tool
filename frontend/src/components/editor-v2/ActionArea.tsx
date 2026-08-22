@@ -46,7 +46,7 @@ export function ActionArea({
   selectedClipRectId,
   onSelectClipRect,
   baseCropRect,
-  zoomEffect,
+  zoomEffects,
   liveCropRectOverride,
   flipHorizontal,
   flipVertical,
@@ -69,7 +69,7 @@ export function ActionArea({
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
   baseCropRect: CropRect | null;
-  zoomEffect: ZoomEffect | null;
+  zoomEffects: ZoomEffect[];
   liveCropRectOverride: CropRect | null;
   flipHorizontal: boolean;
   flipVertical: boolean;
@@ -119,7 +119,7 @@ export function ActionArea({
               ref={playerRef}
               asset={selectedAsset}
               baseCropRect={baseCropRect}
-              zoomEffect={zoomEffect}
+              zoomEffects={zoomEffects}
               liveCropRectOverride={liveCropRectOverride}
               flipHorizontal={flipHorizontal}
               flipVertical={flipVertical}

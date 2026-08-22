@@ -62,7 +62,7 @@ export const CanvasPlayer = forwardRef<
   {
     asset: Asset;
     baseCropRect: CropRect | null;
-    zoomEffect: ZoomEffect | null;
+    zoomEffects: ZoomEffect[];
     // Overrides the computed crop for the CURRENT static frame while
     // paused -- lets the player preview a drag happening on FrameStrip's
     // active tile live, before it's committed. Never applied during
@@ -80,7 +80,7 @@ export const CanvasPlayer = forwardRef<
   {
     asset,
     baseCropRect,
-    zoomEffect,
+    zoomEffects,
     liveCropRectOverride = null,
     flipHorizontal = false,
     flipVertical = false,
@@ -138,7 +138,7 @@ export const CanvasPlayer = forwardRef<
     const frameIndex = frameIndexAtTime(elapsedSeconds, frameRateRef.current, images.length);
     const image = images[frameIndex];
 
-    const crop = liveCropRectOverride ?? (baseCropRect ? computeEffectiveCropRect(baseCropRect, zoomEffect, elapsedSeconds) : FULL_FRAME_CROP_RECT);
+    const crop = liveCropRectOverride ?? (baseCropRect ? computeEffectiveCropRect(baseCropRect, zoomEffects, elapsedSeconds) : FULL_FRAME_CROP_RECT);
     const sx = crop.x * image.naturalWidth;
     const sy = crop.y * image.naturalHeight;
     const sWidth = crop.width * image.naturalWidth;
@@ -292,7 +292,7 @@ export const CanvasPlayer = forwardRef<
   useEffect(() => {
     if (isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
-  }, [baseCropRect, zoomEffect, liveCropRectOverride, flipHorizontal, flipVertical, isReady, isPlaying]);
+  }, [baseCropRect, zoomEffects, liveCropRectOverride, flipHorizontal, flipVertical, isReady, isPlaying]);
 
   useEffect(() => {
     return () => {

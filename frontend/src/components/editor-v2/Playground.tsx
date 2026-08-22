@@ -4,20 +4,27 @@
  * The middle band of the three-pane editor, top to bottom: the selected
  * background track's repeating strip (pinned to the top, resizable by
  * dragging its bottom edge), the video "unfolded" into a per-second
- * thumbnail strip (fills whatever space is left between the other two --
- * it doesn't compete for a fixed share, so shrinking either of them hands
- * it straight back to the frame strip), and a sound volume graph (pinned
- * to the bottom, resizable by dragging its top edge). See
- * ResizablePanel.tsx's `anchor` prop for how the background/volume panels
- * each stay pinned to their own edge of the stack while still being
- * independently resizable.
+ * thumbnail strip (sized to its own natural content height -- tile height
+ * from FrameStrip's frameAspectRatio, not stretched/centered to fill
+ * whatever space is left, which just produced blank padding when the
+ * video's aspect ratio didn't happen to match the available height), and
+ * a sound volume graph (pinned to the bottom, resizable by dragging its
+ * top edge). See ResizablePanel.tsx's `anchor` prop for how the
+ * background/volume panels each stay pinned to their own edge of the
+ * stack while still being independently resizable.
  *
- * All three represent the same timeline at the same PIXELS_PER_SECOND
- * scale (so their total widths line up) and share one scroll position via
- * lib/useSyncedHorizontalScroll.ts -- scrolling any one of them scrolls
- * all three together, since they're meant to read as one aligned view of
- * the clip, not three independently-scrolling panels that happen to be
- * stacked.
+ * If the three strips' combined natural height exceeds the band
+ * ThreePaneEditor allocates this component, this component scrolls
+ * VERTICALLY (overflow-y-auto below) rather than clipping or squeezing
+ * the frame strip to fit -- the frame strip is shown at its true size or
+ * not at all, never distorted to fit a slot.
+ *
+ * All three strips represent the same timeline at the same
+ * PIXELS_PER_SECOND scale (so their total widths line up) and share one
+ * HORIZONTAL scroll position via lib/useSyncedHorizontalScroll.ts --
+ * scrolling any one of them scrolls all three together, since they're
+ * meant to read as one aligned view of the clip, not three
+ * independently-scrolling panels that happen to be stacked.
  */
 import { ResizablePanel } from "./ResizablePanel";
 import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
@@ -48,7 +55,8 @@ export function Playground({
   currentTimeSeconds,
   onSeek,
   baseCropRect,
-  zoomEffect,
+  zoomEffects,
+  frameAspectRatio,
   onChangeZoomRange,
   onCommitZoomRange,
   onCropRectChange,
@@ -66,9 +74,10 @@ export function Playground({
   currentTimeSeconds: number;
   onSeek: (seconds: number) => void;
   baseCropRect: CropRect | null;
-  zoomEffect: ZoomEffect | null;
-  onChangeZoomRange: (startTimeSeconds: number, endTimeSeconds: number) => void;
-  onCommitZoomRange: (startTimeSeconds: number, endTimeSeconds: number) => void;
+  zoomEffects: ZoomEffect[];
+  frameAspectRatio: number | null;
+  onChangeZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCommitZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onCropRectChange: (next: CropRect) => void;
   onCropRectCommit: (next: CropRect) => void;
   flipHorizontal: boolean;
@@ -79,7 +88,7 @@ export function Playground({
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
 
   return (
-    <div className="flex h-full flex-col gap-2 bg-surface px-2">
+    <div className="flex h-full flex-col gap-2 overflow-y-auto bg-surface px-2">
       <ResizablePanel label="background track" anchor="top" initialHeightPx={INITIAL_BACKGROUND_STRIP_HEIGHT_PX}>
         <BackgroundTrackStrip
           selectedTrackId={selectedBackgroundTrackId}
@@ -90,7 +99,7 @@ export function Playground({
         />
       </ResizablePanel>
 
-      <div className="min-h-0 flex-1">
+      <div className="shrink-0">
         <FrameStrip
           thumbnails={thumbnails}
           isLoading={isAnalyzing}
@@ -98,7 +107,8 @@ export function Playground({
           currentTimeSeconds={currentTimeSeconds}
           onSeek={onSeek}
           baseCropRect={baseCropRect}
-          zoomEffect={zoomEffect}
+          zoomEffects={zoomEffects}
+          frameAspectRatio={frameAspectRatio}
           onChangeZoomRange={onChangeZoomRange}
           onCommitZoomRange={onCommitZoomRange}
           onCropRectChange={onCropRectChange}

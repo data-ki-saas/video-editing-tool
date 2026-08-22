@@ -222,23 +222,39 @@ export interface ZoomEffect {
 }
 
 /**
+ * Which of several ZoomEffects (if any) is in effect at `timeSeconds` --
+ * strictly between its own start/end, never at the boundary itself.
+ * ZoomEffects are mutually exclusive with each other (both zoom and pan
+ * are just rect-to-rect transitions of the same type, so two can never
+ * overlap in time -- see transformations.ts's applyCropRectCommit, which
+ * clamps a newly-created one against whatever's already there); a
+ * DIFFERENT effect type added later (its own array, its own row below the
+ * timeline) would get its own version of this same lookup rather than
+ * sharing this one.
+ */
+export function findActiveZoomEffectIndex(zoomEffects: ZoomEffect[], timeSeconds: number): number {
+  return zoomEffects.findIndex((effect) => timeSeconds > effect.startTimeSeconds && timeSeconds < effect.endTimeSeconds);
+}
+
+/**
  * The crop rect that should actually be shown at `timeSeconds`, given the
- * clip rectangle -- the clip's fixed, ongoing property -- and an optional
- * zoom/pan effect layered on top of it. A zoom/pan is a LOCALIZED,
- * temporary deviation, only ever in effect strictly between its own
- * start/end times (the range shown by ZoomEffectRow below the timeline):
- * outside that range, on either side, the fixed clip rectangle applies --
- * it does not persist the effect's end state past where the effect
- * actually ends.
+ * clip rectangle -- the clip's fixed, ongoing property -- and whichever
+ * zoom/pan effect (if any) is active at that instant. A zoom/pan is a
+ * LOCALIZED, temporary deviation, only ever in effect strictly between its
+ * own start/end times (the range shown by ZoomEffectsTrack below the
+ * timeline): outside that range, on either side, the fixed clip rectangle
+ * applies -- it does not persist the effect's end state past where the
+ * effect actually ends.
  */
 export function computeEffectiveCropRect(
   baseCropRect: CropRect,
-  zoomEffect: ZoomEffect | null,
+  zoomEffects: ZoomEffect[],
   timeSeconds: number
 ): CropRect {
-  if (!zoomEffect) return baseCropRect;
-  if (timeSeconds <= zoomEffect.startTimeSeconds || timeSeconds >= zoomEffect.endTimeSeconds) return baseCropRect;
+  const activeIndex = findActiveZoomEffectIndex(zoomEffects, timeSeconds);
+  if (activeIndex === -1) return baseCropRect;
 
+  const zoomEffect = zoomEffects[activeIndex];
   const duration = zoomEffect.endTimeSeconds - zoomEffect.startTimeSeconds;
   const t = duration > 0 ? (timeSeconds - zoomEffect.startTimeSeconds) / duration : 1;
   return interpolateCropRect(zoomEffect.startRect, zoomEffect.endRect, t);

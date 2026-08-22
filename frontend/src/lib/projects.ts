@@ -25,25 +25,28 @@ export interface AppMetaEntry {
 // Every frame-affecting transform is a manipulation of the ONE clip
 // rectangle: its size (drag the corner) is the crop/zoom target, its
 // position (drag the body) is the pan/tilt target, both changing over time
-// is the transition effect (zoomEffect handles zoom AND pan -- a "move
+// is a transition effect (each ZoomEffect handles zoom AND pan -- a "move
 // without resizing between two points in time" is a pan through the exact
 // same mechanism), and flipHorizontal/flipVertical are toggled from
 // handles on the rect's own edges. Grows as more transform types land.
 export interface EditSelectionsSnapshot {
   clipRectId: string | null;
   // The clip rectangle's actual position/size (fractions of the frame --
-  // see video_math.ts's CropRect), independent of clipRectId once the user
-  // drags/resizes it away from that ratio's default max-coverage position.
+  // see video_math.ts's CropRect) -- the clip's fixed, ongoing property.
+  // Independent of clipRectId once the user drags/resizes it away from
+  // that ratio's default max-coverage position.
   cropRect: CropRect | null;
-  // At most one for now -- see components/editor-v2/ZoomEffectRow.tsx's
-  // comment about showing only the selected effect if/when this becomes a
-  // list.
-  zoomEffect: ZoomEffect | null;
+  // Any number of transitions can coexist on one clip, each occupying its
+  // own non-overlapping time range -- see lib/video/transformations.ts's
+  // applyCropRectCommit for how a drag decides whether to create a new one
+  // or reshape an existing one it falls inside, and how a new one is
+  // clamped to not overlap whatever's already there.
+  zoomEffects: ZoomEffect[];
   // "Flip" (left/right handles -- mirrors left-right) and "Mirror"
   // (top/bottom handles -- mirrors top-bottom), matching Premiere/
   // Photoshop's "Flip Horizontal"/"Flip Vertical" naming underneath more
   // approachable labels. Applied uniformly to the whole clip, not
-  // time-varying like zoomEffect.
+  // time-varying like zoomEffects.
   flipHorizontal: boolean;
   flipVertical: boolean;
 }
