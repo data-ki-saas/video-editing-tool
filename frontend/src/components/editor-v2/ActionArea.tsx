@@ -70,10 +70,12 @@ export function ActionArea({
   // active zoom effect at the current time) -- null until a ratio's been
   // picked, in which case no crop guide is shown at all.
   effectiveCropRect: CropRect | null;
-  // Omitted (rather than passed as no-ops) whenever dragging shouldn't be
-  // allowed right now -- see CanvasPlayer's module comment.
-  onCropRectChange?: (next: CropRect) => void;
-  onCropRectCommit?: (next: CropRect) => void;
+  // Always wired up -- ThreePaneEditor's commit handler decides what a
+  // drag actually means (the flat base crop, or one end of a transition)
+  // based on the current playhead position, rather than this needing to
+  // gate whether dragging is allowed at all.
+  onCropRectChange: (next: CropRect) => void;
+  onCropRectCommit: (next: CropRect) => void;
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;

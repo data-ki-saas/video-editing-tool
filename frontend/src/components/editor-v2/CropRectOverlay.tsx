@@ -85,6 +85,12 @@ export function CropRectOverlay({
     <div ref={containerRef} className="pointer-events-none absolute inset-0">
       <div
         onPointerDown={(e) => startDrag(e, "move")}
+        // A drag's mouseup still fires a native `click` afterward (that
+        // event is independent of pointerdown/pointermove and isn't
+        // stopped by stopPropagation on those) -- swallowing it here stops
+        // it from also bubbling up to e.g. FrameStrip's click-to-seek
+        // handler right after a resize/reposition.
+        onClick={(e) => isInteractive && e.stopPropagation()}
         className={"absolute border-2 border-white" + (isInteractive ? " pointer-events-auto cursor-move" : "")}
         style={{
           left: `${cropRect.x * 100}%`,
@@ -99,6 +105,7 @@ export function CropRectOverlay({
         {isInteractive && (
           <div
             onPointerDown={(e) => startDrag(e, "resize")}
+            onClick={(e) => e.stopPropagation()}
             className="pointer-events-auto absolute -bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize rounded-full border border-white bg-accent"
           />
         )}

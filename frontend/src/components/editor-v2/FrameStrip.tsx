@@ -10,17 +10,25 @@
  * Each thumbnail also shows the crop rectangle that would apply at that
  * moment (baseCropRect, or the zoom-interpolated rect if a ZoomEffect
  * covers that timestamp -- see lib/video/video_math.ts's
- * computeEffectiveCropRect), read-only here; CropRectOverlay's draggable
- * version lives on CanvasPlayer's live preview instead. Each tile's crop
- * rect only depends on baseCropRect/zoomEffect (its own fixed timestamp
- * never changes), NOT on currentTimeSeconds -- FrameTile is memoized so
- * the ~60/sec playhead updates during playback don't re-render every
- * thumbnail, only the (separate) playhead line element.
+ * computeEffectiveCropRect). Only the ACTIVE tile -- the one nearest the
+ * current playhead, i.e. the same instant CanvasPlayer is showing -- gets
+ * a draggable/resizable overlay; every other tile stays read-only. This
+ * keeps "editing the crop here" meaning exactly one thing regardless of
+ * whether you drag on the live preview or on the timeline: both edit the
+ * crop at the current time (see ThreePaneEditor's handleCropRectCommit for
+ * what that turns into -- either the flat base crop, or one end of a
+ * transition that spreads to neighboring frames).
  *
- * The zoom effect's own indicator (ZoomEffectRow) renders in the SAME
- * scrollable w-max track as the thumbnails, directly below them, so both
- * share one scroll position and one pixel-accurate timeline width with no
- * manual measurement needed.
+ * Each tile's crop rect only depends on baseCropRect/zoomEffect (its own
+ * fixed timestamp never changes), NOT on currentTimeSeconds -- FrameTile is
+ * memoized so the ~60/sec playhead updates during playback don't re-render
+ * every thumbnail, only the active one (as it hands off between tiles) and
+ * the separate playhead line element.
+ *
+ * The zoom/transition effect's own indicator (ZoomEffectRow) renders in
+ * the SAME scrollable w-max track as the thumbnails, directly below them,
+ * so both share one scroll position and one pixel-accurate timeline width
+ * with no manual measurement needed.
  */
 import { memo, useMemo, useRef } from "react";
 import { CropRectOverlay } from "./CropRectOverlay";
@@ -31,10 +39,14 @@ const FrameTile = memo(function FrameTile({
   src,
   index,
   cropRect,
+  onChange,
+  onCommit,
 }: {
   src: string;
   index: number;
   cropRect: CropRect | null;
+  onChange?: (next: CropRect) => void;
+  onCommit?: (next: CropRect) => void;
 }) {
   return (
     // overflow-hidden is load-bearing: CropRectOverlay dims outside its rect
@@ -46,7 +58,7 @@ const FrameTile = memo(function FrameTile({
     <div className="relative h-full shrink-0 overflow-hidden">
       {/* eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image */}
       <img src={src} alt={`Frame at ${index}s`} className="h-full w-auto rounded-sm object-cover" />
-      {cropRect && <CropRectOverlay cropRect={cropRect} />}
+      {cropRect && <CropRectOverlay cropRect={cropRect} onChange={onChange} onCommit={onCommit} />}
     </div>
   );
 });
@@ -61,6 +73,8 @@ export function FrameStrip({
   zoomEffect,
   onChangeZoomRange,
   onCommitZoomRange,
+  onCropRectChange,
+  onCropRectCommit,
 }: {
   thumbnails: string[];
   isLoading: boolean;
@@ -71,6 +85,8 @@ export function FrameStrip({
   zoomEffect: ZoomEffect | null;
   onChangeZoomRange: (startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitZoomRange: (startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCropRectChange: (next: CropRect) => void;
+  onCropRectCommit: (next: CropRect) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
 
@@ -84,6 +100,15 @@ export function FrameStrip({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, durationSeconds, baseCropRect, zoomEffect]);
+
+  // The tile nearest the playhead -- this DOES change every tick, but only
+  // this one tile's memo identity flips (false->true / true->false) as a
+  // result, not all of them, so it doesn't reintroduce the per-tick
+  // re-render cost tileCropRects above avoids.
+  const activeTileIndex =
+    thumbnails.length > 0 && durationSeconds > 0
+      ? Math.round((currentTimeSeconds / durationSeconds) * (thumbnails.length - 1))
+      : -1;
 
   if (thumbnails.length === 0) {
     return (
@@ -115,7 +140,14 @@ export function FrameStrip({
       <div ref={trackRef} className="relative flex h-full w-max flex-col">
         <div onClick={handleClick} className="flex flex-1 cursor-pointer items-center gap-1">
           {thumbnails.map((src, index) => (
-            <FrameTile key={index} src={src} index={index} cropRect={tileCropRects[index]} />
+            <FrameTile
+              key={index}
+              src={src}
+              index={index}
+              cropRect={tileCropRects[index]}
+              onChange={index === activeTileIndex ? onCropRectChange : undefined}
+              onCommit={index === activeTileIndex ? onCropRectCommit : undefined}
+            />
           ))}
         </div>
 

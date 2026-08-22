@@ -35,6 +35,8 @@ export function Playground({
   zoomEffect,
   onChangeZoomRange,
   onCommitZoomRange,
+  onCropRectChange,
+  onCropRectCommit,
 }: {
   selectedBackgroundTrackId: string;
   videoDurationSeconds: number;
@@ -47,6 +49,8 @@ export function Playground({
   zoomEffect: ZoomEffect | null;
   onChangeZoomRange: (startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitZoomRange: (startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCropRectChange: (next: CropRect) => void;
+  onCropRectCommit: (next: CropRect) => void;
 }) {
   return (
     <div className="flex h-full flex-col gap-2 bg-surface px-2">
@@ -68,6 +72,8 @@ export function Playground({
           zoomEffect={zoomEffect}
           onChangeZoomRange={onChangeZoomRange}
           onCommitZoomRange={onCommitZoomRange}
+          onCropRectChange={onCropRectChange}
+          onCropRectCommit={onCropRectCommit}
         />
       </div>
 

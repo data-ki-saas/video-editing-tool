@@ -122,17 +122,6 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [undo, redo]);
 
-  // Whether a zoom effect is actively interpolating the crop rect right
-  // now -- if so, the overlay shown is a computed, temporary value, not
-  // something a drag should be allowed to fight with (see
-  // CanvasPlayer/ActionArea's comments on why onCropRectChange/Commit get
-  // omitted rather than passed as no-ops in that case).
-  const isZoomActiveNow = Boolean(
-    selections.zoomEffect &&
-      currentTimeSeconds > selections.zoomEffect.startTimeSeconds &&
-      currentTimeSeconds < selections.zoomEffect.endTimeSeconds
-  );
-
   const displayedCropRect = liveCropRect
     ? liveCropRect
     : selections.cropRect
@@ -293,9 +282,50 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     setLiveCropRect(next);
   }
 
+  /**
+   * Commits a drag/resize made at the current playhead time -- from either
+   * CanvasPlayer's live preview or the active tile in FrameStrip, both edit
+   * the same thing. Three cases:
+   *  1. Dragging inside an existing transition's time range reshapes
+   *     whichever endpoint (start or end) the playhead is nearer to,
+   *     rather than creating a redundant second effect.
+   *  2. Dragging outside any transition, with a base crop already set,
+   *     creates a new one: the frames leading up to this moment
+   *     interpolate from the base crop into the newly placed/resized rect
+   *     ("the transition effect spreads to neighbouring frames"). Its
+   *     range can then be prolonged by dragging ZoomEffectRow's edges
+   *     below the timeline.
+   *  3. No base crop yet (the very first placement, right after picking a
+   *     clip rectangle) just sets it directly -- there's nothing to
+   *     transition from yet.
+   */
   function handleCropRectCommit(next: CropRect) {
     setLiveCropRect(null);
-    pushChange("Adjusted crop", { ...selections, cropRect: next });
+
+    const zoomEffect = selections.zoomEffect;
+    const isEditingWithinTransition =
+      zoomEffect && currentTimeSeconds >= zoomEffect.startTimeSeconds && currentTimeSeconds <= zoomEffect.endTimeSeconds;
+
+    if (zoomEffect && isEditingWithinTransition) {
+      const distanceToStart = currentTimeSeconds - zoomEffect.startTimeSeconds;
+      const distanceToEnd = zoomEffect.endTimeSeconds - currentTimeSeconds;
+      const nextZoomEffect =
+        distanceToStart <= distanceToEnd ? { ...zoomEffect, startRect: next } : { ...zoomEffect, endRect: next };
+      pushChange("Adjusted transition", { ...selections, zoomEffect: nextZoomEffect });
+      return;
+    }
+
+    if (!selections.cropRect) {
+      pushChange("Placed clip rectangle", { ...selections, cropRect: next });
+      return;
+    }
+
+    const endTimeSeconds = currentTimeSeconds;
+    const startTimeSeconds = Math.max(0, endTimeSeconds - DEFAULT_ZOOM_DURATION_SECONDS);
+    pushChange("New transition", {
+      ...selections,
+      zoomEffect: { startTimeSeconds, endTimeSeconds, startRect: selections.cropRect, endRect: next },
+    });
   }
 
   function createZoomEffect(direction: "in" | "out") {
@@ -360,8 +390,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           selectedClipRectId={selections.clipRectId}
           onSelectClipRect={handleSelectClipRect}
           effectiveCropRect={displayedCropRect}
-          onCropRectChange={isZoomActiveNow ? undefined : handleCropRectChange}
-          onCropRectCommit={isZoomActiveNow ? undefined : handleCropRectCommit}
+          onCropRectChange={handleCropRectChange}
+          onCropRectCommit={handleCropRectCommit}
           onFrameDimensions={setFrameDimensions}
           onZoomIn={() => createZoomEffect("in")}
           onZoomOut={() => createZoomEffect("out")}
@@ -383,6 +413,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           zoomEffect={displayedZoomEffect}
           onChangeZoomRange={handleChangeZoomRange}
           onCommitZoomRange={handleCommitZoomRange}
+          onCropRectChange={handleCropRectChange}
+          onCropRectCommit={handleCropRectCommit}
         />
       </section>
 

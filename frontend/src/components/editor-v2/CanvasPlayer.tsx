@@ -23,10 +23,11 @@
  * see ThreePaneEditor for how the two are wired together.
  *
  * `cropRect`, when set, draws the CropRectOverlay crop guide over the
- * canvas -- interactive (draggable/resizable) only when `onCropRectChange`
- * *and* `onCropRectCommit` are both given; ThreePaneEditor omits them
- * whenever a zoom effect is actively interpolating the displayed rect at
- * the current time, so a drag can't fight with that.
+ * canvas, draggable/resizable via `onCropRectChange`/`onCropRectCommit` --
+ * the same pair of handlers FrameStrip's active tile uses, so dragging on
+ * either edits "the crop at the current time" consistently. What a commit
+ * actually turns into (the flat base crop, or one end of a transition) is
+ * decided by ThreePaneEditor, not here -- see its handleCropRectCommit.
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Asset } from "@/lib/api";
@@ -282,7 +283,7 @@ export const CanvasPlayer = forwardRef<
           type="button"
           onClick={handlePlayPause}
           aria-label={isPlaying ? "Pause" : "Play"}
-          className="shrink-0 rounded-full p-2 text-foreground hover:bg-foreground/10"
+          className="shrink-0 rounded-full p-2 text-accent hover:bg-accent/10"
         >
           {isPlaying ? <PauseIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
         </button>
