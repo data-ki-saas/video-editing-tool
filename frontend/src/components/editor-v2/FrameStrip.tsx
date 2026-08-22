@@ -37,7 +37,13 @@ const FrameTile = memo(function FrameTile({
   cropRect: CropRect | null;
 }) {
   return (
-    <div className="relative h-full shrink-0">
+    // overflow-hidden is load-bearing: CropRectOverlay dims outside its rect
+    // via a 9999px box-shadow, which is only ever clipped by an ancestor's
+    // overflow -- without this, every tile's shadow bleeds across all its
+    // neighbors, and with ~100+ tiles stacking that effect the whole strip
+    // reads as going dark ("frames disappearing" while scrolling further
+    // into it, since more tiles compounding the bleed come into view).
+    <div className="relative h-full shrink-0 overflow-hidden">
       {/* eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image */}
       <img src={src} alt={`Frame at ${index}s`} className="h-full w-auto rounded-sm object-cover" />
       {cropRect && <CropRectOverlay cropRect={cropRect} />}

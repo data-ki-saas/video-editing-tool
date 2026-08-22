@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { PowerIcon } from "@/components/icons/UIIcons";
 
 export function SignOutButton() {
   const router = useRouter();
@@ -25,9 +26,11 @@ export function SignOutButton() {
       type="button"
       onClick={handleSignOut}
       disabled={signingOut}
-      className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-surface disabled:opacity-50"
+      aria-label={signingOut ? "Signing out…" : "Sign out"}
+      title={signingOut ? "Signing out…" : "Sign out"}
+      className="rounded-full p-2 text-red-600 hover:bg-red-600/10 disabled:opacity-50"
     >
-      {signingOut ? "Signing out…" : "Sign out"}
+      <PowerIcon className="h-5 w-5" />
     </button>
   );
 }

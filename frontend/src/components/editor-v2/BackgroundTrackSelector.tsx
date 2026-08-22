@@ -18,8 +18,6 @@ export function BackgroundTrackSelector({
 }) {
   return (
     <div className="flex h-full flex-col gap-2">
-      <h2 className="text-sm font-medium text-foreground">Background track</h2>
-
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
         {BACKGROUND_TRACK_OPTIONS.map((track) => (
           <button

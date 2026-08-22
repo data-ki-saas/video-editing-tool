@@ -16,6 +16,8 @@ import { BackgroundTrackSelector } from "./BackgroundTrackSelector";
 import { UserActions } from "./UserActions";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
+import { CollapsiblePanel } from "./CollapsiblePanel";
+import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { Asset } from "@/lib/api";
 import type { CropRect } from "@/lib/video/video_math";
 import type { RefObject } from "react";
@@ -99,9 +101,9 @@ export function ActionArea({
         />
       </div>
 
-      <div className="w-40 shrink-0 overflow-hidden border-r border-border pr-4">
+      <CollapsiblePanel label="Background track" icon={<MusicNoteIcon className="h-4 w-4" />} expandedClassName="w-40">
         <BackgroundTrackSelector selectedTrackId={selectedBackgroundTrackId} onSelectTrack={onSelectBackgroundTrack} />
-      </div>
+      </CollapsiblePanel>
 
       <div className="w-[30rem] shrink-0 overflow-hidden border-r border-border pr-4">
         <UserActions

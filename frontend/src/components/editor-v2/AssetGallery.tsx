@@ -69,11 +69,7 @@ export function AssetGallery({
     <div className="flex h-full flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-medium text-foreground">Your assets</h2>
-        <button
-          type="button"
-          onClick={onAddAsset}
-          className="shrink-0 rounded-md bg-accent px-2 py-1 text-xs font-medium text-accent-foreground hover:opacity-90"
-        >
+        <button type="button" onClick={onAddAsset} className="shrink-0 text-xs text-accent hover:underline">
           + Asset
         </button>
       </div>

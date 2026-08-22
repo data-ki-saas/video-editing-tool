@@ -22,7 +22,9 @@
 import { TEMPLATE_OPTIONS } from "@/lib/templates";
 import { TEMPLATE_ICONS } from "./icons/TemplateIcons";
 import { ACTION_ICONS } from "./icons/ActionIcons";
+import { TemplateGridIcon, CropToolIcon } from "@/components/icons/UIIcons";
 import { CLIP_RECT_OPTIONS, ClipRectIcon } from "./ClipRectIcon";
+import { CollapsiblePanel } from "./CollapsiblePanel";
 
 const ARRANGE_ACTIONS = [
   { id: "delete", label: "Delete" },
@@ -44,29 +46,26 @@ function TemplateSection({
   onSelectTemplate: (id: string) => void;
 }) {
   return (
-    <div className="flex h-full w-40 shrink-0 flex-col gap-1">
-      <span className="text-xs text-muted">Template</span>
-      <div className="grid flex-1 grid-cols-3 gap-1 overflow-y-auto">
-        {TEMPLATE_OPTIONS.map((template) => {
-          const Icon = TEMPLATE_ICONS[template.id];
-          const isSelected = template.id === selectedTemplateId;
-          return (
-            <button
-              key={template.id}
-              type="button"
-              title={`${template.name} -- ${template.useCases}`}
-              onClick={() => onSelectTemplate(template.id)}
-              className={
-                "flex flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 " +
-                (isSelected ? "border-accent bg-accent/10" : "border-transparent hover:bg-background")
-              }
-            >
-              <Icon className="h-5 w-5 shrink-0 text-foreground" />
-              <span className="w-full truncate text-center text-[10px] text-muted">{template.name}</span>
-            </button>
-          );
-        })}
-      </div>
+    <div className="grid h-full grid-cols-3 gap-1 overflow-y-auto">
+      {TEMPLATE_OPTIONS.map((template) => {
+        const Icon = TEMPLATE_ICONS[template.id];
+        const isSelected = template.id === selectedTemplateId;
+        return (
+          <button
+            key={template.id}
+            type="button"
+            title={`${template.name} -- ${template.useCases}`}
+            onClick={() => onSelectTemplate(template.id)}
+            className={
+              "flex flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1 " +
+              (isSelected ? "border-accent bg-accent/10" : "border-transparent hover:bg-background")
+            }
+          >
+            <Icon className="h-5 w-5 shrink-0 text-foreground" />
+            <span className="w-full truncate text-center text-[10px] text-muted">{template.name}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -79,28 +78,25 @@ function ClipRectSection({
   onSelectClipRect: (id: string) => void;
 }) {
   return (
-    <div className="flex h-full w-28 shrink-0 flex-col gap-1">
-      <span className="text-xs text-muted">Clip rectangle</span>
-      <div className="flex flex-1 flex-col gap-1 overflow-y-auto">
-        {CLIP_RECT_OPTIONS.map((option) => {
-          const isSelected = option.id === selectedClipRectId;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              title={option.name}
-              onClick={() => onSelectClipRect(option.id)}
-              className={
-                "flex items-center gap-1.5 rounded-md border-2 px-1 py-0.5 text-foreground " +
-                (isSelected ? "border-accent bg-accent/10" : "border-transparent hover:bg-background")
-              }
-            >
-              <ClipRectIcon option={option} />
-              <span className="text-[10px] text-muted">{option.ratioLabel}</span>
-            </button>
-          );
-        })}
-      </div>
+    <div className="flex h-full flex-col gap-1 overflow-y-auto">
+      {CLIP_RECT_OPTIONS.map((option) => {
+        const isSelected = option.id === selectedClipRectId;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            title={option.name}
+            onClick={() => onSelectClipRect(option.id)}
+            className={
+              "flex items-center gap-1.5 rounded-md border-2 px-1 py-0.5 text-foreground " +
+              (isSelected ? "border-accent bg-accent/10" : "border-transparent hover:bg-background")
+            }
+          >
+            <ClipRectIcon option={option} />
+            <span className="text-[10px] text-muted">{option.ratioLabel}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -201,8 +197,12 @@ export function UserActions({
 }) {
   return (
     <div className="flex h-full gap-3 overflow-x-auto">
-      <TemplateSection selectedTemplateId={selectedTemplateId} onSelectTemplate={onSelectTemplate} />
-      <ClipRectSection selectedClipRectId={selectedClipRectId} onSelectClipRect={onSelectClipRect} />
+      <CollapsiblePanel label="Template" icon={<TemplateGridIcon className="h-4 w-4" />} expandedClassName="w-40">
+        <TemplateSection selectedTemplateId={selectedTemplateId} onSelectTemplate={onSelectTemplate} />
+      </CollapsiblePanel>
+      <CollapsiblePanel label="Clip rectangle" icon={<CropToolIcon className="h-4 w-4" />} expandedClassName="w-28">
+        <ClipRectSection selectedClipRectId={selectedClipRectId} onSelectClipRect={onSelectClipRect} />
+      </CollapsiblePanel>
       <ActionButtonsSection canZoom={canZoom} onZoomIn={onZoomIn} onZoomOut={onZoomOut} />
     </div>
   );
