@@ -453,6 +453,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           trimRanges={selections.trimRanges}
           pendingTrimStartSeconds={pendingTrimStartSeconds}
           onTrimTrackClick={handleTrimTrackClick}
+          onMoveTrimDot={setPendingTrimStartSeconds}
           onDeleteTrimRange={handleDeleteTrimRange}
         />
       </section>

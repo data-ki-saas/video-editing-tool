@@ -9,29 +9,22 @@
  *     play area/timeline -- the only frame-affecting choice here, so only
  *     its changes land in the change history -- see ThreePaneEditor)
  *
- * There is no separate "Transform" menu (Zoom In/Out, Pan & Tilt, Flip,
- * Mirror) -- the clip rectangle is the clip's fixed property, and every
- * transform is a manipulation of it directly: Crop is automatic (picking
- * a ratio places it), Zoom/Pan happen by dragging/resizing it at a
+ * There is no separate "Transform" or "Arrange" menu (Zoom In/Out, Pan &
+ * Tilt, Flip, Mirror, Delete, Trim, Drag) -- the clip rectangle is the
+ * clip's fixed property, and every transform is a manipulation of it (or
+ * of the timeline itself) directly: Crop is automatic (picking a ratio
+ * places it), Zoom/Pan happen by dragging/resizing the clip rectangle at a
  * different point on the timeline (see ThreePaneEditor's
  * handleCropRectCommit -- the resulting transition only ever applies
- * within its own range on ZoomEffectRow below the frames, not past it),
- * and Flip/Mirror toggle from CropRectOverlay's own edge handles. Arrange
- * (Delete/Trim/Drag) is still disabled scaffolding -- each needs its own
- * real interaction design for region selection/drag-to-timeline.
+ * within its own range on ZoomEffectsTrack below the frames, not past it),
+ * Flip/Mirror toggle from CropRectOverlay's own edge handles, and Trim is
+ * its own click-to-cut gray/red line above the frames (TrimTrack.tsx).
  */
 import { TEMPLATE_OPTIONS } from "@/lib/templates";
 import { TEMPLATE_ICONS } from "./icons/TemplateIcons";
-import { ACTION_ICONS } from "./icons/ActionIcons";
 import { TemplateGridIcon, CropToolIcon } from "@/components/icons/UIIcons";
 import { CLIP_RECT_OPTIONS, ClipRectIcon } from "./ClipRectIcon";
 import { CollapsiblePanel } from "./CollapsiblePanel";
-
-const ARRANGE_ACTIONS = [
-  { id: "delete", label: "Delete" },
-  { id: "trim", label: "Trim" },
-  { id: "drag", label: "Drag" },
-];
 
 function TemplateSection({
   selectedTemplateId,
@@ -96,38 +89,6 @@ function ClipRectSection({
   );
 }
 
-function ActionButton({ id, label }: { id: string; label: string }) {
-  const Icon = ACTION_ICONS[id];
-  return (
-    <button
-      type="button"
-      disabled
-      title="Coming soon"
-      className="flex w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border-2 border-transparent p-1 opacity-40"
-    >
-      <Icon className="h-5 w-5 text-foreground" />
-      <span className="w-full truncate text-center text-[10px] text-muted">{label}</span>
-    </button>
-  );
-}
-
-function ArrangeSection() {
-  return (
-    <div className="flex h-full flex-1 flex-col gap-1">
-      <span className="text-[10px] font-medium uppercase tracking-wide text-muted">Arrange</span>
-      <p className="text-[10px] text-accent">
-        Crop, Zoom/Pan, and Flip/Mirror all happen on the clip rectangle itself, not from a menu -- drag or resize
-        it, or use its edge handles
-      </p>
-      <div className="flex gap-2 overflow-x-auto">
-        {ARRANGE_ACTIONS.map((action) => (
-          <ActionButton key={action.id} id={action.id} label={action.label} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function UserActions({
   selectedTemplateId,
   onSelectTemplate,
@@ -147,7 +108,6 @@ export function UserActions({
       <CollapsiblePanel label="Clip rectangle" icon={<CropToolIcon className="h-4 w-4" />} expandedClassName="w-28">
         <ClipRectSection selectedClipRectId={selectedClipRectId} onSelectClipRect={onSelectClipRect} />
       </CollapsiblePanel>
-      <ArrangeSection />
     </div>
   );
 }

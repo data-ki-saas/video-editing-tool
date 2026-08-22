@@ -162,6 +162,7 @@ export function FrameStrip({
   trimRanges,
   pendingTrimStartSeconds,
   onTrimTrackClick,
+  onMoveTrimDot,
   onDeleteTrimRange,
   pixelsPerSecond,
   scrollContainerRef,
@@ -189,6 +190,7 @@ export function FrameStrip({
   trimRanges: TrimRange[];
   pendingTrimStartSeconds: number | null;
   onTrimTrackClick: (timeSeconds: number) => void;
+  onMoveTrimDot: (timeSeconds: number) => void;
   onDeleteTrimRange: (rangeIndex: number) => void;
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
@@ -284,6 +286,7 @@ export function FrameStrip({
           pendingTrimStartSeconds={pendingTrimStartSeconds}
           videoDurationSeconds={durationSeconds}
           onClick={onTrimTrackClick}
+          onMoveDot={onMoveTrimDot}
           onDeleteRange={onDeleteTrimRange}
         />
 

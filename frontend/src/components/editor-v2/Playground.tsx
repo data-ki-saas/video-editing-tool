@@ -71,6 +71,7 @@ export function Playground({
   trimRanges,
   pendingTrimStartSeconds,
   onTrimTrackClick,
+  onMoveTrimDot,
   onDeleteTrimRange,
 }: {
   selectedBackgroundTrackId: string;
@@ -97,6 +98,7 @@ export function Playground({
   trimRanges: TrimRange[];
   pendingTrimStartSeconds: number | null;
   onTrimTrackClick: (timeSeconds: number) => void;
+  onMoveTrimDot: (timeSeconds: number) => void;
   onDeleteTrimRange: (rangeIndex: number) => void;
 }) {
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
@@ -137,6 +139,7 @@ export function Playground({
           trimRanges={trimRanges}
           pendingTrimStartSeconds={pendingTrimStartSeconds}
           onTrimTrackClick={onTrimTrackClick}
+          onMoveTrimDot={onMoveTrimDot}
           onDeleteTrimRange={onDeleteTrimRange}
           pixelsPerSecond={PIXELS_PER_SECOND}
           scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}
