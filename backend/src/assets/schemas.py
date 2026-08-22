@@ -2,8 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-AssetKind = Literal["video", "image"]
-AssetMimeType = Literal["video/mp4", "image/jpeg", "image/png"]
+AssetKind = Literal["video", "image", "audio"]
+AssetMimeType = Literal["video/mp4", "image/jpeg", "image/png", "audio/mpeg"]
 
 
 class AssetInfo(BaseModel):

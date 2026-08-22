@@ -36,6 +36,16 @@ class Settings(BaseSettings):
     # re-fetching the asset (list/upload response), not by caching the URL.
     r2_signed_url_expires_seconds: int = 3600
 
+    # Pexels (https://www.pexels.com/api/) -- stock photo/video search.
+    pexels_api_key: str = ""
+
+    # Freesound (https://freesound.org/apiv2/apply/) -- stock background-
+    # music search. Results are filtered server-side to CC0-licensed tracks
+    # only (see stock_media/freesound_client.py), so a key with basic token
+    # auth is all that's ever needed -- no OAuth2, since only preview-quality
+    # audio is imported, not the OAuth2-gated original-quality download.
+    freesound_api_key: str = ""
+
     @property
     def max_upload_size_bytes(self) -> int:
         return self.max_upload_size_mb * 1024 * 1024

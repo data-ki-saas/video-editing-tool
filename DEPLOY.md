@@ -211,6 +211,8 @@ the next push that touches `supabase/migrations/`.
    | `ANTHROPIC_MODEL` | optional | `claude-sonnet-5` |
    | `MAX_UPLOAD_SIZE_MB` | optional | `500` |
    | `R2_SIGNED_URL_EXPIRES_SECONDS` | optional | `3600` |
+   | `PEXELS_API_KEY` | optional (stock photo/video search disabled without it) | `<PEXELS_API_KEY>` |
+   | `FREESOUND_API_KEY` | optional (stock music search disabled without it) | `<FREESOUND_API_KEY>` |
 
    Do **not** set `R2_ENDPOINT_OVERRIDE` — it exists only for the test
    suite (pointing at a local moto server).
@@ -387,6 +389,8 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | `DEEPSEEK_MODEL` | `deepseek-chat` | Not fetched — optional to set |
 | `ANTHROPIC_API_KEY` | `""` | Only needed if `LLM_PROVIDER=anthropic` — Anthropic Console > **API Keys** |
 | `ANTHROPIC_MODEL` | `claude-sonnet-5` | Not fetched — optional to set |
+| `PEXELS_API_KEY` | `""` | [pexels.com/api](https://www.pexels.com/api/) — sign up, one key covers both photo and video search |
+| `FREESOUND_API_KEY` | `""` | [freesound.org/apiv2/apply](https://freesound.org/apiv2/apply/) — request an API credential (basic token auth, no OAuth2 needed) |
 
 ### Render-transfer worker (Render), from `worker/.env.example`
 
@@ -427,6 +431,8 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | Cloudflare > R2 > renders bucket > Manage API Tokens + Custom Domains | renders-bucket access/secret keys, `R2_RENDERS_BUCKET_NAME`, `R2_RENDERS_PUBLIC_URL` |
 | Creatomate > Settings > API Keys | `CREATOMATE_API_KEY` |
 | DeepSeek dashboard > API Keys | `DEEPSEEK_API_KEY` |
+| Pexels > API | `PEXELS_API_KEY` |
+| Freesound > apiv2/apply | `FREESOUND_API_KEY` |
 | Creatomate > project > Preview SDK | `NEXT_PUBLIC_CREATOMATE_PUBLIC_TOKEN` |
 | Render > timeline-editor-backend service page | `NEXT_PUBLIC_API_BASE_URL` (the service's own URL) |
 | Render > render-transfer-worker service page | `RENDER_WORKER_URL` (the service's own URL + `/transfer`) |
