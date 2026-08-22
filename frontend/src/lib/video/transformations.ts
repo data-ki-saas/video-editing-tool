@@ -25,6 +25,7 @@ import {
   computeMaxCoverageCropFraction,
   findActiveZoomEffectIndex,
   toggleFlipAt,
+  mergeTrimRanges,
   type CropRect,
   type ZoomEffect,
 } from "./video_math";
@@ -191,4 +192,56 @@ export function applyZoomEpicenterChange(
   const nextZoomEffects = [...selections.zoomEffects];
   nextZoomEffects[effectIndex] = { ...zoomEffect, epicenterTimeSeconds };
   return { label: "Moved epicenter", state: { ...selections, zoomEffects: nextZoomEffects } };
+}
+
+// Two clicks on TrimTrack's gray line landing within this distance of each
+// other count as "clicked the pending dot again" -- cancels it, instead of
+// creating a near-zero-length trim nobody meant to place.
+const TRIM_CLICK_CANCEL_EPSILON_SECONDS = 0.15;
+
+export interface TrimClickResult {
+  /** null when this click only placed or cancelled a pending dot --
+   * nothing to push into history yet. */
+  historyChange: TransformationResult | null;
+  nextPendingTrimStartSeconds: number | null;
+}
+
+/**
+ * Decision logic for TrimTrack's two-click gesture. The first click on the
+ * gray line (no pending dot yet) just places one -- nothing committed
+ * yet. A second click completes the range between the two points, in
+ * whichever order they were clicked, and merges it into any trim range it
+ * now overlaps (see mergeTrimRanges). A second click landing back on
+ * almost the same spot as the first cancels the pending dot instead.
+ */
+export function applyTrimTrackClick(
+  selections: EditSelectionsSnapshot,
+  pendingTrimStartSeconds: number | null,
+  clickTimeSeconds: number
+): TrimClickResult {
+  if (pendingTrimStartSeconds === null) {
+    return { historyChange: null, nextPendingTrimStartSeconds: clickTimeSeconds };
+  }
+
+  if (Math.abs(clickTimeSeconds - pendingTrimStartSeconds) < TRIM_CLICK_CANCEL_EPSILON_SECONDS) {
+    return { historyChange: null, nextPendingTrimStartSeconds: null };
+  }
+
+  const startTimeSeconds = Math.min(pendingTrimStartSeconds, clickTimeSeconds);
+  const endTimeSeconds = Math.max(pendingTrimStartSeconds, clickTimeSeconds);
+  const trimRanges = mergeTrimRanges([...selections.trimRanges, { startTimeSeconds, endTimeSeconds }]);
+  return {
+    historyChange: { label: "Trim", state: { ...selections, trimRanges } },
+    nextPendingTrimStartSeconds: null,
+  };
+}
+
+/** Removes one trim range outright -- from the "Remove trim" context menu
+ * on TrimTrack's red segment. The cut section plays again afterward. */
+export function applyDeleteTrimRange(selections: EditSelectionsSnapshot, rangeIndex: number): TransformationResult {
+  if (!selections.trimRanges[rangeIndex]) return { label: "Removed trim", state: selections };
+  return {
+    label: "Removed trim",
+    state: { ...selections, trimRanges: selections.trimRanges.filter((_, index) => index !== rangeIndex) },
+  };
 }

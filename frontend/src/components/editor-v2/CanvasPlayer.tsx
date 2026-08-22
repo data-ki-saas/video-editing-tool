@@ -38,8 +38,10 @@ import {
   pickPreviewFrameRate,
   computeEffectiveCropRect,
   computeEffectiveFlip,
+  skipTrimmedRanges,
   FULL_FRAME_CROP_RECT,
   type CropRect,
+  type TrimRange,
   type ZoomEffect,
 } from "@/lib/video/video_math";
 import { ReelLoader } from "@/components/ReelLoader";
@@ -77,6 +79,11 @@ export const CanvasPlayer = forwardRef<
     // change mid-playback.
     flipHorizontalToggles: number[];
     flipVerticalToggles: number[];
+    // Cut-out stretches of the clip (see video_math.ts's TrimRange) --
+    // genuinely skipped during playback and on every seek (skipTrimmedRanges
+    // below), not merely marked, so what plays here matches what FrameStrip's
+    // dimmed tiles promise is gone.
+    trimRanges: TrimRange[];
     onFrameDimensions?: (dimensions: { width: number; height: number }) => void;
     onTimeUpdate?: (seconds: number) => void;
   }
@@ -88,6 +95,7 @@ export const CanvasPlayer = forwardRef<
     liveCropRectOverride = null,
     flipHorizontalToggles,
     flipVerticalToggles,
+    trimRanges,
     onFrameDimensions,
     onTimeUpdate,
   },
@@ -175,6 +183,25 @@ export const CanvasPlayer = forwardRef<
     if (!audioContext) return;
 
     const elapsed = pausedAtSecondsRef.current + (audioContext.currentTime - playStartedAtCtxTimeRef.current);
+
+    // Crossed into a cut section -- jump the audio source itself forward
+    // to just past it (not just what's drawn), so audio and video stay in
+    // sync through the cut rather than the picture skipping while the
+    // audio keeps playing the deleted stretch underneath.
+    const skippedElapsed = skipTrimmedRanges(trimRanges, elapsed);
+    if (skippedElapsed !== elapsed) {
+      stopPlaybackLoop();
+      if (skippedElapsed >= durationRef.current) {
+        drawFrameAt(durationRef.current);
+        onTimeUpdate?.(durationRef.current);
+        pausedAtSecondsRef.current = 0;
+        setIsPlaying(false);
+        return;
+      }
+      resumePlaybackFrom(skippedElapsed);
+      return;
+    }
+
     if (elapsed >= durationRef.current) {
       drawFrameAt(durationRef.current);
       onTimeUpdate?.(durationRef.current);
@@ -191,20 +218,24 @@ export const CanvasPlayer = forwardRef<
   /** Starts (or resumes) playback from `offsetSeconds` -- shared by the
    * Play button and seekTo-while-playing, since both boil down to "spin
    * up a fresh AudioBufferSourceNode at this offset and restart the RAF
-   * loop" (a source node can't be paused/resumed in place, only stopped). */
+   * loop" (a source node can't be paused/resumed in place, only stopped).
+   * Skips the offset itself forward past a cut, in case Play is pressed
+   * (or a seek lands) with the clock sitting inside a trimmed range. */
   function resumePlaybackFrom(offsetSeconds: number) {
     const audioBuffer = audioBufferRef.current;
     if (!audioBuffer) return;
     if (!audioContextRef.current) audioContextRef.current = new AudioContext();
     const audioContext = audioContextRef.current;
 
+    const adjustedOffsetSeconds = Math.min(skipTrimmedRanges(trimRanges, offsetSeconds), durationRef.current);
+
     const source = audioContext.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(audioContext.destination);
-    source.start(0, offsetSeconds);
+    source.start(0, adjustedOffsetSeconds);
     sourceNodeRef.current = source;
     playStartedAtCtxTimeRef.current = audioContext.currentTime;
-    pausedAtSecondsRef.current = offsetSeconds;
+    pausedAtSecondsRef.current = adjustedOffsetSeconds;
 
     setIsPlaying(true);
     animationFrameIdRef.current = requestAnimationFrame(tick);
@@ -235,9 +266,12 @@ export const CanvasPlayer = forwardRef<
         stopPlaybackLoop();
         resumePlaybackFrom(clamped);
       } else {
-        pausedAtSecondsRef.current = clamped;
-        drawFrameAt(clamped);
-        onTimeUpdate?.(clamped);
+        // resumePlaybackFrom already skips past a cut internally -- this
+        // branch doesn't call it, so it needs the same skip itself.
+        const adjusted = Math.min(skipTrimmedRanges(trimRanges, clamped), durationRef.current);
+        pausedAtSecondsRef.current = adjusted;
+        drawFrameAt(adjusted);
+        onTimeUpdate?.(adjusted);
       }
     },
   }));
@@ -299,7 +333,7 @@ export const CanvasPlayer = forwardRef<
   useEffect(() => {
     if (isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
-  }, [baseCropRect, zoomEffects, liveCropRectOverride, flipHorizontalToggles, flipVerticalToggles, isReady, isPlaying]);
+  }, [baseCropRect, zoomEffects, liveCropRectOverride, flipHorizontalToggles, flipVerticalToggles, trimRanges, isReady, isPlaying]);
 
   useEffect(() => {
     return () => {

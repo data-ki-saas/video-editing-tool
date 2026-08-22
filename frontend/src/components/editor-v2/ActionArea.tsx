@@ -21,7 +21,7 @@ import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { CollapsiblePanel } from "./CollapsiblePanel";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { Asset } from "@/lib/api";
-import type { CropRect, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 import type { RefObject } from "react";
 
 // Caps the play area to the widest ratio in the clip-rectangle catalogue
@@ -50,6 +50,7 @@ export function ActionArea({
   liveCropRectOverride,
   flipHorizontalToggles,
   flipVerticalToggles,
+  trimRanges,
   onFrameDimensions,
   playerRef,
   onPlayerTimeUpdate,
@@ -73,6 +74,7 @@ export function ActionArea({
   liveCropRectOverride: CropRect | null;
   flipHorizontalToggles: number[];
   flipVerticalToggles: number[];
+  trimRanges: TrimRange[];
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
   // Lets ThreePaneEditor's Playground scrub this player and track a
   // playhead against it -- see CanvasPlayer.tsx's seekTo/onTimeUpdate.
@@ -123,6 +125,7 @@ export function ActionArea({
               liveCropRectOverride={liveCropRectOverride}
               flipHorizontalToggles={flipHorizontalToggles}
               flipVerticalToggles={flipVerticalToggles}
+              trimRanges={trimRanges}
               onFrameDimensions={onFrameDimensions}
               onTimeUpdate={onPlayerTimeUpdate}
             />

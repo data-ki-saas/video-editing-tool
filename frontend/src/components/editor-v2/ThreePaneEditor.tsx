@@ -38,6 +38,8 @@ import {
   applyZoomEpicenterChange,
   applyDeleteZoomEffect,
   applyFlipToggle,
+  applyTrimTrackClick,
+  applyDeleteTrimRange,
 } from "@/lib/video/transformations";
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
@@ -57,6 +59,7 @@ const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
   zoomEffects: [],
   flipHorizontalToggles: [],
   flipVerticalToggles: [],
+  trimRanges: [],
 };
 
 export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: string; initialTimeline: Timeline }) {
@@ -89,6 +92,12 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
   // (by index into selections.zoomEffects) is being dragged, since any of
   // several can be.
   const [liveZoomEffectEdit, setLiveZoomEffectEdit] = useState<{ index: number; effect: ZoomEffect } | null>(null);
+
+  // The first click of TrimTrack's two-click "place a trim" gesture --
+  // null until a dot is pending, cleared again as soon as the second
+  // click completes (or cancels) it. Never persisted -- it's mid-gesture
+  // state, not a committed trim.
+  const [pendingTrimStartSeconds, setPendingTrimStartSeconds] = useState<number | null>(null);
 
   const canvasPlayerRef = useRef<CanvasPlayerHandle>(null);
 
@@ -126,6 +135,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     zoomEffects: rawSelections.zoomEffects ?? [],
     flipHorizontalToggles: rawSelections.flipHorizontalToggles ?? [],
     flipVerticalToggles: rawSelections.flipVerticalToggles ?? [],
+    trimRanges: rawSelections.trimRanges ?? [],
   };
 
   // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to redo (both redo
@@ -359,6 +369,21 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     pushChange(label, state);
   }
 
+  function handleTrimTrackClick(clickTimeSeconds: number) {
+    const { historyChange, nextPendingTrimStartSeconds } = applyTrimTrackClick(
+      selections,
+      pendingTrimStartSeconds,
+      clickTimeSeconds
+    );
+    setPendingTrimStartSeconds(nextPendingTrimStartSeconds);
+    if (historyChange) pushChange(historyChange.label, historyChange.state);
+  }
+
+  function handleDeleteTrimRange(rangeIndex: number) {
+    const { label, state } = applyDeleteTrimRange(selections, rangeIndex);
+    pushChange(label, state);
+  }
+
   function handleSeek(seconds: number) {
     canvasPlayerRef.current?.seekTo(seconds);
   }
@@ -395,6 +420,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           liveCropRectOverride={liveCropRect}
           flipHorizontalToggles={selections.flipHorizontalToggles}
           flipVerticalToggles={selections.flipVerticalToggles}
+          trimRanges={selections.trimRanges}
           onFrameDimensions={setFrameDimensions}
           playerRef={canvasPlayerRef}
           onPlayerTimeUpdate={setCurrentTimeSeconds}
@@ -424,6 +450,10 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           flipVerticalToggles={selections.flipVerticalToggles}
           onFlipHorizontal={() => handleFlip("horizontal")}
           onFlipVertical={() => handleFlip("vertical")}
+          trimRanges={selections.trimRanges}
+          pendingTrimStartSeconds={pendingTrimStartSeconds}
+          onTrimTrackClick={handleTrimTrackClick}
+          onDeleteTrimRange={handleDeleteTrimRange}
         />
       </section>
 

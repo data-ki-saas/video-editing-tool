@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { CropRect, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 
 export interface TemplateElement {
   id: string;
@@ -52,6 +52,10 @@ export interface EditSelectionsSnapshot {
   // video_math.ts's toggleFlipAt/computeEffectiveFlip).
   flipHorizontalToggles: number[];
   flipVerticalToggles: number[];
+  // Cut-out stretches of the clip -- see TrimTrack.tsx's click-to-place
+  // gesture and CanvasPlayer's skipTrimmedRanges, which actually skips
+  // over them during playback rather than just marking them.
+  trimRanges: TrimRange[];
 }
 
 export interface EditHistoryEntrySnapshot {

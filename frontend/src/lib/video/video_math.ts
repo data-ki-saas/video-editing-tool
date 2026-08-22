@@ -349,6 +349,64 @@ export function computeFlipSegments(toggles: number[], durationSeconds: number):
   return segments;
 }
 
+/** A cut-out stretch of the clip -- see components/editor-v2/TrimTrack.tsx
+ * for the click-to-place-then-click-to-close gesture that creates one, and
+ * CanvasPlayer's skipTrimmedRanges for how it's actually skipped during
+ * playback rather than just marked. */
+export interface TrimRange {
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+}
+
+/**
+ * Folds a fresh (or just-edited) trim range into a sorted, non-overlapping
+ * list -- any ranges that now overlap or touch collapse into one wider
+ * range (min start, max end). Two trims a user places without lining up
+ * their edges exactly still end up as one clean cut rather than two
+ * fragments needing to be reconciled by hand.
+ */
+export function mergeTrimRanges(ranges: TrimRange[]): TrimRange[] {
+  if (ranges.length === 0) return [];
+  const sorted = [...ranges].sort((a, b) => a.startTimeSeconds - b.startTimeSeconds);
+  const merged: TrimRange[] = [{ ...sorted[0] }];
+  for (let i = 1; i < sorted.length; i++) {
+    const current = sorted[i];
+    const last = merged[merged.length - 1];
+    if (current.startTimeSeconds <= last.endTimeSeconds) {
+      last.endTimeSeconds = Math.max(last.endTimeSeconds, current.endTimeSeconds);
+    } else {
+      merged.push({ ...current });
+    }
+  }
+  return merged;
+}
+
+/** Which trim range (if any) has cut out `timeSeconds` -- inclusive of its
+ * start, exclusive of its end, so landing exactly on a range's end counts
+ * as just past the cut, not still inside it. */
+export function findTrimRangeIndexAt(trimRanges: TrimRange[], timeSeconds: number): number {
+  return trimRanges.findIndex((range) => timeSeconds >= range.startTimeSeconds && timeSeconds < range.endTimeSeconds);
+}
+
+/**
+ * If `timeSeconds` has been cut out, the next moment that hasn't been --
+ * that range's own end, walked forward again in case that lands inside
+ * ANOTHER range too (ranges are merged so this can only happen with two
+ * ranges placed back-to-back). Otherwise `timeSeconds` unchanged. This is
+ * the actual "deletion" -- CanvasPlayer calls it on every playback tick and
+ * on every seek, so a cut section is genuinely skipped over, not merely
+ * marked.
+ */
+export function skipTrimmedRanges(trimRanges: TrimRange[], timeSeconds: number): number {
+  let time = timeSeconds;
+  let rangeIndex = findTrimRangeIndexAt(trimRanges, time);
+  while (rangeIndex !== -1) {
+    time = trimRanges[rangeIndex].endTimeSeconds;
+    rangeIndex = findTrimRangeIndexAt(trimRanges, time);
+  }
+  return time;
+}
+
 /**
  * Root-mean-square loudness of `samples` (mono, -1..1 range), one value per
  * `bucketSeconds` window, normalized so the loudest bucket in the clip is

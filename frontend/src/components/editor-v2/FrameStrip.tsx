@@ -47,20 +47,27 @@
  * uniform whole-clip value.
  *
  * ZoomEffectsTrack (every transition's own indicator) and FlipTrack (one
- * per flip axis, when either has any toggles) render in the SAME
- * scrollable track as the thumbnails, directly below them, so all of them
- * share one scroll position and one pixel-accurate timeline width with no
- * manual measurement needed.
+ * per flip axis, when either has any toggles) render BELOW the thumbnails;
+ * TrimTrack (the click-to-cut gray/red line) renders ABOVE them instead,
+ * per its own spec. All of them live in the SAME scrollable track as the
+ * thumbnails, so everything shares one scroll position and one
+ * pixel-accurate timeline width with no manual measurement needed. Tiles
+ * inside a trimmed range are dimmed (see FrameTile's isTrimmed) -- the cut
+ * is real (CanvasPlayer's skipTrimmedRanges actually skips it during
+ * playback), this is just showing where.
  */
 import { memo, useMemo, useRef } from "react";
 import { CropRectOverlay } from "./CropRectOverlay";
 import { ZoomEffectsTrack } from "./ZoomEffectsTrack";
 import { FlipTrack } from "./FlipTrack";
+import { TrimTrack } from "./TrimTrack";
 import {
   computeEffectiveCropRect,
   computeEffectiveFlip,
   computeFlipSegments,
+  findTrimRangeIndexAt,
   type CropRect,
+  type TrimRange,
   type ZoomEffect,
 } from "@/lib/video/video_math";
 
@@ -72,6 +79,7 @@ const FrameTile = memo(function FrameTile({
   cropRect,
   flipHorizontal,
   flipVertical,
+  isTrimmed,
   onChange,
   onCommit,
   onFlipHorizontal,
@@ -84,6 +92,7 @@ const FrameTile = memo(function FrameTile({
   cropRect: CropRect | null;
   flipHorizontal: boolean;
   flipVertical: boolean;
+  isTrimmed: boolean;
   onChange?: (next: CropRect) => void;
   onCommit?: (next: CropRect) => void;
   onFlipHorizontal?: () => void;
@@ -104,7 +113,7 @@ const FrameTile = memo(function FrameTile({
     // Playground's allocated space, Playground.tsx scrolls vertically
     // rather than this shrinking (or centering with padding) to fit.
     <div
-      className="relative shrink-0 overflow-hidden"
+      className={`relative shrink-0 overflow-hidden ${isTrimmed ? "opacity-30" : ""}`}
       style={{ width: widthPx, aspectRatio: frameAspectRatio ?? undefined }}
     >
       {/* Safe to fill the box exactly (object-cover would normally risk
@@ -150,6 +159,10 @@ export function FrameStrip({
   flipVerticalToggles,
   onFlipHorizontal,
   onFlipVertical,
+  trimRanges,
+  pendingTrimStartSeconds,
+  onTrimTrackClick,
+  onDeleteTrimRange,
   pixelsPerSecond,
   scrollContainerRef,
   onScroll,
@@ -173,6 +186,10 @@ export function FrameStrip({
   flipVerticalToggles: number[];
   onFlipHorizontal: () => void;
   onFlipVertical: () => void;
+  trimRanges: TrimRange[];
+  pendingTrimStartSeconds: number | null;
+  onTrimTrackClick: (timeSeconds: number) => void;
+  onDeleteTrimRange: (rangeIndex: number) => void;
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
@@ -209,6 +226,14 @@ export function FrameStrip({
     () => computeFlipSegments(flipVerticalToggles, durationSeconds),
     [flipVerticalToggles, durationSeconds]
   );
+
+  const tileIsTrimmed = useMemo(() => {
+    return thumbnails.map((_, index) => {
+      const timestamp = thumbnails.length > 1 ? (index / (thumbnails.length - 1)) * durationSeconds : 0;
+      return findTrimRangeIndexAt(trimRanges, timestamp) !== -1;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, durationSeconds, trimRanges]);
 
   // The tile nearest the playhead -- this DOES change every tick, but only
   // this one tile's memo identity flips (false->true / true->false) as a
@@ -254,6 +279,14 @@ export function FrameStrip({
           whatever space Playground.tsx allocates -- see FrameTile's
           comment for why forcing that produced unwanted blank padding. */}
       <div ref={trackRef} className="relative flex w-max flex-col">
+        <TrimTrack
+          trimRanges={trimRanges}
+          pendingTrimStartSeconds={pendingTrimStartSeconds}
+          videoDurationSeconds={durationSeconds}
+          onClick={onTrimTrackClick}
+          onDeleteRange={onDeleteTrimRange}
+        />
+
         <div onClick={handleClick} className="flex cursor-pointer items-center">
           {thumbnails.map((src, index) => (
             <FrameTile
@@ -265,6 +298,7 @@ export function FrameStrip({
               cropRect={tileCropRects[index]}
               flipHorizontal={tileFlips[index].flipHorizontal}
               flipVertical={tileFlips[index].flipVertical}
+              isTrimmed={tileIsTrimmed[index]}
               onChange={index === activeTileIndex ? onCropRectChange : undefined}
               onCommit={index === activeTileIndex ? onCropRectCommit : undefined}
               onFlipHorizontal={index === activeTileIndex ? onFlipHorizontal : undefined}

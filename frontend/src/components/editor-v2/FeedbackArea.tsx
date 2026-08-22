@@ -45,6 +45,9 @@ function ActiveTransformationsList({
   for (const segment of computeFlipSegments(selections.flipVerticalToggles, videoDurationSeconds)) {
     rows.push(`Mirrored ${formatTimeRange(segment.startTimeSeconds, segment.endTimeSeconds)}`);
   }
+  for (const range of selections.trimRanges) {
+    rows.push(`Trimmed ${formatTimeRange(range.startTimeSeconds, range.endTimeSeconds)}`);
+  }
 
   if (rows.length === 0) {
     return <p className="text-xs text-muted">No transformations applied yet.</p>;

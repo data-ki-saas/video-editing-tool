@@ -31,7 +31,7 @@ import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip } from "./FrameStrip";
 import { VolumeGraph } from "./VolumeGraph";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
-import type { CropRect, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 
 // Initial heights before any resizing -- the +/-25% stretch range (see
 // video_math.ts's DEFAULT_MAX_STRETCH_RATIO) is computed relative to these.
@@ -68,6 +68,10 @@ export function Playground({
   flipVerticalToggles,
   onFlipHorizontal,
   onFlipVertical,
+  trimRanges,
+  pendingTrimStartSeconds,
+  onTrimTrackClick,
+  onDeleteTrimRange,
 }: {
   selectedBackgroundTrackId: string;
   videoDurationSeconds: number;
@@ -90,6 +94,10 @@ export function Playground({
   flipVerticalToggles: number[];
   onFlipHorizontal: () => void;
   onFlipVertical: () => void;
+  trimRanges: TrimRange[];
+  pendingTrimStartSeconds: number | null;
+  onTrimTrackClick: (timeSeconds: number) => void;
+  onDeleteTrimRange: (rangeIndex: number) => void;
 }) {
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
 
@@ -126,6 +134,10 @@ export function Playground({
           flipVerticalToggles={flipVerticalToggles}
           onFlipHorizontal={onFlipHorizontal}
           onFlipVertical={onFlipVertical}
+          trimRanges={trimRanges}
+          pendingTrimStartSeconds={pendingTrimStartSeconds}
+          onTrimTrackClick={onTrimTrackClick}
+          onDeleteTrimRange={onDeleteTrimRange}
           pixelsPerSecond={PIXELS_PER_SECOND}
           scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}
           onScroll={bindOnScroll(FRAME_STRIP_INDEX)}
