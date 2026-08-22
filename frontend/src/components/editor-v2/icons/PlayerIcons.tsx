@@ -24,3 +24,25 @@ export function PauseIcon(props: IconProps) {
     </svg>
   );
 }
+
+/** Standard "repeat" glyph -- two curved arrows forming a loop -- for the
+ * loop-playback toggle below the Play/Pause button. Outline, not filled,
+ * like every native media player's repeat icon. */
+export function LoopIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M17 2l4 4-4 4" />
+      <path d="M21 6H8a5 5 0 0 0-5 5v1" />
+      <path d="M7 22l-4-4 4-4" />
+      <path d="M3 18h13a5 5 0 0 0 5-5v-1" />
+    </svg>
+  );
+}

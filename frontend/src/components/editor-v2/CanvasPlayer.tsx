@@ -45,7 +45,7 @@ import {
   type ZoomEffect,
 } from "@/lib/video/video_math";
 import { ReelLoader } from "@/components/ReelLoader";
-import { PlayIcon, PauseIcon } from "./icons/PlayerIcons";
+import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
 
 export interface CanvasPlayerHandle {
   seekTo(seconds: number): void;
@@ -115,12 +115,20 @@ export const CanvasPlayer = forwardRef<
   // pausedAtSeconds + (ctx.currentTime - playStartedAtCtxTime) while playing.
   const pausedAtSecondsRef = useRef(0);
   const playStartedAtCtxTimeRef = useRef(0);
+  // Read by tick() -- which, once scheduled via requestAnimationFrame,
+  // keeps calling the SAME closure until the next resumePlaybackFrom, so it
+  // never sees a fresh `isLooping` prop/state value on its own. A ref, kept
+  // in sync with isLooping alongside every setIsLooping call, makes
+  // toggling the loop button WHILE already playing take effect the next
+  // time playback reaches the end, not only the next time Play is pressed.
+  const isLoopingRef = useRef(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [loadingStage, setLoadingStage] = useState("Loading video…");
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLooping, setIsLooping] = useState(false);
 
   function stopPlaybackLoop() {
     if (animationFrameIdRef.current !== null) {
@@ -192,6 +200,10 @@ export const CanvasPlayer = forwardRef<
     if (skippedElapsed !== elapsed) {
       stopPlaybackLoop();
       if (skippedElapsed >= durationRef.current) {
+        if (isLoopingRef.current) {
+          resumePlaybackFrom(0);
+          return;
+        }
         drawFrameAt(durationRef.current);
         onTimeUpdate?.(durationRef.current);
         pausedAtSecondsRef.current = 0;
@@ -203,6 +215,11 @@ export const CanvasPlayer = forwardRef<
     }
 
     if (elapsed >= durationRef.current) {
+      if (isLoopingRef.current) {
+        stopPlaybackLoop();
+        resumePlaybackFrom(0);
+        return;
+      }
       drawFrameAt(durationRef.current);
       onTimeUpdate?.(durationRef.current);
       stopPlaybackLoop();
@@ -256,6 +273,12 @@ export const CanvasPlayer = forwardRef<
     }
 
     resumePlaybackFrom(pausedAtSecondsRef.current);
+  }
+
+  function handleToggleLoop() {
+    const next = !isLooping;
+    setIsLooping(next);
+    isLoopingRef.current = next;
   }
 
   useImperativeHandle(ref, () => ({
@@ -366,18 +389,33 @@ export const CanvasPlayer = forwardRef<
         )}
       </div>
 
-      {/* Icon-only, transparent background -- reads as a video-player
-          control rather than a generic form button -- and sits beside the
-          video instead of below it, so the video keeps the full height. */}
+      {/* Icon-only, transparent background -- reads as video-player
+          controls rather than generic form buttons -- stacked vertically
+          beside the video instead of below it, so the video keeps the
+          full height. */}
       {isReady && (
-        <button
-          type="button"
-          onClick={handlePlayPause}
-          aria-label={isPlaying ? "Pause" : "Play"}
-          className="shrink-0 rounded-full p-2 text-accent hover:bg-accent/10"
-        >
-          {isPlaying ? <PauseIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
-        </button>
+        <div className="flex shrink-0 flex-col items-center gap-1">
+          <button
+            type="button"
+            onClick={handlePlayPause}
+            aria-label={isPlaying ? "Pause" : "Play"}
+            className="shrink-0 rounded-full p-2 text-accent hover:bg-accent/10"
+          >
+            {isPlaying ? <PauseIcon className="h-6 w-6" /> : <PlayIcon className="h-6 w-6" />}
+          </button>
+          <button
+            type="button"
+            onClick={handleToggleLoop}
+            aria-label={isLooping ? "Turn off loop playback" : "Loop playback"}
+            aria-pressed={isLooping}
+            title="Loop playback"
+            className={
+              "shrink-0 rounded-full p-2 hover:bg-accent/10 " + (isLooping ? "text-accent" : "text-muted")
+            }
+          >
+            <LoopIcon className="h-5 w-5" />
+          </button>
+        </div>
       )}
     </div>
   );
