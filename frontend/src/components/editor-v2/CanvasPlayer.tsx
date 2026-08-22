@@ -1,16 +1,23 @@
 "use client";
 
 /**
- * Preview player for a video asset that does NOT rely on the browser's
- * native <video> element during playback -- a rough approximation of the
- * final render while the user is editing, not a frame-perfect one. Once
- * mounted for a given asset, it: (1) extracts a capped, device/duration-
- * adapted set of frames (see lib/video/video_math.ts's pickPreviewFrameRate
- * and lib/video/video.ts's extractPreviewFrames), (2) decodes the audio
- * track (lib/video/audio.ts's decodeAudioBuffer) -- and from then on, plays
- * both back from a single AudioContext clock, never touching the original
- * video file again. The original video is only ever a source to derive
- * these from, not something played directly.
+ * Preview player for a video asset -- playback only, no crop editing here
+ * (that lives entirely on FrameStrip's timeline now; see its module
+ * comment). This player renders the actual CROPPED result: each frame is
+ * drawn by sampling only the region CropRect/ZoomEffect say should be kept
+ * at that instant and scaling it to fill the canvas, so what's shown is
+ * "the final outcome of the work done in the timeline," not the full
+ * uncropped frame with a guide drawn over it.
+ *
+ * Does NOT rely on the browser's native <video> element during playback --
+ * a rough approximation of the final render while the user is editing, not
+ * a frame-perfect one. Once mounted for a given asset, it: (1) extracts a
+ * capped, device/duration-adapted set of frames (see lib/video/video_math.ts's
+ * pickPreviewFrameRate and lib/video/video.ts's extractPreviewFrames), (2)
+ * decodes the audio track (lib/video/audio.ts's decodeAudioBuffer) -- and
+ * from then on, plays both back from a single AudioContext clock, never
+ * touching the original video file again. The original video is only ever
+ * a source to derive these from, not something played directly.
  *
  * Frame selection during playback is pure math (video_math.ts's
  * frameIndexAtTime) driven by AudioContext.currentTime -- there's no
@@ -21,20 +28,19 @@
  * timeline can scrub this player, and reports playback position upward via
  * `onTimeUpdate` every tick so that timeline can draw a moving playhead --
  * see ThreePaneEditor for how the two are wired together.
- *
- * `cropRect`, when set, draws the CropRectOverlay crop guide over the
- * canvas, draggable/resizable via `onCropRectChange`/`onCropRectCommit` --
- * the same pair of handlers FrameStrip's active tile uses, so dragging on
- * either edits "the crop at the current time" consistently. What a commit
- * actually turns into (the flat base crop, or one end of a transition) is
- * decided by ThreePaneEditor, not here -- see its handleCropRectCommit.
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Asset } from "@/lib/api";
 import { extractPreviewFrames, getVideoDuration } from "@/lib/video/video";
 import { decodeAudioBuffer } from "@/lib/video/audio";
-import { frameIndexAtTime, pickPreviewFrameRate, type CropRect } from "@/lib/video/video_math";
-import { CropRectOverlay } from "./CropRectOverlay";
+import {
+  frameIndexAtTime,
+  pickPreviewFrameRate,
+  computeEffectiveCropRect,
+  FULL_FRAME_CROP_RECT,
+  type CropRect,
+  type ZoomEffect,
+} from "@/lib/video/video_math";
 import { ReelLoader } from "@/components/ReelLoader";
 import { PlayIcon, PauseIcon } from "./icons/PlayerIcons";
 
@@ -55,13 +61,34 @@ export const CanvasPlayer = forwardRef<
   CanvasPlayerHandle,
   {
     asset: Asset;
-    cropRect?: CropRect | null;
-    onCropRectChange?: (next: CropRect) => void;
-    onCropRectCommit?: (next: CropRect) => void;
+    baseCropRect: CropRect | null;
+    zoomEffect: ZoomEffect | null;
+    // Overrides the computed crop for the CURRENT static frame while
+    // paused -- lets the player preview a drag happening on FrameStrip's
+    // active tile live, before it's committed. Never applied during
+    // playback (dragging and playing at once isn't a real scenario).
+    liveCropRectOverride?: CropRect | null;
+    // "Flip" (horizontal) / "Mirror" (vertical) -- applied uniformly to
+    // the whole clip, toggled from CropRectOverlay's edge handles on
+    // FrameStrip's active tile (the player itself is playback-only).
+    flipHorizontal?: boolean;
+    flipVertical?: boolean;
     onFrameDimensions?: (dimensions: { width: number; height: number }) => void;
     onTimeUpdate?: (seconds: number) => void;
   }
->(function CanvasPlayer({ asset, cropRect = null, onCropRectChange, onCropRectCommit, onFrameDimensions, onTimeUpdate }, ref) {
+>(function CanvasPlayer(
+  {
+    asset,
+    baseCropRect,
+    zoomEffect,
+    liveCropRectOverride = null,
+    flipHorizontal = false,
+    flipVertical = false,
+    onFrameDimensions,
+    onTimeUpdate,
+  },
+  ref
+) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imagesRef = useRef<HTMLImageElement[]>([]);
   const frameRateRef = useRef(0);
@@ -82,7 +109,6 @@ export const CanvasPlayer = forwardRef<
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [frameDimensions, setFrameDimensions] = useState<{ width: number; height: number } | null>(null);
 
   function stopPlaybackLoop() {
     if (animationFrameIdRef.current !== null) {
@@ -97,6 +123,11 @@ export const CanvasPlayer = forwardRef<
     sourceNodeRef.current = null;
   }
 
+  /** Draws the frame at `elapsedSeconds`, sampling only the region the
+   * current crop/zoom (or a live in-progress drag override) says to keep,
+   * scaled to fill the canvas -- this IS the crop, not a guide over an
+   * uncropped frame. Canvas width/height track the cropped region's own
+   * pixel size, so there's no extra unnecessary scale step beyond that. */
   function drawFrameAt(elapsedSeconds: number) {
     const canvas = canvasRef.current;
     const images = imagesRef.current;
@@ -106,11 +137,30 @@ export const CanvasPlayer = forwardRef<
 
     const frameIndex = frameIndexAtTime(elapsedSeconds, frameRateRef.current, images.length);
     const image = images[frameIndex];
-    if (canvas.width !== image.naturalWidth || canvas.height !== image.naturalHeight) {
-      canvas.width = image.naturalWidth;
-      canvas.height = image.naturalHeight;
+
+    const crop = liveCropRectOverride ?? (baseCropRect ? computeEffectiveCropRect(baseCropRect, zoomEffect, elapsedSeconds) : FULL_FRAME_CROP_RECT);
+    const sx = crop.x * image.naturalWidth;
+    const sy = crop.y * image.naturalHeight;
+    const sWidth = crop.width * image.naturalWidth;
+    const sHeight = crop.height * image.naturalHeight;
+
+    const targetWidth = Math.max(1, Math.round(sWidth));
+    const targetHeight = Math.max(1, Math.round(sHeight));
+    if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
     }
-    ctx.drawImage(image, 0, 0);
+
+    // Flip/mirror via the canvas transform, not by touching sx/sy/sWidth/
+    // sHeight -- scale(-1) + translate the origin to the far edge maps the
+    // same source region onto a horizontally/vertically reversed
+    // destination, restored via ctx.restore() so it never leaks into the
+    // next draw (this canvas is reused every frame).
+    ctx.save();
+    ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
+    ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
+    ctx.drawImage(image, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
   }
 
   function tick() {
@@ -195,7 +245,6 @@ export const CanvasPlayer = forwardRef<
     setIsReady(false);
     setError(null);
     setIsPlaying(false);
-    setFrameDimensions(null);
     imagesRef.current = [];
     audioBufferRef.current = null;
     pausedAtSecondsRef.current = 0;
@@ -216,9 +265,7 @@ export const CanvasPlayer = forwardRef<
       if (cancelled) return;
       imagesRef.current = images;
       audioBufferRef.current = audioBuffer;
-      const dimensions = { width: images[0].naturalWidth, height: images[0].naturalHeight };
-      setFrameDimensions(dimensions);
-      onFrameDimensions?.(dimensions);
+      onFrameDimensions?.({ width: images[0].naturalWidth, height: images[0].naturalHeight });
       setIsReady(true);
       drawFrameAt(0);
     }
@@ -238,6 +285,15 @@ export const CanvasPlayer = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onTimeUpdate/onFrameDimensions are stable setters from the parent, not worth re-running this for
   }, [asset.url]);
 
+  // Redraws the current (static) frame whenever the crop/zoom/live-drag
+  // state changes while paused -- e.g. adjusting the active tile's crop on
+  // FrameStrip should update what the player shows immediately, not only
+  // once playback next passes through that instant.
+  useEffect(() => {
+    if (isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
+  }, [baseCropRect, zoomEffect, liveCropRectOverride, flipHorizontal, flipVertical, isReady, isPlaying]);
+
   useEffect(() => {
     return () => {
       stopPlaybackLoop();
@@ -256,22 +312,16 @@ export const CanvasPlayer = forwardRef<
 
   return (
     <div className="flex h-full w-full items-center justify-center gap-1 p-2">
-      {/* Sized via aspect-ratio (not flex centering alone) so its box
-          exactly matches the canvas -- CropRectOverlay's percentage
-          positioning needs to align with that box precisely, not with
-          whatever extra space a plain centered flex child might leave. */}
-      <div
-        className="relative h-full max-w-full overflow-hidden rounded-md bg-black"
-        style={frameDimensions ? { aspectRatio: `${frameDimensions.width} / ${frameDimensions.height}` } : undefined}
-      >
-        <canvas ref={canvasRef} className="h-full w-full" />
+      <div className="relative flex h-full max-w-full items-center justify-center overflow-hidden rounded-md bg-black">
+        {/* No explicit sizing beyond h-full/max-w-full -- the canvas's own
+            width/height attributes (set in drawFrameAt to the cropped
+            region's pixel size) already give it the right intrinsic aspect
+            ratio, the same way an <img> would. */}
+        <canvas ref={canvasRef} className="h-full max-h-full w-auto max-w-full" />
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60">
             <ReelLoader stage={loadingStage} className="text-white" />
           </div>
-        )}
-        {frameDimensions && cropRect && (
-          <CropRectOverlay cropRect={cropRect} onChange={onCropRectChange} onCommit={onCropRectCommit} />
         )}
       </div>
 

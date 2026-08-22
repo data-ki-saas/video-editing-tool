@@ -5,6 +5,10 @@
  * full duration of the video, as a strip of equal-width segments -- one per
  * loop -- shown above the frame thumbnail strip in the Playground. Empty
  * state when no track (or "None") is selected.
+ *
+ * Total width is `videoDurationSeconds * pixelsPerSecond` -- the same
+ * scale FrameStrip and VolumeGraph use, so all three line up and share one
+ * scroll position (see lib/useSyncedHorizontalScroll.ts).
  */
 import { useEffect, useState } from "react";
 import { BACKGROUND_TRACK_OPTIONS } from "@/lib/backgroundTracks";
@@ -13,9 +17,15 @@ import { getAudioDuration } from "@/lib/video/audio";
 export function BackgroundTrackStrip({
   selectedTrackId,
   videoDurationSeconds,
+  pixelsPerSecond,
+  scrollContainerRef,
+  onScroll,
 }: {
   selectedTrackId: string;
   videoDurationSeconds: number;
+  pixelsPerSecond: number;
+  scrollContainerRef: (el: HTMLDivElement | null) => void;
+  onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
 }) {
   const track = BACKGROUND_TRACK_OPTIONS.find((option) => option.id === selectedTrackId) ?? null;
 
@@ -64,22 +74,24 @@ export function BackgroundTrackStrip({
   const loopCount = Math.max(1, Math.ceil(videoDurationSeconds / trackDurationSeconds));
 
   return (
-    <div className="flex h-full gap-px overflow-hidden bg-neutral-900 px-2 py-1">
-      {Array.from({ length: loopCount }, (_, index) => {
-        // The final loop is usually cut short by the video ending mid-track
-        // -- its segment shrinks proportionally instead of overhanging past
-        // the strip's right edge.
-        const remainingSeconds = videoDurationSeconds - index * trackDurationSeconds;
-        const widthFraction = Math.min(trackDurationSeconds, remainingSeconds) / videoDurationSeconds;
-        return (
-          <div
-            key={index}
-            style={{ flexBasis: `${widthFraction * 100}%` }}
-            title={`${track.name} -- loop ${index + 1}`}
-            className="shrink-0 rounded-sm border border-accent/40 bg-accent/20"
-          />
-        );
-      })}
+    <div ref={scrollContainerRef} onScroll={onScroll} className="h-full overflow-x-auto bg-neutral-900 px-2 py-1">
+      <div className="flex h-full gap-px" style={{ width: videoDurationSeconds * pixelsPerSecond }}>
+        {Array.from({ length: loopCount }, (_, index) => {
+          // The final loop is usually cut short by the video ending
+          // mid-track -- its segment shrinks proportionally instead of
+          // overhanging past the strip's right edge.
+          const remainingSeconds = videoDurationSeconds - index * trackDurationSeconds;
+          const widthFraction = Math.min(trackDurationSeconds, remainingSeconds) / videoDurationSeconds;
+          return (
+            <div
+              key={index}
+              style={{ flexBasis: `${widthFraction * 100}%` }}
+              title={`${track.name} -- loop ${index + 1}`}
+              className="shrink-0 rounded-sm border border-accent/40 bg-accent/20"
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }

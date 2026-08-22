@@ -166,22 +166,36 @@ export function computeMaxCoverageCropFraction(sourceAspectRatio: number, target
 }
 
 /**
- * Linearly interpolates between two CropRects (both fractions, see above)
- * at progress `t` (0 = start, 1 = end, clamped) -- the "algorithm
- * calculates the sizes and position of intermediate clip rectangles"
- * driving a zoom in/out effect's live preview (see ZoomTimelineTrack.tsx
- * and CanvasPlayer's effective-crop-rect-at-time logic). Pure lerp on each
- * field independently -- width/height interpolate at the same rate as x/y
- * so the rect visually scales and moves smoothly together, not in two
+ * Eases a linear progress value 0..1 into an ease-in-out curve (slow ->
+ * fast -> slow) -- applied before interpolating a transition's rect so a
+ * zoom/pan accelerates into and decelerates out of the move instead of
+ * changing at constant speed, which reads as mechanical rather than
+ * smooth. Standard cubic ease-in-out; kept as its own named function
+ * (rather than inlined into interpolateCropRect) so a different curve can
+ * be swapped in later without touching the interpolation math itself.
+ */
+export function easeInOut(t: number): number {
+  const clampedT = Math.min(Math.max(t, 0), 1);
+  return clampedT < 0.5 ? 4 * clampedT ** 3 : 1 - (-2 * clampedT + 2) ** 3 / 2;
+}
+
+/**
+ * Interpolates between two CropRects (both fractions, see above) at
+ * progress `t` (0 = start, 1 = end, clamped and eased via easeInOut above)
+ * -- the "algorithm calculates the sizes and position of intermediate
+ * clip rectangles" driving a zoom/pan transition's live preview (see
+ * ZoomEffectRow.tsx and CanvasPlayer's effective-crop-rect-at-time logic).
+ * Lerp on each field independently -- width/height move at the same rate
+ * as x/y so the rect visually scales and moves together, not in two
  * separate motions.
  */
 export function interpolateCropRect(start: CropRect, end: CropRect, t: number): CropRect {
-  const clampedT = Math.min(Math.max(t, 0), 1);
+  const easedT = easeInOut(t);
   return {
-    x: start.x + (end.x - start.x) * clampedT,
-    y: start.y + (end.y - start.y) * clampedT,
-    width: start.width + (end.width - start.width) * clampedT,
-    height: start.height + (end.height - start.height) * clampedT,
+    x: start.x + (end.x - start.x) * easedT,
+    y: start.y + (end.y - start.y) * easedT,
+    width: start.width + (end.width - start.width) * easedT,
+    height: start.height + (end.height - start.height) * easedT,
   };
 }
 

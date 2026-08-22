@@ -74,7 +74,7 @@ function PanTiltIcon(props: IconProps) {
   );
 }
 
-function FlipIcon(props: IconProps) {
+export function FlipIcon(props: IconProps) {
   return (
     <svg {...BASE_PROPS} {...props}>
       <path d="M12 3v18" strokeDasharray="2 2" />
@@ -84,7 +84,7 @@ function FlipIcon(props: IconProps) {
   );
 }
 
-function MirrorIcon(props: IconProps) {
+export function MirrorIcon(props: IconProps) {
   return (
     <svg {...BASE_PROPS} {...props}>
       <path d="M3 12h18" strokeDasharray="2 2" />

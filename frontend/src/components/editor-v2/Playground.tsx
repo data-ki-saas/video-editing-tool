@@ -11,17 +11,33 @@
  * ResizablePanel.tsx's `anchor` prop for how the background/volume panels
  * each stay pinned to their own edge of the stack while still being
  * independently resizable.
+ *
+ * All three represent the same timeline at the same PIXELS_PER_SECOND
+ * scale (so their total widths line up) and share one scroll position via
+ * lib/useSyncedHorizontalScroll.ts -- scrolling any one of them scrolls
+ * all three together, since they're meant to read as one aligned view of
+ * the clip, not three independently-scrolling panels that happen to be
+ * stacked.
  */
 import { ResizablePanel } from "./ResizablePanel";
 import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip } from "./FrameStrip";
 import { VolumeGraph } from "./VolumeGraph";
+import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
 import type { CropRect, ZoomEffect } from "@/lib/video/video_math";
 
 // Initial heights before any resizing -- the +/-25% stretch range (see
 // video_math.ts's DEFAULT_MAX_STRETCH_RATIO) is computed relative to these.
 const INITIAL_BACKGROUND_STRIP_HEIGHT_PX = 40;
 const INITIAL_VOLUME_GRAPH_HEIGHT_PX = 80;
+
+// Shared time-to-pixel scale for all three strips -- see this file's
+// module comment.
+const PIXELS_PER_SECOND = 60;
+
+const BACKGROUND_STRIP_INDEX = 0;
+const FRAME_STRIP_INDEX = 1;
+const VOLUME_GRAPH_INDEX = 2;
 
 export function Playground({
   selectedBackgroundTrackId,
@@ -37,6 +53,10 @@ export function Playground({
   onCommitZoomRange,
   onCropRectChange,
   onCropRectCommit,
+  flipHorizontal,
+  flipVertical,
+  onFlipHorizontal,
+  onFlipVertical,
 }: {
   selectedBackgroundTrackId: string;
   videoDurationSeconds: number;
@@ -51,13 +71,22 @@ export function Playground({
   onCommitZoomRange: (startTimeSeconds: number, endTimeSeconds: number) => void;
   onCropRectChange: (next: CropRect) => void;
   onCropRectCommit: (next: CropRect) => void;
+  flipHorizontal: boolean;
+  flipVertical: boolean;
+  onFlipHorizontal: () => void;
+  onFlipVertical: () => void;
 }) {
+  const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
+
   return (
     <div className="flex h-full flex-col gap-2 bg-surface px-2">
       <ResizablePanel label="background track" anchor="top" initialHeightPx={INITIAL_BACKGROUND_STRIP_HEIGHT_PX}>
         <BackgroundTrackStrip
           selectedTrackId={selectedBackgroundTrackId}
           videoDurationSeconds={videoDurationSeconds}
+          pixelsPerSecond={PIXELS_PER_SECOND}
+          scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}
+          onScroll={bindOnScroll(BACKGROUND_STRIP_INDEX)}
         />
       </ResizablePanel>
 
@@ -74,11 +103,24 @@ export function Playground({
           onCommitZoomRange={onCommitZoomRange}
           onCropRectChange={onCropRectChange}
           onCropRectCommit={onCropRectCommit}
+          flipHorizontal={flipHorizontal}
+          flipVertical={flipVertical}
+          onFlipHorizontal={onFlipHorizontal}
+          onFlipVertical={onFlipVertical}
+          pixelsPerSecond={PIXELS_PER_SECOND}
+          scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}
+          onScroll={bindOnScroll(FRAME_STRIP_INDEX)}
         />
       </div>
 
       <ResizablePanel label="sound volume" anchor="bottom" initialHeightPx={INITIAL_VOLUME_GRAPH_HEIGHT_PX}>
-        <VolumeGraph levels={volumeLevels} isLoading={isAnalyzing} />
+        <VolumeGraph
+          levels={volumeLevels}
+          isLoading={isAnalyzing}
+          pixelsPerSecond={PIXELS_PER_SECOND}
+          scrollContainerRef={bindRef(VOLUME_GRAPH_INDEX)}
+          onScroll={bindOnScroll(VOLUME_GRAPH_INDEX)}
+        />
       </ResizablePanel>
     </div>
   );

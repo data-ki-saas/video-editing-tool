@@ -9,15 +9,17 @@
  *     play area/timeline -- the only frame-affecting choice here, along
  *     with Zoom In/Out below, so only their changes land in the change
  *     history -- see ThreePaneEditor)
- *  3. Action buttons, grouped Arrange (Delete/Trim/Drag) and Transform
- *     (Zoom In/Zoom Out/Pan & Tilt/Flip/Mirror). Zoom In/Out are wired up
- *     (they reuse the clip rectangle's crop-rect mechanism, scaled toward
- *     or away from center over a default time range you can then drag to
- *     resize on the timeline below); the rest are still disabled
- *     scaffolding ("Coming soon") -- each needs its own real interaction
- *     design (region selection, drag-to-timeline, pan/flip mechanics).
- *     Crop is called out as automatic (driven by the clip-rectangle picker)
- *     rather than a button, since there's no separate action to take for it.
+ *  3. Action buttons, grouped Arrange (Delete/Trim/Drag, still disabled
+ *     scaffolding -- each needs its own real interaction design for region
+ *     selection/drag-to-timeline) and Transform. Crop, Zoom In/Out, Pan &
+ *     Tilt, Flip, and Mirror are all just manipulations of the ONE clip
+ *     rectangle now, not separate buttons -- Crop is automatic (picking a
+ *     ratio places it), Zoom In/Out create a transition from here (a
+ *     default scale toward/away from center), and Flip/Mirror/Pan/Tilt all
+ *     happen by dragging/resizing/toggling directly on the rectangle
+ *     itself (see CropRectOverlay.tsx's edge handles and
+ *     ThreePaneEditor's handleCropRectCommit). That's why there's no
+ *     separate Flip/Mirror/Pan/Tilt button here.
  */
 import { TEMPLATE_OPTIONS } from "@/lib/templates";
 import { TEMPLATE_ICONS } from "./icons/TemplateIcons";
@@ -32,11 +34,6 @@ const ARRANGE_ACTIONS = [
   { id: "drag", label: "Drag" },
 ];
 
-const DISABLED_TRANSFORM_ACTIONS = [
-  { id: "pan-tilt", label: "Pan & Tilt" },
-  { id: "flip", label: "Flip" },
-  { id: "mirror", label: "Mirror" },
-];
 
 function TemplateSection({
   selectedTemplateId,
@@ -152,27 +149,15 @@ function ActionButtonsSection({
 
       <div className="flex flex-col gap-1">
         <span className="text-[10px] font-medium uppercase tracking-wide text-muted">Transform</span>
-        <p className="text-[10px] text-accent">Crop -- applied automatically from the clip rectangle</p>
+        <p className="text-[10px] text-accent">
+          Crop, Pan/Tilt, and Flip/Mirror all happen on the clip rectangle itself (drag, resize, or use its edge
+          handles)
+        </p>
         <div className="flex gap-2 overflow-x-auto">
-          <ActionButton
-            id="zoom-in"
-            label="Zoom In"
-            disabled={!canZoom}
-            onClick={onZoomIn}
-          />
-          <ActionButton
-            id="zoom-out"
-            label="Zoom Out"
-            disabled={!canZoom}
-            onClick={onZoomOut}
-          />
-          {DISABLED_TRANSFORM_ACTIONS.map((action) => (
-            <ActionButton key={action.id} id={action.id} label={action.label} disabled />
-          ))}
+          <ActionButton id="zoom-in" label="Zoom In" disabled={!canZoom} onClick={onZoomIn} />
+          <ActionButton id="zoom-out" label="Zoom Out" disabled={!canZoom} onClick={onZoomOut} />
         </div>
-        {!canZoom && (
-          <p className="text-[10px] text-muted">Pick a clip rectangle first to enable Zoom In/Out.</p>
-        )}
+        {!canZoom && <p className="text-[10px] text-muted">Pick a clip rectangle first to enable Zoom In/Out.</p>}
       </div>
     </div>
   );

@@ -21,7 +21,14 @@ export interface AppMetaEntry {
 // choices are NOT part of this: they don't affect frames (yet), so they're
 // plain persisted fields on Timeline below rather than history entries --
 // only actions that change frames belong in the visible change list.
-// Grows as more frame-affecting actions (crop/zoom/pan/flip/trim/...) land.
+//
+// Every frame-affecting transform is a manipulation of the ONE clip
+// rectangle: its size (drag the corner) is the crop/zoom target, its
+// position (drag the body) is the pan/tilt target, both changing over time
+// is the transition effect (zoomEffect handles zoom AND pan -- a "move
+// without resizing between two points in time" is a pan through the exact
+// same mechanism), and flipHorizontal/flipVertical are toggled from
+// handles on the rect's own edges. Grows as more transform types land.
 export interface EditSelectionsSnapshot {
   clipRectId: string | null;
   // The clip rectangle's actual position/size (fractions of the frame --
@@ -32,6 +39,13 @@ export interface EditSelectionsSnapshot {
   // comment about showing only the selected effect if/when this becomes a
   // list.
   zoomEffect: ZoomEffect | null;
+  // "Flip" (left/right handles -- mirrors left-right) and "Mirror"
+  // (top/bottom handles -- mirrors top-bottom), matching Premiere/
+  // Photoshop's "Flip Horizontal"/"Flip Vertical" naming underneath more
+  // approachable labels. Applied uniformly to the whole clip, not
+  // time-varying like zoomEffect.
+  flipHorizontal: boolean;
+  flipVertical: boolean;
 }
 
 export interface EditHistoryEntrySnapshot {

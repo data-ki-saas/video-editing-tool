@@ -6,7 +6,9 @@
  * gallery (replaces the always-visible upload dropzone -- "+ Asset" opens
  * UploadDialog instead), a background-track picker, the user-actions panel
  * (templates / clip rectangles / action buttons), and a play area showing
- * whichever asset is currently selected.
+ * whichever asset is currently selected. The play area is playback-only --
+ * no crop/flip editing happens here; that all lives on FrameStrip's
+ * timeline (see Playground.tsx), CanvasPlayer just renders the result.
  */
 import { useState } from "react";
 import { ProjectList } from "./ProjectList";
@@ -19,7 +21,7 @@ import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { CollapsiblePanel } from "./CollapsiblePanel";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { Asset } from "@/lib/api";
-import type { CropRect } from "@/lib/video/video_math";
+import type { CropRect, ZoomEffect } from "@/lib/video/video_math";
 import type { RefObject } from "react";
 
 // Caps the play area to the widest ratio in the clip-rectangle catalogue
@@ -43,9 +45,11 @@ export function ActionArea({
   onSelectTemplate,
   selectedClipRectId,
   onSelectClipRect,
-  effectiveCropRect,
-  onCropRectChange,
-  onCropRectCommit,
+  baseCropRect,
+  zoomEffect,
+  liveCropRectOverride,
+  flipHorizontal,
+  flipVertical,
   onFrameDimensions,
   onZoomIn,
   onZoomOut,
@@ -66,16 +70,11 @@ export function ActionArea({
   onSelectTemplate: (id: string) => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
-  // The crop rect to actually display right now (already resolved for any
-  // active zoom effect at the current time) -- null until a ratio's been
-  // picked, in which case no crop guide is shown at all.
-  effectiveCropRect: CropRect | null;
-  // Always wired up -- ThreePaneEditor's commit handler decides what a
-  // drag actually means (the flat base crop, or one end of a transition)
-  // based on the current playhead position, rather than this needing to
-  // gate whether dragging is allowed at all.
-  onCropRectChange: (next: CropRect) => void;
-  onCropRectCommit: (next: CropRect) => void;
+  baseCropRect: CropRect | null;
+  zoomEffect: ZoomEffect | null;
+  liveCropRectOverride: CropRect | null;
+  flipHorizontal: boolean;
+  flipVertical: boolean;
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -126,9 +125,11 @@ export function ActionArea({
               key={selectedAsset.id}
               ref={playerRef}
               asset={selectedAsset}
-              cropRect={effectiveCropRect}
-              onCropRectChange={onCropRectChange}
-              onCropRectCommit={onCropRectCommit}
+              baseCropRect={baseCropRect}
+              zoomEffect={zoomEffect}
+              liveCropRectOverride={liveCropRectOverride}
+              flipHorizontal={flipHorizontal}
+              flipVertical={flipVertical}
               onFrameDimensions={onFrameDimensions}
               onTimeUpdate={onPlayerTimeUpdate}
             />
