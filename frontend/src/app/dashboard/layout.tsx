@@ -1,6 +1,4 @@
 import type { Metadata } from "next";
-import { DashboardSidebar } from "@/components/DashboardSidebar";
-import { EditorPanelProvider } from "@/lib/editor/EditorPanelContext";
 
 // Requires auth (see src/lib/supabase/middleware.ts) -- noindex since crawlers would just hit a redirect.
 export const metadata: Metadata = {
@@ -9,13 +7,9 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+// No sidebar here on purpose -- project switching now lives inside the
+// editor's Action Area (see components/editor-v2/ProjectList.tsx), not as a
+// persistent full-height column.
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <EditorPanelProvider>
-      <div className="flex h-screen bg-background text-foreground">
-        <DashboardSidebar />
-        <main className="flex-1 overflow-y-auto">{children}</main>
-      </div>
-    </EditorPanelProvider>
-  );
+  return <main className="flex h-screen flex-col overflow-y-auto bg-background text-foreground">{children}</main>;
 }

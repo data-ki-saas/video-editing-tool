@@ -62,6 +62,27 @@ function captureFrameAt(video: HTMLVideoElement, timeSeconds: number, canvas: HT
 }
 
 /**
+ * Grabs a single representative frame from the video at `url` -- used by the
+ * asset gallery's thumbnail tiles, which need one small preview per video
+ * asset rather than the full per-second timeline strip. Reuses the same
+ * load/capture primitives as extractThumbnails below. Defaults to 0.1s
+ * rather than 0 since the very first frame of some encodings is black.
+ */
+export async function captureSingleFrame(url: string, atSeconds = 0.1): Promise<string> {
+  const video = await loadVideoElement(url);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = THUMBNAIL_WIDTH_PX;
+    canvas.height = Math.round(THUMBNAIL_WIDTH_PX * (video.videoHeight / video.videoWidth || 9 / 16));
+    const clampedTime = Math.min(atSeconds, video.duration || atSeconds);
+    return await captureFrameAt(video, clampedTime, canvas);
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
+/**
  * Extracts one thumbnail per `intervalSeconds` across the full duration of
  * the video at `url`. Calls `onProgress` with the frames captured so far
  * after each one, so the Playground can render the strip incrementally

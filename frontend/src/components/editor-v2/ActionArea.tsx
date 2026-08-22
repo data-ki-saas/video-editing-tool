@@ -1,29 +1,48 @@
 "use client";
 
 /**
- * Top band of the three-pane editor: the upload box on the left (reuses the
- * existing UploadPanel unchanged), a play area on the right showing whatever
- * asset is currently selected -- the same asset the Playground unfolds into
- * a thumbnail strip + volume graph below.
+ * Top band of the three-pane editor, left to right: the project switcher
+ * (replaces the removed left navigation sidebar), this project's asset
+ * gallery (replaces the always-visible upload dropzone -- "+ Asset" opens
+ * UploadDialog instead), and a play area showing whichever asset is
+ * currently selected.
  */
-import { UploadPanel } from "@/components/editor-panels/UploadPanel";
+import { useState } from "react";
+import { ProjectList } from "./ProjectList";
+import { AssetGallery } from "./AssetGallery";
+import { UploadDialog } from "./UploadDialog";
 import type { Asset } from "@/lib/api";
 
 export function ActionArea({
   projectId,
+  assets,
   selectedAsset,
+  onSelectAsset,
   onUploaded,
   onUploadingChange,
 }: {
   projectId: string;
+  assets: Asset[];
   selectedAsset: Asset | null;
+  onSelectAsset: (asset: Asset) => void;
   onUploaded: (asset: Asset) => void;
   onUploadingChange?: (isUploading: boolean) => void;
 }) {
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+
   return (
     <div className="flex h-full gap-4 p-4">
-      <div className="w-full max-w-sm shrink-0 overflow-y-auto">
-        <UploadPanel projectId={projectId} onUploaded={onUploaded} onUploadingChange={onUploadingChange} />
+      <div className="w-44 shrink-0 overflow-hidden border-r border-border pr-4">
+        <ProjectList activeProjectId={projectId} />
+      </div>
+
+      <div className="w-64 shrink-0 overflow-hidden">
+        <AssetGallery
+          assets={assets}
+          selectedAssetId={selectedAsset?.id ?? null}
+          onSelect={onSelectAsset}
+          onAddAsset={() => setIsUploadDialogOpen(true)}
+        />
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-center rounded-md border border-border bg-neutral-950">
@@ -46,6 +65,18 @@ export function ActionArea({
           <p className="p-4 text-sm text-muted">Upload a video to start editing</p>
         )}
       </div>
+
+      {isUploadDialogOpen && (
+        <UploadDialog
+          projectId={projectId}
+          onUploaded={(asset) => {
+            onUploaded(asset);
+            setIsUploadDialogOpen(false);
+          }}
+          onUploadingChange={onUploadingChange}
+          onClose={() => setIsUploadDialogOpen(false)}
+        />
+      )}
     </div>
   );
 }

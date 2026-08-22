@@ -1,8 +1,8 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import Link from "next/link";
 import { getProject, type Project } from "@/lib/projects";
+import { setLastProjectId } from "@/lib/lastProject";
 import { ThreePaneEditor } from "@/components/editor-v2/ThreePaneEditor";
 
 function formatNicheLabel(niche: string | null): string | null {
@@ -18,7 +18,12 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
 
   useEffect(() => {
     getProject(projectId)
-      .then(setProject)
+      .then((loaded) => {
+        setProject(loaded);
+        // Marks this as the reel to resume into next time bare /dashboard
+        // is opened -- see lib/lastProject.ts.
+        setLastProjectId(loaded.id);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load this reel"));
   }, [projectId]);
 
@@ -37,9 +42,6 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between border-b border-neutral-200 px-4 py-3">
         <div>
-          <Link href="/dashboard" className="text-sm text-neutral-500 hover:underline">
-            ← Your reels
-          </Link>
           <h1 className="text-lg font-semibold">{project.name}</h1>
           {details && <p className="text-sm text-neutral-500">{details}</p>}
         </div>

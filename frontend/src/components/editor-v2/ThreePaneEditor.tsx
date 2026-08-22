@@ -1,14 +1,16 @@
 "use client";
 
 /**
- * Top-level layout for the new client-side video editor (baby-steps rebuild
- * of the reel editor -- lives at /dashboard/[projectId]/editor-v2 alongside
- * the existing Creatomate-based VideoEditor.tsx, not replacing it yet).
+ * Top-level layout for the client-side video editor (baby-steps rebuild of
+ * the reel editor) -- rendered directly by /dashboard/[projectId]. The old
+ * Creatomate-based VideoEditor.tsx is kept in the codebase but unreferenced,
+ * for a possible future re-hook rather than a full rebuild of render/trim/
+ * background/overlay.
  *
  * Three fixed horizontal bands per spec: 30% action area, 50% playground,
- * 20% feedback area. This component owns the one piece of cross-band state
- * (which asset is selected) and the thumbnail/volume extraction pipeline;
- * each band below is otherwise a plain, mostly-stateless view.
+ * 20% feedback area. This component owns the cross-band state (the full
+ * asset list, which one is selected) and the thumbnail/volume extraction
+ * pipeline; each band below is otherwise a plain, mostly-stateless view.
  */
 import { useCallback, useEffect, useState } from "react";
 import { listAssets, type Asset } from "@/lib/api";
@@ -22,6 +24,7 @@ const THUMBNAIL_INTERVAL_SECONDS = 1;
 const VOLUME_BUCKET_SECONDS = 1;
 
 export function ThreePaneEditor({ projectId }: { projectId: string }) {
+  const [assets, setAssets] = useState<Asset[]>([]);
   const [assetsError, setAssetsError] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -34,6 +37,7 @@ export function ThreePaneEditor({ projectId }: { projectId: string }) {
   const refreshAssets = useCallback(async () => {
     try {
       const data = await listAssets(projectId);
+      setAssets(data);
       setAssetsError(null);
       // Defaults the play area/timeline to the most recently uploaded video
       // once assets first load -- doesn't override a selection the user (or
@@ -103,6 +107,7 @@ export function ThreePaneEditor({ projectId }: { projectId: string }) {
   }, [selectedAsset]);
 
   function handleUploaded(asset: Asset) {
+    setAssets((prev) => [asset, ...prev]);
     setSelectedAsset(asset);
   }
 
@@ -111,7 +116,9 @@ export function ThreePaneEditor({ projectId }: { projectId: string }) {
       <section style={{ flexBasis: "30%" }} className="shrink-0 overflow-hidden border-b border-border">
         <ActionArea
           projectId={projectId}
+          assets={assets}
           selectedAsset={selectedAsset}
+          onSelectAsset={setSelectedAsset}
           onUploaded={handleUploaded}
           onUploadingChange={setIsUploading}
         />
