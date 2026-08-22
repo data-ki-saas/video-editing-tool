@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { getProject, type Project } from "@/lib/projects";
-import { VideoEditor } from "@/components/VideoEditor";
+import { ThreePaneEditor } from "@/components/editor-v2/ThreePaneEditor";
 
 function formatNicheLabel(niche: string | null): string | null {
   if (!niche) return null;
@@ -34,8 +34,8 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
     .join(" · ");
 
   return (
-    <div className="flex flex-col">
-      <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center justify-between border-b border-neutral-200 px-4 py-3">
         <div>
           <Link href="/dashboard" className="text-sm text-neutral-500 hover:underline">
             ← Your reels
@@ -43,11 +43,10 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
           <h1 className="text-lg font-semibold">{project.name}</h1>
           {details && <p className="text-sm text-neutral-500">{details}</p>}
         </div>
-        <Link href={`/dashboard/${project.id}/editor-v2`} className="text-sm text-neutral-500 hover:underline">
-          Try new editor (beta) →
-        </Link>
       </div>
-      <VideoEditor key={project.id} projectId={project.id} />
+      <div className="min-h-0 flex-1">
+        <ThreePaneEditor key={project.id} projectId={project.id} />
+      </div>
     </div>
   );
 }
