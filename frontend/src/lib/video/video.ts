@@ -1,11 +1,12 @@
 /**
- * Client-side frame extraction, powering the Playground's "unfold the video
- * into a timeline of per-second thumbnails" view (see
- * components/editor-v2/Playground.tsx).
+ * Client-side frame extraction. Two callers use this:
+ *  - the Playground's per-second thumbnail strip (extractThumbnails)
+ *  - CanvasPlayer's preview-playback frames (extractPreviewFrames), at a
+ *    device/duration-adapted rate from video_math.ts's pickPreviewFrameRate
  *
  * All numeric/layout math lives in video_math.ts -- this module only touches
- * the DOM (<video>, <canvas>). See audio.ts for the equivalent volume-graph
- * extraction over the audio track.
+ * the DOM (<video>, <canvas>). See audio.ts for the equivalent audio-track
+ * handling (volume graph + playback decode).
  *
  * Requires the R2 uploads bucket to have a CORS policy allowing this origin
  * (see backend/scripts/configure_r2_cors.py) -- without it, captureFrameAt
@@ -16,15 +17,18 @@
 import { generateSampleTimestamps } from "./video_math";
 
 const THUMBNAIL_WIDTH_PX = 160;
-const THUMBNAIL_JPEG_QUALITY = 0.7;
+const PREVIEW_FRAME_WIDTH_PX = 480;
+const FRAME_JPEG_QUALITY = 0.7;
 
 /** Loads `url` into a detached (never-appended-to-the-page) <video> element
- * and resolves once its metadata (duration, dimensions) is available. */
-function loadVideoElement(url: string): Promise<HTMLVideoElement> {
+ * and resolves once its metadata (duration, dimensions) is available.
+ * `preload: "metadata"` is used for duration-only probes (getVideoDuration)
+ * to avoid buffering the whole file when only the header is needed. */
+function loadVideoElement(url: string, preload: "metadata" | "auto" = "auto"): Promise<HTMLVideoElement> {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
     video.crossOrigin = "anonymous"; // required for the canvas reads below to not taint
-    video.preload = "auto";
+    video.preload = preload;
     video.muted = true;
     video.src = url;
     video.onloadedmetadata = () => resolve(video);
@@ -49,7 +53,7 @@ function captureFrameAt(video: HTMLVideoElement, timeSeconds: number, canvas: HT
       }
       try {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", THUMBNAIL_JPEG_QUALITY));
+        resolve(canvas.toDataURL("image/jpeg", FRAME_JPEG_QUALITY));
       } catch (err) {
         // Most likely a tainted-canvas SecurityError -- see this module's
         // top comment about the R2 bucket's CORS policy.
@@ -61,11 +65,50 @@ function captureFrameAt(video: HTMLVideoElement, timeSeconds: number, canvas: HT
   });
 }
 
+/** Extracts frames at a fixed interval, at a given thumbnail width, sharing
+ * the load/seek/capture machinery between extractThumbnails and
+ * extractPreviewFrames below (they only differ in interval and size). */
+async function extractFramesAtInterval(
+  url: string,
+  intervalSeconds: number,
+  widthPx: number,
+  onProgress?: (framesSoFar: string[]) => void
+): Promise<string[]> {
+  const video = await loadVideoElement(url);
+  try {
+    const timestamps = generateSampleTimestamps(video.duration, intervalSeconds);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = widthPx;
+    canvas.height = Math.round(widthPx * (video.videoHeight / video.videoWidth || 9 / 16));
+
+    const frames: string[] = [];
+    for (const timestamp of timestamps) {
+      frames.push(await captureFrameAt(video, timestamp, canvas));
+      onProgress?.([...frames]);
+    }
+    return frames;
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
+}
+
+/** Duration-only probe -- used by CanvasPlayer to pick a preview frame rate
+ * (video_math.ts's pickPreviewFrameRate) before committing to a full
+ * extraction pass at that rate. */
+export async function getVideoDuration(url: string): Promise<number> {
+  const video = await loadVideoElement(url, "metadata");
+  const duration = video.duration;
+  video.removeAttribute("src");
+  video.load();
+  return duration;
+}
+
 /**
  * Grabs a single representative frame from the video at `url` -- used by the
  * asset gallery's thumbnail tiles, which need one small preview per video
- * asset rather than the full per-second timeline strip. Reuses the same
- * load/capture primitives as extractThumbnails below. Defaults to 0.1s
+ * asset rather than the full per-second timeline strip. Defaults to 0.1s
  * rather than 0 since the very first frame of some encodings is black.
  */
 export async function captureSingleFrame(url: string, atSeconds = 0.1): Promise<string> {
@@ -88,27 +131,23 @@ export async function captureSingleFrame(url: string, atSeconds = 0.1): Promise<
  * after each one, so the Playground can render the strip incrementally
  * instead of waiting for a multi-minute video to finish extracting entirely.
  */
-export async function extractThumbnails(
+export function extractThumbnails(
   url: string,
   intervalSeconds: number,
   onProgress?: (framesSoFar: string[]) => void
 ): Promise<string[]> {
-  const video = await loadVideoElement(url);
-  try {
-    const timestamps = generateSampleTimestamps(video.duration, intervalSeconds);
+  return extractFramesAtInterval(url, intervalSeconds, THUMBNAIL_WIDTH_PX, onProgress);
+}
 
-    const canvas = document.createElement("canvas");
-    canvas.width = THUMBNAIL_WIDTH_PX;
-    canvas.height = Math.round(THUMBNAIL_WIDTH_PX * (video.videoHeight / video.videoWidth || 9 / 16));
-
-    const frames: string[] = [];
-    for (const timestamp of timestamps) {
-      frames.push(await captureFrameAt(video, timestamp, canvas));
-      onProgress?.([...frames]);
-    }
-    return frames;
-  } finally {
-    video.removeAttribute("src");
-    video.load();
-  }
+/**
+ * Extracts frames at `frameRate` (see video_math.ts's pickPreviewFrameRate
+ * for how CanvasPlayer picks this) across the full duration of the video at
+ * `url`, at a size suited to actual playback rather than a small thumbnail.
+ */
+export function extractPreviewFrames(
+  url: string,
+  frameRate: number,
+  onProgress?: (framesSoFar: string[]) => void
+): Promise<string[]> {
+  return extractFramesAtInterval(url, 1 / frameRate, PREVIEW_FRAME_WIDTH_PX, onProgress);
 }

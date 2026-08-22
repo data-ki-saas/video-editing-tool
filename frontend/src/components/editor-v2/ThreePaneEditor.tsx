@@ -9,21 +9,30 @@
  *
  * Three fixed horizontal bands per spec: 30% action area, 50% playground,
  * 20% feedback area. This component owns the cross-band state (the full
- * asset list, which one is selected) and the thumbnail/volume extraction
- * pipeline; each band below is otherwise a plain, mostly-stateless view.
+ * asset list, which one is selected, the edit-selections history, playback
+ * position) and the thumbnail/volume extraction pipeline; each band below
+ * is otherwise a plain, mostly-stateless view.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listAssets, type Asset } from "@/lib/api";
-import { extractThumbnails } from "@/lib/video/video";
+import { extractThumbnails, getVideoDuration } from "@/lib/video/video";
 import { extractVolumeProfile } from "@/lib/video/audio";
+import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
+import { useEditHistory } from "@/lib/useEditHistory";
+import { TEMPLATE_OPTIONS } from "@/lib/templates";
+import { BACKGROUND_TRACK_OPTIONS } from "@/lib/backgroundTracks";
 import { ActionArea } from "./ActionArea";
 import { Playground } from "./Playground";
 import { FeedbackArea } from "./FeedbackArea";
+import type { CanvasPlayerHandle } from "./CanvasPlayer";
 
 const THUMBNAIL_INTERVAL_SECONDS = 1;
 const VOLUME_BUCKET_SECONDS = 1;
+const SAVE_DEBOUNCE_MS = 600;
 
-export function ThreePaneEditor({ projectId }: { projectId: string }) {
+const DEFAULT_SELECTIONS: EditSelectionsSnapshot = { templateId: null, clipRectId: null, backgroundTrackId: "none" };
+
+export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: string; initialTimeline: Timeline }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [assetsError, setAssetsError] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
@@ -31,8 +40,25 @@ export function ThreePaneEditor({ projectId }: { projectId: string }) {
 
   const [thumbnails, setThumbnails] = useState<string[]>([]);
   const [volumeLevels, setVolumeLevels] = useState<number[]>([]);
+  const [videoDurationSeconds, setVideoDurationSeconds] = useState(0);
+  const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const canvasPlayerRef = useRef<CanvasPlayerHandle>(null);
+
+  // Selection-only (see UserActions.tsx/BackgroundTrackSelector.tsx), but
+  // every change is kept as a revertible entry (FeedbackArea's change list)
+  // and persisted into Timeline.editHistory below, so reopening this reel
+  // resumes exactly where it was left, not from a blank slate.
+  const {
+    state: selections,
+    entries: editHistoryEntries,
+    currentIndex: editHistoryIndex,
+    pushChange,
+    revertTo,
+  } = useEditHistory<EditSelectionsSnapshot>(DEFAULT_SELECTIONS, initialTimeline.editHistory, initialTimeline.editHistoryIndex);
 
   const refreshAssets = useCallback(async () => {
     try {
@@ -56,10 +82,10 @@ export function ThreePaneEditor({ projectId }: { projectId: string }) {
   }, [refreshAssets]);
 
   // Unfolds the selected video into a per-second thumbnail strip + volume
-  // graph whenever the selection changes. The two extractions run
+  // graph + duration whenever the selection changes. The extractions run
   // concurrently and update state independently (rather than waiting on
   // Promise.all to fully resolve) so the Playground can render whichever
-  // finishes first instead of blocking on the slower of the two.
+  // finishes first instead of blocking on the slowest.
   useEffect(() => {
     // Resets the previous asset's extraction results as soon as the
     // selection changes, rather than leaving stale thumbnails/levels on
@@ -68,6 +94,8 @@ export function ThreePaneEditor({ projectId }: { projectId: string }) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setThumbnails([]);
       setVolumeLevels([]);
+      setVideoDurationSeconds(0);
+      setCurrentTimeSeconds(0);
       setAnalysisError(null);
       return;
     }
@@ -77,6 +105,7 @@ export function ThreePaneEditor({ projectId }: { projectId: string }) {
     setAnalysisError(null);
     setThumbnails([]);
     setVolumeLevels([]);
+    setCurrentTimeSeconds(0);
 
     function reportFailure(err: unknown) {
       if (cancelled) return;
@@ -97,7 +126,15 @@ export function ThreePaneEditor({ projectId }: { projectId: string }) {
       })
       .catch(reportFailure);
 
-    Promise.allSettled([thumbnailsDone, volumeDone]).then(() => {
+    // Needed by the background-track strip, to work out how many times a
+    // track loops across the video's full length.
+    const durationDone = getVideoDuration(selectedAsset.url)
+      .then((duration) => {
+        if (!cancelled) setVideoDurationSeconds(duration);
+      })
+      .catch(reportFailure);
+
+    Promise.allSettled([thumbnailsDone, volumeDone, durationDone]).then(() => {
       if (!cancelled) setIsAnalyzing(false);
     });
 
@@ -106,9 +143,77 @@ export function ThreePaneEditor({ projectId }: { projectId: string }) {
     };
   }, [selectedAsset]);
 
+  // Persists the edit-selections history into Timeline.editHistory
+  // whenever it changes, debounced -- and flushes any pending save
+  // immediately on unmount (see the second effect below) rather than
+  // silently dropping a change made just before switching reels or
+  // navigating away.
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushSaveRef = useRef<() => void>(() => {});
+  const hasSkippedInitialSaveRef = useRef(false);
+
+  useEffect(() => {
+    if (!hasSkippedInitialSaveRef.current) {
+      hasSkippedInitialSaveRef.current = true;
+      return;
+    }
+
+    const doSave = () => {
+      const nextTimeline: Timeline = {
+        ...initialTimeline,
+        editHistory: editHistoryEntries,
+        editHistoryIndex,
+      };
+      saveTimeline(projectId, nextTimeline)
+        .then(() => setSaveError(null))
+        .catch((err) => setSaveError(err instanceof Error ? err.message : "Failed to save your changes"));
+    };
+
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(doSave, SAVE_DEBOUNCE_MS);
+    flushSaveRef.current = () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      doSave();
+    };
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, [projectId, initialTimeline, editHistoryEntries, editHistoryIndex]);
+
+  useEffect(() => {
+    return () => flushSaveRef.current();
+  }, []);
+
   function handleUploaded(asset: Asset) {
     setAssets((prev) => [asset, ...prev]);
     setSelectedAsset(asset);
+  }
+
+  function handleAssetDeleted(assetId: string) {
+    setAssets((prev) => prev.filter((asset) => asset.id !== assetId));
+    setSelectedAsset((prev) => (prev?.id === assetId ? null : prev));
+  }
+
+  function handleSelectTemplate(id: string) {
+    const name = TEMPLATE_OPTIONS.find((option) => option.id === id)?.name ?? id;
+    pushChange(`Template: ${name}`, { ...selections, templateId: id });
+  }
+
+  function handleSelectClipRect(id: string) {
+    pushChange(`Clip rectangle: ${id}`, { ...selections, clipRectId: id });
+  }
+
+  function handleSelectBackgroundTrack(id: string) {
+    const name = BACKGROUND_TRACK_OPTIONS.find((option) => option.id === id)?.name ?? id;
+    pushChange(`Background track: ${name}`, { ...selections, backgroundTrackId: id });
+  }
+
+  function handleSeek(seconds: number) {
+    canvasPlayerRef.current?.seekTo(seconds);
   }
 
   return (
@@ -121,19 +226,40 @@ export function ThreePaneEditor({ projectId }: { projectId: string }) {
           onSelectAsset={setSelectedAsset}
           onUploaded={handleUploaded}
           onUploadingChange={setIsUploading}
+          onAssetDeleted={handleAssetDeleted}
+          selectedBackgroundTrackId={selections.backgroundTrackId}
+          onSelectBackgroundTrack={handleSelectBackgroundTrack}
+          selectedTemplateId={selections.templateId}
+          onSelectTemplate={handleSelectTemplate}
+          selectedClipRectId={selections.clipRectId}
+          onSelectClipRect={handleSelectClipRect}
+          playerRef={canvasPlayerRef}
+          onPlayerTimeUpdate={setCurrentTimeSeconds}
         />
       </section>
 
       <section style={{ flexBasis: "50%" }} className="shrink-0 overflow-hidden border-b border-border">
-        <Playground thumbnails={thumbnails} volumeLevels={volumeLevels} isAnalyzing={isAnalyzing} />
+        <Playground
+          selectedBackgroundTrackId={selections.backgroundTrackId}
+          videoDurationSeconds={videoDurationSeconds}
+          thumbnails={thumbnails}
+          volumeLevels={volumeLevels}
+          isAnalyzing={isAnalyzing}
+          currentTimeSeconds={currentTimeSeconds}
+          onSeek={handleSeek}
+        />
       </section>
 
       <section style={{ flexBasis: "20%" }} className="shrink-0 overflow-y-auto">
         <FeedbackArea
           assetsError={assetsError}
           analysisError={analysisError}
+          saveError={saveError}
           isAnalyzing={isAnalyzing}
           isUploading={isUploading}
+          editHistoryEntries={editHistoryEntries}
+          editHistoryIndex={editHistoryIndex}
+          onRevertEdit={revertTo}
         />
       </section>
     </div>

@@ -55,6 +55,57 @@ export function clampPanelHeight(
   return Math.min(Math.max(candidateHeightPx, min), max);
 }
 
+// Bounds for the CanvasPlayer's preview frame rate (see
+// components/editor-v2/CanvasPlayer.tsx) -- tunable in one place. Never goes
+// below MIN: a clip playing back slower than 5fps stops reading as
+// "playback" at all. MAX caps how smooth a *short* clip's preview gets,
+// since smoother just means more frames to extract/hold in memory for no
+// visible benefit past a point.
+export const MIN_PREVIEW_FRAME_RATE_FPS = 5;
+export const MAX_PREVIEW_FRAME_RATE_FPS = 15;
+// Target ceiling on total extracted frames regardless of clip length -- a
+// 3-minute clip and a 10-second clip should cost roughly the same to
+// extract/hold in memory, not scale linearly with duration.
+export const TARGET_PREVIEW_FRAME_BUDGET = 1800;
+
+/** Rough, browser-exposed proxy for how much decode/compositing headroom a
+ * device has -- there's no standard "current CPU/memory load" API on the
+ * web, so logical core count is the closest broadly-supported signal.
+ * Callers pass navigator.hardwareConcurrency in; kept as a plain parameter
+ * (rather than read here) so this file stays DOM/navigator-free. */
+function hardwareFpsCeiling(hardwareConcurrency: number): number {
+  if (hardwareConcurrency <= 2) return MIN_PREVIEW_FRAME_RATE_FPS;
+  if (hardwareConcurrency <= 4) return 10;
+  return MAX_PREVIEW_FRAME_RATE_FPS;
+}
+
+/**
+ * Picks a preview frame rate for extractPreviewFrames/CanvasPlayer, adapting
+ * to both the clip's length (so total frame count -- and extraction time +
+ * memory -- stays roughly bounded by TARGET_PREVIEW_FRAME_BUDGET rather than
+ * growing linearly with duration) and the device's apparent capability.
+ * Always within [MIN_PREVIEW_FRAME_RATE_FPS, MAX_PREVIEW_FRAME_RATE_FPS].
+ */
+export function pickPreviewFrameRate(durationSeconds: number, hardwareConcurrency: number): number {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return MAX_PREVIEW_FRAME_RATE_FPS;
+
+  const budgetLimitedFps = TARGET_PREVIEW_FRAME_BUDGET / durationSeconds;
+  const fps = Math.min(budgetLimitedFps, hardwareFpsCeiling(hardwareConcurrency), MAX_PREVIEW_FRAME_RATE_FPS);
+  return Math.max(MIN_PREVIEW_FRAME_RATE_FPS, Math.round(fps));
+}
+
+/**
+ * Given how much of the clip has played (in seconds), which extracted
+ * preview frame should be shown right now -- pure clock math, no DOM/Web
+ * Audio access, so CanvasPlayer's requestAnimationFrame loop can call this
+ * every tick without it ever touching the original video or audio context.
+ */
+export function frameIndexAtTime(elapsedSeconds: number, frameRate: number, frameCount: number): number {
+  if (frameCount <= 0) return 0;
+  const index = Math.floor(elapsedSeconds * frameRate);
+  return Math.min(Math.max(index, 0), frameCount - 1);
+}
+
 /**
  * Root-mean-square loudness of `samples` (mono, -1..1 range), one value per
  * `bucketSeconds` window, normalized so the loudest bucket in the clip is

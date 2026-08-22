@@ -13,12 +13,34 @@ export interface AppMetaEntry {
   presetId?: string;
 }
 
+// A snapshot of the editor-v2 selections (template/clip-rectangle/
+// background-track) at some point in the edit history -- see
+// lib/useEditHistory.ts. Kept generic there; named here since this is the
+// one concrete shape actually persisted.
+export interface EditSelectionsSnapshot {
+  templateId: string | null;
+  clipRectId: string | null;
+  backgroundTrackId: string;
+}
+
+export interface EditHistoryEntrySnapshot {
+  label: string;
+  state: EditSelectionsSnapshot;
+  at: number;
+}
+
 export interface Timeline {
   output_format: "mp4";
   width: number;
   height: number;
   elements: TemplateElement[];
   _appMeta: Record<string, AppMetaEntry>;
+  // Persists ThreePaneEditor's undo-able change list (see
+  // lib/useEditHistory.ts) so reopening a reel resumes with the same
+  // history and current selection, not a blank slate. Optional/absent on
+  // any timeline saved before this existed.
+  editHistory?: EditHistoryEntrySnapshot[];
+  editHistoryIndex?: number;
 }
 
 // Generic on purpose -- what fields matter for a "listing" varies entirely
@@ -101,6 +123,17 @@ export async function saveTimeline(projectId: string, timeline: Timeline): Promi
   if (error) throw new Error(error.message);
   if (!data || data.length === 0) {
     throw new Error("Save didn't apply -- your session may have expired");
+  }
+}
+
+export async function renameProject(projectId: string, name: string): Promise<void> {
+  const supabase = createClient();
+  // .select("id") for the same reason as saveTimeline above -- an update
+  // that matches zero rows still reports success with no `error` otherwise.
+  const { data, error } = await supabase.from("projects").update({ name }).eq("id", projectId).select("id");
+  if (error) throw new Error(error.message);
+  if (!data || data.length === 0) {
+    throw new Error("Rename didn't apply -- your session may have expired");
   }
 }
 

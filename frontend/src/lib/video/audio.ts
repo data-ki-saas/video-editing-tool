@@ -1,9 +1,11 @@
 /**
- * Client-side audio analysis, powering the Playground's volume graph (see
- * components/editor-v2/Playground.tsx). Decodes the audio track via the Web
- * Audio API and hands the raw samples to video_math.ts's pure RMS
- * calculation -- this module only owns fetching/decoding, not the numeric
- * work itself.
+ * Client-side audio handling. Two callers use this:
+ *  - the Playground's volume graph (extractVolumeProfile), which hands raw
+ *    samples to video_math.ts's pure RMS calculation
+ *  - CanvasPlayer's audio playback (decodeAudioBuffer), which plays the
+ *    decoded buffer back through an AudioBufferSourceNode instead of an
+ *    HTMLMediaElement
+ * Both share the same fetch+decode step below.
  *
  * Same CORS requirement as video.ts's frame extraction: the R2 uploads
  * bucket needs a CORS policy allowing this origin, or fetch() below is
@@ -33,11 +35,31 @@ function toMonoSamples(audioBuffer: AudioBuffer): Float32Array {
   return mono;
 }
 
+/** Duration-only probe for a background track (or any plain audio file) --
+ * mirrors video.ts's getVideoDuration but for an <audio> element. The
+ * Playground's background-track strip only needs a track's length to
+ * compute how many times it loops across the video, not its decoded
+ * samples, so this avoids a full fetch+decode for that. */
+export function getAudioDuration(url: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const audio = document.createElement("audio");
+    audio.preload = "metadata";
+    audio.src = url;
+    audio.onloadedmetadata = () => resolve(audio.duration);
+    audio.onerror = () => {
+      reject(new Error(`Could not load background track: ${audio.error?.message ?? "unknown error"}`));
+    };
+  });
+}
+
 /**
- * Fetches and decodes the audio track at `url`, returning one normalized
- * loudness value (0..1) per `bucketSeconds` window across the whole clip.
+ * Fetches and decodes the audio track at `url`. Uses its own short-lived
+ * AudioContext for the decode itself -- a decoded AudioBuffer is a plain
+ * data object, not tied to the context that produced it, so callers (e.g.
+ * CanvasPlayer) are free to play it back through a different, longer-lived
+ * AudioContext of their own.
  */
-export async function extractVolumeProfile(url: string, bucketSeconds: number): Promise<number[]> {
+export async function decodeAudioBuffer(url: string): Promise<AudioBuffer> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Could not fetch audio track (HTTP ${response.status})`);
   const arrayBuffer = await response.arrayBuffer();
@@ -45,10 +67,18 @@ export async function extractVolumeProfile(url: string, bucketSeconds: number): 
   const AudioContextCtor = getAudioContextConstructor();
   const audioContext = new AudioContextCtor();
   try {
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-    const monoSamples = toMonoSamples(audioBuffer);
-    return computeVolumeBuckets(monoSamples, audioBuffer.sampleRate, bucketSeconds);
+    return await audioContext.decodeAudioData(arrayBuffer);
   } finally {
     void audioContext.close();
   }
+}
+
+/**
+ * Returns one normalized loudness value (0..1) per `bucketSeconds` window
+ * across the whole clip at `url`, for the Playground's volume graph.
+ */
+export async function extractVolumeProfile(url: string, bucketSeconds: number): Promise<number[]> {
+  const audioBuffer = await decodeAudioBuffer(url);
+  const monoSamples = toMonoSamples(audioBuffer);
+  return computeVolumeBuckets(monoSamples, audioBuffer.sampleRate, bucketSeconds);
 }
