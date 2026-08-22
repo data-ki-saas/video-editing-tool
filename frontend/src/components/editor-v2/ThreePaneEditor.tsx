@@ -28,7 +28,13 @@ import { listAssets, type Asset } from "@/lib/api";
 import { extractThumbnails, getVideoDuration } from "@/lib/video/video";
 import { extractVolumeProfile } from "@/lib/video/audio";
 import type { CropRect, ZoomEffect } from "@/lib/video/video_math";
-import { applySelectClipRect, applyCropRectCommit, applyZoomRangeChange, applyFlipToggle } from "@/lib/video/transformations";
+import {
+  applySelectClipRect,
+  applyCropRectCommit,
+  applyZoomRangeChange,
+  applyZoomEpicenterChange,
+  applyFlipToggle,
+} from "@/lib/video/transformations";
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
@@ -316,6 +322,19 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     pushChange(label, state);
   }
 
+  function handleChangeZoomEpicenter(effectIndex: number, epicenterTimeSeconds: number) {
+    const zoomEffect = selections.zoomEffects[effectIndex];
+    if (!zoomEffect) return;
+    setLiveZoomEffectEdit({ index: effectIndex, effect: { ...zoomEffect, epicenterTimeSeconds } });
+  }
+
+  function handleCommitZoomEpicenter(effectIndex: number, epicenterTimeSeconds: number) {
+    if (!selections.zoomEffects[effectIndex]) return;
+    setLiveZoomEffectEdit(null);
+    const { label, state } = applyZoomEpicenterChange(selections, effectIndex, epicenterTimeSeconds);
+    pushChange(label, state);
+  }
+
   function handleSeek(seconds: number) {
     canvasPlayerRef.current?.seekTo(seconds);
   }
@@ -372,6 +391,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           frameAspectRatio={frameAspectRatio}
           onChangeZoomRange={handleChangeZoomRange}
           onCommitZoomRange={handleCommitZoomRange}
+          onChangeZoomEpicenter={handleChangeZoomEpicenter}
+          onCommitZoomEpicenter={handleCommitZoomEpicenter}
           onCropRectChange={handleCropRectChange}
           onCropRectCommit={handleCropRectCommit}
           flipHorizontal={selections.flipHorizontal}

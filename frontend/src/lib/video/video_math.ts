@@ -214,10 +214,27 @@ export function scaleCropRectCentered(rect: CropRect, scale: number): CropRect {
   return { x: centerX - width / 2, y: centerY - height / 2, width, height };
 }
 
+/**
+ * A zoom/pan transition as three keyframes, not two: `startRect` (normal,
+ * at startTimeSeconds), `epicenterRect` (the peak -- max zoom-in, or the
+ * furthest point of a pan -- at epicenterTimeSeconds), and `endRect` (at
+ * endTimeSeconds, defaulting to startRect so the transition eases back to
+ * normal by default -- "I zoom in, then slowly zoom out back to normal").
+ * The two halves (start->epicenter, epicenter->start) each get their own
+ * ease-in-out via interpolateCropRect, which reads as a natural
+ * accelerate-into/hold-at/decelerate-out-of the peak rather than one
+ * mechanical A-to-B move. Dragging the epicenter's own green dot on
+ * ZoomEffectsTrack only moves epicenterTimeSeconds, independent of the
+ * overall start/end range; stretching the segment's edges only moves
+ * start/endTimeSeconds, independent of the epicenter's own position --
+ * see transformations.ts's applyZoomEpicenterChange vs applyZoomRangeChange.
+ */
 export interface ZoomEffect {
   startTimeSeconds: number;
+  epicenterTimeSeconds: number;
   endTimeSeconds: number;
   startRect: CropRect;
+  epicenterRect: CropRect;
   endRect: CropRect;
 }
 
@@ -245,6 +262,11 @@ export function findActiveZoomEffectIndex(zoomEffects: ZoomEffect[], timeSeconds
  * timeline): outside that range, on either side, the fixed clip rectangle
  * applies -- it does not persist the effect's end state past where the
  * effect actually ends.
+ *
+ * Inside the range, interpolates through whichever HALF of the effect
+ * `timeSeconds` falls in -- start->epicenter, or epicenter->end -- each
+ * its own eased lerp, so the rect eases into the epicenter and eases back
+ * out of it rather than moving through it at constant speed.
  */
 export function computeEffectiveCropRect(
   baseCropRect: CropRect,
@@ -255,9 +277,14 @@ export function computeEffectiveCropRect(
   if (activeIndex === -1) return baseCropRect;
 
   const zoomEffect = zoomEffects[activeIndex];
-  const duration = zoomEffect.endTimeSeconds - zoomEffect.startTimeSeconds;
-  const t = duration > 0 ? (timeSeconds - zoomEffect.startTimeSeconds) / duration : 1;
-  return interpolateCropRect(zoomEffect.startRect, zoomEffect.endRect, t);
+  if (timeSeconds <= zoomEffect.epicenterTimeSeconds) {
+    const duration = zoomEffect.epicenterTimeSeconds - zoomEffect.startTimeSeconds;
+    const t = duration > 0 ? (timeSeconds - zoomEffect.startTimeSeconds) / duration : 1;
+    return interpolateCropRect(zoomEffect.startRect, zoomEffect.epicenterRect, t);
+  }
+  const duration = zoomEffect.endTimeSeconds - zoomEffect.epicenterTimeSeconds;
+  const t = duration > 0 ? (timeSeconds - zoomEffect.epicenterTimeSeconds) / duration : 1;
+  return interpolateCropRect(zoomEffect.epicenterRect, zoomEffect.endRect, t);
 }
 
 /**

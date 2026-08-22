@@ -59,6 +59,8 @@ export function Playground({
   frameAspectRatio,
   onChangeZoomRange,
   onCommitZoomRange,
+  onChangeZoomEpicenter,
+  onCommitZoomEpicenter,
   onCropRectChange,
   onCropRectCommit,
   flipHorizontal,
@@ -78,6 +80,8 @@ export function Playground({
   frameAspectRatio: number | null;
   onChangeZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onChangeZoomEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
+  onCommitZoomEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
   onCropRectChange: (next: CropRect) => void;
   onCropRectCommit: (next: CropRect) => void;
   flipHorizontal: boolean;
@@ -111,6 +115,8 @@ export function Playground({
           frameAspectRatio={frameAspectRatio}
           onChangeZoomRange={onChangeZoomRange}
           onCommitZoomRange={onCommitZoomRange}
+          onChangeZoomEpicenter={onChangeZoomEpicenter}
+          onCommitZoomEpicenter={onCommitZoomEpicenter}
           onCropRectChange={onCropRectChange}
           onCropRectCommit={onCropRectCommit}
           flipHorizontal={flipHorizontal}

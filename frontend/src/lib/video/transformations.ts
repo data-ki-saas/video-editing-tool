@@ -51,14 +51,17 @@ export function applySelectClipRect(
  * CanvasPlayer's live preview or FrameStrip's active tile, both call this.
  * Three cases:
  *  1. Dragging inside an existing transition's time range reshapes
- *     whichever endpoint (start or end) the playhead is nearer to, rather
- *     than creating a redundant second effect covering the same instant.
+ *     whichever of its three keyframes (start, epicenter, or end) the
+ *     playhead is nearest to, rather than creating a redundant second
+ *     effect covering the same instant.
  *  2. Dragging outside every existing transition, with a base crop
- *     already set, creates a new one spanning a default window ending at
- *     this moment -- "the transition spreads to neighbouring frames." Its
- *     start is clamped so it can't reach back before whichever transition
- *     already ends closest to this point, keeping every transition
- *     mutually non-overlapping.
+ *     already set, creates a new one: this moment becomes the epicenter
+ *     (the peak the drag reaches), spanning a default window on either
+ *     side that eases in from the base rect and back out to it -- "I zoom
+ *     in, then slowly zoom out back to normal." Its start is clamped so
+ *     it can't reach back before whichever transition already ends
+ *     closest to this point, keeping every transition mutually
+ *     non-overlapping.
  *  3. No base crop yet (the very first placement) just sets it directly.
  */
 export function applyCropRectCommit(
@@ -71,9 +74,18 @@ export function applyCropRectCommit(
   if (activeIndex !== -1) {
     const zoomEffect = selections.zoomEffects[activeIndex];
     const distanceToStart = currentTimeSeconds - zoomEffect.startTimeSeconds;
+    const distanceToEpicenter = Math.abs(currentTimeSeconds - zoomEffect.epicenterTimeSeconds);
     const distanceToEnd = zoomEffect.endTimeSeconds - currentTimeSeconds;
-    const nextZoomEffect =
-      distanceToStart <= distanceToEnd ? { ...zoomEffect, startRect: nextRect } : { ...zoomEffect, endRect: nextRect };
+    const nearest = Math.min(distanceToStart, distanceToEpicenter, distanceToEnd);
+
+    let nextZoomEffect: ZoomEffect;
+    if (nearest === distanceToEpicenter) {
+      nextZoomEffect = { ...zoomEffect, epicenterRect: nextRect };
+    } else if (nearest === distanceToStart) {
+      nextZoomEffect = { ...zoomEffect, startRect: nextRect };
+    } else {
+      nextZoomEffect = { ...zoomEffect, endRect: nextRect };
+    }
     const nextZoomEffects = [...selections.zoomEffects];
     nextZoomEffects[activeIndex] = nextZoomEffect;
     return { label: "Adjusted transition", state: { ...selections, zoomEffects: nextZoomEffects } };
@@ -83,13 +95,21 @@ export function applyCropRectCommit(
     return { label: "Placed clip rectangle", state: { ...selections, cropRect: nextRect } };
   }
 
-  const endTimeSeconds = currentTimeSeconds;
+  const epicenterTimeSeconds = currentTimeSeconds;
   const precedingEffectEnd = selections.zoomEffects
     .filter((effect) => effect.endTimeSeconds <= currentTimeSeconds)
     .reduce((latest, effect) => Math.max(latest, effect.endTimeSeconds), 0);
-  const startTimeSeconds = Math.max(precedingEffectEnd, endTimeSeconds - DEFAULT_ZOOM_DURATION_SECONDS);
+  const startTimeSeconds = Math.max(precedingEffectEnd, epicenterTimeSeconds - DEFAULT_ZOOM_DURATION_SECONDS);
+  const endTimeSeconds = epicenterTimeSeconds + DEFAULT_ZOOM_DURATION_SECONDS;
 
-  const newZoomEffect: ZoomEffect = { startTimeSeconds, endTimeSeconds, startRect: selections.cropRect, endRect: nextRect };
+  const newZoomEffect: ZoomEffect = {
+    startTimeSeconds,
+    epicenterTimeSeconds,
+    endTimeSeconds,
+    startRect: selections.cropRect,
+    epicenterRect: nextRect,
+    endRect: selections.cropRect,
+  };
   return {
     label: "New transition",
     state: { ...selections, zoomEffects: [...selections.zoomEffects, newZoomEffect] },
@@ -114,7 +134,8 @@ export function applyFlipToggle(
 /** Prolonging/shortening one transition by dragging its
  * ZoomEffectsTrack segment's edges -- only that entry's time range
  * changes, its start/end rects are untouched. `effectIndex` identifies
- * which transition in the array is being resized. */
+ * which transition in the array is being resized. A longer half (start to
+ * epicenter, or epicenter to end) means a slower ease through that half. */
 export function applyZoomRangeChange(
   selections: EditSelectionsSnapshot,
   effectIndex: number,
@@ -126,4 +147,21 @@ export function applyZoomRangeChange(
   const nextZoomEffects = [...selections.zoomEffects];
   nextZoomEffects[effectIndex] = { ...zoomEffect, startTimeSeconds, endTimeSeconds };
   return { label: "Adjusted transition range", state: { ...selections, zoomEffects: nextZoomEffects } };
+}
+
+/** Moving a transition's epicenter -- the green dot on ZoomEffectsTrack --
+ * along its own segment. Only epicenterTimeSeconds changes; the three
+ * keyframe rects and the segment's own start/end times are untouched. The
+ * dot's own drag math (ZoomEffectsTrack.tsx) keeps it from crossing either
+ * edge, so this never needs to reclamp it against start/endTimeSeconds. */
+export function applyZoomEpicenterChange(
+  selections: EditSelectionsSnapshot,
+  effectIndex: number,
+  epicenterTimeSeconds: number
+): TransformationResult {
+  const zoomEffect = selections.zoomEffects[effectIndex];
+  if (!zoomEffect) return { label: "Moved epicenter", state: selections };
+  const nextZoomEffects = [...selections.zoomEffects];
+  nextZoomEffects[effectIndex] = { ...zoomEffect, epicenterTimeSeconds };
+  return { label: "Moved epicenter", state: { ...selections, zoomEffects: nextZoomEffects } };
 }

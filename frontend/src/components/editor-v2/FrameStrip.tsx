@@ -129,6 +129,8 @@ export function FrameStrip({
   frameAspectRatio,
   onChangeZoomRange,
   onCommitZoomRange,
+  onChangeZoomEpicenter,
+  onCommitZoomEpicenter,
   onCropRectChange,
   onCropRectCommit,
   flipHorizontal,
@@ -149,6 +151,8 @@ export function FrameStrip({
   frameAspectRatio: number | null;
   onChangeZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onChangeZoomEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
+  onCommitZoomEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
   onCropRectChange: (next: CropRect) => void;
   onCropRectCommit: (next: CropRect) => void;
   flipHorizontal: boolean;
@@ -241,6 +245,8 @@ export function FrameStrip({
           videoDurationSeconds={durationSeconds}
           onChangeRange={onChangeZoomRange}
           onCommitRange={onCommitZoomRange}
+          onChangeEpicenter={onChangeZoomEpicenter}
+          onCommitEpicenter={onCommitZoomEpicenter}
         />
       </div>
     </div>
