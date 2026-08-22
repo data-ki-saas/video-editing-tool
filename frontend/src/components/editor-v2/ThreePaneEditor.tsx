@@ -35,7 +35,7 @@ import {
   applyZoomEpicenterChange,
   applyFlipToggle,
 } from "@/lib/video/transformations";
-import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
+import { saveTimeline, normalizeEditHistory, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { ActionArea } from "./ActionArea";
@@ -108,7 +108,11 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     revertTo,
     undo,
     redo,
-  } = useEditHistory<EditSelectionsSnapshot>(DEFAULT_SELECTIONS, initialTimeline.editHistory, initialTimeline.editHistoryIndex);
+  } = useEditHistory<EditSelectionsSnapshot>(
+    DEFAULT_SELECTIONS,
+    normalizeEditHistory(initialTimeline.editHistory),
+    initialTimeline.editHistoryIndex
+  );
 
   // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to redo (both redo
   // conventions are common enough -- Windows apps mostly use Ctrl+Y, Mac

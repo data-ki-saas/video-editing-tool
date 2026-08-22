@@ -57,6 +57,74 @@ export interface EditHistoryEntrySnapshot {
   at: number;
 }
 
+/**
+ * Fills in a persisted ZoomEffect that predates the epicenter model (just
+ * startRect/endRect, no epicenterRect/epicenterTimeSeconds) by folding end
+ * into the epicenter with a zero-length second half -- that reproduces its
+ * original start-to-end ease exactly, since computeEffectiveCropRect always
+ * lands in the first half (start->epicenter) when epicenter === end.
+ * Anything already in the current shape passes through untouched.
+ */
+function normalizeZoomEffect(raw: unknown): ZoomEffect | null {
+  if (!raw || typeof raw !== "object") return null;
+  const effect = raw as Partial<ZoomEffect>;
+  if (
+    typeof effect.startTimeSeconds !== "number" ||
+    typeof effect.endTimeSeconds !== "number" ||
+    !effect.startRect ||
+    !effect.endRect
+  ) {
+    return null;
+  }
+  return {
+    startTimeSeconds: effect.startTimeSeconds,
+    epicenterTimeSeconds:
+      typeof effect.epicenterTimeSeconds === "number" ? effect.epicenterTimeSeconds : effect.endTimeSeconds,
+    endTimeSeconds: effect.endTimeSeconds,
+    startRect: effect.startRect,
+    epicenterRect: effect.epicenterRect ?? effect.endRect,
+    endRect: effect.endRect,
+  };
+}
+
+/**
+ * Timeline.editHistory is untyped JSON from Supabase, not something the
+ * compiler protects -- an entry saved before a shape change (the singular
+ * zoomEffect -> zoomEffects array rename, then the two- -> three-keyframe
+ * ZoomEffect rename) doesn't match EditSelectionsSnapshot as currently
+ * defined, and loading one as-is crashes the first thing that assumes the
+ * current shape (e.g. video_math.ts's findActiveZoomEffectIndex calling
+ * .findIndex on an undefined zoomEffects). Normalized once here, at the
+ * persistence boundary, rather than defensively everywhere zoomEffects is
+ * read.
+ */
+function normalizeSelectionsSnapshot(raw: unknown): EditSelectionsSnapshot {
+  const selections = (raw ?? {}) as Partial<EditSelectionsSnapshot> & { zoomEffect?: ZoomEffect | null };
+  const rawZoomEffects = Array.isArray(selections.zoomEffects)
+    ? selections.zoomEffects
+    : selections.zoomEffect
+      ? [selections.zoomEffect]
+      : [];
+  const zoomEffects = rawZoomEffects
+    .map(normalizeZoomEffect)
+    .filter((effect): effect is ZoomEffect => effect !== null);
+
+  return {
+    clipRectId: selections.clipRectId ?? null,
+    cropRect: selections.cropRect ?? null,
+    zoomEffects,
+    flipHorizontal: selections.flipHorizontal ?? false,
+    flipVertical: selections.flipVertical ?? false,
+  };
+}
+
+export function normalizeEditHistory(
+  entries: EditHistoryEntrySnapshot[] | undefined
+): EditHistoryEntrySnapshot[] | undefined {
+  if (!entries) return entries;
+  return entries.map((entry) => ({ ...entry, state: normalizeSelectionsSnapshot(entry.state) }));
+}
+
 export interface Timeline {
   output_format: "mp4";
   width: number;
