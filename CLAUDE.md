@@ -20,6 +20,16 @@ fields. `projects.niche` (text) + `projects.attributes` (jsonb) hold
 whatever fields matter for that niche — never add real-estate-specific
 columns to `projects` again; that was tried once and reverted.
 
+**Driving vision**: the primary user is an influencer/creator turning raw
+mobile-phone or GoPro footage into a finished reel for YouTube/Instagram —
+not a professional video editor. This should shape every editor UI/UX
+decision: favor simple, direct-manipulation controls (drag the clip
+rectangle, drag a colored handle, drag a dot on the timeline) over
+menus/dialogs/technical jargon, and favor sensible smart defaults (e.g. a
+zoom/pan easing back to normal automatically) over exposing every knob.
+When a feature could go either the "pro NLE" way or the "intuitive for a
+casual creator" way, default to the latter.
+
 ## Conventions specific to this repo
 
 - **Secrets default to `backend/`**, not `frontend/`. The two exceptions —
