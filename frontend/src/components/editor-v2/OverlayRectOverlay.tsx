@@ -1,20 +1,22 @@
 "use client";
 
 /**
- * Renders one image overlay's position/size rectangle (OverlayImage.rect,
- * fractions of the frame -- see lib/video/video_math.ts) on top of a video
- * frame or thumbnail, showing the actual overlay image inside it. Read-only
- * unless onChange/onCommit are both given -- only the active tile wires
- * these (see FrameStrip.tsx), matching CropRectOverlay's pattern -- in
- * which case dragging the body moves it and the corner handle resizes it
- * (free-form, not aspect-locked -- kept simple for now).
+ * Renders one overlay's position/size rectangle (fractions of the frame --
+ * see lib/video/video_math.ts's OverlayImage/TextOverlay) on top of a
+ * video frame or thumbnail, showing its actual content inside: an image
+ * (pass `imageUrl`) or, for a text overlay, `renderInner` (a
+ * TextOverlayCanvas -- see FrameStrip.tsx). Read-only unless onChange/
+ * onCommit are both given -- only the active tile wires these (see
+ * FrameStrip.tsx), matching CropRectOverlay's pattern -- in which case
+ * dragging the body moves it and the corner handle resizes it (free-form,
+ * not aspect-locked -- kept simple for now).
  *
  * Styled distinctly from CropRectOverlay (a dashed cyan border, no
  * dimming outside it) since both can be visible on the same tile at once --
- * an overlay image sits ON TOP of the clip's crop rectangle, not instead
- * of it, so they need to read as two different kinds of box.
+ * an overlay sits ON TOP of the clip's crop rectangle, not instead of it,
+ * so they need to read as two different kinds of box.
  */
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
 import type { CropRect } from "@/lib/video/video_math";
 
 const MIN_SIZE_FRACTION = 0.05;
@@ -22,11 +24,15 @@ const MIN_SIZE_FRACTION = 0.05;
 export function OverlayRectOverlay({
   rect,
   imageUrl,
+  renderInner,
   onChange,
   onCommit,
 }: {
   rect: CropRect;
-  imageUrl: string;
+  imageUrl?: string;
+  /** Replaces the default `<img>` content -- used for text overlays,
+   * which have no imageUrl at all. */
+  renderInner?: ReactNode;
   onChange?: (next: CropRect) => void;
   onCommit?: (next: CropRect) => void;
 }) {
@@ -98,8 +104,10 @@ export function OverlayRectOverlay({
           height: `${rect.height * 100}%`,
         }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element -- a presigned R2 asset URL, not a Next-optimizable static asset */}
-        <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+        {renderInner ?? (
+          // eslint-disable-next-line @next/next/no-img-element -- a presigned R2 asset URL, not a Next-optimizable static asset
+          <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+        )}
 
         {isInteractive && (
           <div

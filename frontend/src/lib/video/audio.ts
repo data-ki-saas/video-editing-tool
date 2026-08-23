@@ -82,3 +82,42 @@ export async function extractVolumeProfile(url: string, bucketSeconds: number): 
   const monoSamples = toMonoSamples(audioBuffer);
   return computeVolumeBuckets(monoSamples, audioBuffer.sampleRate, bucketSeconds);
 }
+
+/**
+ * Concatenates decoded audio buffers into one continuous buffer, so a
+ * multi-clip sequence can still be played back through a single
+ * AudioBufferSourceNode -- CanvasPlayer's existing clock/seek/trim-skip
+ * logic then needs no changes at all, since it just thinks it's playing
+ * one longer virtual clip. `context` is the caller's own longer-lived
+ * AudioContext (the one actually used for playback), not a fresh one --
+ * `createBuffer` only allocates, it doesn't decode, so no separate decode
+ * context is needed here.
+ *
+ * Assumes every buffer shares the same sample rate. In practice this holds
+ * even for source files recorded at different native rates: decodeAudioBuffer
+ * decodes each one through its own AudioContext, and per the Web Audio
+ * spec decodeAudioData resamples to *that context's* rate -- which is the
+ * same across every AudioContext instantiated with no explicit sampleRate
+ * option within one browser session. No resampling is implemented here;
+ * a real mismatch (unlikely per the above) would play the mismatched
+ * buffer's channel data at the wrong pitch/speed.
+ */
+export function concatenateAudioBuffers(context: AudioContext, buffers: AudioBuffer[]): AudioBuffer {
+  const numberOfChannels = Math.max(...buffers.map((buffer) => buffer.numberOfChannels));
+  const sampleRate = buffers[0].sampleRate;
+  const totalLength = buffers.reduce((sum, buffer) => sum + buffer.length, 0);
+
+  const combined = context.createBuffer(numberOfChannels, totalLength, sampleRate);
+  let offset = 0;
+  for (const buffer of buffers) {
+    for (let channel = 0; channel < numberOfChannels; channel++) {
+      // A buffer with fewer channels than the combined output (e.g. mono
+      // source mixed with a stereo one) reuses its own channel 0 for every
+      // output channel, rather than leaving the extra channel silent.
+      const channelData = channel < buffer.numberOfChannels ? buffer.getChannelData(channel) : buffer.getChannelData(0);
+      combined.getChannelData(channel).set(channelData, offset);
+    }
+    offset += buffer.length;
+  }
+  return combined;
+}

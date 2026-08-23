@@ -1,16 +1,22 @@
 "use client";
 
 /**
- * Visualizes the selected background track repeating (looping) across the
- * full duration of the video, as a strip of equal-width segments -- one per
+ * Visualizes the background-music sequence repeating (looping) across the
+ * full duration of the video, as a strip of segments -- one per track per
  * loop -- shown above the frame thumbnail strip in the Playground. Empty
  * state when no track is selected.
  *
- * Takes an already-resolved track ({name, url} or null) rather than a
- * catalog id -- the caller (ThreePaneEditor) is the one that knows whether
- * the background is a curated BACKGROUND_TRACK_OPTIONS entry or one of
- * this project's own music assets (set via AssetGallery's right-click
- * "Add"), so this component doesn't need to know that distinction exists.
+ * Takes an ordered list of already-resolved tracks ({name, url}[]) rather
+ * than a catalog id -- the caller (ThreePaneEditor) is the one that knows
+ * whether the background is a curated BACKGROUND_TRACK_OPTIONS entry or
+ * one or more of this project's own music assets (appended via
+ * AssetGallery's right-click "Add"), so this component doesn't need to
+ * know that distinction exists. Multiple tracks concatenate into one
+ * combined sequence (fetching each one's own duration sequentially, same
+ * SequenceClipInfo/buildSequenceClipInfos/totalSequenceDuration math the
+ * video sequence uses -- see video_math.ts), and that whole combined
+ * sequence loops across the video's duration, rather than looping just
+ * one track.
  *
  * Total width is `videoDurationSeconds * pixelsPerSecond` -- the same
  * scale FrameStrip and VolumeGraph use, so all three line up and share one
@@ -18,82 +24,113 @@
  */
 import { useEffect, useState } from "react";
 import { getAudioDuration } from "@/lib/video/audio";
+import { buildSequenceClipInfos, totalSequenceDuration, type SequenceClipInfo } from "@/lib/video/video_math";
 
 export function BackgroundTrackStrip({
-  track,
+  tracks,
   videoDurationSeconds,
   pixelsPerSecond,
   scrollContainerRef,
   onScroll,
 }: {
-  track: { name: string; url: string } | null;
+  tracks: { name: string; url: string }[];
   videoDurationSeconds: number;
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
 }) {
-  const [trackDurationSeconds, setTrackDurationSeconds] = useState<number | null>(null);
+  const [sequenceClips, setSequenceClips] = useState<SequenceClipInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Joined URLs, not the `tracks` array reference -- so an unrelated
+  // parent re-render doesn't re-fetch every track's duration again.
+  const tracksKey = tracks.map((track) => track.url).join(",");
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null);
-    if (!track?.url) {
-      setTrackDurationSeconds(null);
-      return;
-    }
+    setSequenceClips([]);
+    if (tracks.length === 0) return;
 
     let cancelled = false;
-    getAudioDuration(track.url)
-      .then((duration) => {
-        if (!cancelled) setTrackDurationSeconds(duration);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load background track");
-      });
+    setIsLoading(true);
+
+    async function loadDurations() {
+      const clipMeta: { assetId: string; url: string; durationSeconds: number }[] = [];
+      for (const track of tracks) {
+        if (cancelled) return;
+        try {
+          const duration = await getAudioDuration(track.url);
+          clipMeta.push({ assetId: track.name, url: track.url, durationSeconds: duration });
+        } catch (err) {
+          if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load a background track");
+        }
+      }
+      if (!cancelled) setSequenceClips(buildSequenceClipInfos(clipMeta));
+    }
+
+    loadDurations().finally(() => {
+      if (!cancelled) setIsLoading(false);
+    });
+
     return () => {
       cancelled = true;
     };
-  }, [track]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on tracksKey (joined urls), not the tracks array reference
+  }, [tracksKey]);
 
-  if (!track?.url) {
+  if (tracks.length === 0) {
     return (
       <div className="flex h-full items-center justify-center bg-neutral-900 px-2 text-xs text-muted">
         No background track selected
       </div>
     );
   }
-  if (error) {
+  if (error && sequenceClips.length === 0) {
     return (
       <div className="flex h-full items-center justify-center bg-neutral-900 px-2 text-xs text-red-400">{error}</div>
     );
   }
-  if (!trackDurationSeconds || videoDurationSeconds <= 0) {
+
+  const sequenceDurationSeconds = totalSequenceDuration(sequenceClips);
+  if (isLoading || sequenceDurationSeconds <= 0 || videoDurationSeconds <= 0) {
     return (
       <div className="flex h-full items-center justify-center bg-neutral-900 px-2 text-xs text-muted">Loading…</div>
     );
   }
 
-  const loopCount = Math.max(1, Math.ceil(videoDurationSeconds / trackDurationSeconds));
+  const loopCount = Math.max(1, Math.ceil(videoDurationSeconds / sequenceDurationSeconds));
+  const segments = Array.from({ length: loopCount }, (_, loopIndex) => loopIndex).flatMap((loopIndex) =>
+    sequenceClips
+      .map((clip, clipIndex) => {
+        const absoluteStartSeconds = loopIndex * sequenceDurationSeconds + clip.startTimeSeconds;
+        if (absoluteStartSeconds >= videoDurationSeconds) return null;
+        // The final segment is usually cut short by the video ending
+        // mid-track -- it shrinks proportionally instead of overhanging
+        // past the strip's right edge.
+        const remainingSeconds = videoDurationSeconds - absoluteStartSeconds;
+        const widthFraction = Math.min(clip.durationSeconds, remainingSeconds) / videoDurationSeconds;
+        return { key: `${loopIndex}-${clipIndex}`, widthFraction, title: `${clip.assetId} -- loop ${loopIndex + 1}` };
+      })
+      .filter((segment): segment is { key: string; widthFraction: number; title: string } => segment !== null)
+  );
 
   return (
-    <div ref={scrollContainerRef} onScroll={onScroll} className="hide-scrollbar h-full overflow-x-auto bg-neutral-900 px-2 py-1">
+    <div
+      ref={scrollContainerRef}
+      onScroll={onScroll}
+      className="hide-scrollbar h-full overflow-x-auto bg-neutral-900 px-2 py-1"
+    >
       <div className="flex h-full gap-px" style={{ width: videoDurationSeconds * pixelsPerSecond }}>
-        {Array.from({ length: loopCount }, (_, index) => {
-          // The final loop is usually cut short by the video ending
-          // mid-track -- its segment shrinks proportionally instead of
-          // overhanging past the strip's right edge.
-          const remainingSeconds = videoDurationSeconds - index * trackDurationSeconds;
-          const widthFraction = Math.min(trackDurationSeconds, remainingSeconds) / videoDurationSeconds;
-          return (
-            <div
-              key={index}
-              style={{ flexBasis: `${widthFraction * 100}%` }}
-              title={`${track.name} -- loop ${index + 1}`}
-              className="shrink-0 rounded-sm border border-accent/40 bg-accent/20"
-            />
-          );
-        })}
+        {segments.map((segment) => (
+          <div
+            key={segment.key}
+            style={{ flexBasis: `${segment.widthFraction * 100}%` }}
+            title={segment.title}
+            className="shrink-0 rounded-sm border border-accent/40 bg-accent/20"
+          />
+        ))}
       </div>
     </div>
   );

@@ -1,17 +1,18 @@
 "use client";
 
 /**
- * The middle band of the three-pane editor, top to bottom: the selected
- * background track's repeating strip (pinned to the top, resizable by
- * dragging its bottom edge), the video "unfolded" into a per-second
- * thumbnail strip (sized to its own natural content height -- tile height
- * from FrameStrip's frameAspectRatio, not stretched/centered to fill
- * whatever space is left, which just produced blank padding when the
- * video's aspect ratio didn't happen to match the available height), and
- * a sound volume graph (pinned to the bottom, resizable by dragging its
- * top edge). See ResizablePanel.tsx's `anchor` prop for how the
- * background/volume panels each stay pinned to their own edge of the
- * stack while still being independently resizable.
+ * The middle band of the three-pane editor, top to bottom: the background-
+ * music strip (pinned to the top, resizable by dragging its bottom edge --
+ * concatenates every track in the sequence and loops the whole thing
+ * across the video's duration, see BackgroundTrackStrip), the video
+ * sequence "unfolded" into a per-second thumbnail strip (sized to its own
+ * natural content height -- tile height from FrameStrip's frameAspectRatio,
+ * not stretched/centered to fill whatever space is left, which just
+ * produced blank padding when the video's aspect ratio didn't happen to
+ * match the available height), and a sound volume graph (pinned to the
+ * bottom, resizable by dragging its top edge). See ResizablePanel.tsx's
+ * `anchor` prop for how the background/volume panels each stay pinned to
+ * their own edge of the stack while still being independently resizable.
  *
  * If the three strips' combined natural height exceeds the band
  * ThreePaneEditor allocates this component, this component scrolls
@@ -31,7 +32,7 @@ import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip } from "./FrameStrip";
 import { VolumeGraph } from "./VolumeGraph";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
-import type { CropRect, OverlayImage, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, TextOverlay, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 
 // Initial heights before any resizing -- the +/-25% stretch range (see
 // video_math.ts's DEFAULT_MAX_STRETCH_RATIO) is computed relative to these.
@@ -47,9 +48,11 @@ const FRAME_STRIP_INDEX = 1;
 const VOLUME_GRAPH_INDEX = 2;
 
 export function Playground({
-  backgroundTrack,
+  backgroundTracks,
   videoDurationSeconds,
   thumbnails,
+  thumbnailTimestampsSeconds,
+  clipBoundarySeconds,
   volumeLevels,
   isAnalyzing,
   currentTimeSeconds,
@@ -80,10 +83,19 @@ export function Playground({
   onChangeOverlayRange,
   onCommitOverlayRange,
   onDeleteOverlay,
+  textOverlays,
+  onChangeTextOverlayRect,
+  onCommitTextOverlayRect,
+  onChangeTextOverlayRange,
+  onCommitTextOverlayRange,
+  onDeleteTextOverlay,
+  onRequestEditTextOverlay,
 }: {
-  backgroundTrack: { name: string; url: string } | null;
+  backgroundTracks: { name: string; url: string }[];
   videoDurationSeconds: number;
   thumbnails: string[];
+  thumbnailTimestampsSeconds: number[];
+  clipBoundarySeconds: number[];
   volumeLevels: number[];
   isAnalyzing: boolean;
   currentTimeSeconds: number;
@@ -114,6 +126,13 @@ export function Playground({
   onChangeOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onDeleteOverlay: (overlayIndex: number) => void;
+  textOverlays: TextOverlay[];
+  onChangeTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onCommitTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onChangeTextOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCommitTextOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onDeleteTextOverlay: (overlayIndex: number) => void;
+  onRequestEditTextOverlay: (overlayIndex: number) => void;
 }) {
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
 
@@ -121,7 +140,7 @@ export function Playground({
     <div className="flex h-full flex-col gap-2 overflow-y-auto bg-surface px-2">
       <ResizablePanel label="background track" anchor="top" initialHeightPx={INITIAL_BACKGROUND_STRIP_HEIGHT_PX}>
         <BackgroundTrackStrip
-          track={backgroundTrack}
+          tracks={backgroundTracks}
           videoDurationSeconds={videoDurationSeconds}
           pixelsPerSecond={PIXELS_PER_SECOND}
           scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}
@@ -132,6 +151,8 @@ export function Playground({
       <div className="shrink-0">
         <FrameStrip
           thumbnails={thumbnails}
+          thumbnailTimestampsSeconds={thumbnailTimestampsSeconds}
+          clipBoundarySeconds={clipBoundarySeconds}
           isLoading={isAnalyzing}
           durationSeconds={videoDurationSeconds}
           currentTimeSeconds={currentTimeSeconds}
@@ -162,6 +183,13 @@ export function Playground({
           onChangeOverlayRange={onChangeOverlayRange}
           onCommitOverlayRange={onCommitOverlayRange}
           onDeleteOverlay={onDeleteOverlay}
+          textOverlays={textOverlays}
+          onChangeTextOverlayRect={onChangeTextOverlayRect}
+          onCommitTextOverlayRect={onCommitTextOverlayRect}
+          onChangeTextOverlayRange={onChangeTextOverlayRange}
+          onCommitTextOverlayRange={onCommitTextOverlayRange}
+          onDeleteTextOverlay={onDeleteTextOverlay}
+          onRequestEditTextOverlay={onRequestEditTextOverlay}
           pixelsPerSecond={PIXELS_PER_SECOND}
           scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}
           onScroll={bindOnScroll(FRAME_STRIP_INDEX)}

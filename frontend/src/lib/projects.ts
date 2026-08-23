@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { CropRect, OverlayImage, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, TextOverlay, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 
 export interface TemplateElement {
   id: string;
@@ -61,6 +61,17 @@ export interface EditSelectionsSnapshot {
   // flip; multiple can coexist, even at overlapping times (e.g. two
   // different images shown together).
   overlayImages: OverlayImage[];
+  // Text captions composited on top of the base video, rendered via a
+  // named template (see lib/video/textTemplates.ts) -- same
+  // positioned-rect-plus-time-range shape as overlayImages, but the
+  // content is authored text rather than an uploaded asset.
+  textOverlays: TextOverlay[];
+  // Which video assets play, in order, concatenated into one continuous
+  // sequence -- right-click "Add" on a video asset appends to this (see
+  // transformations.ts's applyAddSequenceClip). History-tracked (unlike
+  // the background-track fields below) because it changes what the
+  // frames actually are.
+  sequenceAssetIds: string[];
 }
 
 export interface EditHistoryEntrySnapshot {
@@ -87,9 +98,15 @@ export interface Timeline {
   selectedTemplateId?: string | null;
   selectedBackgroundTrackId?: string;
   // Set instead of selectedBackgroundTrackId when the background music is
-  // one of this project's own assets (via AssetGallery's right-click
-  // "Add" on a music tile) rather than a curated BACKGROUND_TRACK_OPTIONS
+  // one or more of this project's own assets (via AssetGallery's
+  // right-click "Add" on a music tile, which appends -- multiple tracks
+  // concatenate, then the whole concatenated sequence loops across the
+  // video's duration) rather than a curated BACKGROUND_TRACK_OPTIONS
   // entry -- the two are mutually exclusive, picking one clears the other.
+  // `selectedBackgroundAssetId` (singular) is read as a one-item seed if
+  // this is absent, for the one commit where the field briefly existed in
+  // that shape.
+  backgroundSequenceAssetIds?: string[];
   selectedBackgroundAssetId?: string | null;
 }
 

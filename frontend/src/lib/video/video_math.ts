@@ -433,6 +433,91 @@ export function findActiveOverlays(overlays: OverlayImage[], timeSeconds: number
 }
 
 /**
+ * Text composited on top of the base video for a time range, rendered via
+ * a named template (see lib/video/textTemplates.ts) rather than free-form
+ * styling -- the template owns font/color/animation, this just says WHAT
+ * text, WHICH template, WHERE (rect, same fractional shape as
+ * OverlayImage's), and WHEN.
+ */
+export interface TextOverlay {
+  text: string;
+  templateId: string;
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  rect: CropRect;
+}
+
+/** Every text overlay visible at `timeSeconds` -- same multiple-at-once,
+ * half-open-interval semantics as findActiveOverlays above. */
+export function findActiveTextOverlays(overlays: TextOverlay[], timeSeconds: number): TextOverlay[] {
+  return overlays.filter((overlay) => timeSeconds >= overlay.startTimeSeconds && timeSeconds < overlay.endTimeSeconds);
+}
+
+/** How far `timeSeconds` is through a [startTimeSeconds, endTimeSeconds)
+ * window, as a 0..1 fraction clamped at both ends -- what every text
+ * template renderer uses to drive its own entrance/exit animation, so
+ * each template only ever has to reason about "progress," never about
+ * clock time directly. */
+export function computeProgress(startTimeSeconds: number, endTimeSeconds: number, timeSeconds: number): number {
+  const duration = endTimeSeconds - startTimeSeconds;
+  if (duration <= 0) return 1;
+  return Math.min(Math.max((timeSeconds - startTimeSeconds) / duration, 0), 1);
+}
+
+/**
+ * One clip's place within a concatenated sequence -- a video-in-video-out
+ * multi-clip timeline (right-click "Add" on a video/music asset) or a
+ * multi-track background-music sequence both build a list of these. Pure
+ * bookkeeping: which asset, its own duration, and its cumulative
+ * `startTimeSeconds` once every earlier clip's duration is added up.
+ */
+export interface SequenceClipInfo {
+  assetId: string;
+  url: string;
+  durationSeconds: number;
+  startTimeSeconds: number;
+}
+
+export function buildSequenceClipInfos(
+  clips: { assetId: string; url: string; durationSeconds: number }[]
+): SequenceClipInfo[] {
+  let cursor = 0;
+  return clips.map((clip) => {
+    const info: SequenceClipInfo = { ...clip, startTimeSeconds: cursor };
+    cursor += clip.durationSeconds;
+    return info;
+  });
+}
+
+export function totalSequenceDuration(clips: SequenceClipInfo[]): number {
+  return clips.reduce((sum, clip) => sum + clip.durationSeconds, 0);
+}
+
+/**
+ * Which clip (and the local offset within it) a global elapsed-seconds
+ * position in the concatenated sequence falls on -- what lets CanvasPlayer
+ * keep treating "the sequence" as one continuous virtual clip: everything
+ * else (crop/zoom/flip/trim/overlay) only ever deals in elapsedSeconds
+ * against the sequence's own total duration and never needs to know clips
+ * exist. Clamps into the last clip past the sequence's own end (mirrors
+ * frameIndexAtTime's clamping) rather than returning null there, since
+ * playback logic always calls this with an already-clamped time.
+ */
+export function resolveSequencePosition(
+  clips: SequenceClipInfo[],
+  elapsedSeconds: number
+): { clipIndex: number; localSeconds: number } | null {
+  if (clips.length === 0) return null;
+  for (let i = 0; i < clips.length; i++) {
+    const clip = clips[i];
+    if (elapsedSeconds < clip.startTimeSeconds + clip.durationSeconds || i === clips.length - 1) {
+      return { clipIndex: i, localSeconds: elapsedSeconds - clip.startTimeSeconds };
+    }
+  }
+  return null;
+}
+
+/**
  * Root-mean-square loudness of `samples` (mono, -1..1 range), one value per
  * `bucketSeconds` window, normalized so the loudest bucket in the clip is
  * 1.0. Normalizing per-clip (rather than against a fixed reference level)

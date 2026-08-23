@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * Renders the video "unfolded" into one thumbnail per second, and doubles
- * as a scrub timeline: click anywhere on the strip to seek CanvasPlayer to
- * that time, and a vertical playhead tracks playback position as it
- * advances (see ThreePaneEditor's currentTimeSeconds/onSeek wiring, and
- * CanvasPlayer's seekTo/onTimeUpdate).
+ * Renders the video sequence "unfolded" into one thumbnail per second, and
+ * doubles as a scrub timeline: click anywhere on the strip to seek
+ * CanvasPlayer to that time, and a vertical playhead tracks playback
+ * position as it advances (see ThreePaneEditor's currentTimeSeconds/onSeek
+ * wiring, and CanvasPlayer's seekTo/onTimeUpdate).
  *
  * Each tile is a fixed `pixelsPerSecond` wide -- so this strip's total
  * width is exactly `thumbnails.length * pixelsPerSecond`, the same scale
@@ -16,40 +16,46 @@
  * height: sizing the box itself to the video's real shape means the image
  * fills it exactly, with no letterboxing, which in turn means
  * CropRectOverlay's percentage positioning (relative to this same box)
- * lines up with the image with no separate correction needed. `items-center`
- * on the row centers tiles vertically if the panel is taller than that
- * natural height; `max-h-full` shrinks them (preserving ratio, standard
- * CSS aspect-ratio + max-height resolution) if it's shorter.
+ * lines up with the image with no separate correction needed.
+ *
+ * IMPORTANT: each tile's own timestamp comes from `thumbnailTimestampsSeconds`
+ * (built by ThreePaneEditor in lockstep with `thumbnails`), NOT derived
+ * from `(index / (thumbnails.length - 1)) * durationSeconds`. That
+ * derivation only holds when thumbnails are evenly spaced across the
+ * WHOLE duration, which was true for a single clip but breaks once the
+ * sequence concatenates several clips' independently-generated thumbnail
+ * arrays (each contributing its own extra fractional final-sample
+ * thumbnail) -- an even-spacing assumption would drift tile timestamps
+ * away from what's actually showing, more so the more clips there are.
+ * `clipBoundarySeconds` draws a thin divider at each clip seam so they're
+ * visible instead of invisible.
  *
  * Each thumbnail also shows the crop rectangle that would apply at that
  * moment (baseCropRect, or the zoom-interpolated rect from whichever
  * ZoomEffect covers that timestamp -- see lib/video/video_math.ts's
- * computeEffectiveCropRect). Only the ACTIVE tile -- the one nearest the
- * current playhead, i.e. the same instant CanvasPlayer is showing -- gets
- * a draggable/resizable overlay (plus flip/mirror edge handles); every
- * other tile stays read-only. This keeps "editing the crop here" meaning
- * exactly one thing regardless of whether you drag on the live preview or
- * on the timeline: both edit the crop at the current time (see
- * ThreePaneEditor's handleCropRectCommit for what that turns into --
- * either the flat base crop, or one end of a transition that spreads to
- * neighboring frames). Flip/mirror, unlike crop, applies uniformly to the
- * whole clip -- every thumbnail mirrors via a CSS transform, not just the
- * active tile.
+ * computeEffectiveCropRect). Only the ACTIVE tile -- the one whose own
+ * timestamp is closest to the current playhead, i.e. the same instant
+ * CanvasPlayer is showing -- gets a draggable/resizable overlay (plus
+ * flip/mirror edge handles); every other tile stays read-only. This keeps
+ * "editing the crop here" meaning exactly one thing regardless of whether
+ * you drag on the live preview or on the timeline: both edit the crop at
+ * the current time (see ThreePaneEditor's handleCropRectCommit for what
+ * that turns into -- either the flat base crop, or one end of a
+ * transition that spreads to neighboring frames). Flip/mirror, unlike
+ * crop, applies uniformly to the whole clip -- every thumbnail mirrors via
+ * a CSS transform, not just the active tile.
  *
  * Each tile's crop rect and flip state only depend on
  * baseCropRect/zoomEffects/flip toggle lists (its own fixed timestamp never
  * changes), NOT on currentTimeSeconds -- FrameTile is memoized so the
  * ~60/sec playhead updates during playback don't re-render every
  * thumbnail, only the active one (as it hands off between tiles) and the
- * separate playhead line element. Flip, like crop, is now itself a
- * timeline action (see video_math.ts's computeEffectiveFlip) -- each tile
- * shows whichever flip state is in effect at its own instant, not one
- * uniform whole-clip value.
+ * separate playhead line element.
  *
  * ZoomEffectsTrack (every transition's own indicator), FlipTrack (one per
- * flip axis, when either has any toggles), and OverlayTrack (one row per
- * image overlay, showing how many frames it's visible for) render BELOW
- * the thumbnails; TrimTrack (the click-to-cut gray/red line) renders ABOVE
+ * flip axis, when either has any toggles), OverlayTrack (one row per image
+ * overlay), and TextOverlayTrack (one row per caption) render BELOW the
+ * thumbnails; TrimTrack (the click-to-cut gray/red line) renders ABOVE
  * them instead, per its own spec. All of them live in the SAME scrollable
  * track as the thumbnails, so everything shares one scroll position and
  * one pixel-accurate timeline width with no manual measurement needed.
@@ -57,26 +63,31 @@
  * the cut is real (CanvasPlayer's skipTrimmedRanges actually skips it
  * during playback), this is just showing where.
  *
- * Each tile also shows every image overlay active at its own instant (see
- * video_math.ts's findActiveOverlays) as its own OverlayRectOverlay, on
- * TOP of the crop rectangle -- an overlay sits over the clip, not instead
- * of it. Only the active tile's overlays are draggable/resizable, same
- * gating as the crop rectangle.
+ * Each tile also shows every image/text overlay active at its own instant
+ * (see video_math.ts's findActiveOverlays/findActiveTextOverlays) as its
+ * own OverlayRectOverlay/TextOverlayCanvas, on TOP of the crop rectangle --
+ * an overlay sits over the clip, not instead of it. Only the active
+ * tile's overlays are draggable/resizable, same gating as the crop
+ * rectangle.
  */
 import { memo, useMemo, useRef } from "react";
 import { CropRectOverlay } from "./CropRectOverlay";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
+import { TextOverlayCanvas } from "./TextOverlayCanvas";
 import { ZoomEffectsTrack } from "./ZoomEffectsTrack";
 import { FlipTrack } from "./FlipTrack";
 import { TrimTrack } from "./TrimTrack";
 import { OverlayTrack } from "./OverlayTrack";
+import { TextOverlayTrack } from "./TextOverlayTrack";
 import {
   computeEffectiveCropRect,
   computeEffectiveFlip,
   computeFlipSegments,
+  computeProgress,
   findTrimRangeIndexAt,
   type CropRect,
   type OverlayImage,
+  type TextOverlay,
   type TrimRange,
   type ZoomEffect,
 } from "@/lib/video/video_math";
@@ -92,12 +103,15 @@ const FrameTile = memo(function FrameTile({
   isTrimmed,
   overlays,
   assetUrlById,
+  textOverlays,
   onChange,
   onCommit,
   onFlipHorizontal,
   onFlipVertical,
   onOverlayRectChange,
   onOverlayRectCommit,
+  onTextOverlayRectChange,
+  onTextOverlayRectCommit,
 }: {
   src: string;
   index: number;
@@ -109,12 +123,15 @@ const FrameTile = memo(function FrameTile({
   isTrimmed: boolean;
   overlays: { overlay: OverlayImage; overlayIndex: number }[];
   assetUrlById: Record<string, string>;
+  textOverlays: { overlay: TextOverlay; overlayIndex: number; progress: number }[];
   onChange?: (next: CropRect) => void;
   onCommit?: (next: CropRect) => void;
   onFlipHorizontal?: () => void;
   onFlipVertical?: () => void;
   onOverlayRectChange?: (overlayIndex: number, next: CropRect) => void;
   onOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
+  onTextOverlayRectChange?: (overlayIndex: number, next: CropRect) => void;
+  onTextOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
 }) {
   const scaleX = flipHorizontal ? -1 : 1;
   const scaleY = flipVertical ? -1 : 1;
@@ -162,12 +179,25 @@ const FrameTile = memo(function FrameTile({
           onCommit={onOverlayRectCommit ? (next) => onOverlayRectCommit(overlayIndex, next) : undefined}
         />
       ))}
+      {textOverlays.map(({ overlay, overlayIndex, progress }) => (
+        <OverlayRectOverlay
+          key={overlayIndex}
+          rect={overlay.rect}
+          onChange={onTextOverlayRectChange ? (next) => onTextOverlayRectChange(overlayIndex, next) : undefined}
+          onCommit={onTextOverlayRectCommit ? (next) => onTextOverlayRectCommit(overlayIndex, next) : undefined}
+          renderInner={
+            <TextOverlayCanvas text={overlay.text} templateId={overlay.templateId} progress={progress} className="h-full w-full" />
+          }
+        />
+      ))}
     </div>
   );
 });
 
 export function FrameStrip({
   thumbnails,
+  thumbnailTimestampsSeconds,
+  clipBoundarySeconds,
   isLoading,
   durationSeconds,
   currentTimeSeconds,
@@ -198,11 +228,20 @@ export function FrameStrip({
   onChangeOverlayRange,
   onCommitOverlayRange,
   onDeleteOverlay,
+  textOverlays,
+  onChangeTextOverlayRect,
+  onCommitTextOverlayRect,
+  onChangeTextOverlayRange,
+  onCommitTextOverlayRange,
+  onDeleteTextOverlay,
+  onRequestEditTextOverlay,
   pixelsPerSecond,
   scrollContainerRef,
   onScroll,
 }: {
   thumbnails: string[];
+  thumbnailTimestampsSeconds: number[];
+  clipBoundarySeconds: number[];
   isLoading: boolean;
   durationSeconds: number;
   currentTimeSeconds: number;
@@ -233,6 +272,13 @@ export function FrameStrip({
   onChangeOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onDeleteOverlay: (overlayIndex: number) => void;
+  textOverlays: TextOverlay[];
+  onChangeTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onCommitTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onChangeTextOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCommitTextOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onDeleteTextOverlay: (overlayIndex: number) => void;
+  onRequestEditTextOverlay: (overlayIndex: number) => void;
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
@@ -243,23 +289,17 @@ export function FrameStrip({
   // currentTimeSeconds tick during playback (see FrameTile's memo comment).
   const tileCropRects = useMemo(() => {
     if (!baseCropRect) return thumbnails.map(() => null);
-    return thumbnails.map((_, index) => {
-      const timestamp = thumbnails.length > 1 ? (index / (thumbnails.length - 1)) * durationSeconds : 0;
-      return computeEffectiveCropRect(baseCropRect, zoomEffects, timestamp);
-    });
+    return thumbnailTimestampsSeconds.map((timestamp) => computeEffectiveCropRect(baseCropRect, zoomEffects, timestamp));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
-  }, [thumbnails.length, durationSeconds, baseCropRect, zoomEffects]);
+  }, [thumbnails.length, thumbnailTimestampsSeconds, baseCropRect, zoomEffects]);
 
   const tileFlips = useMemo(() => {
-    return thumbnails.map((_, index) => {
-      const timestamp = thumbnails.length > 1 ? (index / (thumbnails.length - 1)) * durationSeconds : 0;
-      return {
-        flipHorizontal: computeEffectiveFlip(flipHorizontalToggles, timestamp),
-        flipVertical: computeEffectiveFlip(flipVerticalToggles, timestamp),
-      };
-    });
+    return thumbnailTimestampsSeconds.map((timestamp) => ({
+      flipHorizontal: computeEffectiveFlip(flipHorizontalToggles, timestamp),
+      flipVertical: computeEffectiveFlip(flipVerticalToggles, timestamp),
+    }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
-  }, [thumbnails.length, durationSeconds, flipHorizontalToggles, flipVerticalToggles]);
+  }, [thumbnails.length, thumbnailTimestampsSeconds, flipHorizontalToggles, flipVerticalToggles]);
 
   const flipHorizontalSegments = useMemo(
     () => computeFlipSegments(flipHorizontalToggles, durationSeconds),
@@ -271,39 +311,57 @@ export function FrameStrip({
   );
 
   const tileIsTrimmed = useMemo(() => {
-    return thumbnails.map((_, index) => {
-      const timestamp = thumbnails.length > 1 ? (index / (thumbnails.length - 1)) * durationSeconds : 0;
-      return findTrimRangeIndexAt(trimRanges, timestamp) !== -1;
-    });
+    return thumbnailTimestampsSeconds.map((timestamp) => findTrimRangeIndexAt(trimRanges, timestamp) !== -1);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
-  }, [thumbnails.length, durationSeconds, trimRanges]);
+  }, [thumbnails.length, thumbnailTimestampsSeconds, trimRanges]);
 
   // Keeps each overlay's original index into overlayImages (needed to
   // dispatch onChangeOverlayRect/onCommitOverlayRect against the right
   // entry) -- a plain .filter() on its own would lose that.
   const tileOverlays = useMemo(() => {
-    return thumbnails.map((_, index) => {
-      const timestamp = thumbnails.length > 1 ? (index / (thumbnails.length - 1)) * durationSeconds : 0;
-      return overlayImages
+    return thumbnailTimestampsSeconds.map((timestamp) =>
+      overlayImages
         .map((overlay, overlayIndex) => ({ overlay, overlayIndex }))
-        .filter(({ overlay }) => timestamp >= overlay.startTimeSeconds && timestamp < overlay.endTimeSeconds);
-    });
+        .filter(({ overlay }) => timestamp >= overlay.startTimeSeconds && timestamp < overlay.endTimeSeconds)
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
-  }, [thumbnails.length, durationSeconds, overlayImages]);
+  }, [thumbnails.length, thumbnailTimestampsSeconds, overlayImages]);
 
-  // The tile nearest the playhead -- this DOES change every tick, but only
-  // this one tile's memo identity flips (false->true / true->false) as a
-  // result, not all of them, so it doesn't reintroduce the per-tick
-  // re-render cost tileCropRects above avoids.
-  const activeTileIndex =
-    thumbnails.length > 0 && durationSeconds > 0
-      ? Math.round((currentTimeSeconds / durationSeconds) * (thumbnails.length - 1))
-      : -1;
+  const tileTextOverlays = useMemo(() => {
+    return thumbnailTimestampsSeconds.map((timestamp) =>
+      textOverlays
+        .map((overlay, overlayIndex) => ({
+          overlay,
+          overlayIndex,
+          progress: computeProgress(overlay.startTimeSeconds, overlay.endTimeSeconds, timestamp),
+        }))
+        .filter(({ overlay }) => timestamp >= overlay.startTimeSeconds && timestamp < overlay.endTimeSeconds)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, thumbnailTimestampsSeconds, textOverlays]);
+
+  // The tile whose OWN timestamp is closest to the playhead -- NOT an
+  // even-spacing index formula (see this file's module comment on why
+  // that breaks for a concatenated sequence). Still only this one tile's
+  // memo identity flips per tick, not all of them.
+  const activeTileIndex = useMemo(() => {
+    if (thumbnailTimestampsSeconds.length === 0) return -1;
+    let closestIndex = 0;
+    let closestDistance = Infinity;
+    for (let index = 0; index < thumbnailTimestampsSeconds.length; index++) {
+      const distance = Math.abs(thumbnailTimestampsSeconds[index] - currentTimeSeconds);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = index;
+      }
+    }
+    return closestIndex;
+  }, [thumbnailTimestampsSeconds, currentTimeSeconds]);
 
   if (thumbnails.length === 0) {
     return (
       <div className="flex h-full items-center justify-center bg-neutral-950 px-2 text-xs text-muted">
-        {isLoading ? "Generating thumbnails…" : "Select a video to see its timeline"}
+        {isLoading ? "Generating thumbnails…" : "Add a video to see its timeline"}
       </div>
     );
   }
@@ -358,12 +416,15 @@ export function FrameStrip({
               isTrimmed={tileIsTrimmed[index]}
               overlays={tileOverlays[index]}
               assetUrlById={assetUrlById}
+              textOverlays={tileTextOverlays[index]}
               onChange={index === activeTileIndex ? onCropRectChange : undefined}
               onCommit={index === activeTileIndex ? onCropRectCommit : undefined}
               onFlipHorizontal={index === activeTileIndex ? onFlipHorizontal : undefined}
               onFlipVertical={index === activeTileIndex ? onFlipVertical : undefined}
               onOverlayRectChange={index === activeTileIndex ? onChangeOverlayRect : undefined}
               onOverlayRectCommit={index === activeTileIndex ? onCommitOverlayRect : undefined}
+              onTextOverlayRectChange={index === activeTileIndex ? onChangeTextOverlayRect : undefined}
+              onTextOverlayRectCommit={index === activeTileIndex ? onCommitTextOverlayRect : undefined}
             />
           ))}
         </div>
@@ -372,6 +433,15 @@ export function FrameStrip({
           className="pointer-events-none absolute inset-y-0 w-0.5 bg-red-500"
           style={{ left: `${playheadPercent}%` }}
         />
+
+        {clipBoundarySeconds.map((boundarySeconds, index) => (
+          <div
+            key={index}
+            title="Clip boundary"
+            className="pointer-events-none absolute inset-y-0 w-px bg-white/60"
+            style={{ left: `${durationSeconds > 0 ? (boundarySeconds / durationSeconds) * 100 : 0}%` }}
+          />
+        ))}
 
         <ZoomEffectsTrack
           zoomEffects={zoomEffects}
@@ -401,6 +471,14 @@ export function FrameStrip({
           onChangeRange={onChangeOverlayRange}
           onCommitRange={onCommitOverlayRange}
           onDelete={onDeleteOverlay}
+        />
+        <TextOverlayTrack
+          textOverlays={textOverlays}
+          videoDurationSeconds={durationSeconds}
+          onChangeRange={onChangeTextOverlayRange}
+          onCommitRange={onCommitTextOverlayRange}
+          onEdit={onRequestEditTextOverlay}
+          onDelete={onDeleteTextOverlay}
         />
       </div>
     </div>

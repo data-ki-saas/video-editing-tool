@@ -8,12 +8,17 @@
  * permanent drop target taking up space; right-click offers Delete, plus
  * an "Add" action whose meaning depends on kind: for an image, places it
  * as an overlay on the timeline (ThreePaneEditor's handleAddOverlay); for
- * music, sets it as the project's background track (handleSetBackgroundTrack)
- * -- same slot as picking one from the curated BackgroundTrackSelector
- * list. A small "+" badge marks a tile as currently in use (referenced by
- * an overlay, or the active background track), mirroring the selected-tile
- * border rather than being a separate concept. Thumbnails are a fixed
- * square, regardless of asset kind/aspect ratio.
+ * a video, appends it to the concatenated video sequence (handleAddToSequence
+ * -- the first Add is what starts rendering frames at all, every later one
+ * plays right after whatever's already there); for music, appends it to
+ * the background-music sequence (handleAddToBackgroundSequence -- multiple
+ * appended tracks concatenate, then loop as a whole across the video's
+ * duration), same slot as picking one from the curated
+ * BackgroundTrackSelector list. A small "+" badge marks a tile as
+ * currently in use (referenced by an overlay, in the video sequence, or in
+ * the background sequence), mirroring the selected-tile border rather than
+ * being a separate concept. Thumbnails are a fixed square, regardless of
+ * asset kind/aspect ratio.
  *
  * Music tiles also get a "Play"/"Pause" action -- plays right there in the
  * tile (a plain hidden <audio>, driven entirely by JS, not the browser's
@@ -43,7 +48,8 @@ export function AssetGallery({
   onBrowseStock,
   onDeleted,
   onAddOverlay,
-  onSetBackgroundTrack,
+  onAddToSequence,
+  onAddToBackgroundSequence,
   usedAssetIds,
 }: {
   assets: Asset[];
@@ -57,7 +63,8 @@ export function AssetGallery({
   onBrowseStock: () => void;
   onDeleted: (assetId: string) => void;
   onAddOverlay: (asset: Asset) => void;
-  onSetBackgroundTrack: (asset: Asset) => void;
+  onAddToSequence: (asset: Asset) => void;
+  onAddToBackgroundSequence: (asset: Asset) => void;
   usedAssetIds: Set<string>;
 }) {
   const [videoThumbnails, setVideoThumbnails] = useState<Record<string, string>>({});
@@ -169,9 +176,11 @@ export function AssetGallery({
                     : []),
                   ...(asset.kind === "image"
                     ? [{ label: "Add", onSelect: () => onAddOverlay(asset) }]
-                    : asset.kind === "audio"
-                      ? [{ label: "Add", onSelect: () => onSetBackgroundTrack(asset) }]
-                      : []),
+                    : asset.kind === "video"
+                      ? [{ label: "Add", onSelect: () => onAddToSequence(asset) }]
+                      : asset.kind === "audio"
+                        ? [{ label: "Add", onSelect: () => onAddToBackgroundSequence(asset) }]
+                        : []),
                   { label: "Delete", danger: true, onSelect: () => void handleDelete(asset) },
                 ])
               }

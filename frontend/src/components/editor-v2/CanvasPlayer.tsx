@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * Preview player for a video asset -- playback only, no crop editing here
- * (that lives entirely on FrameStrip's timeline now; see its module
+ * Preview player for the video sequence -- playback only, no crop editing
+ * here (that lives entirely on FrameStrip's timeline now; see its module
  * comment). This player renders the actual CROPPED result: each frame is
  * drawn by sampling only the region CropRect/ZoomEffect say should be kept
  * at that instant and scaling it to fill the canvas, so what's shown is
@@ -11,18 +11,37 @@
  *
  * Does NOT rely on the browser's native <video> element during playback --
  * a rough approximation of the final render while the user is editing, not
- * a frame-perfect one. Once mounted for a given asset, it: (1) extracts a
- * capped, device/duration-adapted set of frames (see lib/video/video_math.ts's
- * pickPreviewFrameRate and lib/video/video.ts's extractPreviewFrames), (2)
- * decodes the audio track (lib/video/audio.ts's decodeAudioBuffer) -- and
- * from then on, plays both back from a single AudioContext clock, never
- * touching the original video file again. The original video is only ever
- * a source to derive these from, not something played directly.
+ * a frame-perfect one. Takes an ORDERED list of clips (`clips` prop, one
+ * per video asset in the sequence -- see video_math.ts's SequenceClipInfo/
+ * resolveSequencePosition) rather than one asset: on mount/sequence-change
+ * it extracts each clip's own capped, device/duration-adapted frame set
+ * (lib/video/video_math.ts's pickPreviewFrameRate, lib/video/video.ts's
+ * extractPreviewFrames) and decodes each clip's audio track
+ * (lib/video/audio.ts's decodeAudioBuffer) SEQUENTIALLY (bounds peak
+ * memory -- decoding fully loads a whole file into memory with no
+ * streaming), then concatenates the decoded buffers into ONE continuous
+ * AudioBuffer (audio.ts's concatenateAudioBuffers) so playback is still
+ * driven by a single AudioContext clock + one AudioBufferSourceNode, never
+ * touching any original video file again once loaded. A clip that fails to
+ * load is skipped (this player still plays the rest of the sequence); if
+ * every clip fails, the player shows the same full error state as before.
  *
- * Frame selection during playback is pure math (video_math.ts's
- * frameIndexAtTime) driven by AudioContext.currentTime -- there's no
- * listening to a hidden <video>'s timeupdate/seeked events, and no
- * per-frame syncing logic at all.
+ * Frame selection during playback is pure math: `elapsedSeconds` resolves
+ * to {clipIndex, localSeconds} via resolveSequencePosition, then
+ * frameIndexAtTime picks that clip's own frame -- driven by
+ * AudioContext.currentTime, no listening to a hidden <video>'s
+ * timeupdate/seeked events, and no per-frame syncing logic at all.
+ *
+ * Canvas pixel size is fixed once per sequence load (from the first loaded
+ * clip's first frame's natural size) rather than recomputed from whichever
+ * frame is currently drawn -- different clips can have different native
+ * resolutions, and recomputing per-frame would visibly resize the canvas
+ * at every clip boundary. It still responds live to the crop rect's own
+ * ratio changing (just always scaled against that one fixed reference
+ * resolution, not the current frame's own size) -- and, as a side effect,
+ * a zoom-in now renders at full canvas resolution instead of shrinking the
+ * canvas's own pixel size while zoomed (a visible sharpness improvement,
+ * not a regression).
  *
  * Exposes an imperative `seekTo` (via ref) so the Playground's frame-strip
  * timeline can scrub this player, and reports playback position upward via
@@ -30,9 +49,8 @@
  * see ThreePaneEditor for how the two are wired together.
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { Asset } from "@/lib/api";
 import { extractPreviewFrames, getVideoDuration } from "@/lib/video/video";
-import { decodeAudioBuffer } from "@/lib/video/audio";
+import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
 import {
   frameIndexAtTime,
   pickPreviewFrameRate,
@@ -40,12 +58,20 @@ import {
   computeEffectiveFlip,
   skipTrimmedRanges,
   findActiveOverlays,
+  findActiveTextOverlays,
+  computeProgress,
+  buildSequenceClipInfos,
+  totalSequenceDuration,
+  resolveSequencePosition,
   FULL_FRAME_CROP_RECT,
   type CropRect,
   type OverlayImage,
+  type SequenceClipInfo,
+  type TextOverlay,
   type TrimRange,
   type ZoomEffect,
 } from "@/lib/video/video_math";
+import { getTextTemplateRenderer } from "@/lib/video/textTemplates";
 import { ReelLoader } from "@/components/ReelLoader";
 import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
 
@@ -65,7 +91,9 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 export const CanvasPlayer = forwardRef<
   CanvasPlayerHandle,
   {
-    asset: Asset;
+    // Every video clip in the sequence, in order -- see this file's module
+    // comment and video_math.ts's SequenceClipInfo/resolveSequencePosition.
+    clips: { assetId: string; url: string }[];
     baseCropRect: CropRect | null;
     zoomEffects: ZoomEffect[];
     // Overrides the computed crop for the CURRENT static frame while
@@ -92,13 +120,17 @@ export const CanvasPlayer = forwardRef<
     // separate from OverlayImage itself since that's persisted state and
     // has no business holding a URL that expires.
     overlayImages: OverlayImage[];
+    // Text captions composited on top of the base frame, rendered via a
+    // named template (see lib/video/textTemplates.ts) -- drawn after image
+    // overlays, so text always sits above them.
+    textOverlays: TextOverlay[];
     assetUrlById: Record<string, string>;
     onFrameDimensions?: (dimensions: { width: number; height: number }) => void;
     onTimeUpdate?: (seconds: number) => void;
   }
 >(function CanvasPlayer(
   {
-    asset,
+    clips,
     baseCropRect,
     zoomEffects,
     liveCropRectOverride = null,
@@ -106,6 +138,7 @@ export const CanvasPlayer = forwardRef<
     flipVerticalToggles,
     trimRanges,
     overlayImages,
+    textOverlays,
     assetUrlById,
     onFrameDimensions,
     onTimeUpdate,
@@ -113,9 +146,20 @@ export const CanvasPlayer = forwardRef<
   ref
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imagesRef = useRef<HTMLImageElement[]>([]);
-  const frameRateRef = useRef(0);
+  // Per-clip decoded preview frames + frame rate, indexed the same as
+  // loadedClipsRef below (NOT necessarily the same as the `clips` prop --
+  // a clip that failed to load is excluded from all three in lockstep).
+  const clipImagesRef = useRef<HTMLImageElement[][]>([]);
+  const frameRatesRef = useRef<number[]>([]);
+  // Which clips actually loaded, with cumulative start times -- what
+  // resolveSequencePosition resolves elapsedSeconds against, and what
+  // durationRef.current is derived from (their total).
+  const loadedClipsRef = useRef<SequenceClipInfo[]>([]);
   const durationRef = useRef(0);
+  // Fixed once per sequence load, from the first loaded clip's first
+  // frame -- see this file's module comment on why canvas size is no
+  // longer recomputed from whichever frame is currently drawn.
+  const referenceFrameSizeRef = useRef({ width: 0, height: 0 });
   // Loaded overlay images, keyed by assetId -- populated asynchronously
   // (see the loading effect below), so drawFrameAt just skips an overlay
   // whose image hasn't resolved yet rather than waiting on it.
@@ -141,9 +185,18 @@ export const CanvasPlayer = forwardRef<
   const [isLoading, setIsLoading] = useState(true);
   const [loadingStage, setLoadingStage] = useState("Loading video…");
   const [error, setError] = useState<string | null>(null);
+  // A clip that failed to load but wasn't the ONLY one -- shown as a small
+  // non-blocking note rather than replacing the whole player (see `error`
+  // above for the "every clip failed" case).
+  const [partialLoadWarning, setPartialLoadWarning] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
+
+  function ensureAudioContext(): AudioContext {
+    if (!audioContextRef.current) audioContextRef.current = new AudioContext();
+    return audioContextRef.current;
+  }
 
   function stopPlaybackLoop() {
     if (animationFrameIdRef.current !== null) {
@@ -161,26 +214,32 @@ export const CanvasPlayer = forwardRef<
   /** Draws the frame at `elapsedSeconds`, sampling only the region the
    * current crop/zoom (or a live in-progress drag override) says to keep,
    * scaled to fill the canvas -- this IS the crop, not a guide over an
-   * uncropped frame. Canvas width/height track the cropped region's own
-   * pixel size, so there's no extra unnecessary scale step beyond that. */
+   * uncropped frame. */
   function drawFrameAt(elapsedSeconds: number) {
     const canvas = canvasRef.current;
-    const images = imagesRef.current;
-    if (!canvas || images.length === 0) return;
+    const position = resolveSequencePosition(loadedClipsRef.current, elapsedSeconds);
+    if (!canvas || !position) return;
+    const images = clipImagesRef.current[position.clipIndex];
+    if (!images || images.length === 0) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const frameIndex = frameIndexAtTime(elapsedSeconds, frameRateRef.current, images.length);
+    const frameIndex = frameIndexAtTime(position.localSeconds, frameRatesRef.current[position.clipIndex], images.length);
     const image = images[frameIndex];
 
     const crop = liveCropRectOverride ?? (baseCropRect ? computeEffectiveCropRect(baseCropRect, zoomEffects, elapsedSeconds) : FULL_FRAME_CROP_RECT);
+
+    // Source rect: sampled from THIS frame's own natural size (clips can
+    // have different native resolutions). Destination (canvas) size: the
+    // fixed reference resolution, so different clips scale into the same
+    // pixel dimensions rather than resizing the canvas at each cut.
     const sx = crop.x * image.naturalWidth;
     const sy = crop.y * image.naturalHeight;
     const sWidth = crop.width * image.naturalWidth;
     const sHeight = crop.height * image.naturalHeight;
 
-    const targetWidth = Math.max(1, Math.round(sWidth));
-    const targetHeight = Math.max(1, Math.round(sHeight));
+    const targetWidth = Math.max(1, Math.round(crop.width * referenceFrameSizeRef.current.width));
+    const targetHeight = Math.max(1, Math.round(crop.height * referenceFrameSizeRef.current.height));
     if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
       canvas.width = targetWidth;
       canvas.height = targetHeight;
@@ -213,6 +272,23 @@ export const CanvasPlayer = forwardRef<
         overlay.rect.width * canvas.width,
         overlay.rect.height * canvas.height
       );
+    }
+
+    // Text overlays draw last, always on top of image overlays.
+    for (const overlay of findActiveTextOverlays(textOverlays, elapsedSeconds)) {
+      const renderer = getTextTemplateRenderer(overlay.templateId);
+      if (!renderer) continue;
+      renderer({
+        ctx,
+        text: overlay.text,
+        rectPx: {
+          x: overlay.rect.x * canvas.width,
+          y: overlay.rect.y * canvas.height,
+          width: overlay.rect.width * canvas.width,
+          height: overlay.rect.height * canvas.height,
+        },
+        progress: computeProgress(overlay.startTimeSeconds, overlay.endTimeSeconds, elapsedSeconds),
+      });
     }
   }
 
@@ -271,8 +347,7 @@ export const CanvasPlayer = forwardRef<
   function resumePlaybackFrom(offsetSeconds: number) {
     const audioBuffer = audioBufferRef.current;
     if (!audioBuffer) return;
-    if (!audioContextRef.current) audioContextRef.current = new AudioContext();
-    const audioContext = audioContextRef.current;
+    const audioContext = ensureAudioContext();
 
     const adjustedOffsetSeconds = Math.min(skipTrimmedRanges(trimRanges, offsetSeconds), durationRef.current);
 
@@ -329,37 +404,87 @@ export const CanvasPlayer = forwardRef<
     },
   }));
 
-  // Extracts this asset's preview frames + decodes its audio once per
-  // asset -- see the module comment above for why nothing after this
-  // effect touches the original video file again.
+  // Extracts every clip's preview frames + decodes every clip's audio,
+  // sequentially (bounds peak memory -- see this file's module comment),
+  // then concatenates the decoded audio into one buffer so playback still
+  // uses a single AudioBufferSourceNode. A clip that fails to load is
+  // skipped and excluded from loadedClipsRef -- the rest of the sequence
+  // still plays. Keyed on a joined clip id/url string, not the `clips`
+  // array reference, so an unrelated re-render (e.g. a crop edit) doesn't
+  // re-trigger a full re-extraction.
+  const clipsKey = clips.map((clip) => `${clip.assetId}:${clip.url}`).join(",");
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
     setLoadingStage("Loading video…");
     setIsReady(false);
     setError(null);
+    setPartialLoadWarning(null);
     setIsPlaying(false);
-    imagesRef.current = [];
+    clipImagesRef.current = [];
+    frameRatesRef.current = [];
+    loadedClipsRef.current = [];
     audioBufferRef.current = null;
     pausedAtSecondsRef.current = 0;
     onTimeUpdate?.(0);
 
     async function load() {
-      const duration = await getVideoDuration(asset.url);
-      const frameRate = pickPreviewFrameRate(duration, navigator.hardwareConcurrency || 4);
-      frameRateRef.current = frameRate;
-      durationRef.current = duration;
+      if (clips.length === 0) return;
+      const audioContext = ensureAudioContext();
 
-      setLoadingStage("Loading frames & audio…");
-      const [images, audioBuffer] = await Promise.all([
-        extractPreviewFrames(asset.url, frameRate).then((frames) => Promise.all(frames.map(loadImage))),
-        decodeAudioBuffer(asset.url),
-      ]);
+      const loadedImages: HTMLImageElement[][] = [];
+      const loadedFrameRates: number[] = [];
+      const loadedAudioBuffers: AudioBuffer[] = [];
+      const loadedClipMeta: { assetId: string; url: string; durationSeconds: number }[] = [];
+      let failureCount = 0;
+      let lastFailureMessage = "";
 
+      for (const clip of clips) {
+        if (cancelled) return;
+        setLoadingStage(clips.length > 1 ? `Loading clip ${loadedClipMeta.length + failureCount + 1} of ${clips.length}…` : "Loading frames & audio…");
+
+        try {
+          const duration = await getVideoDuration(clip.url);
+          const frameRate = pickPreviewFrameRate(duration, navigator.hardwareConcurrency || 4);
+          const [images, audioBuffer] = await Promise.all([
+            extractPreviewFrames(clip.url, frameRate).then((frames) => Promise.all(frames.map(loadImage))),
+            decodeAudioBuffer(clip.url),
+          ]);
+          if (cancelled) return;
+
+          loadedImages.push(images);
+          loadedFrameRates.push(frameRate);
+          loadedAudioBuffers.push(audioBuffer);
+          loadedClipMeta.push({ assetId: clip.assetId, url: clip.url, durationSeconds: duration });
+        } catch (err) {
+          failureCount += 1;
+          lastFailureMessage = err instanceof Error ? err.message : "Failed to load this clip";
+        }
+      }
       if (cancelled) return;
-      imagesRef.current = images;
-      audioBufferRef.current = audioBuffer;
-      onFrameDimensions?.({ width: images[0].naturalWidth, height: images[0].naturalHeight });
+
+      if (loadedClipMeta.length === 0) {
+        throw new Error(lastFailureMessage || "Failed to load this video for playback");
+      }
+
+      clipImagesRef.current = loadedImages;
+      frameRatesRef.current = loadedFrameRates;
+      loadedClipsRef.current = buildSequenceClipInfos(loadedClipMeta);
+      durationRef.current = totalSequenceDuration(loadedClipsRef.current);
+      audioBufferRef.current = concatenateAudioBuffers(audioContext, loadedAudioBuffers);
+
+      const firstImage = loadedImages[0]?.[0];
+      if (firstImage) {
+        referenceFrameSizeRef.current = { width: firstImage.naturalWidth, height: firstImage.naturalHeight };
+        onFrameDimensions?.({ width: firstImage.naturalWidth, height: firstImage.naturalHeight });
+      }
+
+      if (failureCount > 0) {
+        setPartialLoadWarning(
+          `${failureCount} clip${failureCount > 1 ? "s" : ""} in this sequence failed to load and ${failureCount > 1 ? "were" : "was"} skipped (${lastFailureMessage}).`
+        );
+      }
+
       setIsReady(true);
       drawFrameAt(0);
     }
@@ -376,8 +501,8 @@ export const CanvasPlayer = forwardRef<
       cancelled = true;
       stopPlaybackLoop();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- onTimeUpdate/onFrameDimensions are stable setters from the parent, not worth re-running this for
-  }, [asset.url]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on clipsKey (a joined id/url string), not the clips array reference; onTimeUpdate/onFrameDimensions are stable setters from the parent
+  }, [clipsKey]);
 
   // Redraws the current (static) frame whenever the crop/zoom/live-drag
   // state changes while paused -- e.g. adjusting the active tile's crop on
@@ -394,6 +519,7 @@ export const CanvasPlayer = forwardRef<
     flipVerticalToggles,
     trimRanges,
     overlayImages,
+    textOverlays,
     isReady,
     isPlaying,
   ]);
@@ -456,14 +582,19 @@ export const CanvasPlayer = forwardRef<
     <div className="flex h-full w-full items-center justify-center gap-1 p-2">
       <div className="relative flex h-full max-w-full items-center justify-center overflow-hidden rounded-md bg-black">
         {/* No explicit sizing beyond h-full/max-w-full -- the canvas's own
-            width/height attributes (set in drawFrameAt to the cropped
-            region's pixel size) already give it the right intrinsic aspect
-            ratio, the same way an <img> would. */}
+            width/height attributes (set in drawFrameAt to the fixed
+            reference-resolution crop size) already give it the right
+            intrinsic aspect ratio, the same way an <img> would. */}
         <canvas ref={canvasRef} className="h-full max-h-full w-auto max-w-full" />
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60">
             <ReelLoader stage={loadingStage} className="text-white" />
           </div>
+        )}
+        {partialLoadWarning && !isLoading && (
+          <p className="absolute inset-x-0 bottom-0 bg-black/70 px-2 py-1 text-center text-[11px] text-yellow-300">
+            {partialLoadWarning}
+          </p>
         )}
       </div>
 

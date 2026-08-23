@@ -5,10 +5,19 @@
  * (replaces the removed left navigation sidebar), this project's asset
  * gallery (replaces the always-visible upload dropzone -- "+ Asset" opens
  * UploadDialog instead), a background-track picker, the user-actions panel
- * (templates / clip rectangles / action buttons), and a play area showing
- * whichever asset is currently selected. The play area is playback-only --
- * no crop/flip editing happens here; that all lives on FrameStrip's
- * timeline (see Playground.tsx), CanvasPlayer just renders the result.
+ * (templates / clip rectangles / text), and a play area. The play area is
+ * playback-only -- no crop/flip editing happens here; that all lives on
+ * FrameStrip's timeline (see Playground.tsx), CanvasPlayer just renders
+ * the result.
+ *
+ * The play area shows the video SEQUENCE (sequenceClips), not whichever
+ * asset is merely highlighted in the gallery: a sequence with clips in it
+ * always wins the play-area slot, falling back to a standalone image
+ * preview or a placeholder only when the sequence is empty. Left-clicking
+ * a video asset no longer has any effect on what plays -- only right-click
+ * "Add" builds the sequence -- but still sets `selectedAsset` for the
+ * gallery's own highlight border and for previewing an image asset
+ * directly.
  */
 import { useState } from "react";
 import { ProjectList } from "./ProjectList";
@@ -17,12 +26,14 @@ import { UploadDialog } from "./UploadDialog";
 import { StockMediaDialog } from "./StockMediaDialog";
 import { BackgroundTrackSelector } from "./BackgroundTrackSelector";
 import { UserActions } from "./UserActions";
+import { TextOverlayDialog } from "./TextOverlayDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { CollapsiblePanel } from "./CollapsiblePanel";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { Asset } from "@/lib/api";
-import type { CropRect, OverlayImage, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, TextOverlay, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { TextTemplateId } from "@/lib/video/textTemplates";
 import type { RefObject } from "react";
 
 // Caps the play area to the widest ratio in the clip-rectangle catalogue
@@ -41,7 +52,8 @@ export function ActionArea({
   onUploadingChange,
   onAssetDeleted,
   onAddOverlay,
-  onSetBackgroundTrack,
+  onAddToSequence,
+  onAddToBackgroundSequence,
   usedAssetIds,
   selectedBackgroundTrackId,
   onSelectBackgroundTrack,
@@ -49,6 +61,11 @@ export function ActionArea({
   onSelectTemplate,
   selectedClipRectId,
   onSelectClipRect,
+  onOpenTextDialog,
+  isTextDialogOpen,
+  editingTextOverlay,
+  onSaveTextOverlay,
+  onCloseTextDialog,
   baseCropRect,
   zoomEffects,
   liveCropRectOverride,
@@ -56,6 +73,8 @@ export function ActionArea({
   flipVerticalToggles,
   trimRanges,
   overlayImages,
+  textOverlays,
+  sequenceClips,
   assetUrlById,
   onFrameDimensions,
   playerRef,
@@ -70,7 +89,8 @@ export function ActionArea({
   onUploadingChange?: (isUploading: boolean) => void;
   onAssetDeleted: (assetId: string) => void;
   onAddOverlay: (asset: Asset) => void;
-  onSetBackgroundTrack: (asset: Asset) => void;
+  onAddToSequence: (asset: Asset) => void;
+  onAddToBackgroundSequence: (asset: Asset) => void;
   usedAssetIds: Set<string>;
   selectedBackgroundTrackId: string;
   onSelectBackgroundTrack: (id: string) => void;
@@ -78,6 +98,11 @@ export function ActionArea({
   onSelectTemplate: (id: string) => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
+  onOpenTextDialog: () => void;
+  isTextDialogOpen: boolean;
+  editingTextOverlay: TextOverlay | null;
+  onSaveTextOverlay: (text: string, templateId: string) => void;
+  onCloseTextDialog: () => void;
   baseCropRect: CropRect | null;
   zoomEffects: ZoomEffect[];
   liveCropRectOverride: CropRect | null;
@@ -85,6 +110,8 @@ export function ActionArea({
   flipVerticalToggles: number[];
   trimRanges: TrimRange[];
   overlayImages: OverlayImage[];
+  textOverlays: TextOverlay[];
+  sequenceClips: { assetId: string; url: string }[];
   assetUrlById: Record<string, string>;
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
   // Lets ThreePaneEditor's Playground scrub this player and track a
@@ -94,6 +121,8 @@ export function ActionArea({
 }) {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
+
+  const sequenceKey = sequenceClips.map((clip) => clip.assetId).join(",");
 
   return (
     <div className="flex h-full gap-4 overflow-x-auto p-4">
@@ -111,7 +140,8 @@ export function ActionArea({
           onBrowseStock={() => setIsStockDialogOpen(true)}
           onDeleted={onAssetDeleted}
           onAddOverlay={onAddOverlay}
-          onSetBackgroundTrack={onSetBackgroundTrack}
+          onAddToSequence={onAddToSequence}
+          onAddToBackgroundSequence={onAddToBackgroundSequence}
           usedAssetIds={usedAssetIds}
         />
       </div>
@@ -126,16 +156,17 @@ export function ActionArea({
           onSelectTemplate={onSelectTemplate}
           selectedClipRectId={selectedClipRectId}
           onSelectClipRect={onSelectClipRect}
+          onOpenTextDialog={onOpenTextDialog}
         />
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-end overflow-hidden rounded-md border border-border bg-neutral-950 p-2">
         <div className="h-full max-w-full" style={{ aspectRatio: `${WIDEST_CLIP_RATIO} / 1` }}>
-          {selectedAsset?.kind === "video" ? (
+          {sequenceClips.length > 0 ? (
             <CanvasPlayer
-              key={selectedAsset.id}
+              key={sequenceKey}
               ref={playerRef}
-              asset={selectedAsset}
+              clips={sequenceClips}
               baseCropRect={baseCropRect}
               zoomEffects={zoomEffects}
               liveCropRectOverride={liveCropRectOverride}
@@ -143,6 +174,7 @@ export function ActionArea({
               flipVerticalToggles={flipVerticalToggles}
               trimRanges={trimRanges}
               overlayImages={overlayImages}
+              textOverlays={textOverlays}
               assetUrlById={assetUrlById}
               onFrameDimensions={onFrameDimensions}
               onTimeUpdate={onPlayerTimeUpdate}
@@ -157,7 +189,7 @@ export function ActionArea({
             />
           ) : (
             <p className="flex h-full w-full items-center justify-center p-4 text-sm text-muted">
-              Upload a video to start editing
+              Right-click a video asset and choose &quot;Add&quot; to start editing
             </p>
           )}
         </div>
@@ -181,6 +213,14 @@ export function ActionArea({
           onImported={onUploaded}
           onImportingChange={onUploadingChange}
           onClose={() => setIsStockDialogOpen(false)}
+        />
+      )}
+
+      {isTextDialogOpen && (
+        <TextOverlayDialog
+          editingOverlay={editingTextOverlay}
+          onSave={(text, templateId: TextTemplateId) => onSaveTextOverlay(text, templateId)}
+          onClose={onCloseTextDialog}
         />
       )}
     </div>

@@ -28,6 +28,7 @@ import {
   mergeTrimRanges,
   type CropRect,
   type OverlayImage,
+  type TextOverlay,
   type ZoomEffect,
 } from "./video_math";
 
@@ -311,5 +312,111 @@ export function applyDeleteOverlayImage(
   return {
     label: "Removed image overlay",
     state: { ...selections, overlayImages: selections.overlayImages.filter((_, index) => index !== overlayIndex) },
+  };
+}
+
+/** Appends a video asset to the concatenated sequence -- from
+ * AssetGallery's right-click "Add" on a video asset. The first "Add" is
+ * what starts rendering frames at all; every later one plays right after
+ * whatever's already in the sequence. Duplicates are allowed (the same
+ * clip can appear twice), same policy as image overlays. */
+export function applyAddSequenceClip(selections: EditSelectionsSnapshot, assetId: string): TransformationResult {
+  return {
+    label: "Added clip to sequence",
+    state: { ...selections, sequenceAssetIds: [...selections.sequenceAssetIds, assetId] },
+  };
+}
+
+// Default window/placement for a freshly-added text overlay. Unlike an
+// image overlay's "always the first frame," a caption is added at
+// whatever moment the playhead is on when the dialog opens -- captions
+// are placed at a specific moment on purpose, not always the start -- and
+// its default rect sits in the bottom third, the conventional
+// caption-safe zone, rather than dead-center.
+const DEFAULT_TEXT_OVERLAY_DURATION_SECONDS = DEFAULT_OVERLAY_DURATION_SECONDS;
+const DEFAULT_TEXT_OVERLAY_RECT: CropRect = { x: 0.1, y: 0.7, width: 0.8, height: 0.2 };
+
+/** Adds a new text overlay starting at the current playhead position,
+ * from TextOverlayDialog's "Add". */
+export function applyAddTextOverlay(
+  selections: EditSelectionsSnapshot,
+  text: string,
+  templateId: string,
+  currentTimeSeconds: number,
+  videoDurationSeconds: number
+): TransformationResult {
+  const startTimeSeconds = currentTimeSeconds;
+  const endTimeSeconds = Math.min(
+    startTimeSeconds + DEFAULT_TEXT_OVERLAY_DURATION_SECONDS,
+    videoDurationSeconds > startTimeSeconds ? videoDurationSeconds : startTimeSeconds + DEFAULT_TEXT_OVERLAY_DURATION_SECONDS
+  );
+  const newOverlay: TextOverlay = {
+    text,
+    templateId,
+    startTimeSeconds,
+    endTimeSeconds,
+    rect: DEFAULT_TEXT_OVERLAY_RECT,
+  };
+  return {
+    label: "Added text",
+    state: { ...selections, textOverlays: [...selections.textOverlays, newOverlay] },
+  };
+}
+
+/** Changes an existing text overlay's wording/template -- from
+ * TextOverlayDialog's "Save", reopened via TextOverlayTrack's "Edit
+ * text." Its rect/time range are untouched. */
+export function applyEditTextOverlay(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  text: string,
+  templateId: string
+): TransformationResult {
+  const overlay = selections.textOverlays[overlayIndex];
+  if (!overlay) return { label: "Edited text", state: selections };
+  const nextOverlays = [...selections.textOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, text, templateId };
+  return { label: "Edited text", state: { ...selections, textOverlays: nextOverlays } };
+}
+
+/** Moving/resizing a text overlay's rect via its own drag handles on the
+ * active tile (see TextOverlayCanvas.tsx). */
+export function applyTextOverlayRectCommit(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  nextRect: CropRect
+): TransformationResult {
+  const overlay = selections.textOverlays[overlayIndex];
+  if (!overlay) return { label: "Moved text", state: selections };
+  const nextOverlays = [...selections.textOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, rect: nextRect };
+  return { label: "Moved text", state: { ...selections, textOverlays: nextOverlays } };
+}
+
+/** Dragging a text overlay's segment edges on TextOverlayTrack -- "how
+ * many frames it's visible for." */
+export function applyTextOverlayRangeChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  startTimeSeconds: number,
+  endTimeSeconds: number
+): TransformationResult {
+  const overlay = selections.textOverlays[overlayIndex];
+  if (!overlay) return { label: "Adjusted text range", state: selections };
+  const nextOverlays = [...selections.textOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, startTimeSeconds, endTimeSeconds };
+  return { label: "Adjusted text range", state: { ...selections, textOverlays: nextOverlays } };
+}
+
+/** Removes one text overlay outright -- from the "Remove" context menu
+ * on TextOverlayTrack's segment. */
+export function applyDeleteTextOverlay(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number
+): TransformationResult {
+  if (!selections.textOverlays[overlayIndex]) return { label: "Removed text", state: selections };
+  return {
+    label: "Removed text",
+    state: { ...selections, textOverlays: selections.textOverlays.filter((_, index) => index !== overlayIndex) },
   };
 }

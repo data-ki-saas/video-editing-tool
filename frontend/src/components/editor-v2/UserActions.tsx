@@ -19,12 +19,25 @@
  * within its own range on ZoomEffectsTrack below the frames, not past it),
  * Flip/Mirror toggle from CropRectOverlay's own edge handles, and Trim is
  * its own click-to-cut gray/red line above the frames (TrimTrack.tsx).
+ *
+ * "Text" is a third trigger here, styled like the two collapsible panels'
+ * own collapsed state but opening TextOverlayDialog (a modal, owned by
+ * ActionArea) rather than expanding inline -- adding a caption needs a
+ * template gallery and a text box, more than a narrow side panel can hold.
  */
 import { TEMPLATE_OPTIONS } from "@/lib/templates";
 import { TEMPLATE_ICONS } from "./icons/TemplateIcons";
 import { TemplateGridIcon, CropToolIcon } from "@/components/icons/UIIcons";
 import { CLIP_RECT_OPTIONS, ClipRectIcon } from "./ClipRectIcon";
 import { CollapsiblePanel } from "./CollapsiblePanel";
+
+function TextGlyphIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className={className}>
+      <path d="M5 6h14M12 6v13" />
+    </svg>
+  );
+}
 
 function TemplateSection({
   selectedTemplateId,
@@ -94,11 +107,13 @@ export function UserActions({
   onSelectTemplate,
   selectedClipRectId,
   onSelectClipRect,
+  onOpenTextDialog,
 }: {
   selectedTemplateId: string | null;
   onSelectTemplate: (id: string) => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
+  onOpenTextDialog: () => void;
 }) {
   return (
     <div className="flex h-full gap-3 overflow-x-auto">
@@ -108,6 +123,17 @@ export function UserActions({
       <CollapsiblePanel label="Clip rectangle" icon={<CropToolIcon className="h-4 w-4" />} expandedClassName="w-28">
         <ClipRectSection selectedClipRectId={selectedClipRectId} onSelectClipRect={onSelectClipRect} />
       </CollapsiblePanel>
+      <button
+        type="button"
+        onClick={onOpenTextDialog}
+        title="Add text"
+        className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pt-2 text-muted hover:bg-background"
+      >
+        <TextGlyphIcon className="h-4 w-4" />
+        <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+          Text
+        </span>
+      </button>
     </div>
   );
 }

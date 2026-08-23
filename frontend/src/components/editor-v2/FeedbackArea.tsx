@@ -51,6 +51,12 @@ function ActiveTransformationsList({
   for (const overlay of selections.overlayImages) {
     rows.push(`Image overlay ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
   }
+  for (const overlay of selections.textOverlays) {
+    rows.push(`Text "${overlay.text}" ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
+  }
+  if (selections.sequenceAssetIds.length > 1) {
+    rows.push(`Sequence: ${selections.sequenceAssetIds.length} clips`);
+  }
 
   if (rows.length === 0) {
     return <p className="text-xs text-muted">No transformations applied yet.</p>;
