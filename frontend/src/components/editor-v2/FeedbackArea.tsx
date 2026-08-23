@@ -7,11 +7,17 @@
  * click that got it there. Undo/redo (Ctrl+Z/Ctrl+Y, see
  * ThreePaneEditor.tsx) still walks that click-by-click history underneath
  * (lib/useEditHistory.ts); this panel just doesn't surface the history
- * itself, only what it currently adds up to. Right: status/errors from the
- * asset list and the thumbnail/volume analysis pipeline.
+ * itself, only what it currently adds up to. Middle: status/errors from the
+ * asset list and the thumbnail/volume analysis pipeline. Right: a vertical
+ * settings/sign-out strip, anchored to this panel's bottom-right corner --
+ * moved here from the dashboard's old persistent top bar (see
+ * app/dashboard/layout.tsx) to give the editor that row of height back.
  */
+import Link from "next/link";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { computeFlipSegments } from "@/lib/video/video_math";
+import { SignOutButton } from "@/components/SignOutButton";
+import { SettingsIcon } from "@/components/icons/UIIcons";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
 
 function formatTimeRange(startTimeSeconds: number, endTimeSeconds: number): string {
@@ -105,6 +111,18 @@ export function FeedbackArea({
         {saveError && <p className="text-red-600">Couldn&apos;t save your changes: {saveError}</p>}
         {isUploading && <p className="text-muted">Uploading…</p>}
         {isAnalyzing && !analysisError && <p className="text-muted">Analyzing video for the timeline preview…</p>}
+      </div>
+
+      <div className="flex shrink-0 flex-col items-center justify-end gap-1 border-l border-border pl-3">
+        <Link
+          href="/settings"
+          aria-label="Settings"
+          title="Settings"
+          className="rounded-full p-2 text-muted hover:bg-foreground/10"
+        >
+          <SettingsIcon className="h-5 w-5" />
+        </Link>
+        <SignOutButton />
       </div>
     </div>
   );

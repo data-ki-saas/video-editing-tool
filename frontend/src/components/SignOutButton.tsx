@@ -1,9 +1,10 @@
 "use client";
 
-/** Standalone sign-out control -- lives in the dashboard's persistent top
- * bar (see app/dashboard/layout.tsx) now that the old left sidebar (which
- * used to host this) is gone. /settings also has its own copy; harmless
- * duplication, not worth threading shared state for. */
+/** Standalone sign-out control -- lives in the editor's FeedbackArea corner
+ * strip (see components/editor-v2/FeedbackArea.tsx) and in the top bar for
+ * bare /dashboard and /dashboard/new (see app/dashboard/(chrome)/layout.tsx).
+ * /settings also has its own copy; harmless duplication, not worth
+ * threading shared state for. */
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
