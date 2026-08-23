@@ -47,7 +47,7 @@ const FRAME_STRIP_INDEX = 1;
 const VOLUME_GRAPH_INDEX = 2;
 
 export function Playground({
-  selectedBackgroundTrackId,
+  backgroundTrack,
   videoDurationSeconds,
   thumbnails,
   volumeLevels,
@@ -81,7 +81,7 @@ export function Playground({
   onCommitOverlayRange,
   onDeleteOverlay,
 }: {
-  selectedBackgroundTrackId: string;
+  backgroundTrack: { name: string; url: string } | null;
   videoDurationSeconds: number;
   thumbnails: string[];
   volumeLevels: number[];
@@ -121,7 +121,7 @@ export function Playground({
     <div className="flex h-full flex-col gap-2 overflow-y-auto bg-surface px-2">
       <ResizablePanel label="background track" anchor="top" initialHeightPx={INITIAL_BACKGROUND_STRIP_HEIGHT_PX}>
         <BackgroundTrackStrip
-          selectedTrackId={selectedBackgroundTrackId}
+          track={backgroundTrack}
           videoDurationSeconds={videoDurationSeconds}
           pixelsPerSecond={PIXELS_PER_SECOND}
           scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}

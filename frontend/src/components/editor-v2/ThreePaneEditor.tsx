@@ -48,6 +48,7 @@ import {
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
+import { BACKGROUND_TRACK_OPTIONS } from "@/lib/backgroundTracks";
 import { ActionArea } from "./ActionArea";
 import { Playground } from "./Playground";
 import { FeedbackArea } from "./FeedbackArea";
@@ -126,6 +127,12 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
   );
   const [selectedBackgroundTrackId, setSelectedBackgroundTrackId] = useState(
     initialTimeline.selectedBackgroundTrackId ?? "none"
+  );
+  // Set instead of selectedBackgroundTrackId when the background music is
+  // one of this project's own assets rather than a curated catalog entry --
+  // mutually exclusive, see handleSetBackgroundTrack/handleSelectBackgroundTrack.
+  const [selectedBackgroundAssetId, setSelectedBackgroundAssetId] = useState<string | null>(
+    initialTimeline.selectedBackgroundAssetId ?? null
   );
 
   // Frame-affecting, history-tracked -- every change is a revertible entry
@@ -294,6 +301,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
         editHistoryIndex,
         selectedTemplateId,
         selectedBackgroundTrackId,
+        selectedBackgroundAssetId,
       };
       saveTimeline(projectId, nextTimeline)
         .then(() => setSaveError(null))
@@ -313,7 +321,15 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [projectId, initialTimeline, editHistoryEntries, editHistoryIndex, selectedTemplateId, selectedBackgroundTrackId]);
+  }, [
+    projectId,
+    initialTimeline,
+    editHistoryEntries,
+    editHistoryIndex,
+    selectedTemplateId,
+    selectedBackgroundTrackId,
+    selectedBackgroundAssetId,
+  ]);
 
   useEffect(() => {
     return () => flushSaveRef.current();
@@ -410,6 +426,20 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     pushChange(label, state);
   }
 
+  // Right-click "Add" on a music asset in AssetGallery -- sets it as the
+  // project's background track, same slot as picking one from
+  // BackgroundTrackSelector's curated catalog (the two are mutually
+  // exclusive; cosmetic/not history-tracked, like the catalog choice).
+  function handleSetBackgroundTrack(asset: Asset) {
+    setSelectedBackgroundAssetId(asset.id);
+    setSelectedBackgroundTrackId("none");
+  }
+
+  function handleSelectBackgroundTrack(id: string) {
+    setSelectedBackgroundTrackId(id);
+    setSelectedBackgroundAssetId(null);
+  }
+
   function handleChangeOverlayRect(overlayIndex: number, next: CropRect) {
     setLiveOverlayRectEdit({ index: overlayIndex, rect: next });
   }
@@ -469,9 +499,25 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
   // asset-list lookup.
   const assetUrlById = Object.fromEntries(assets.map((asset) => [asset.id, asset.url]));
 
-  // Every asset currently referenced by at least one overlay -- drives
-  // AssetGallery's "+" in-use badge.
+  // Every asset currently referenced by at least one overlay, or set as the
+  // background track -- drives AssetGallery's "+" in-use badge.
   const usedAssetIds = new Set(selections.overlayImages.map((overlay) => overlay.assetId));
+  if (selectedBackgroundAssetId) usedAssetIds.add(selectedBackgroundAssetId);
+
+  // Resolves whichever background source is actually active -- a project
+  // asset (selectedBackgroundAssetId) takes precedence, otherwise the
+  // curated catalog entry, if any -- into the single shape
+  // BackgroundTrackStrip needs. Neither concept is specific to it, so the
+  // resolution happens here rather than inside that component.
+  const backgroundAsset = selectedBackgroundAssetId
+    ? (assets.find((asset) => asset.id === selectedBackgroundAssetId) ?? null)
+    : null;
+  const backgroundCatalogTrack = BACKGROUND_TRACK_OPTIONS.find((option) => option.id === selectedBackgroundTrackId);
+  const resolvedBackgroundTrack = backgroundAsset
+    ? { name: backgroundAsset.filename, url: backgroundAsset.url }
+    : backgroundCatalogTrack?.url
+      ? { name: backgroundCatalogTrack.name, url: backgroundCatalogTrack.url }
+      : null;
 
   return (
     <div className="flex h-full flex-col">
@@ -486,9 +532,10 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           onUploadingChange={setIsUploading}
           onAssetDeleted={handleAssetDeleted}
           onAddOverlay={handleAddOverlay}
+          onSetBackgroundTrack={handleSetBackgroundTrack}
           usedAssetIds={usedAssetIds}
           selectedBackgroundTrackId={selectedBackgroundTrackId}
-          onSelectBackgroundTrack={setSelectedBackgroundTrackId}
+          onSelectBackgroundTrack={handleSelectBackgroundTrack}
           selectedTemplateId={selectedTemplateId}
           onSelectTemplate={setSelectedTemplateId}
           selectedClipRectId={selections.clipRectId}
@@ -509,7 +556,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
 
       <section style={{ flexBasis: "50%" }} className="shrink-0 overflow-hidden border-b border-border">
         <Playground
-          selectedBackgroundTrackId={selectedBackgroundTrackId}
+          backgroundTrack={resolvedBackgroundTrack}
           videoDurationSeconds={videoDurationSeconds}
           thumbnails={thumbnails}
           volumeLevels={volumeLevels}

@@ -41,6 +41,7 @@ export function ActionArea({
   onUploadingChange,
   onAssetDeleted,
   onAddOverlay,
+  onSetBackgroundTrack,
   usedAssetIds,
   selectedBackgroundTrackId,
   onSelectBackgroundTrack,
@@ -69,6 +70,7 @@ export function ActionArea({
   onUploadingChange?: (isUploading: boolean) => void;
   onAssetDeleted: (assetId: string) => void;
   onAddOverlay: (asset: Asset) => void;
+  onSetBackgroundTrack: (asset: Asset) => void;
   usedAssetIds: Set<string>;
   selectedBackgroundTrackId: string;
   onSelectBackgroundTrack: (id: string) => void;
@@ -109,6 +111,7 @@ export function ActionArea({
           onBrowseStock={() => setIsStockDialogOpen(true)}
           onDeleted={onAssetDeleted}
           onAddOverlay={onAddOverlay}
+          onSetBackgroundTrack={onSetBackgroundTrack}
           usedAssetIds={usedAssetIds}
         />
       </div>

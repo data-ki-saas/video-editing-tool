@@ -86,6 +86,11 @@ export interface Timeline {
   // persisted directly rather than through the change history.
   selectedTemplateId?: string | null;
   selectedBackgroundTrackId?: string;
+  // Set instead of selectedBackgroundTrackId when the background music is
+  // one of this project's own assets (via AssetGallery's right-click
+  // "Add" on a music tile) rather than a curated BACKGROUND_TRACK_OPTIONS
+  // entry -- the two are mutually exclusive, picking one clears the other.
+  selectedBackgroundAssetId?: string | null;
 }
 
 // Generic on purpose -- what fields matter for a "listing" varies entirely

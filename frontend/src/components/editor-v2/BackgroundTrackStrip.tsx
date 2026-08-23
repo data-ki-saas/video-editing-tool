@@ -4,31 +4,34 @@
  * Visualizes the selected background track repeating (looping) across the
  * full duration of the video, as a strip of equal-width segments -- one per
  * loop -- shown above the frame thumbnail strip in the Playground. Empty
- * state when no track (or "None") is selected.
+ * state when no track is selected.
+ *
+ * Takes an already-resolved track ({name, url} or null) rather than a
+ * catalog id -- the caller (ThreePaneEditor) is the one that knows whether
+ * the background is a curated BACKGROUND_TRACK_OPTIONS entry or one of
+ * this project's own music assets (set via AssetGallery's right-click
+ * "Add"), so this component doesn't need to know that distinction exists.
  *
  * Total width is `videoDurationSeconds * pixelsPerSecond` -- the same
  * scale FrameStrip and VolumeGraph use, so all three line up and share one
  * scroll position (see lib/useSyncedHorizontalScroll.ts).
  */
 import { useEffect, useState } from "react";
-import { BACKGROUND_TRACK_OPTIONS } from "@/lib/backgroundTracks";
 import { getAudioDuration } from "@/lib/video/audio";
 
 export function BackgroundTrackStrip({
-  selectedTrackId,
+  track,
   videoDurationSeconds,
   pixelsPerSecond,
   scrollContainerRef,
   onScroll,
 }: {
-  selectedTrackId: string;
+  track: { name: string; url: string } | null;
   videoDurationSeconds: number;
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
 }) {
-  const track = BACKGROUND_TRACK_OPTIONS.find((option) => option.id === selectedTrackId) ?? null;
-
   const [trackDurationSeconds, setTrackDurationSeconds] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 

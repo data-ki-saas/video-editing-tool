@@ -6,11 +6,14 @@
  * Clicking a tile selects that asset (drives the play area + Playground
  * timeline in ThreePaneEditor); "+ Asset" opens UploadDialog instead of a
  * permanent drop target taking up space; right-click offers Delete, plus
- * Add (image assets only) to place that image as an overlay on the
- * timeline -- see ThreePaneEditor's handleAddOverlay. A small "+" badge
- * marks a tile as currently in use (referenced by at least one overlay),
- * mirroring the selected-tile border rather than being a separate concept.
- * Thumbnails are a fixed square, regardless of asset kind/aspect ratio.
+ * an "Add" action whose meaning depends on kind: for an image, places it
+ * as an overlay on the timeline (ThreePaneEditor's handleAddOverlay); for
+ * music, sets it as the project's background track (handleSetBackgroundTrack)
+ * -- same slot as picking one from the curated BackgroundTrackSelector
+ * list. A small "+" badge marks a tile as currently in use (referenced by
+ * an overlay, or the active background track), mirroring the selected-tile
+ * border rather than being a separate concept. Thumbnails are a fixed
+ * square, regardless of asset kind/aspect ratio.
  *
  * Music tiles also get a "Play"/"Pause" action -- plays right there in the
  * tile (a plain hidden <audio>, driven entirely by JS, not the browser's
@@ -40,6 +43,7 @@ export function AssetGallery({
   onBrowseStock,
   onDeleted,
   onAddOverlay,
+  onSetBackgroundTrack,
   usedAssetIds,
 }: {
   assets: Asset[];
@@ -53,6 +57,7 @@ export function AssetGallery({
   onBrowseStock: () => void;
   onDeleted: (assetId: string) => void;
   onAddOverlay: (asset: Asset) => void;
+  onSetBackgroundTrack: (asset: Asset) => void;
   usedAssetIds: Set<string>;
 }) {
   const [videoThumbnails, setVideoThumbnails] = useState<Record<string, string>>({});
@@ -164,7 +169,9 @@ export function AssetGallery({
                     : []),
                   ...(asset.kind === "image"
                     ? [{ label: "Add", onSelect: () => onAddOverlay(asset) }]
-                    : []),
+                    : asset.kind === "audio"
+                      ? [{ label: "Add", onSelect: () => onSetBackgroundTrack(asset) }]
+                      : []),
                   { label: "Delete", danger: true, onSelect: () => void handleDelete(asset) },
                 ])
               }
