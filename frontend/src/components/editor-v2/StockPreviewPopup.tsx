@@ -1,12 +1,15 @@
 "use client";
 
 /**
- * The "check it in a popup" step for a video or music search result on
+ * The "check it in a popup" step for a video search result on
  * StockMediaDialog -- a small nested modal (higher z-index than the dialog
  * behind it) playing the actual preview file, with its own "Add to
  * project" button so importing doesn't require going back to the grid.
  * Never used for photos ("pictures are easy" -- the grid thumbnail already
- * is the check).
+ * is the check) or music (a native `<audio controls>` sits directly in
+ * MusicResultRow instead -- see StockMediaDialog.tsx -- since a hidden-
+ * behind-a-click preview step is more friction than something this
+ * lightweight needs).
  */
 import type { StockSearchResult } from "@/lib/api";
 
@@ -47,11 +50,7 @@ export function StockPreviewPopup({
         </div>
 
         <div className="flex items-center justify-center overflow-hidden rounded-md bg-black">
-          {result.kind === "video" ? (
-            <video src={result.preview_url} controls autoPlay className="max-h-[60vh] w-full" />
-          ) : (
-            <audio src={result.preview_url} controls autoPlay className="w-full p-4" />
-          )}
+          <video src={result.preview_url} controls autoPlay className="max-h-[60vh] w-full" />
         </div>
 
         <p className="mt-2 text-[11px] text-muted">{result.attribution}</p>

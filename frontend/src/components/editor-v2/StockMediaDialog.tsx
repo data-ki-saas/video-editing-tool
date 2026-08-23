@@ -4,10 +4,16 @@
  * "Browse stock media" popup, opened by AssetGallery's "+ Stock" button --
  * search Pexels (photos/videos) or Freesound (music, CC0-licensed only) and
  * import a result straight into this project's asset list, the same way an
- * uploaded file becomes one (see lib/api.ts's importStockAsset). Video and
- * music results can be checked in their own nested preview popup
- * (StockPreviewPopup) before importing; photos don't need one -- the grid
- * thumbnail already is the check.
+ * uploaded file becomes one (see lib/api.ts's importStockAsset).
+ *
+ * Checking a result before adding it works differently per kind: a photo's
+ * grid thumbnail already IS the check (no extra step). A video opens in its
+ * own nested preview popup (StockPreviewPopup) since it needs real screen
+ * space to actually watch. Music instead gets a plain native
+ * `<audio controls>` player inline in its own row -- a hidden-behind-a-click
+ * preview step is the wrong amount of friction for something this
+ * lightweight; the player should just be sitting right there, visibly
+ * playable, the moment a track shows up in the results.
  *
  * Video/music search is already limited server-side to sub-minute clips
  * (see backend/src/stock_media/service.py's MAX_CLIP_DURATION_SECONDS), so
@@ -17,6 +23,27 @@ import { useState } from "react";
 import { importStockAsset, searchStockMedia, type Asset, type StockMediaKind, type StockSearchResult } from "@/lib/api";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import { StockPreviewPopup } from "./StockPreviewPopup";
+
+function AddButton({
+  isImporting,
+  isImported,
+  onImport,
+}: {
+  isImporting: boolean;
+  isImported: boolean;
+  onImport: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onImport}
+      disabled={isImporting || isImported}
+      className="shrink-0 rounded-md bg-accent px-2 py-1 text-[10px] font-medium text-accent-foreground disabled:opacity-50"
+    >
+      {isImported ? "Added" : isImporting ? "…" : "Add"}
+    </button>
+  );
+}
 
 const KIND_TABS: { id: StockMediaKind; label: string }[] = [
   { id: "photo", label: "Photos" },
@@ -30,6 +57,9 @@ function formatDuration(seconds: number | null): string | null {
   return `${Math.floor(wholeSeconds / 60)}:${(wholeSeconds % 60).toString().padStart(2, "0")}`;
 }
 
+/** Photo or video results -- a thumbnail grid tile. A photo imports
+ * directly on click (the thumbnail already is the check); a video opens
+ * StockPreviewPopup instead, since checking it needs real screen space. */
 function ResultTile({
   result,
   isImporting,
@@ -53,9 +83,7 @@ function ResultTile({
         title={result.kind === "photo" ? "Add to project" : "Preview before adding"}
         className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-neutral-900"
       >
-        {result.kind === "music" ? (
-          <MusicNoteIcon className="h-8 w-8 text-muted" />
-        ) : result.thumbnail_url ? (
+        {result.thumbnail_url ? (
           // eslint-disable-next-line @next/next/no-img-element -- a third-party thumbnail URL, not a Next-optimizable local/static asset
           <img src={result.thumbnail_url} alt={result.title} className="h-full w-full object-cover" />
         ) : (
@@ -70,15 +98,45 @@ function ResultTile({
         <span className="min-w-0 flex-1 truncate text-[10px] text-muted" title={result.attribution}>
           {result.attribution}
         </span>
-        <button
-          type="button"
-          onClick={onImport}
-          disabled={isImporting || isImported}
-          className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-[10px] font-medium text-accent-foreground disabled:opacity-50"
-        >
-          {isImported ? "Added" : isImporting ? "…" : "Add"}
-        </button>
+        <AddButton isImporting={isImporting} isImported={isImported} onImport={onImport} />
       </div>
+    </div>
+  );
+}
+
+/** A music result -- a full-width row with a native `<audio controls>`
+ * player sitting directly in it, playable immediately with no extra click
+ * to reveal it. Freesound gives no artwork, so MusicNoteIcon is purely
+ * decorative here, not a preview trigger. */
+function MusicResultRow({
+  result,
+  isImporting,
+  isImported,
+  onImport,
+}: {
+  result: StockSearchResult;
+  isImporting: boolean;
+  isImported: boolean;
+  onImport: () => void;
+}) {
+  const duration = formatDuration(result.duration_seconds);
+
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-border bg-background p-2">
+      <MusicNoteIcon className="h-5 w-5 shrink-0 text-muted" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={result.title}>
+            {result.title}
+          </span>
+          {duration && <span className="shrink-0 text-[10px] text-muted">{duration}</span>}
+        </div>
+        <audio controls src={result.preview_url} className="mt-1 h-8 w-full" />
+        <p className="mt-0.5 truncate text-[10px] text-muted" title={result.attribution}>
+          {result.attribution}
+        </p>
+      </div>
+      <AddButton isImporting={isImporting} isImported={isImported} onImport={onImport} />
     </div>
   );
 }
@@ -212,17 +270,27 @@ export function StockMediaDialog({
             </p>
           )}
 
-          <div className="grid grid-cols-3 gap-2">
-            {results.map((result) => (
-              <ResultTile
-                key={result.id}
-                result={result}
-                isImporting={importingIds.has(result.id)}
-                isImported={importedIds.has(result.id)}
-                onPreview={() => setPreviewResult(result)}
-                onImport={() => handleImport(result)}
-              />
-            ))}
+          <div className={activeKind === "music" ? "flex flex-col gap-2" : "grid grid-cols-3 gap-2"}>
+            {results.map((result) =>
+              result.kind === "music" ? (
+                <MusicResultRow
+                  key={result.id}
+                  result={result}
+                  isImporting={importingIds.has(result.id)}
+                  isImported={importedIds.has(result.id)}
+                  onImport={() => handleImport(result)}
+                />
+              ) : (
+                <ResultTile
+                  key={result.id}
+                  result={result}
+                  isImporting={importingIds.has(result.id)}
+                  isImported={importedIds.has(result.id)}
+                  onPreview={() => setPreviewResult(result)}
+                  onImport={() => handleImport(result)}
+                />
+              )
+            )}
           </div>
 
           {isSearching && <p className="mt-2 text-center text-xs text-muted">Searching…</p>}
