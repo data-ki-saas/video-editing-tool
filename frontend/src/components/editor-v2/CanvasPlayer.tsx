@@ -47,6 +47,17 @@
  * timeline can scrub this player, and reports playback position upward via
  * `onTimeUpdate` every tick so that timeline can draw a moving playhead --
  * see ThreePaneEditor for how the two are wired together.
+ *
+ * `backgroundTracks` (resolved {name, url}[], same list BackgroundTrackStrip
+ * visualizes) plays here too, mixed under the main clip audio at a fixed,
+ * lower gain -- decoded/concatenated the same way as the main sequence's
+ * audio (one buffer, looped via AudioBufferSourceNode.loop rather than
+ * manually rescheduled, which naturally reproduces "the whole concatenated
+ * sequence repeats across the video's duration"). Decoded in its own effect,
+ * independent of the main clips-loading effect, so adding/changing a
+ * background track doesn't re-extract every video frame from scratch; if
+ * it's still decoding (or absent) when Play is pressed, the clip simply
+ * plays without music that time around rather than blocking playback on it.
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { extractPreviewFrames, getVideoDuration } from "@/lib/video/video";
@@ -78,6 +89,11 @@ import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
 export interface CanvasPlayerHandle {
   seekTo(seconds: number): void;
 }
+
+// Keeps background music audible under the main clip's own audio without
+// drowning it out -- no volume control exposed for it (v1), matching this
+// app's "smart default over exposing every knob" bias.
+const BACKGROUND_MUSIC_GAIN = 0.5;
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -125,6 +141,10 @@ export const CanvasPlayer = forwardRef<
     // overlays, so text always sits above them.
     textOverlays: TextOverlay[];
     assetUrlById: Record<string, string>;
+    // Resolved background-music sequence (project assets and/or a curated
+    // catalog track) -- mixed into playback here, see this file's module
+    // comment. Empty when no background track is selected.
+    backgroundTracks: { name: string; url: string }[];
     onFrameDimensions?: (dimensions: { width: number; height: number }) => void;
     onTimeUpdate?: (seconds: number) => void;
   }
@@ -140,6 +160,7 @@ export const CanvasPlayer = forwardRef<
     overlayImages,
     textOverlays,
     assetUrlById,
+    backgroundTracks,
     onFrameDimensions,
     onTimeUpdate,
   },
@@ -168,6 +189,11 @@ export const CanvasPlayer = forwardRef<
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  // Background-music sequence, decoded/concatenated independently of the
+  // main clips (see this file's module comment) -- null while loading or
+  // absent, checked at play/seek time rather than gating isReady on it.
+  const backgroundAudioBufferRef = useRef<AudioBuffer | null>(null);
+  const backgroundSourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
   const animationFrameIdRef = useRef<number | null>(null);
   // Wall-clock bookkeeping for the AudioContext-driven playback clock:
   // elapsed = pausedAtSeconds while stopped, or
@@ -209,6 +235,12 @@ export const CanvasPlayer = forwardRef<
       // Already stopped (e.g. it ran to the end on its own) -- fine to ignore.
     }
     sourceNodeRef.current = null;
+    try {
+      backgroundSourceNodeRef.current?.stop();
+    } catch {
+      // Already stopped -- fine to ignore.
+    }
+    backgroundSourceNodeRef.current = null;
   }
 
   /** Draws the frame at `elapsedSeconds`, sampling only the region the
@@ -358,6 +390,23 @@ export const CanvasPlayer = forwardRef<
     sourceNodeRef.current = source;
     playStartedAtCtxTimeRef.current = audioContext.currentTime;
     pausedAtSecondsRef.current = adjustedOffsetSeconds;
+
+    // Background music loops on its own (loop = true over the whole
+    // buffer) rather than being rescheduled per repeat -- its start offset
+    // is taken modulo its own duration so resuming partway through the
+    // main sequence lands at the right phase within the loop, matching
+    // what BackgroundTrackStrip visualizes.
+    const backgroundBuffer = backgroundAudioBufferRef.current;
+    if (backgroundBuffer && backgroundBuffer.duration > 0) {
+      const backgroundSource = audioContext.createBufferSource();
+      backgroundSource.buffer = backgroundBuffer;
+      backgroundSource.loop = true;
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = BACKGROUND_MUSIC_GAIN;
+      backgroundSource.connect(gainNode).connect(audioContext.destination);
+      backgroundSource.start(0, adjustedOffsetSeconds % backgroundBuffer.duration);
+      backgroundSourceNodeRef.current = backgroundSource;
+    }
 
     setIsPlaying(true);
     animationFrameIdRef.current = requestAnimationFrame(tick);
@@ -561,6 +610,39 @@ export const CanvasPlayer = forwardRef<
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
   }, [overlayImages, assetUrlById, isReady, isPlaying]);
+
+  // Decodes/concatenates the background-music sequence independently of the
+  // main clips-loading effect above, so adding or swapping a background
+  // track doesn't re-extract every video frame. A track that fails to
+  // decode is skipped (same policy as a failed video clip); if every track
+  // fails, playback just proceeds without music rather than erroring.
+  const backgroundTracksKey = backgroundTracks.map((track) => track.url).join(",");
+  useEffect(() => {
+    let cancelled = false;
+    backgroundAudioBufferRef.current = null;
+    if (backgroundTracks.length === 0) return;
+
+    async function loadBackgroundAudio() {
+      const audioContext = ensureAudioContext();
+      const decoded: AudioBuffer[] = [];
+      for (const track of backgroundTracks) {
+        if (cancelled) return;
+        try {
+          decoded.push(await decodeAudioBuffer(track.url));
+        } catch {
+          // Skipped -- one bad background track shouldn't block the rest.
+        }
+      }
+      if (cancelled || decoded.length === 0) return;
+      backgroundAudioBufferRef.current = concatenateAudioBuffers(audioContext, decoded);
+    }
+
+    void loadBackgroundAudio();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on backgroundTracksKey (joined urls), not the backgroundTracks array reference
+  }, [backgroundTracksKey]);
 
   useEffect(() => {
     return () => {

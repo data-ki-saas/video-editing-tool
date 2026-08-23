@@ -75,6 +75,7 @@ export function ActionArea({
   overlayImages,
   textOverlays,
   sequenceClips,
+  backgroundTracks,
   assetUrlById,
   onFrameDimensions,
   playerRef,
@@ -112,6 +113,7 @@ export function ActionArea({
   overlayImages: OverlayImage[];
   textOverlays: TextOverlay[];
   sequenceClips: { assetId: string; url: string }[];
+  backgroundTracks: { name: string; url: string }[];
   assetUrlById: Record<string, string>;
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
   // Lets ThreePaneEditor's Playground scrub this player and track a
@@ -175,6 +177,7 @@ export function ActionArea({
               trimRanges={trimRanges}
               overlayImages={overlayImages}
               textOverlays={textOverlays}
+              backgroundTracks={backgroundTracks}
               assetUrlById={assetUrlById}
               onFrameDimensions={onFrameDimensions}
               onTimeUpdate={onPlayerTimeUpdate}

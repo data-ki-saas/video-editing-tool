@@ -761,6 +761,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           overlayImages={displayedOverlayImages}
           textOverlays={displayedTextOverlays}
           sequenceClips={sequenceClips}
+          backgroundTracks={resolvedBackgroundTracks}
           assetUrlById={assetUrlById}
           onFrameDimensions={setFrameDimensions}
           playerRef={canvasPlayerRef}
