@@ -27,6 +27,7 @@ import {
   toggleFlipAt,
   mergeTrimRanges,
   type CropRect,
+  type OverlayImage,
   type ZoomEffect,
 } from "./video_math";
 
@@ -243,5 +244,72 @@ export function applyDeleteTrimRange(selections: EditSelectionsSnapshot, rangeIn
   return {
     label: "Removed trim",
     state: { ...selections, trimRanges: selections.trimRanges.filter((_, index) => index !== rangeIndex) },
+  };
+}
+
+// Default window/placement for a freshly-added image overlay -- "drop it
+// on the first frame" -- a modest, clearly-adjustable centered box, both
+// tweaked afterward via OverlayRectOverlay's own handles and its segment
+// on OverlayTrack.
+const DEFAULT_OVERLAY_DURATION_SECONDS = 3;
+const DEFAULT_OVERLAY_RECT: CropRect = { x: 0.3, y: 0.3, width: 0.4, height: 0.4 };
+
+/** Adds a new image overlay starting at the first frame (time 0), from
+ * AssetGallery's right-click "Add" action on an image asset. */
+export function applyAddOverlayImage(
+  selections: EditSelectionsSnapshot,
+  assetId: string,
+  videoDurationSeconds: number
+): TransformationResult {
+  const endTimeSeconds = Math.min(
+    DEFAULT_OVERLAY_DURATION_SECONDS,
+    videoDurationSeconds > 0 ? videoDurationSeconds : DEFAULT_OVERLAY_DURATION_SECONDS
+  );
+  const newOverlay: OverlayImage = { assetId, startTimeSeconds: 0, endTimeSeconds, rect: DEFAULT_OVERLAY_RECT };
+  return {
+    label: "Added image overlay",
+    state: { ...selections, overlayImages: [...selections.overlayImages, newOverlay] },
+  };
+}
+
+/** Moving/resizing an overlay's rect via its own drag handles on the
+ * active tile (see OverlayRectOverlay.tsx). */
+export function applyOverlayRectCommit(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  nextRect: CropRect
+): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  if (!overlay) return { label: "Moved overlay", state: selections };
+  const nextOverlays = [...selections.overlayImages];
+  nextOverlays[overlayIndex] = { ...overlay, rect: nextRect };
+  return { label: "Moved overlay", state: { ...selections, overlayImages: nextOverlays } };
+}
+
+/** Dragging an overlay's segment edges on OverlayTrack -- "how many
+ * frames the image is visible for." */
+export function applyOverlayRangeChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  startTimeSeconds: number,
+  endTimeSeconds: number
+): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  if (!overlay) return { label: "Adjusted overlay range", state: selections };
+  const nextOverlays = [...selections.overlayImages];
+  nextOverlays[overlayIndex] = { ...overlay, startTimeSeconds, endTimeSeconds };
+  return { label: "Adjusted overlay range", state: { ...selections, overlayImages: nextOverlays } };
+}
+
+/** Removes one image overlay outright -- from the "Remove overlay"
+ * context menu on OverlayTrack's segment. */
+export function applyDeleteOverlayImage(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number
+): TransformationResult {
+  if (!selections.overlayImages[overlayIndex]) return { label: "Removed image overlay", state: selections };
+  return {
+    label: "Removed image overlay",
+    state: { ...selections, overlayImages: selections.overlayImages.filter((_, index) => index !== overlayIndex) },
   };
 }

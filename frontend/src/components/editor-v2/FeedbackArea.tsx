@@ -48,6 +48,9 @@ function ActiveTransformationsList({
   for (const range of selections.trimRanges) {
     rows.push(`Trimmed ${formatTimeRange(range.startTimeSeconds, range.endTimeSeconds)}`);
   }
+  for (const overlay of selections.overlayImages) {
+    rows.push(`Image overlay ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
+  }
 
   if (rows.length === 0) {
     return <p className="text-xs text-muted">No transformations applied yet.</p>;

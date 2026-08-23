@@ -46,27 +46,37 @@
  * shows whichever flip state is in effect at its own instant, not one
  * uniform whole-clip value.
  *
- * ZoomEffectsTrack (every transition's own indicator) and FlipTrack (one
- * per flip axis, when either has any toggles) render BELOW the thumbnails;
- * TrimTrack (the click-to-cut gray/red line) renders ABOVE them instead,
- * per its own spec. All of them live in the SAME scrollable track as the
- * thumbnails, so everything shares one scroll position and one
- * pixel-accurate timeline width with no manual measurement needed. Tiles
- * inside a trimmed range are dimmed (see FrameTile's isTrimmed) -- the cut
- * is real (CanvasPlayer's skipTrimmedRanges actually skips it during
- * playback), this is just showing where.
+ * ZoomEffectsTrack (every transition's own indicator), FlipTrack (one per
+ * flip axis, when either has any toggles), and OverlayTrack (one row per
+ * image overlay, showing how many frames it's visible for) render BELOW
+ * the thumbnails; TrimTrack (the click-to-cut gray/red line) renders ABOVE
+ * them instead, per its own spec. All of them live in the SAME scrollable
+ * track as the thumbnails, so everything shares one scroll position and
+ * one pixel-accurate timeline width with no manual measurement needed.
+ * Tiles inside a trimmed range are dimmed (see FrameTile's isTrimmed) --
+ * the cut is real (CanvasPlayer's skipTrimmedRanges actually skips it
+ * during playback), this is just showing where.
+ *
+ * Each tile also shows every image overlay active at its own instant (see
+ * video_math.ts's findActiveOverlays) as its own OverlayRectOverlay, on
+ * TOP of the crop rectangle -- an overlay sits over the clip, not instead
+ * of it. Only the active tile's overlays are draggable/resizable, same
+ * gating as the crop rectangle.
  */
 import { memo, useMemo, useRef } from "react";
 import { CropRectOverlay } from "./CropRectOverlay";
+import { OverlayRectOverlay } from "./OverlayRectOverlay";
 import { ZoomEffectsTrack } from "./ZoomEffectsTrack";
 import { FlipTrack } from "./FlipTrack";
 import { TrimTrack } from "./TrimTrack";
+import { OverlayTrack } from "./OverlayTrack";
 import {
   computeEffectiveCropRect,
   computeEffectiveFlip,
   computeFlipSegments,
   findTrimRangeIndexAt,
   type CropRect,
+  type OverlayImage,
   type TrimRange,
   type ZoomEffect,
 } from "@/lib/video/video_math";
@@ -80,10 +90,14 @@ const FrameTile = memo(function FrameTile({
   flipHorizontal,
   flipVertical,
   isTrimmed,
+  overlays,
+  assetUrlById,
   onChange,
   onCommit,
   onFlipHorizontal,
   onFlipVertical,
+  onOverlayRectChange,
+  onOverlayRectCommit,
 }: {
   src: string;
   index: number;
@@ -93,10 +107,14 @@ const FrameTile = memo(function FrameTile({
   flipHorizontal: boolean;
   flipVertical: boolean;
   isTrimmed: boolean;
+  overlays: { overlay: OverlayImage; overlayIndex: number }[];
+  assetUrlById: Record<string, string>;
   onChange?: (next: CropRect) => void;
   onCommit?: (next: CropRect) => void;
   onFlipHorizontal?: () => void;
   onFlipVertical?: () => void;
+  onOverlayRectChange?: (overlayIndex: number, next: CropRect) => void;
+  onOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
 }) {
   const scaleX = flipHorizontal ? -1 : 1;
   const scaleY = flipVertical ? -1 : 1;
@@ -135,6 +153,15 @@ const FrameTile = memo(function FrameTile({
           onFlipVertical={onFlipVertical}
         />
       )}
+      {overlays.map(({ overlay, overlayIndex }) => (
+        <OverlayRectOverlay
+          key={overlayIndex}
+          rect={overlay.rect}
+          imageUrl={assetUrlById[overlay.assetId] ?? ""}
+          onChange={onOverlayRectChange ? (next) => onOverlayRectChange(overlayIndex, next) : undefined}
+          onCommit={onOverlayRectCommit ? (next) => onOverlayRectCommit(overlayIndex, next) : undefined}
+        />
+      ))}
     </div>
   );
 });
@@ -164,6 +191,13 @@ export function FrameStrip({
   onTrimTrackClick,
   onMoveTrimDot,
   onDeleteTrimRange,
+  overlayImages,
+  assetUrlById,
+  onChangeOverlayRect,
+  onCommitOverlayRect,
+  onChangeOverlayRange,
+  onCommitOverlayRange,
+  onDeleteOverlay,
   pixelsPerSecond,
   scrollContainerRef,
   onScroll,
@@ -192,6 +226,13 @@ export function FrameStrip({
   onTrimTrackClick: (timeSeconds: number) => void;
   onMoveTrimDot: (timeSeconds: number) => void;
   onDeleteTrimRange: (rangeIndex: number) => void;
+  overlayImages: OverlayImage[];
+  assetUrlById: Record<string, string>;
+  onChangeOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onCommitOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onChangeOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCommitOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onDeleteOverlay: (overlayIndex: number) => void;
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
@@ -236,6 +277,19 @@ export function FrameStrip({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, durationSeconds, trimRanges]);
+
+  // Keeps each overlay's original index into overlayImages (needed to
+  // dispatch onChangeOverlayRect/onCommitOverlayRect against the right
+  // entry) -- a plain .filter() on its own would lose that.
+  const tileOverlays = useMemo(() => {
+    return thumbnails.map((_, index) => {
+      const timestamp = thumbnails.length > 1 ? (index / (thumbnails.length - 1)) * durationSeconds : 0;
+      return overlayImages
+        .map((overlay, overlayIndex) => ({ overlay, overlayIndex }))
+        .filter(({ overlay }) => timestamp >= overlay.startTimeSeconds && timestamp < overlay.endTimeSeconds);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, durationSeconds, overlayImages]);
 
   // The tile nearest the playhead -- this DOES change every tick, but only
   // this one tile's memo identity flips (false->true / true->false) as a
@@ -302,10 +356,14 @@ export function FrameStrip({
               flipHorizontal={tileFlips[index].flipHorizontal}
               flipVertical={tileFlips[index].flipVertical}
               isTrimmed={tileIsTrimmed[index]}
+              overlays={tileOverlays[index]}
+              assetUrlById={assetUrlById}
               onChange={index === activeTileIndex ? onCropRectChange : undefined}
               onCommit={index === activeTileIndex ? onCropRectCommit : undefined}
               onFlipHorizontal={index === activeTileIndex ? onFlipHorizontal : undefined}
               onFlipVertical={index === activeTileIndex ? onFlipVertical : undefined}
+              onOverlayRectChange={index === activeTileIndex ? onChangeOverlayRect : undefined}
+              onOverlayRectCommit={index === activeTileIndex ? onCommitOverlayRect : undefined}
             />
           ))}
         </div>
@@ -335,6 +393,14 @@ export function FrameStrip({
           videoDurationSeconds={durationSeconds}
           colorClassName="bg-purple-500/50 border border-purple-500"
           title="Mirrored"
+        />
+        <OverlayTrack
+          overlayImages={overlayImages}
+          assetUrlById={assetUrlById}
+          videoDurationSeconds={durationSeconds}
+          onChangeRange={onChangeOverlayRange}
+          onCommitRange={onCommitOverlayRange}
+          onDelete={onDeleteOverlay}
         />
       </div>
     </div>

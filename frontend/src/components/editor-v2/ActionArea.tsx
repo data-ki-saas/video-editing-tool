@@ -22,7 +22,7 @@ import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { CollapsiblePanel } from "./CollapsiblePanel";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { Asset } from "@/lib/api";
-import type { CropRect, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 import type { RefObject } from "react";
 
 // Caps the play area to the widest ratio in the clip-rectangle catalogue
@@ -40,6 +40,8 @@ export function ActionArea({
   onUploaded,
   onUploadingChange,
   onAssetDeleted,
+  onAddOverlay,
+  usedAssetIds,
   selectedBackgroundTrackId,
   onSelectBackgroundTrack,
   selectedTemplateId,
@@ -52,6 +54,8 @@ export function ActionArea({
   flipHorizontalToggles,
   flipVerticalToggles,
   trimRanges,
+  overlayImages,
+  assetUrlById,
   onFrameDimensions,
   playerRef,
   onPlayerTimeUpdate,
@@ -64,6 +68,8 @@ export function ActionArea({
   onUploaded: (asset: Asset) => void;
   onUploadingChange?: (isUploading: boolean) => void;
   onAssetDeleted: (assetId: string) => void;
+  onAddOverlay: (asset: Asset) => void;
+  usedAssetIds: Set<string>;
   selectedBackgroundTrackId: string;
   onSelectBackgroundTrack: (id: string) => void;
   selectedTemplateId: string | null;
@@ -76,6 +82,8 @@ export function ActionArea({
   flipHorizontalToggles: number[];
   flipVerticalToggles: number[];
   trimRanges: TrimRange[];
+  overlayImages: OverlayImage[];
+  assetUrlById: Record<string, string>;
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
   // Lets ThreePaneEditor's Playground scrub this player and track a
   // playhead against it -- see CanvasPlayer.tsx's seekTo/onTimeUpdate.
@@ -100,6 +108,8 @@ export function ActionArea({
           onAddAsset={() => setIsUploadDialogOpen(true)}
           onBrowseStock={() => setIsStockDialogOpen(true)}
           onDeleted={onAssetDeleted}
+          onAddOverlay={onAddOverlay}
+          usedAssetIds={usedAssetIds}
         />
       </div>
 
@@ -129,6 +139,8 @@ export function ActionArea({
               flipHorizontalToggles={flipHorizontalToggles}
               flipVerticalToggles={flipVerticalToggles}
               trimRanges={trimRanges}
+              overlayImages={overlayImages}
+              assetUrlById={assetUrlById}
               onFrameDimensions={onFrameDimensions}
               onTimeUpdate={onPlayerTimeUpdate}
             />

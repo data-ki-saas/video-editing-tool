@@ -30,7 +30,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listAssets, type Asset } from "@/lib/api";
 import { extractThumbnails, getVideoDuration } from "@/lib/video/video";
 import { extractVolumeProfile } from "@/lib/video/audio";
-import type { CropRect, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, ZoomEffect } from "@/lib/video/video_math";
 import {
   applySelectClipRect,
   applyCropRectCommit,
@@ -40,6 +40,10 @@ import {
   applyFlipToggle,
   applyTrimTrackClick,
   applyDeleteTrimRange,
+  applyAddOverlayImage,
+  applyOverlayRectCommit,
+  applyOverlayRangeChange,
+  applyDeleteOverlayImage,
 } from "@/lib/video/transformations";
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
@@ -60,6 +64,7 @@ const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
   flipHorizontalToggles: [],
   flipVerticalToggles: [],
   trimRanges: [],
+  overlayImages: [],
 };
 
 export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: string; initialTimeline: Timeline }) {
@@ -99,6 +104,19 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
   // state, not a committed trim.
   const [pendingTrimStartSeconds, setPendingTrimStartSeconds] = useState<number | null>(null);
 
+  // Live position of one image overlay's rect while actively dragging its
+  // OverlayRectOverlay handles on FrameStrip's active tile, before it's
+  // committed -- same change-vs-commit split as liveCropRect above.
+  const [liveOverlayRectEdit, setLiveOverlayRectEdit] = useState<{ index: number; rect: CropRect } | null>(null);
+
+  // Live time range of one image overlay while actively dragging its
+  // OverlayTrack segment edges, before it's committed -- same split again.
+  const [liveOverlayRangeEdit, setLiveOverlayRangeEdit] = useState<{
+    index: number;
+    startTimeSeconds: number;
+    endTimeSeconds: number;
+  } | null>(null);
+
   const canvasPlayerRef = useRef<CanvasPlayerHandle>(null);
 
   // Cosmetic-only, persisted but not history-tracked (see this file's
@@ -136,6 +154,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     flipHorizontalToggles: rawSelections.flipHorizontalToggles ?? [],
     flipVerticalToggles: rawSelections.flipVerticalToggles ?? [],
     trimRanges: rawSelections.trimRanges ?? [],
+    overlayImages: rawSelections.overlayImages ?? [],
   };
 
   // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to redo (both redo
@@ -384,6 +403,40 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     pushChange(label, state);
   }
 
+  // Right-click "Add" on an image asset in AssetGallery -- places it as an
+  // overlay starting at the first frame (time 0), per spec.
+  function handleAddOverlay(asset: Asset) {
+    const { label, state } = applyAddOverlayImage(selections, asset.id, videoDurationSeconds);
+    pushChange(label, state);
+  }
+
+  function handleChangeOverlayRect(overlayIndex: number, next: CropRect) {
+    setLiveOverlayRectEdit({ index: overlayIndex, rect: next });
+  }
+
+  function handleCommitOverlayRect(overlayIndex: number, next: CropRect) {
+    setLiveOverlayRectEdit(null);
+    const { label, state } = applyOverlayRectCommit(selections, overlayIndex, next);
+    pushChange(label, state);
+  }
+
+  function handleChangeOverlayRange(overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
+    setLiveOverlayRangeEdit({ index: overlayIndex, startTimeSeconds, endTimeSeconds });
+  }
+
+  function handleCommitOverlayRange(overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
+    setLiveOverlayRangeEdit(null);
+    const { label, state } = applyOverlayRangeChange(selections, overlayIndex, startTimeSeconds, endTimeSeconds);
+    pushChange(label, state);
+  }
+
+  function handleDeleteOverlay(overlayIndex: number) {
+    setLiveOverlayRectEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    setLiveOverlayRangeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    const { label, state } = applyDeleteOverlayImage(selections, overlayIndex);
+    pushChange(label, state);
+  }
+
   function handleSeek(seconds: number) {
     canvasPlayerRef.current?.seekTo(seconds);
   }
@@ -397,6 +450,29 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
 
   const frameAspectRatio = frameDimensions ? frameDimensions.width / frameDimensions.height : null;
 
+  // Splices any in-progress rect/range drag into the persisted array at
+  // its own index, same pattern as displayedZoomEffects above.
+  const displayedOverlayImages: OverlayImage[] = selections.overlayImages.map((overlay, index) => {
+    if (liveOverlayRectEdit?.index === index) return { ...overlay, rect: liveOverlayRectEdit.rect };
+    if (liveOverlayRangeEdit?.index === index) {
+      return {
+        ...overlay,
+        startTimeSeconds: liveOverlayRangeEdit.startTimeSeconds,
+        endTimeSeconds: liveOverlayRangeEdit.endTimeSeconds,
+      };
+    }
+    return overlay;
+  });
+
+  // assetId -> presigned R2 URL, for CanvasPlayer/FrameStrip/OverlayTrack to
+  // resolve an overlay's actual image without each needing their own
+  // asset-list lookup.
+  const assetUrlById = Object.fromEntries(assets.map((asset) => [asset.id, asset.url]));
+
+  // Every asset currently referenced by at least one overlay -- drives
+  // AssetGallery's "+" in-use badge.
+  const usedAssetIds = new Set(selections.overlayImages.map((overlay) => overlay.assetId));
+
   return (
     <div className="flex h-full flex-col">
       <section style={{ flexBasis: "30%" }} className="shrink-0 overflow-hidden border-b border-border">
@@ -409,6 +485,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           onUploaded={handleUploaded}
           onUploadingChange={setIsUploading}
           onAssetDeleted={handleAssetDeleted}
+          onAddOverlay={handleAddOverlay}
+          usedAssetIds={usedAssetIds}
           selectedBackgroundTrackId={selectedBackgroundTrackId}
           onSelectBackgroundTrack={setSelectedBackgroundTrackId}
           selectedTemplateId={selectedTemplateId}
@@ -421,6 +499,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           flipHorizontalToggles={selections.flipHorizontalToggles}
           flipVerticalToggles={selections.flipVerticalToggles}
           trimRanges={selections.trimRanges}
+          overlayImages={displayedOverlayImages}
+          assetUrlById={assetUrlById}
           onFrameDimensions={setFrameDimensions}
           playerRef={canvasPlayerRef}
           onPlayerTimeUpdate={setCurrentTimeSeconds}
@@ -455,6 +535,13 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           onTrimTrackClick={handleTrimTrackClick}
           onMoveTrimDot={setPendingTrimStartSeconds}
           onDeleteTrimRange={handleDeleteTrimRange}
+          overlayImages={displayedOverlayImages}
+          assetUrlById={assetUrlById}
+          onChangeOverlayRect={handleChangeOverlayRect}
+          onCommitOverlayRect={handleCommitOverlayRect}
+          onChangeOverlayRange={handleChangeOverlayRange}
+          onCommitOverlayRange={handleCommitOverlayRange}
+          onDeleteOverlay={handleDeleteOverlay}
         />
       </section>
 
@@ -465,7 +552,7 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           saveError={saveError}
           isAnalyzing={isAnalyzing}
           isUploading={isUploading}
-          selections={{ ...selections, zoomEffects: displayedZoomEffects }}
+          selections={{ ...selections, zoomEffects: displayedZoomEffects, overlayImages: displayedOverlayImages }}
           videoDurationSeconds={videoDurationSeconds}
         />
       </section>

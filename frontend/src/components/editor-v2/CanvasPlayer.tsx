@@ -39,8 +39,10 @@ import {
   computeEffectiveCropRect,
   computeEffectiveFlip,
   skipTrimmedRanges,
+  findActiveOverlays,
   FULL_FRAME_CROP_RECT,
   type CropRect,
+  type OverlayImage,
   type TrimRange,
   type ZoomEffect,
 } from "@/lib/video/video_math";
@@ -84,6 +86,13 @@ export const CanvasPlayer = forwardRef<
     // below), not merely marked, so what plays here matches what FrameStrip's
     // dimmed tiles promise is gone.
     trimRanges: TrimRange[];
+    // Image assets composited on top of the base frame for their own time
+    // range (see video_math.ts's OverlayImage) -- `assetUrlById` resolves
+    // each overlay's assetId to the actual R2 URL to load and draw, kept
+    // separate from OverlayImage itself since that's persisted state and
+    // has no business holding a URL that expires.
+    overlayImages: OverlayImage[];
+    assetUrlById: Record<string, string>;
     onFrameDimensions?: (dimensions: { width: number; height: number }) => void;
     onTimeUpdate?: (seconds: number) => void;
   }
@@ -96,6 +105,8 @@ export const CanvasPlayer = forwardRef<
     flipHorizontalToggles,
     flipVerticalToggles,
     trimRanges,
+    overlayImages,
+    assetUrlById,
     onFrameDimensions,
     onTimeUpdate,
   },
@@ -105,6 +116,10 @@ export const CanvasPlayer = forwardRef<
   const imagesRef = useRef<HTMLImageElement[]>([]);
   const frameRateRef = useRef(0);
   const durationRef = useRef(0);
+  // Loaded overlay images, keyed by assetId -- populated asynchronously
+  // (see the loading effect below), so drawFrameAt just skips an overlay
+  // whose image hasn't resolved yet rather than waiting on it.
+  const overlayImagesRef = useRef<Record<string, HTMLImageElement>>({});
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
@@ -184,6 +199,21 @@ export const CanvasPlayer = forwardRef<
     ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
     ctx.drawImage(image, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
     ctx.restore();
+
+    // Composited AFTER the flip transform is undone (ctx.restore() above)
+    // -- an overlay image is independent of the base clip's flip state,
+    // not something that should mirror along with it.
+    for (const overlay of findActiveOverlays(overlayImages, elapsedSeconds)) {
+      const overlayImage = overlayImagesRef.current[overlay.assetId];
+      if (!overlayImage) continue;
+      ctx.drawImage(
+        overlayImage,
+        overlay.rect.x * canvas.width,
+        overlay.rect.y * canvas.height,
+        overlay.rect.width * canvas.width,
+        overlay.rect.height * canvas.height
+      );
+    }
   }
 
   function tick() {
@@ -356,7 +386,55 @@ export const CanvasPlayer = forwardRef<
   useEffect(() => {
     if (isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
-  }, [baseCropRect, zoomEffects, liveCropRectOverride, flipHorizontalToggles, flipVerticalToggles, trimRanges, isReady, isPlaying]);
+  }, [
+    baseCropRect,
+    zoomEffects,
+    liveCropRectOverride,
+    flipHorizontalToggles,
+    flipVerticalToggles,
+    trimRanges,
+    overlayImages,
+    isReady,
+    isPlaying,
+  ]);
+
+  // Loads each currently-referenced overlay image once (cached in
+  // overlayImagesRef by assetId) and redraws the current frame once any of
+  // them finish -- covers both "an overlay was just added, its image
+  // hasn't loaded yet" and "the asset list refreshed with a fresh
+  // presigned URL for one already loaded" (re-fetches, since the object
+  // itself hasn't changed this is cheap and just replaces the same
+  // pixels). A missing/failed image is skipped in drawFrameAt, not
+  // surfaced as a page error -- one broken overlay thumbnail shouldn't
+  // block playback of everything else.
+  useEffect(() => {
+    let cancelled = false;
+    const toLoad = overlayImages
+      .map((overlay) => ({ assetId: overlay.assetId, url: assetUrlById[overlay.assetId] }))
+      .filter(({ url }) => url);
+
+    Promise.all(
+      toLoad.map(({ assetId, url }) =>
+        loadImage(url)
+          .then((img) => ({ assetId, img }))
+          .catch(() => null)
+      )
+    ).then((loaded) => {
+      if (cancelled) return;
+      let didLoadAny = false;
+      for (const entry of loaded) {
+        if (!entry) continue;
+        overlayImagesRef.current[entry.assetId] = entry.img;
+        didLoadAny = true;
+      }
+      if (didLoadAny && isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
+  }, [overlayImages, assetUrlById, isReady, isPlaying]);
 
   useEffect(() => {
     return () => {

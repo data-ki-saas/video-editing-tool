@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { CropRect, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 
 export interface TemplateElement {
   id: string;
@@ -56,6 +56,11 @@ export interface EditSelectionsSnapshot {
   // gesture and CanvasPlayer's skipTrimmedRanges, which actually skips
   // over them during playback rather than just marking them.
   trimRanges: TrimRange[];
+  // Image assets composited on top of the base video -- see
+  // video_math.ts's OverlayImage. Independent of trimRanges/zoomEffects/
+  // flip; multiple can coexist, even at overlapping times (e.g. two
+  // different images shown together).
+  overlayImages: OverlayImage[];
 }
 
 export interface EditHistoryEntrySnapshot {

@@ -31,7 +31,7 @@ import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip } from "./FrameStrip";
 import { VolumeGraph } from "./VolumeGraph";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
-import type { CropRect, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 
 // Initial heights before any resizing -- the +/-25% stretch range (see
 // video_math.ts's DEFAULT_MAX_STRETCH_RATIO) is computed relative to these.
@@ -73,6 +73,13 @@ export function Playground({
   onTrimTrackClick,
   onMoveTrimDot,
   onDeleteTrimRange,
+  overlayImages,
+  assetUrlById,
+  onChangeOverlayRect,
+  onCommitOverlayRect,
+  onChangeOverlayRange,
+  onCommitOverlayRange,
+  onDeleteOverlay,
 }: {
   selectedBackgroundTrackId: string;
   videoDurationSeconds: number;
@@ -100,6 +107,13 @@ export function Playground({
   onTrimTrackClick: (timeSeconds: number) => void;
   onMoveTrimDot: (timeSeconds: number) => void;
   onDeleteTrimRange: (rangeIndex: number) => void;
+  overlayImages: OverlayImage[];
+  assetUrlById: Record<string, string>;
+  onChangeOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onCommitOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onChangeOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCommitOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onDeleteOverlay: (overlayIndex: number) => void;
 }) {
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
 
@@ -141,6 +155,13 @@ export function Playground({
           onTrimTrackClick={onTrimTrackClick}
           onMoveTrimDot={onMoveTrimDot}
           onDeleteTrimRange={onDeleteTrimRange}
+          overlayImages={overlayImages}
+          assetUrlById={assetUrlById}
+          onChangeOverlayRect={onChangeOverlayRect}
+          onCommitOverlayRect={onCommitOverlayRect}
+          onChangeOverlayRange={onChangeOverlayRange}
+          onCommitOverlayRange={onCommitOverlayRange}
+          onDeleteOverlay={onDeleteOverlay}
           pixelsPerSecond={PIXELS_PER_SECOND}
           scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}
           onScroll={bindOnScroll(FRAME_STRIP_INDEX)}

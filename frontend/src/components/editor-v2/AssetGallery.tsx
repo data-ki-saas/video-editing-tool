@@ -5,7 +5,12 @@
  * always-visible upload dropzone from the original ActionArea design.
  * Clicking a tile selects that asset (drives the play area + Playground
  * timeline in ThreePaneEditor); "+ Asset" opens UploadDialog instead of a
- * permanent drop target taking up space; right-click offers Delete.
+ * permanent drop target taking up space; right-click offers Delete, plus
+ * Add (image assets only) to place that image as an overlay on the
+ * timeline -- see ThreePaneEditor's handleAddOverlay. A small "+" badge
+ * marks a tile as currently in use (referenced by at least one overlay),
+ * mirroring the selected-tile border rather than being a separate concept.
+ * Thumbnails are a fixed square, regardless of asset kind/aspect ratio.
  */
 import { useEffect, useState } from "react";
 import { deleteAsset, type Asset } from "@/lib/api";
@@ -22,6 +27,8 @@ export function AssetGallery({
   onAddAsset,
   onBrowseStock,
   onDeleted,
+  onAddOverlay,
+  usedAssetIds,
 }: {
   assets: Asset[];
   // Distinguishes "still fetching the list" from "fetched, there really
@@ -33,6 +40,8 @@ export function AssetGallery({
   onAddAsset: () => void;
   onBrowseStock: () => void;
   onDeleted: (assetId: string) => void;
+  onAddOverlay: (asset: Asset) => void;
+  usedAssetIds: Set<string>;
 }) {
   const [videoThumbnails, setVideoThumbnails] = useState<Record<string, string>>({});
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
@@ -94,10 +103,15 @@ export function AssetGallery({
               title={asset.filename}
               onClick={() => onSelect(asset)}
               onContextMenu={(e) =>
-                openContextMenu(e, [{ label: "Delete", danger: true, onSelect: () => void handleDelete(asset) }])
+                openContextMenu(e, [
+                  ...(asset.kind === "image"
+                    ? [{ label: "Add", onSelect: () => onAddOverlay(asset) }]
+                    : []),
+                  { label: "Delete", danger: true, onSelect: () => void handleDelete(asset) },
+                ])
               }
               className={
-                "relative h-full w-16 shrink-0 overflow-hidden rounded-md border-2 " +
+                "relative aspect-square w-16 shrink-0 overflow-hidden rounded-md border-2 " +
                 (selectedAssetId === asset.id ? "border-accent" : "border-transparent")
               }
             >
@@ -111,6 +125,15 @@ export function AssetGallery({
               ) : (
                 <span className="flex h-full w-full items-center justify-center bg-neutral-800 text-xs text-muted">
                   {asset.kind === "video" ? "▶" : "🖼"}
+                </span>
+              )}
+
+              {usedAssetIds.has(asset.id) && (
+                <span
+                  title="In use"
+                  className="absolute right-0.5 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-accent-foreground"
+                >
+                  +
                 </span>
               )}
             </button>

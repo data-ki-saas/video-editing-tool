@@ -408,6 +408,31 @@ export function skipTrimmedRanges(trimRanges: TrimRange[], timeSeconds: number):
 }
 
 /**
+ * An image asset composited on top of the base video for a time range --
+ * a picture-in-picture layer, not a crop/zoom/flip of the base clip
+ * itself. `rect` is the SAME fractional {x,y,width,height} shape as
+ * CropRect (position/size as fractions of the frame) -- it's generic
+ * rectangle geometry, just describing where the overlay sits rather than
+ * what to crop.
+ */
+export interface OverlayImage {
+  assetId: string;
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  rect: CropRect;
+}
+
+/**
+ * Every overlay visible at `timeSeconds` -- unlike a ZoomEffect, more than
+ * one overlay CAN be visible at once (different images, or the same image
+ * placed twice), so this returns a list rather than a single index. Half-
+ * open (inclusive start, exclusive end), same convention as trim ranges.
+ */
+export function findActiveOverlays(overlays: OverlayImage[], timeSeconds: number): OverlayImage[] {
+  return overlays.filter((overlay) => timeSeconds >= overlay.startTimeSeconds && timeSeconds < overlay.endTimeSeconds);
+}
+
+/**
  * Root-mean-square loudness of `samples` (mono, -1..1 range), one value per
  * `bucketSeconds` window, normalized so the loudest bucket in the clip is
  * 1.0. Normalizing per-clip (rather than against a fixed reference level)
