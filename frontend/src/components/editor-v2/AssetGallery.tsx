@@ -11,13 +11,25 @@
  * marks a tile as currently in use (referenced by at least one overlay),
  * mirroring the selected-tile border rather than being a separate concept.
  * Thumbnails are a fixed square, regardless of asset kind/aspect ratio.
+ *
+ * Music tiles also get a "Play"/"Pause" action -- plays right there in the
+ * tile (a plain hidden <audio>, driven entirely by JS, not the browser's
+ * native control bar) with a circular progress ring animated over the
+ * music-note icon, rather than opening any kind of popup. Only one track
+ * plays at a time; starting a second stops whichever was already playing.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { deleteAsset, type Asset } from "@/lib/api";
 import { captureSingleFrame } from "@/lib/video/video";
 import { ReelLoader } from "@/components/ReelLoader";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
+import { PauseIcon } from "./icons/PlayerIcons";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
+
+// SVG circumference for the progress ring (r=16 in a 36x36 viewBox) --
+// shared by the ring's own stroke-dasharray and its progress-driven offset.
+const RING_RADIUS = 16;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 export function AssetGallery({
   assets,
@@ -44,7 +56,45 @@ export function AssetGallery({
   usedAssetIds: Set<string>;
 }) {
   const [videoThumbnails, setVideoThumbnails] = useState<Record<string, string>>({});
+  const [playingAssetId, setPlayingAssetId] = useState<string | null>(null);
+  const [playbackProgress, setPlaybackProgress] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
+
+  function getAudioElement() {
+    if (audioRef.current) return audioRef.current;
+    const audio = new Audio();
+    audio.addEventListener("timeupdate", () => {
+      if (audio.duration) setPlaybackProgress(audio.currentTime / audio.duration);
+    });
+    audio.addEventListener("ended", () => {
+      setPlayingAssetId(null);
+      setPlaybackProgress(0);
+    });
+    audioRef.current = audio;
+    return audio;
+  }
+
+  function handleTogglePlay(asset: Asset) {
+    const audio = getAudioElement();
+    if (playingAssetId === asset.id) {
+      audio.pause();
+      setPlayingAssetId(null);
+      return;
+    }
+    audio.src = asset.url;
+    audio.currentTime = 0;
+    setPlaybackProgress(0);
+    void audio.play();
+    setPlayingAssetId(asset.id);
+  }
+
+  // Stops playback (rather than leaving an <audio> element silently
+  // running) if this gallery unmounts mid-playback -- switching reels
+  // shouldn't leave a previous project's music audible.
+  useEffect(() => {
+    return () => audioRef.current?.pause();
+  }, []);
 
   // Generates one representative frame per video asset, once, the first
   // time it shows up here -- images use their own URL directly (no
@@ -104,6 +154,14 @@ export function AssetGallery({
               onClick={() => onSelect(asset)}
               onContextMenu={(e) =>
                 openContextMenu(e, [
+                  ...(asset.kind === "audio"
+                    ? [
+                        {
+                          label: playingAssetId === asset.id ? "Pause" : "Play",
+                          onSelect: () => handleTogglePlay(asset),
+                        },
+                      ]
+                    : []),
                   ...(asset.kind === "image"
                     ? [{ label: "Add", onSelect: () => onAddOverlay(asset) }]
                     : []),
@@ -116,8 +174,36 @@ export function AssetGallery({
               }
             >
               {asset.kind === "audio" ? (
-                <span className="flex h-full w-full items-center justify-center bg-neutral-800">
-                  <MusicNoteIcon className="h-5 w-5 text-muted" />
+                <span className="relative flex h-full w-full items-center justify-center bg-neutral-800">
+                  {playingAssetId === asset.id ? (
+                    <>
+                      <PauseIcon className="h-5 w-5 text-accent" />
+                      <svg viewBox="0 0 36 36" className="absolute h-full w-full -rotate-90">
+                        <circle
+                          cx="18"
+                          cy="18"
+                          r={RING_RADIUS}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          className="text-white/20"
+                        />
+                        <circle
+                          cx="18"
+                          cy="18"
+                          r={RING_RADIUS}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeDasharray={RING_CIRCUMFERENCE}
+                          strokeDashoffset={RING_CIRCUMFERENCE * (1 - playbackProgress)}
+                          className="text-accent"
+                        />
+                      </svg>
+                    </>
+                  ) : (
+                    <MusicNoteIcon className="h-5 w-5 text-muted" />
+                  )}
                 </span>
               ) : thumbnailSrc ? (
                 // eslint-disable-next-line @next/next/no-img-element -- short-lived data:/presigned URL, not a Next-optimizable static asset
