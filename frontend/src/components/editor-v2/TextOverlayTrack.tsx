@@ -4,9 +4,12 @@
  * "How many frames is this caption visible for" -- one row per text
  * overlay (see lib/video/video_math.ts's TextOverlay), each a draggable
  * segment spanning its own time range. One row PER overlay, same reasoning
- * as OverlayTrack.tsx: overlays can legitimately overlap in time. Two
- * right-click actions: "Edit text" (reopens TextOverlayDialog pre-filled)
- * and "Remove" (deletes it outright).
+ * as OverlayTrack.tsx: overlays can legitimately overlap in time. Clicking
+ * a segment (anywhere but its resize handles) reopens TextOverlayDialog
+ * pre-filled, same as right-clicking and choosing "Edit text" -- both call
+ * the same `onEdit`, since editing text/template is this rail's single most
+ * common action and shouldn't require discovering the context menu first.
+ * Right-click still offers "Edit text" and "Remove" (deletes it outright).
  */
 import { useRef } from "react";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
@@ -76,23 +79,26 @@ function TextOverlaySegment({
   return (
     <div ref={trackRef} className="relative h-4 w-full shrink-0">
       <div
+        onClick={onEdit}
         onContextMenu={(e) =>
           openContextMenu(e, [
             { label: "Edit text", onSelect: onEdit },
             { label: "Remove", danger: true, onSelect: onDelete },
           ])
         }
-        title={`"${overlay.text}" -- right-click to edit or remove`}
-        className="absolute top-0 flex h-full items-center overflow-hidden rounded-sm border border-emerald-400 bg-emerald-400/20 px-1"
+        title={`"${overlay.text}" -- click to edit, right-click to edit or remove`}
+        className="absolute top-0 flex h-full cursor-pointer items-center overflow-hidden rounded-sm border border-emerald-400 bg-emerald-400/20 px-1"
         style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
       >
         <span className="pointer-events-none select-none truncate text-[9px] text-emerald-100">{overlay.text}</span>
         <div
           onPointerDown={(e) => startEdgeDrag(e, "start")}
+          onClick={(e) => e.stopPropagation()}
           className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-emerald-400/60"
         />
         <div
           onPointerDown={(e) => startEdgeDrag(e, "end")}
+          onClick={(e) => e.stopPropagation()}
           className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-emerald-400/60"
         />
       </div>
