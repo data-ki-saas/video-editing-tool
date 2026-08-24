@@ -310,7 +310,16 @@ export function ThreePaneEditor({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [undo, redo]);
 
-  const refreshAssets = useCallback(async () => {
+  // Returns the freshly-fetched list (not just the ones already in state) --
+  // handleLocalRenderClick needs this to rebuild fresh presigned URLs for
+  // the render it's about to start, since the `assets`/`assetUrlById` this
+  // component already has in scope could be up to r2_signed_url_expires_seconds
+  // old (whatever they were when this project was last opened/refreshed),
+  // and a slow local export (see exportTimeline.ts) can easily outlast a
+  // stale URL otherwise. Mirrors the cloud render's own "resolve fresh URLs
+  // right before the actual operation" approach (api/render/route.ts's
+  // resolveAssetSources), just done client-side instead of server-side.
+  const refreshAssets = useCallback(async (): Promise<Asset[]> => {
     try {
       const data = await listAssets(projectId);
       setAssets(data);
@@ -320,8 +329,10 @@ export function ThreePaneEditor({
       // selection the user (or a just-finished upload) already made. Only
       // cosmetic now: the sequence (below), not this, drives what plays.
       setSelectedAsset((prev) => prev ?? data.find((asset) => asset.kind === "video") ?? null);
+      return data;
     } catch (err) {
       setAssetsError(err instanceof Error ? err.message : "Failed to load assets");
+      return [];
     } finally {
       setAssetsLoaded(true);
     }
@@ -852,8 +863,32 @@ export function ThreePaneEditor({
 
     setIsLocalRenderPopupOpen(true);
 
-    const gatheredSequenceClips = await gatherLocalSequenceClips(sequenceClips);
-    const gatheredBackgroundClips = await gatherLocalBackgroundClips(resolvedBackgroundTracks);
+    // Re-fetches the asset list right before rendering rather than reusing
+    // this component's own (possibly long-since-fetched) `assets`/
+    // `assetUrlById` -- presigned URLs expire (r2_signed_url_expires_seconds,
+    // backend/src/core/config.py), and a local export can run for a while on
+    // a slow connection, so a URL that was still fine when this project was
+    // opened can easily expire mid-render otherwise. This is exactly what
+    // caused overlay images to silently fail to load partway through a slow
+    // export. Mirrors the cloud render's own "resolve fresh URLs right
+    // before the actual operation" approach (api/render/route.ts's
+    // resolveAssetSources), just done client-side instead of server-side.
+    const freshAssets = await refreshAssets();
+    const freshAssetUrlById = Object.fromEntries(freshAssets.map((asset) => [asset.id, asset.url]));
+    const freshSequenceClips = effectiveSequenceAssetIds.map((assetId) => ({ assetId, url: freshAssetUrlById[assetId] }));
+    const freshBackgroundAssetTracks = backgroundSequenceAssetIds
+      .map((id) => freshAssets.find((asset) => asset.id === id))
+      .filter((asset): asset is Asset => Boolean(asset))
+      .map((asset) => ({ assetId: asset.id, name: asset.filename, url: asset.url }));
+    const freshResolvedBackgroundTracks =
+      freshBackgroundAssetTracks.length > 0
+        ? freshBackgroundAssetTracks
+        : backgroundCatalogTrack?.url
+          ? [{ assetId: null, name: backgroundCatalogTrack.name, url: backgroundCatalogTrack.url }]
+          : [];
+
+    const gatheredSequenceClips = await gatherLocalSequenceClips(freshSequenceClips);
+    const gatheredBackgroundClips = await gatherLocalBackgroundClips(freshResolvedBackgroundTracks);
 
     const clipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selections.clipRectId);
     const targetRatio = clipRectOption
@@ -865,7 +900,7 @@ export function ThreePaneEditor({
       selections,
       sequenceClips: gatheredSequenceClips,
       backgroundClips: gatheredBackgroundClips,
-      assetUrlById,
+      assetUrlById: freshAssetUrlById,
       outputWidth: width,
       outputHeight: height,
     });
