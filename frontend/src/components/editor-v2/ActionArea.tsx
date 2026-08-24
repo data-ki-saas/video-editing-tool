@@ -28,12 +28,13 @@ import { BackgroundTrackSelector } from "./BackgroundTrackSelector";
 import { UserActions } from "./UserActions";
 import { TextOverlayDialog } from "./TextOverlayDialog";
 import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
+import { ImageTemplatesDialog } from "./ImageTemplatesDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { CollapsiblePanel } from "./CollapsiblePanel";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { Asset } from "@/lib/api";
-import type { CropRect, OverlayImage, TextOverlay, TranscriptCaption, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, SequenceEntry, TextOverlay, TranscriptCaption, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 import type { TextTemplateId } from "@/lib/video/textTemplates";
 import type { TranscriptCaptionTemplateId } from "@/lib/video/transcriptCaptionTemplates";
 import type { RefObject } from "react";
@@ -79,6 +80,10 @@ export function ActionArea({
   onSaveTranscriptCaption,
   onDisableTranscriptCaption,
   onCloseTranscriptDialog,
+  onOpenImageTemplatesDialog,
+  isImageTemplatesDialogOpen,
+  onAddImageSequenceClip,
+  onCloseImageTemplatesDialog,
   previewFrameUrl,
   frameAspectRatio,
   baseCropRect,
@@ -125,6 +130,10 @@ export function ActionArea({
   onSaveTranscriptCaption: (templateId: TranscriptCaptionTemplateId, rect: CropRect) => void;
   onDisableTranscriptCaption: () => void;
   onCloseTranscriptDialog: () => void;
+  onOpenImageTemplatesDialog: () => void;
+  isImageTemplatesDialogOpen: boolean;
+  onAddImageSequenceClip: (assetId: string, durationSeconds: number, templateId: string) => void;
+  onCloseImageTemplatesDialog: () => void;
   // The actual current frame (closest thumbnail to the playhead) and its
   // aspect ratio, for TextOverlayDialog/TranscriptCaptionDialog's live
   // preview -- see TextOverlayDialog's own comment on why positioning
@@ -139,7 +148,7 @@ export function ActionArea({
   trimRanges: TrimRange[];
   overlayImages: OverlayImage[];
   textOverlays: TextOverlay[];
-  sequenceClips: { assetId: string; url: string }[];
+  sequenceClips: (SequenceEntry & { url: string })[];
   backgroundTracks: { name: string; url: string }[];
   assetUrlById: Record<string, string>;
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
@@ -151,7 +160,7 @@ export function ActionArea({
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
 
-  const sequenceKey = sequenceClips.map((clip) => clip.assetId).join(",");
+  const sequenceKey = sequenceClips.map((clip) => `${clip.id}:${clip.kind === "image" ? clip.durationSeconds : ""}`).join(",");
 
   const selectedClipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selectedClipRectId);
   const playAreaRatio = selectedClipRectOption
@@ -192,6 +201,7 @@ export function ActionArea({
           onSelectClipRect={onSelectClipRect}
           onOpenTextDialog={onOpenTextDialog}
           onOpenTranscriptDialog={onOpenTranscriptDialog}
+          onOpenImageTemplatesDialog={onOpenImageTemplatesDialog}
         />
       </div>
 
@@ -280,6 +290,15 @@ export function ActionArea({
           onSave={onSaveTranscriptCaption}
           onDisable={onDisableTranscriptCaption}
           onClose={onCloseTranscriptDialog}
+        />
+      )}
+
+      {isImageTemplatesDialogOpen && (
+        <ImageTemplatesDialog
+          assets={assets}
+          baseCropRect={baseCropRect}
+          onAdd={onAddImageSequenceClip}
+          onClose={onCloseImageTemplatesDialog}
         />
       )}
     </div>

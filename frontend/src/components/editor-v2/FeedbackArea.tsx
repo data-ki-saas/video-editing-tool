@@ -65,8 +65,8 @@ function ActiveTransformationsList({
   for (const overlay of selections.textOverlays) {
     rows.push(`Text "${overlay.text}" ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
   }
-  if (selections.sequenceAssetIds.length > 1) {
-    rows.push(`Sequence: ${selections.sequenceAssetIds.length} clips`);
+  if (selections.sequenceClips.length > 1) {
+    rows.push(`Sequence: ${selections.sequenceClips.length} clips`);
   }
   if (selections.transcriptCaption) {
     const option = TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS.find(

@@ -79,6 +79,7 @@ import {
   type CropRect,
   type OverlayImage,
   type SequenceClipInfo,
+  type SequenceEntry,
   type TextOverlay,
   type TrimRange,
   type ZoomEffect,
@@ -103,9 +104,11 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 export const CanvasPlayer = forwardRef<
   CanvasPlayerHandle,
   {
-    // Every video clip in the sequence, in order -- see this file's module
+    // Every clip in the sequence, in order -- see this file's module
     // comment and video_math.ts's SequenceClipInfo/resolveSequencePosition.
-    clips: { assetId: string; url: string }[];
+    // An "image" entry is treated as a video with exactly one frame, held
+    // for its own authored durationSeconds, with silent audio.
+    clips: (SequenceEntry & { url: string })[];
     baseCropRect: CropRect | null;
     zoomEffects: ZoomEffect[];
     // Overrides the computed crop for the CURRENT static frame while
@@ -457,7 +460,7 @@ export const CanvasPlayer = forwardRef<
   // still plays. Keyed on a joined clip id/url string, not the `clips`
   // array reference, so an unrelated re-render (e.g. a crop edit) doesn't
   // re-trigger a full re-extraction.
-  const clipsKey = clips.map((clip) => `${clip.assetId}:${clip.url}`).join(",");
+  const clipsKey = clips.map((clip) => `${clip.id}:${clip.url}:${clip.kind === "image" ? clip.durationSeconds : ""}`).join(",");
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
@@ -480,7 +483,7 @@ export const CanvasPlayer = forwardRef<
       const loadedImages: HTMLImageElement[][] = [];
       const loadedFrameRates: number[] = [];
       const loadedAudioBuffers: AudioBuffer[] = [];
-      const loadedClipMeta: { assetId: string; url: string; durationSeconds: number }[] = [];
+      const loadedClipMeta: { assetId: string; url: string; durationSeconds: number; kind: "video" | "image" }[] = [];
       let failureCount = 0;
       let lastFailureMessage = "";
 
@@ -489,6 +492,23 @@ export const CanvasPlayer = forwardRef<
         setLoadingStage(clips.length > 1 ? `Loading clip ${loadedClipMeta.length + failureCount + 1} of ${clips.length}…` : "Loading frames & audio…");
 
         try {
+          if (clip.kind === "image") {
+            // An image clip is "a video with exactly one frame, held for
+            // its authored duration, with silent audio" -- no file to
+            // probe/decode. frameIndexAtTime already clamps to
+            // frameCount - 1, so a single-frame array naturally holds that
+            // one frame for the whole clip with no other changes needed.
+            const duration = clip.durationSeconds;
+            const image = await loadImage(clip.url);
+            const silentAudioBuffer = audioContext.createBuffer(1, Math.max(1, Math.round(duration * audioContext.sampleRate)), audioContext.sampleRate);
+
+            loadedImages.push([image]);
+            loadedFrameRates.push(1);
+            loadedAudioBuffers.push(silentAudioBuffer);
+            loadedClipMeta.push({ assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "image" });
+            continue;
+          }
+
           const duration = await getVideoDuration(clip.url);
           const frameRate = pickPreviewFrameRate(duration, navigator.hardwareConcurrency || 4);
           const [images, audioBuffer] = await Promise.all([
@@ -500,7 +520,7 @@ export const CanvasPlayer = forwardRef<
           loadedImages.push(images);
           loadedFrameRates.push(frameRate);
           loadedAudioBuffers.push(audioBuffer);
-          loadedClipMeta.push({ assetId: clip.assetId, url: clip.url, durationSeconds: duration });
+          loadedClipMeta.push({ assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "video" });
         } catch (err) {
           failureCount += 1;
           lastFailureMessage = err instanceof Error ? err.message : "Failed to load this clip";

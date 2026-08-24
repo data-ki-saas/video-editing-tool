@@ -27,17 +27,22 @@
  * trim, image/text overlays, and which videos are in the sequence) goes
  * through useEditHistory.
  *
- * The video "selection" is no longer a single asset: `selections.sequenceAssetIds`
- * is an ordered list of video clips concatenated into one continuous
- * timeline (right-click "Add" on a video asset appends to it -- the first
- * Add is what starts rendering frames at all, every later one plays right
- * after whatever's already there). Everything else -- crop, zoom/pan,
- * flip, trim, overlays -- is defined purely in terms of "elapsed seconds
- * across the sequence" and has no idea a video is more than one physical
- * file; only this component's own extraction pipeline and CanvasPlayer
- * needed real changes to support that.
+ * The video "selection" is no longer a single asset: `selections.sequenceClips`
+ * is an ordered list of clips concatenated into one continuous timeline --
+ * either a "video" entry (right-click "Add" on a video asset appends one;
+ * the first Add is what starts rendering frames at all, every later one
+ * plays right after whatever's already there) or an "image" entry (the
+ * "Image Templates" toolbar tool), which additionally carries its own
+ * authored duration and Ken Burns template id, since a still image has no
+ * intrinsic duration to probe. Everything else -- crop, zoom/pan, flip,
+ * trim, overlays -- is defined purely in terms of "elapsed seconds across
+ * the sequence" and has no idea a video is more than one physical file, or
+ * that some clips are stills; only this component's own extraction
+ * pipeline and CanvasPlayer needed real changes to support that (an image
+ * clip is treated as "a video with exactly one frame, held for its
+ * authored duration, with silent audio").
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listAssets, type Asset } from "@/lib/api";
 import { extractThumbnails, getVideoDuration } from "@/lib/video/video";
 import { extractVolumeProfile } from "@/lib/video/audio";
@@ -47,6 +52,7 @@ import {
   computeOutputDimensions,
   type CropRect,
   type OverlayImage,
+  type SequenceEntry,
   type TextOverlay,
   type ZoomEffect,
 } from "@/lib/video/video_math";
@@ -64,6 +70,8 @@ import {
   applyOverlayRangeChange,
   applyDeleteOverlayImage,
   applyAddSequenceClip,
+  applyAddImageSequenceClip,
+  applyResizeImageClip,
   applyAddTextOverlay,
   applyEditTextOverlay,
   applyTextOverlayRectCommit,
@@ -100,7 +108,7 @@ const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
   trimRanges: [],
   overlayImages: [],
   textOverlays: [],
-  sequenceAssetIds: [],
+  sequenceClips: [],
   transcriptCaption: null,
 };
 
@@ -213,6 +221,7 @@ export function ThreePaneEditor({
   // there's only ever one transcript caption config (see
   // video_math.ts's TranscriptCaption).
   const [isTranscriptDialogOpen, setIsTranscriptDialogOpen] = useState(false);
+  const [isImageTemplatesDialogOpen, setIsImageTemplatesDialogOpen] = useState(false);
 
   // The cloud (Creatomate) render is temporarily disabled -- see
   // handleRenderClick below, which shows this instead of actually starting
@@ -267,6 +276,26 @@ export function ThreePaneEditor({
   // to read what an old field meant -- it's just a crash guard: a missing
   // field defaults to empty/unset rather than leaving `undefined` for the
   // first .length/.filter/.findIndex on it to throw on.
+  //
+  // sequenceClips is the one exception that DOES read an old field's
+  // meaning: it replaced sequenceAssetIds (a plain string[] of video asset
+  // ids) when image clips were added, and unlike a cosmetic shape change,
+  // this field holds a user's actual video sequence -- silently dropping it
+  // would erase real content on every project saved before this change. A
+  // legacy sequenceAssetIds is converted into the new SequenceEntry shape
+  // (each a "video" entry, since that's the only kind that used to exist);
+  // once any project resaves under the new shape, this branch is dead for
+  // it going forward.
+  // Generated ids must stay STABLE across re-renders (FrameStrip's per-clip
+  // drag handles, the thumbnail-extraction effect's clip key, etc. all key
+  // off entry.id) -- memoized on rawSelections itself, which only changes
+  // on an actual undo/redo/pushChange, not on every render.
+  const sequenceClips: SequenceEntry[] = useMemo(() => {
+    if (rawSelections.sequenceClips) return rawSelections.sequenceClips;
+    const legacySequenceAssetIds = (rawSelections as unknown as { sequenceAssetIds?: string[] }).sequenceAssetIds ?? [];
+    return legacySequenceAssetIds.map((assetId) => ({ id: crypto.randomUUID(), kind: "video" as const, assetId }));
+  }, [rawSelections]);
+
   const selections: EditSelectionsSnapshot = {
     clipRectId: rawSelections.clipRectId ?? null,
     cropRect: rawSelections.cropRect ?? null,
@@ -276,7 +305,7 @@ export function ThreePaneEditor({
     trimRanges: rawSelections.trimRanges ?? [],
     overlayImages: rawSelections.overlayImages ?? [],
     textOverlays: rawSelections.textOverlays ?? [],
-    sequenceAssetIds: rawSelections.sequenceAssetIds ?? [],
+    sequenceClips,
     transcriptCaption: rawSelections.transcriptCaption ?? null,
   };
 
@@ -350,19 +379,31 @@ export function ThreePaneEditor({
   // needing their own asset-list lookup.
   const assetUrlById = Object.fromEntries(assets.map((asset) => [asset.id, asset.url]));
 
-  // The sequence to actually play: persisted sequenceAssetIds, filtered to
-  // ids that still resolve to a real asset (so a deleted asset silently
-  // drops out of playback instead of breaking it). If that's empty and a
-  // video asset exists, falls back to that one video as a NON-PERSISTED
-  // runtime default (mirrors the old auto-select-most-recent-video
-  // behavior for existing/first-time projects, without writing a
-  // synthetic history entry).
-  const sequenceAssetIdsInAssets = selections.sequenceAssetIds.filter((id) => assetUrlById[id]);
+  // The sequence to actually play: persisted sequenceClips, filtered to
+  // entries whose asset still resolves (so a deleted asset silently drops
+  // out of playback instead of breaking it). If that's empty and a video
+  // asset exists, falls back to that one video as a NON-PERSISTED runtime
+  // default (mirrors the old auto-select-most-recent-video behavior for
+  // existing/first-time projects, without writing a synthetic history
+  // entry). Each resolved clip carries its own `url` (for CanvasPlayer/
+  // FrameStrip/the extraction effect below) alongside whatever the entry
+  // itself already has -- `durationSeconds` is authored for an image entry,
+  // still absent (probed below) for a video one.
+  const resolvedSequenceEntries = sequenceClips.filter((entry) => assetUrlById[entry.assetId]);
   const fallbackVideoAsset = assets.find((asset) => asset.kind === "video") ?? null;
-  const effectiveSequenceAssetIds =
-    sequenceAssetIdsInAssets.length > 0 ? sequenceAssetIdsInAssets : fallbackVideoAsset ? [fallbackVideoAsset.id] : [];
-  const sequenceClips = effectiveSequenceAssetIds.map((assetId) => ({ assetId, url: assetUrlById[assetId] }));
-  const sequenceClipsKey = sequenceClips.map((clip) => clip.assetId).join(",");
+  const effectiveSequenceEntries: SequenceEntry[] =
+    resolvedSequenceEntries.length > 0
+      ? resolvedSequenceEntries
+      : fallbackVideoAsset
+        ? [{ id: fallbackVideoAsset.id, kind: "video", assetId: fallbackVideoAsset.id }]
+        : [];
+  const playbackClips = effectiveSequenceEntries.map((entry) => ({ ...entry, url: assetUrlById[entry.assetId] }));
+  // Includes each image entry's own durationSeconds -- a duration edit
+  // (FrameStrip's post-add resize handle) must re-trigger extraction, not
+  // just an id/kind change.
+  const sequenceClipsKey = playbackClips
+    .map((clip) => `${clip.id}:${clip.kind === "image" ? clip.durationSeconds : ""}`)
+    .join(",");
 
   // Unfolds the video sequence into a per-second thumbnail strip + volume
   // graph + duration, one clip at a time. Sequential, not concurrent --
@@ -376,7 +417,7 @@ export function ThreePaneEditor({
   // load (bad URL, decode error) is skipped -- reported once, but doesn't
   // block the rest of the sequence from extracting.
   useEffect(() => {
-    if (sequenceClips.length === 0) {
+    if (playbackClips.length === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setThumbnails([]);
       setThumbnailTimestampsSeconds([]);
@@ -414,9 +455,35 @@ export function ThreePaneEditor({
       let accumulatedTimestamps: number[] = [];
       let accumulatedVolumeLevels: number[] = [];
 
-      for (const clip of sequenceClips) {
+      for (const clip of playbackClips) {
         if (cancelled) return;
         if (cursor > 0) boundaries.push(cursor);
+        const clipStartSeconds = cursor;
+
+        if (clip.kind === "image") {
+          // An image clip has no file to probe/decode -- its duration is
+          // authored (see lib/video/imageTemplates.ts), its "thumbnails"
+          // are just its own URL held for every sampled tick (same
+          // shortcut AssetGallery.tsx already uses for image tiles), and
+          // it has no audio, so its volume buckets are silent.
+          const clipDurationSeconds = clip.durationSeconds;
+          const clipTimestamps = generateSampleTimestamps(clipDurationSeconds, THUMBNAIL_INTERVAL_SECONDS).map(
+            (t) => t + clipStartSeconds
+          );
+          accumulatedThumbnails = [...accumulatedThumbnails, ...clipTimestamps.map(() => clip.url)];
+          accumulatedTimestamps = [...accumulatedTimestamps, ...clipTimestamps];
+          setThumbnails(accumulatedThumbnails);
+          setThumbnailTimestampsSeconds(accumulatedTimestamps);
+
+          const volumeBucketCount = generateSampleTimestamps(clipDurationSeconds, VOLUME_BUCKET_SECONDS).length;
+          accumulatedVolumeLevels = [...accumulatedVolumeLevels, ...new Array(volumeBucketCount).fill(0)];
+          setVolumeLevels(accumulatedVolumeLevels);
+
+          cursor += clipDurationSeconds;
+          setVideoDurationSeconds(cursor);
+          setClipBoundarySeconds([...boundaries]);
+          continue;
+        }
 
         let clipDurationSeconds: number;
         try {
@@ -427,7 +494,6 @@ export function ThreePaneEditor({
         }
         if (cancelled) return;
 
-        const clipStartSeconds = cursor;
         const [thumbnailsResult, volumeResult] = await Promise.allSettled([
           extractThumbnails(clip.url, THUMBNAIL_INTERVAL_SECONDS),
           extractVolumeProfile(clip.url, VOLUME_BUCKET_SECONDS),
@@ -537,14 +603,14 @@ export function ThreePaneEditor({
 
     const referencesDeletedAsset =
       selections.overlayImages.some((overlay) => overlay.assetId === assetId) ||
-      selections.sequenceAssetIds.includes(assetId);
+      selections.sequenceClips.some((entry) => entry.assetId === assetId);
     if (referencesDeletedAsset) {
       const { label, state } = {
         label: "Removed deleted asset",
         state: {
           ...selections,
           overlayImages: selections.overlayImages.filter((overlay) => overlay.assetId !== assetId),
-          sequenceAssetIds: selections.sequenceAssetIds.filter((id) => id !== assetId),
+          sequenceClips: selections.sequenceClips.filter((entry) => entry.assetId !== assetId),
         },
       };
       pushChange(label, state);
@@ -638,6 +704,39 @@ export function ThreePaneEditor({
   // there.
   function handleAddToSequence(asset: Asset) {
     const { label, state } = applyAddSequenceClip(selections, asset.id);
+    pushChange(label, state);
+  }
+
+  // "Image" button in UserActions -- opens ImageTemplatesDialog fresh.
+  function handleOpenImageTemplatesDialog() {
+    setIsImageTemplatesDialogOpen(true);
+  }
+
+  function handleCloseImageTemplatesDialog() {
+    setIsImageTemplatesDialogOpen(false);
+  }
+
+  // ImageTemplatesDialog's "Add to video" -- appends a new image clip,
+  // animated via the chosen Ken Burns template, to the end of the
+  // sequence. The clip and its auto-generated ZoomEffect land in ONE
+  // history entry (applyAddImageSequenceClip), so undo removes both
+  // together. `videoDurationSeconds` (already tracked from the extraction
+  // effect above) is the sequence's current total length, i.e. exactly
+  // where this new clip starts.
+  function handleAddImageSequenceClip(assetId: string, durationSeconds: number, templateId: string) {
+    const { label, state } = applyAddImageSequenceClip(selections, assetId, durationSeconds, templateId, videoDurationSeconds);
+    pushChange(label, state);
+    setIsImageTemplatesDialogOpen(false);
+  }
+
+  // FrameStrip's post-add drag handle on an image clip's boundary --
+  // `clipStartSeconds` comes from the caller's own resolved playbackClips
+  // (which has real elapsed-seconds positions, accounting for any
+  // preceding video clips' actual probed durations -- see
+  // applyResizeImageClip's own comment on why this can't be recomputed
+  // from `selections` alone).
+  function handleResizeImageClip(entryId: string, newDurationSeconds: number, clipStartSeconds: number) {
+    const { label, state } = applyResizeImageClip(selections, entryId, newDurationSeconds, clipStartSeconds);
     pushChange(label, state);
   }
 
@@ -819,7 +918,7 @@ export function ThreePaneEditor({
   // "+" in-use badge.
   const usedAssetIds = new Set([
     ...selections.overlayImages.map((overlay) => overlay.assetId),
-    ...selections.sequenceAssetIds,
+    ...selections.sequenceClips.map((entry) => entry.assetId),
     ...backgroundSequenceAssetIds,
   ]);
 
@@ -859,7 +958,7 @@ export function ThreePaneEditor({
   // (gatherLocalRenderClips.ts) since the local exporter needs each clip's
   // actual URL, not just its duration.
   async function handleLocalRenderClick() {
-    if (effectiveSequenceAssetIds.length === 0 || isLocalRendering) return;
+    if (effectiveSequenceEntries.length === 0 || isLocalRendering) return;
 
     setIsLocalRenderPopupOpen(true);
 
@@ -875,7 +974,7 @@ export function ThreePaneEditor({
     // resolveAssetSources), just done client-side instead of server-side.
     const freshAssets = await refreshAssets();
     const freshAssetUrlById = Object.fromEntries(freshAssets.map((asset) => [asset.id, asset.url]));
-    const freshSequenceClips = effectiveSequenceAssetIds.map((assetId) => ({ assetId, url: freshAssetUrlById[assetId] }));
+    const freshSequenceClips = effectiveSequenceEntries.map((entry) => ({ ...entry, url: freshAssetUrlById[entry.assetId] }));
     const freshBackgroundAssetTracks = backgroundSequenceAssetIds
       .map((id) => freshAssets.find((asset) => asset.id === id))
       .filter((asset): asset is Asset => Boolean(asset))
@@ -939,6 +1038,10 @@ export function ThreePaneEditor({
           onSaveTranscriptCaption={handleSaveTranscriptCaption}
           onDisableTranscriptCaption={handleDisableTranscriptCaption}
           onCloseTranscriptDialog={handleCloseTranscriptDialog}
+          onOpenImageTemplatesDialog={handleOpenImageTemplatesDialog}
+          isImageTemplatesDialogOpen={isImageTemplatesDialogOpen}
+          onAddImageSequenceClip={handleAddImageSequenceClip}
+          onCloseImageTemplatesDialog={handleCloseImageTemplatesDialog}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
           baseCropRect={selections.cropRect}
@@ -949,7 +1052,7 @@ export function ThreePaneEditor({
           trimRanges={selections.trimRanges}
           overlayImages={displayedOverlayImages}
           textOverlays={displayedTextOverlays}
-          sequenceClips={sequenceClips}
+          sequenceClips={playbackClips}
           backgroundTracks={resolvedBackgroundTracks}
           assetUrlById={assetUrlById}
           onFrameDimensions={setFrameDimensions}
@@ -965,6 +1068,8 @@ export function ThreePaneEditor({
           thumbnails={thumbnails}
           thumbnailTimestampsSeconds={thumbnailTimestampsSeconds}
           clipBoundarySeconds={clipBoundarySeconds}
+          sequenceEntries={effectiveSequenceEntries}
+          onResizeImageClip={handleResizeImageClip}
           volumeLevels={volumeLevels}
           isAnalyzing={isAnalyzing}
           currentTimeSeconds={currentTimeSeconds}
@@ -1019,14 +1124,14 @@ export function ThreePaneEditor({
             textOverlays: displayedTextOverlays,
           }}
           videoDurationSeconds={videoDurationSeconds}
-          canRender={effectiveSequenceAssetIds.length > 0}
+          canRender={effectiveSequenceEntries.length > 0}
           isRendering={isRendering}
           renderStatus={renderStatus}
           renderUrl={renderUrl}
           renderError={renderError}
           isRenderStuck={isRenderStuck}
           onRenderClick={handleRenderClick}
-          canLocalRender={effectiveSequenceAssetIds.length > 0}
+          canLocalRender={effectiveSequenceEntries.length > 0}
           isLocalRendering={isLocalRendering}
           isLocalRenderSupported={isLocalRenderSupported}
           localRenderUnsupportedReason={localRenderUnsupportedReason}

@@ -52,6 +52,20 @@ function ClosedCaptionIcon({ className }: { className?: string }) {
   );
 }
 
+// A photo frame with a small motion trail on its corner -- distinguishes
+// the "animate a photo" trigger from a plain picture glyph.
+function ImageMotionIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
+      <rect x="2.5" y="4.5" width="14" height="14" rx="2" />
+      <circle cx="7.5" cy="9.5" r="1.4" fill="currentColor" stroke="none" />
+      <path d="M4 16l4-4 3 3 4-5 2 2" />
+      <path d="M18.5 8.5c1.8 1.2 2.5 3 1.8 5" strokeLinecap="round" />
+      <path d="M19 6.7l1.6 1.4-2 .8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function TemplateSection({
   selectedTemplateId,
   onSelectTemplate,
@@ -122,6 +136,7 @@ export function UserActions({
   onSelectClipRect,
   onOpenTextDialog,
   onOpenTranscriptDialog,
+  onOpenImageTemplatesDialog,
 }: {
   selectedTemplateId: string | null;
   onSelectTemplate: (id: string) => void;
@@ -129,6 +144,7 @@ export function UserActions({
   onSelectClipRect: (id: string) => void;
   onOpenTextDialog: () => void;
   onOpenTranscriptDialog: () => void;
+  onOpenImageTemplatesDialog: () => void;
 }) {
   return (
     <div className="flex h-full gap-3 overflow-x-auto">
@@ -158,6 +174,17 @@ export function UserActions({
         <ClosedCaptionIcon className="h-4 w-4" />
         <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
           Auto-Caption
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onOpenImageTemplatesDialog}
+        title="Animate a photo"
+        className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pt-2 text-muted hover:bg-background"
+      >
+        <ImageMotionIcon className="h-4 w-4" />
+        <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+          Image
         </span>
       </button>
     </div>

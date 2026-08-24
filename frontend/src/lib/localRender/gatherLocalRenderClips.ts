@@ -15,14 +15,22 @@
  */
 import { getVideoDuration } from "@/lib/video/video";
 import { getAudioDuration } from "@/lib/video/audio";
-import { buildSequenceClipInfos, type SequenceClipInfo } from "@/lib/video/video_math";
+import { buildSequenceClipInfos, type SequenceClipInfo, type SequenceEntry } from "@/lib/video/video_math";
 
-export async function gatherLocalSequenceClips(clips: { assetId: string; url: string }[]): Promise<SequenceClipInfo[]> {
-  const clipMeta: { assetId: string; url: string; durationSeconds: number }[] = [];
+export async function gatherLocalSequenceClips(
+  clips: (SequenceEntry & { url: string })[]
+): Promise<SequenceClipInfo[]> {
+  const clipMeta: { assetId: string; url: string; durationSeconds: number; kind: "video" | "image" }[] = [];
   for (const clip of clips) {
+    if (clip.kind === "image") {
+      // No file to probe -- an image clip's duration is authored (see
+      // lib/video/imageTemplates.ts), not read from anywhere.
+      clipMeta.push({ assetId: clip.assetId, url: clip.url, durationSeconds: clip.durationSeconds, kind: "image" });
+      continue;
+    }
     try {
       const durationSeconds = await getVideoDuration(clip.url);
-      clipMeta.push({ ...clip, durationSeconds });
+      clipMeta.push({ assetId: clip.assetId, url: clip.url, durationSeconds, kind: "video" });
     } catch {
       // Skipped -- same "one bad clip shouldn't block the rest" policy as
       // CanvasPlayer's own sequence loading.

@@ -59,9 +59,11 @@ import { getTranscriptCaptionConfig } from "@/lib/video/transcriptCaptionTemplat
 
 export interface CompileTimelineInput {
   selections: EditSelectionsSnapshot;
-  /** Real per-clip durations for every clip in selections.sequenceAssetIds,
+  /** Real per-clip durations for every clip in selections.sequenceClips,
    * in order -- gathered fresh client-side right before rendering (see
-   * gatherRenderClips.ts), not reused from the preview pipeline. */
+   * gatherRenderClips.ts), not reused from the preview pipeline. A video
+   * entry's duration is probed from the file; an image entry's is its own
+   * authored durationSeconds, carried straight through. */
   sequenceClips: SequenceClipInfo[];
   /** Same shape, for the resolved background-music sequence (empty if none). */
   backgroundClips: SequenceClipInfo[];
@@ -146,19 +148,46 @@ function buildCropProperties(segment: RenderSegment, baseCropRect: CropRect | nu
   return { width, height, x, y };
 }
 
-/** One Video element per RenderSegment, each with its own crop/zoom
- * keyframes, all on track 1 of their shared parent (sequenced
- * back-to-back, same convention as the README's multi-clip example). */
-function buildVideoSegments(
+/** One Video or Image element per RenderSegment, each with its own
+ * crop/zoom keyframes, all on track 1 of their shared parent (sequenced
+ * back-to-back, same convention as the README's multi-clip example). An
+ * image segment gets no trimStart/trimDuration (meaningless for a still
+ * image -- it has no timeline of its own to trim into), but otherwise
+ * reuses buildCropProperties verbatim: Image's x/y/width/height/xAnchor/
+ * yAnchor are the same ValueOrKeyframes-typed properties Video's are
+ * (both extend the SDK's shared ElementBase/ElementProperties -- verified
+ * directly against node_modules/creatomate/src/elements/{Image,
+ * ElementBase}.ts), so the exact same keyframed crop transform applies to
+ * either element type unchanged. */
+function buildMediaSegments(
   segments: RenderSegment[],
   baseCropRect: CropRect | null,
   zoomEffects: ZoomEffect[],
   appMeta: Record<string, AppMetaEntry>
-): Video[] {
+): (Video | Image)[] {
   return segments.map((segment) => {
+    const crop = buildCropProperties(segment, baseCropRect, zoomEffects);
+
+    if (segment.kind === "image") {
+      const id = nextId("clip");
+      appMeta[id] = { role: "clip", assetId: segment.assetId };
+      return new Image({
+        id,
+        track: 1,
+        time: segment.outputStartSeconds,
+        duration: segment.durationSeconds,
+        fit: "fill",
+        xAnchor: "0%",
+        yAnchor: "0%",
+        ...crop,
+        // Overwritten server-side by resolveAssetSources (api/render/route.ts)
+        // from _appMeta[id].assetId -- never a real playable URL by itself.
+        source: "",
+      });
+    }
+
     const id = nextId("clip");
     appMeta[id] = { role: "clip", assetId: segment.assetId };
-    const crop = buildCropProperties(segment, baseCropRect, zoomEffects);
     return new Video({
       id,
       track: 1,
@@ -184,7 +213,7 @@ function buildVideoSegments(
  * Composition (no crop keyframes of its own) when there's nothing to
  * flip on either axis, to avoid emitting pointless static 100% keyframes. */
 function buildFlipWrapper(
-  videoSegments: Video[],
+  mediaSegments: (Video | Image)[],
   flipHorizontalToggles: number[],
   flipVerticalToggles: number[],
   totalOutputDurationSeconds: number
@@ -203,7 +232,7 @@ function buildFlipWrapper(
     yAnchor: "50%",
     ...(xScale ? { xScale } : {}),
     ...(yScale ? { yScale } : {}),
-    elements: videoSegments,
+    elements: mediaSegments,
   });
 }
 
@@ -433,27 +462,28 @@ function buildBackgroundAudioElement(
   });
 }
 
-/** Auto-generated (transcript) captions -- one Text element per
- * RenderSegment, each transcribing that segment's OWN Video element
+/** Auto-generated (transcript) captions -- one Text element per VIDEO
+ * RenderSegment, each transcribing that segment's own Video element
  * (transcriptSource takes exactly one video element's id, and the
  * sequence is already split into per-clip/per-trim Video elements -- see
  * video_math.ts's TranscriptCaption doc comment for why this is fine: a
- * caption naturally resets at a hard cut anyway). `videoSegments` is the
- * SAME array buildVideoSegments returned, in the same order, so
- * videoSegments[i] is exactly the Video element `segments[i]` became --
- * no separate id bookkeeping needed. Root-level placement, same
- * output-frame-relative rect convention as image/text overlays. */
+ * caption naturally resets at a hard cut anyway). Image segments are
+ * skipped entirely -- a still photo has no spoken audio to transcribe.
+ * `videoSegmentPairs` pairs each VIDEO segment with the exact Video
+ * element buildMediaSegments produced for it (not a plain index into
+ * `segments`, since that array can also contain Image elements once image
+ * clips exist). Root-level placement, same output-frame-relative rect
+ * convention as image/text overlays. */
 function buildTranscriptCaptionElements(
   transcriptCaption: TranscriptCaption | null,
-  segments: RenderSegment[],
-  videoSegments: Video[],
+  videoSegmentPairs: { segment: RenderSegment; element: Video }[],
   track: number
 ): Text[] {
   if (!transcriptCaption) return [];
   const config = getTranscriptCaptionConfig(transcriptCaption.templateId);
 
-  return segments.map((segment, index) => {
-    const sourceVideoId = videoSegments[index].properties.id as string;
+  return videoSegmentPairs.map(({ segment, element }) => {
+    const sourceVideoId = element.properties.id as string;
     return new Text({
       id: nextId("transcript"),
       track,
@@ -481,9 +511,12 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const segments = buildRenderSegments(sequenceClips, selections.trimRanges);
   const totalOutputDurationSeconds = segments.reduce((sum, s) => sum + s.durationSeconds, 0);
 
-  const videoSegments = buildVideoSegments(segments, selections.cropRect, selections.zoomEffects, appMeta);
+  const mediaSegments = buildMediaSegments(segments, selections.cropRect, selections.zoomEffects, appMeta);
+  const videoSegmentPairs = segments
+    .map((segment, index) => ({ segment, element: mediaSegments[index] }))
+    .filter((pair): pair is { segment: RenderSegment; element: Video } => pair.segment.kind === "video");
   const flipWrapper = buildFlipWrapper(
-    videoSegments,
+    mediaSegments,
     selections.flipHorizontalToggles,
     selections.flipVerticalToggles,
     totalOutputDurationSeconds
@@ -518,12 +551,7 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
 
   const overlayElements = buildOverlayImageElements(clampedOverlayImages, segments, nextTrack, appMeta);
   const textElements = buildTextElements(clampedTextOverlays, segments, nextTrack);
-  const transcriptCaptionElements = buildTranscriptCaptionElements(
-    selections.transcriptCaption,
-    segments,
-    videoSegments,
-    nextTrack()
-  );
+  const transcriptCaptionElements = buildTranscriptCaptionElements(selections.transcriptCaption, videoSegmentPairs, nextTrack());
   const backgroundAudio = buildBackgroundAudioElement(backgroundClips, totalOutputDurationSeconds, nextTrack(), appMeta);
 
   const elements: TemplateElement[] = [

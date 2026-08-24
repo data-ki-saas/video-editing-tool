@@ -26,13 +26,16 @@ import {
   findActiveZoomEffectIndex,
   toggleFlipAt,
   mergeTrimRanges,
+  FULL_FRAME_CROP_RECT,
   DEFAULT_TEXT_OVERLAY_RECT,
   DEFAULT_TRANSCRIPT_CAPTION_RECT,
   type CropRect,
   type OverlayImage,
+  type SequenceEntry,
   type TextOverlay,
   type ZoomEffect,
 } from "./video_math";
+import { buildKenBurnsEffect } from "./imageTemplates";
 
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
@@ -323,9 +326,114 @@ export function applyDeleteOverlayImage(
  * whatever's already in the sequence. Duplicates are allowed (the same
  * clip can appear twice), same policy as image overlays. */
 export function applyAddSequenceClip(selections: EditSelectionsSnapshot, assetId: string): TransformationResult {
+  const newEntry: SequenceEntry = { id: crypto.randomUUID(), kind: "video", assetId };
   return {
     label: "Added clip to sequence",
-    state: { ...selections, sequenceAssetIds: [...selections.sequenceAssetIds, assetId] },
+    state: { ...selections, sequenceClips: [...selections.sequenceClips, newEntry] },
+  };
+}
+
+// A freshly-added image clip defaults to this long -- long enough to read
+// as a deliberate beat in the reel, short enough that a creator adding
+// several photos in a row doesn't end up with a sluggish sequence. Also the
+// floor/ceiling for ImageTemplatesDialog's duration stretch handle and
+// FrameStrip's post-add resize handle (see applyResizeImageClip below).
+export const DEFAULT_IMAGE_CLIP_DURATION_SECONDS = 4;
+export const MIN_IMAGE_CLIP_DURATION_SECONDS = 1;
+export const MAX_IMAGE_CLIP_DURATION_SECONDS = 15;
+
+/** Appends an image asset to the concatenated sequence as its own
+ * full-screen clip, animated via a Ken Burns template -- from
+ * ImageTemplatesDialog's "Add to video". Unlike a video clip, this needs an
+ * authored duration (images have none intrinsically) and generates its own
+ * ZoomEffect from the chosen template (lib/video/imageTemplates.ts) up
+ * front, both landing in ONE history entry -- "added...as a group," a
+ * single undo step for the clip and its motion together. `startTimeSeconds`
+ * is the sequence's current total duration (the caller already tracks this
+ * as videoDurationSeconds), so the new clip lands after whatever's already
+ * there, same "always appends" policy as applyAddSequenceClip. */
+export function applyAddImageSequenceClip(
+  selections: EditSelectionsSnapshot,
+  assetId: string,
+  durationSeconds: number,
+  templateId: string,
+  startTimeSeconds: number
+): TransformationResult {
+  const newEntry: SequenceEntry = { id: crypto.randomUUID(), kind: "image", assetId, durationSeconds, templateId };
+  const base = selections.cropRect ?? FULL_FRAME_CROP_RECT;
+  const newZoomEffect = buildKenBurnsEffect(templateId, base, startTimeSeconds, durationSeconds);
+  return {
+    label: "Added image clip",
+    state: {
+      ...selections,
+      sequenceClips: [...selections.sequenceClips, newEntry],
+      zoomEffects: [...selections.zoomEffects, newZoomEffect],
+    },
+  };
+}
+
+/** Resizing an image clip's duration from its own drag handle on
+ * FrameStrip's clip-boundary marker (post-add, on the main timeline --
+ * distinct from ImageTemplatesDialog's own duration stretch/+/- control,
+ * which only sets the duration a clip is FIRST added with). Rescales the
+ * clip's own Ken Burns ZoomEffect to still span exactly its new duration
+ * (same start, epicenter/end pushed to the new end) and shifts every
+ * later clip's own time-ranged state (zoom effects, overlays, text,
+ * flip toggles, trims -- all authored in absolute elapsed-seconds across
+ * the whole sequence) by the resulting delta, so nothing after this clip
+ * silently drifts out of sync with its own footage.
+ *
+ * `clipStartSeconds` is passed in by the caller (ThreePaneEditor already
+ * has it on the resolved SequenceClipInfo for this entry) rather than
+ * recomputed here: a preceding VIDEO clip's real duration is only ever
+ * known from the probed file, never stored on its SequenceEntry, so this
+ * module -- which only ever sees `selections`, not probed durations --
+ * can't derive it correctly on its own for a mixed video+image sequence. */
+export function applyResizeImageClip(
+  selections: EditSelectionsSnapshot,
+  entryId: string,
+  newDurationSeconds: number,
+  clipStartSeconds: number
+): TransformationResult {
+  const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
+  const entry = selections.sequenceClips[entryIndex];
+  if (!entry || entry.kind !== "image") return { label: "Resized image clip", state: selections };
+
+  const clampedDuration = Math.min(
+    MAX_IMAGE_CLIP_DURATION_SECONDS,
+    Math.max(MIN_IMAGE_CLIP_DURATION_SECONDS, newDurationSeconds)
+  );
+  const delta = clampedDuration - entry.durationSeconds;
+  if (delta === 0) return { label: "Resized image clip", state: selections };
+
+  const shiftEffectRange = <T extends { startTimeSeconds: number; endTimeSeconds: number }>(item: T): T =>
+    item.startTimeSeconds >= clipStartSeconds + entry.durationSeconds
+      ? { ...item, startTimeSeconds: item.startTimeSeconds + delta, endTimeSeconds: item.endTimeSeconds + delta }
+      : item;
+
+  const nextEntries = [...selections.sequenceClips];
+  nextEntries[entryIndex] = { ...entry, durationSeconds: clampedDuration };
+
+  const nextZoomEffects = selections.zoomEffects.map((effect) => {
+    if (effect.startTimeSeconds === clipStartSeconds && effect.endTimeSeconds === clipStartSeconds + entry.durationSeconds) {
+      const newEnd = clipStartSeconds + clampedDuration;
+      return { ...effect, epicenterTimeSeconds: newEnd, endTimeSeconds: newEnd };
+    }
+    return shiftEffectRange(effect);
+  });
+
+  return {
+    label: "Resized image clip",
+    state: {
+      ...selections,
+      sequenceClips: nextEntries,
+      zoomEffects: nextZoomEffects,
+      overlayImages: selections.overlayImages.map(shiftEffectRange),
+      textOverlays: selections.textOverlays.map(shiftEffectRange),
+      trimRanges: selections.trimRanges.map(shiftEffectRange),
+      flipHorizontalToggles: selections.flipHorizontalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
+      flipVerticalToggles: selections.flipVerticalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
+    },
   };
 }
 

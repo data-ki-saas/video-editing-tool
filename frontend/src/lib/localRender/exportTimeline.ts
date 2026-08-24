@@ -165,7 +165,9 @@ async function buildMixedAudioBuffer(
 
   const decodedByAssetId = new Map<string, AudioBuffer>();
   for (const clip of sequenceClips) {
-    if (decodedByAssetId.has(clip.assetId)) continue;
+    // An image clip has no audio track at all -- skip the (guaranteed to
+    // fail) decode attempt rather than relying on the catch below.
+    if (clip.kind === "image" || decodedByAssetId.has(clip.assetId)) continue;
     try {
       decodedByAssetId.set(clip.assetId, await decodeAudioBuffer(clip.url));
     } catch {
@@ -221,12 +223,23 @@ export async function exportVideoLocally(
   const { format, mimeType, videoCodec, audioCodec } = await pickOutputConfig(outputWidth, outputHeight);
 
   const videoElementsByAssetId = new Map<string, HTMLVideoElement>();
+  // A still image's own clip frame -- distinct from overlayImagesByAssetId
+  // below (picture-in-picture layers), this is the BASE clip's own frame,
+  // held for its whole segment instead of seeked per-frame like a video.
+  const imageClipElementsByAssetId = new Map<string, HTMLImageElement>();
   const overlayImagesByAssetId = new Map<string, HTMLImageElement>();
   const overlayBlobUrls: string[] = [];
   const warnings: string[] = [];
 
   try {
     for (const clip of sequenceClips) {
+      if (clip.kind === "image") {
+        if (imageClipElementsByAssetId.has(clip.assetId)) continue;
+        const { image, blobUrl } = await loadOverlayImage(clip.url);
+        imageClipElementsByAssetId.set(clip.assetId, image);
+        overlayBlobUrls.push(blobUrl);
+        continue;
+      }
       if (videoElementsByAssetId.has(clip.assetId)) continue;
       videoElementsByAssetId.set(clip.assetId, await loadVideoElement(clip.url, "auto"));
     }
@@ -284,15 +297,23 @@ export async function exportVideoLocally(
 
       const sourceTimeSeconds = segment.sourceStartSeconds + (outputTimeSeconds - segment.outputStartSeconds);
       const localSeconds = segment.clipLocalStartSeconds + (outputTimeSeconds - segment.outputStartSeconds);
-      const video = videoElementsByAssetId.get(segment.assetId);
-      if (video) {
-        await seekVideoTo(video, localSeconds);
+      const source: HTMLVideoElement | HTMLImageElement | null =
+        segment.kind === "image"
+          ? (imageClipElementsByAssetId.get(segment.assetId) ?? null)
+          : (videoElementsByAssetId.get(segment.assetId) ?? null);
 
+      if (source instanceof HTMLVideoElement) {
+        await seekVideoTo(source, localSeconds);
+      }
+
+      if (source) {
+        const sourceWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
+        const sourceHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
         const crop = computeEffectiveCropRect(baseCropRect, selections.zoomEffects, sourceTimeSeconds);
-        const sx = crop.x * video.videoWidth;
-        const sy = crop.y * video.videoHeight;
-        const sWidth = crop.width * video.videoWidth;
-        const sHeight = crop.height * video.videoHeight;
+        const sx = crop.x * sourceWidth;
+        const sy = crop.y * sourceHeight;
+        const sWidth = crop.width * sourceWidth;
+        const sHeight = crop.height * sourceHeight;
 
         const flipHorizontal = computeEffectiveFlip(selections.flipHorizontalToggles, sourceTimeSeconds);
         const flipVertical = computeEffectiveFlip(selections.flipVerticalToggles, sourceTimeSeconds);
@@ -300,7 +321,7 @@ export async function exportVideoLocally(
         ctx.save();
         ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
         ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
-        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(source, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
         ctx.restore();
       } else {
         ctx.clearRect(0, 0, canvas.width, canvas.height);

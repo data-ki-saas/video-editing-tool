@@ -70,7 +70,7 @@
  * tile's overlays are draggable/resizable, same gating as the crop
  * rectangle.
  */
-import { memo, useMemo, useRef } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import { CropRectOverlay } from "./CropRectOverlay";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
 import { TextOverlayCanvas } from "./TextOverlayCanvas";
@@ -88,6 +88,7 @@ import {
   findTrimRangeIndexAt,
   type CropRect,
   type OverlayImage,
+  type SequenceEntry,
   type TextOverlay,
   type TrimRange,
   type ZoomEffect,
@@ -199,6 +200,8 @@ export function FrameStrip({
   thumbnails,
   thumbnailTimestampsSeconds,
   clipBoundarySeconds,
+  sequenceEntries,
+  onResizeImageClip,
   isLoading,
   durationSeconds,
   currentTimeSeconds,
@@ -243,6 +246,13 @@ export function FrameStrip({
   thumbnails: string[];
   thumbnailTimestampsSeconds: number[];
   clipBoundarySeconds: number[];
+  // In-order clip metadata, aligned with the groupings clipBoundarySeconds
+  // divides -- sequenceEntries[i] is the clip that ENDS at
+  // clipBoundarySeconds[i]. Only an "image" entry's boundary becomes a
+  // drag handle (see handleBoundaryPointerDown below); a video seam stays
+  // the plain read-only divider it always was.
+  sequenceEntries: SequenceEntry[];
+  onResizeImageClip: (entryId: string, newDurationSeconds: number, clipStartSeconds: number) => void;
   isLoading: boolean;
   durationSeconds: number;
   currentTimeSeconds: number;
@@ -285,6 +295,48 @@ export function FrameStrip({
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
+
+  // Post-add duration drag on an image clip's own boundary marker (the
+  // popup that adds the clip sets its INITIAL duration; this is how it
+  // stays adjustable afterward, on the main timeline, per the driving
+  // vision's "direct manipulation over dialogs" bias). Kept entirely LOCAL
+  // to this component while dragging -- only the final release fires
+  // onResizeImageClip -- rather than lifting a live value up to
+  // ThreePaneEditor on every pointermove, since committing there re-runs
+  // the whole thumbnail/duration extraction effect (expensive to do at
+  // 60fps of drag deltas).
+  const [draggingBoundary, setDraggingBoundary] = useState<{
+    index: number;
+    clipStartSeconds: number;
+    candidateSeconds: number;
+  } | null>(null);
+
+  function handleBoundaryPointerDown(
+    index: number,
+    clipStartSeconds: number,
+    boundarySeconds: number,
+    e: React.PointerEvent<HTMLDivElement>
+  ) {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDraggingBoundary({ index, clipStartSeconds, candidateSeconds: boundarySeconds });
+  }
+  function handleBoundaryPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!draggingBoundary || !trackRef.current || durationSeconds <= 0) return;
+    const rect = trackRef.current.getBoundingClientRect();
+    const fraction = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+    setDraggingBoundary({ ...draggingBoundary, candidateSeconds: fraction * durationSeconds });
+  }
+  function handleBoundaryPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    if (!draggingBoundary) return;
+    const entry = sequenceEntries[draggingBoundary.index];
+    if (entry?.kind === "image") {
+      const newDurationSeconds = draggingBoundary.candidateSeconds - draggingBoundary.clipStartSeconds;
+      onResizeImageClip(entry.id, newDurationSeconds, draggingBoundary.clipStartSeconds);
+    }
+    setDraggingBoundary(null);
+  }
 
   // Recomputed only when the crop/zoom actually changes -- NOT on every
   // currentTimeSeconds tick during playback (see FrameTile's memo comment).
@@ -426,14 +478,38 @@ export function FrameStrip({
           style={{ left: `${playheadPercent}%` }}
         />
 
-        {clipBoundarySeconds.map((boundarySeconds, index) => (
-          <div
-            key={index}
-            title="Clip boundary"
-            className="pointer-events-none absolute inset-y-0 w-px bg-white/60"
-            style={{ left: `${durationSeconds > 0 ? (boundarySeconds / durationSeconds) * 100 : 0}%` }}
-          />
-        ))}
+        {clipBoundarySeconds.map((boundarySeconds, index) => {
+          const clipStartSeconds = index === 0 ? 0 : clipBoundarySeconds[index - 1];
+          const isImageBoundary = sequenceEntries[index]?.kind === "image";
+          const isDraggingThis = draggingBoundary?.index === index;
+          const positionSeconds = isDraggingThis ? draggingBoundary.candidateSeconds : boundarySeconds;
+          const leftPercent = durationSeconds > 0 ? (positionSeconds / durationSeconds) * 100 : 0;
+
+          if (!isImageBoundary) {
+            return (
+              <div
+                key={index}
+                title="Clip boundary"
+                className="pointer-events-none absolute inset-y-0 w-px bg-white/60"
+                style={{ left: `${leftPercent}%` }}
+              />
+            );
+          }
+
+          return (
+            <div
+              key={index}
+              title="Drag to resize this photo clip's duration"
+              onPointerDown={(e) => handleBoundaryPointerDown(index, clipStartSeconds, boundarySeconds, e)}
+              onPointerMove={handleBoundaryPointerMove}
+              onPointerUp={handleBoundaryPointerUp}
+              className="absolute inset-y-0 flex w-3 -translate-x-1/2 cursor-ew-resize items-center justify-center"
+              style={{ left: `${leftPercent}%` }}
+            >
+              <div className={"h-full w-0.5 " + (isDraggingThis ? "bg-accent" : "bg-accent/70")} />
+            </div>
+          );
+        })}
 
         <ZoomEffectsTrack
           zoomEffects={zoomEffects}

@@ -32,7 +32,7 @@ import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip } from "./FrameStrip";
 import { VolumeGraph } from "./VolumeGraph";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
-import type { CropRect, OverlayImage, TextOverlay, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, SequenceEntry, TextOverlay, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 
 // Initial heights before any resizing -- the +/-25% stretch range (see
 // video_math.ts's DEFAULT_MAX_STRETCH_RATIO) is computed relative to these.
@@ -53,6 +53,8 @@ export function Playground({
   thumbnails,
   thumbnailTimestampsSeconds,
   clipBoundarySeconds,
+  sequenceEntries,
+  onResizeImageClip,
   volumeLevels,
   isAnalyzing,
   currentTimeSeconds,
@@ -96,6 +98,12 @@ export function Playground({
   thumbnails: string[];
   thumbnailTimestampsSeconds: number[];
   clipBoundarySeconds: number[];
+  // In-order metadata for each clip in the sequence (aligned with the
+  // groupings clipBoundarySeconds divides) -- FrameStrip uses this to know
+  // which clip-boundary marker belongs to an image clip (and so should be
+  // its own drag handle) vs. an ordinary video seam (a plain divider).
+  sequenceEntries: SequenceEntry[];
+  onResizeImageClip: (entryId: string, newDurationSeconds: number, clipStartSeconds: number) => void;
   volumeLevels: number[];
   isAnalyzing: boolean;
   currentTimeSeconds: number;
@@ -153,6 +161,8 @@ export function Playground({
           thumbnails={thumbnails}
           thumbnailTimestampsSeconds={thumbnailTimestampsSeconds}
           clipBoundarySeconds={clipBoundarySeconds}
+          sequenceEntries={sequenceEntries}
+          onResizeImageClip={onResizeImageClip}
           isLoading={isAnalyzing}
           durationSeconds={videoDurationSeconds}
           currentTimeSeconds={currentTimeSeconds}

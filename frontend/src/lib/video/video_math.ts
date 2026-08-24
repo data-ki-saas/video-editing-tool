@@ -516,23 +516,49 @@ export function findClosestTimestampIndex(timestamps: number[], targetSeconds: n
  * multi-track background-music sequence both build a list of these. Pure
  * bookkeeping: which asset, its own duration, and its cumulative
  * `startTimeSeconds` once every earlier clip's duration is added up.
+ * `kind` defaults to "video" for callers that don't pass one (every
+ * pre-existing call site -- background music, the local/cloud render
+ * gatherers before image clips existed) so it's optional on input but
+ * always present on the built info.
  */
 export interface SequenceClipInfo {
   assetId: string;
   url: string;
   durationSeconds: number;
   startTimeSeconds: number;
+  kind: "video" | "image";
 }
 
 export function buildSequenceClipInfos(
-  clips: { assetId: string; url: string; durationSeconds: number }[]
+  clips: { assetId: string; url: string; durationSeconds: number; kind?: "video" | "image" }[]
 ): SequenceClipInfo[] {
   let cursor = 0;
   return clips.map((clip) => {
-    const info: SequenceClipInfo = { ...clip, startTimeSeconds: cursor };
+    const info: SequenceClipInfo = { ...clip, kind: clip.kind ?? "video", startTimeSeconds: cursor };
     cursor += clip.durationSeconds;
     return info;
   });
+}
+
+/**
+ * One entry in the base video sequence -- either a video asset (just an id;
+ * duration is always re-probed from the file, never authored) or an image
+ * asset animated via a Ken Burns template (lib/video/imageTemplates.ts),
+ * which needs an authored `durationSeconds` (images have no intrinsic
+ * duration) and a `templateId`. Every entry carries its own `id`, generated
+ * once when it's added (see transformations.ts's applyAddSequenceClip/
+ * applyAddImageSequenceClip) -- NOT the same as `assetId`, since the same
+ * asset can appear more than once (two image clips from the same photo,
+ * each with its own duration/template) and needs to be addressed
+ * independently by everything downstream (thumbnail extraction, live
+ * preview, the per-clip duration drag on FrameStrip).
+ */
+export type SequenceEntry =
+  | { id: string; kind: "video"; assetId: string }
+  | { id: string; kind: "image"; assetId: string; durationSeconds: number; templateId: string };
+
+export function sequenceEntryAssetId(entry: SequenceEntry): string {
+  return entry.assetId;
 }
 
 export function totalSequenceDuration(clips: SequenceClipInfo[]): number {
@@ -614,6 +640,11 @@ export function computeVolumeBuckets(samples: Float32Array, sampleRate: number, 
  */
 export interface RenderSegment {
   assetId: string;
+  /** Which kind of clip this segment came from -- determines whether the
+   * compiler emits a Creatomate Video (with trimStart/trimDuration) or an
+   * Image (no source trim, since a still image has no timeline of its own)
+   * for it. See lib/timeline/compileCreatomateTimeline.ts. */
+  kind: "video" | "image";
   sourceStartSeconds: number;
   /** This clip's own local offset where this segment begins -- Creatomate's Video.trimStart. */
   clipLocalStartSeconds: number;
@@ -679,6 +710,7 @@ export function buildRenderSegments(clips: SequenceClipInfo[], trimRanges: TrimR
 
       segments.push({
         assetId: clip.assetId,
+        kind: clip.kind,
         sourceStartSeconds: subStart,
         clipLocalStartSeconds: subStart - clip.startTimeSeconds,
         durationSeconds,

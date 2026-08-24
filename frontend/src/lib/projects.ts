@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { CropRect, OverlayImage, TextOverlay, TranscriptCaption, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, SequenceEntry, TextOverlay, TranscriptCaption, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 
 export interface TemplateElement {
   id: string;
@@ -66,12 +66,17 @@ export interface EditSelectionsSnapshot {
   // positioned-rect-plus-time-range shape as overlayImages, but the
   // content is authored text rather than an uploaded asset.
   textOverlays: TextOverlay[];
-  // Which video assets play, in order, concatenated into one continuous
-  // sequence -- right-click "Add" on a video asset appends to this (see
-  // transformations.ts's applyAddSequenceClip). History-tracked (unlike
-  // the background-track fields below) because it changes what the
+  // Which assets play, in order, concatenated into one continuous
+  // sequence -- right-click "Add" on a video asset appends a "video" entry
+  // (transformations.ts's applyAddSequenceClip); the "Image Templates"
+  // toolbar tool appends an "image" entry, which additionally carries its
+  // own authored durationSeconds (images have no intrinsic duration) and
+  // templateId (see lib/video/imageTemplates.ts) -- applyAddImageSequenceClip.
+  // Every entry has its own `id`, not just an assetId, since the same asset
+  // can appear more than once with independent settings. History-tracked
+  // (unlike the background-track fields below) because it changes what the
   // frames actually are.
-  sequenceAssetIds: string[];
+  sequenceClips: SequenceEntry[];
   // Auto-generated, speech-driven captions (Creatomate's own transcription
   // -- see lib/video/transcriptCaptionTemplates.ts), as opposed to
   // textOverlays' manually-typed ones. One config for the whole video, not
