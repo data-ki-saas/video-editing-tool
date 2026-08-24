@@ -18,6 +18,7 @@ export function LocalRenderPopup({
   resultUrl,
   resultMimeType,
   resultError,
+  resultWarnings,
   onClose,
 }: {
   isRendering: boolean;
@@ -25,6 +26,7 @@ export function LocalRenderPopup({
   resultUrl: string | null;
   resultMimeType: string | null;
   resultError: string | null;
+  resultWarnings: string[];
   onClose: () => void;
 }) {
   const isDismissable = !isRendering;
@@ -73,6 +75,13 @@ export function LocalRenderPopup({
               autoPlay
               className="max-h-[60vh] w-full rounded-md bg-black"
             />
+            {resultWarnings.length > 0 && (
+              <ul className="flex flex-col gap-1 rounded-md bg-yellow-100 p-2 text-xs text-yellow-800">
+                {resultWarnings.map((warning, index) => (
+                  <li key={index}>{warning}</li>
+                ))}
+              </ul>
+            )}
             <a
               href={resultUrl}
               download={`reel.${fileExtension}`}

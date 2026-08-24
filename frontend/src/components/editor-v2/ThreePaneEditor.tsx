@@ -130,6 +130,7 @@ export function ThreePaneEditor({
     resultUrl: localRenderUrl,
     resultMimeType: localRenderMimeType,
     resultError: localRenderError,
+    resultWarnings: localRenderWarnings,
     startLocalRender,
   } = useLocalRender();
 
@@ -1006,6 +1007,7 @@ export function ThreePaneEditor({
           resultUrl={localRenderUrl}
           resultMimeType={localRenderMimeType}
           resultError={localRenderError}
+          resultWarnings={localRenderWarnings}
           onClose={() => setIsLocalRenderPopupOpen(false)}
         />
       )}

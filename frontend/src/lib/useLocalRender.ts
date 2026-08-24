@@ -20,6 +20,7 @@ export function useLocalRender() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [resultMimeType, setResultMimeType] = useState<string | null>(null);
   const [resultError, setResultError] = useState<string | null>(null);
+  const [resultWarnings, setResultWarnings] = useState<string[]>([]);
 
   useEffect(() => {
     checkLocalRenderSupport().then(({ supported, reason }) => {
@@ -31,6 +32,7 @@ export function useLocalRender() {
   async function startLocalRender(input: LocalRenderInput) {
     setIsRendering(true);
     setResultError(null);
+    setResultWarnings([]);
     setProgress(0);
     // A previous render's blob URL is no longer reachable from the UI once
     // a new one starts -- release it now rather than leaking it for the
@@ -41,11 +43,12 @@ export function useLocalRender() {
     });
 
     try {
-      const { blob, mimeType } = await exportVideoLocally(input, ({ framesDone, totalFrames }) => {
+      const { blob, mimeType, warnings } = await exportVideoLocally(input, ({ framesDone, totalFrames }) => {
         setProgress(totalFrames > 0 ? framesDone / totalFrames : 0);
       });
       setResultUrl(URL.createObjectURL(blob));
       setResultMimeType(mimeType);
+      setResultWarnings(warnings);
     } catch (err) {
       setResultError(err instanceof Error ? err.message : "Failed to render locally");
     } finally {
@@ -61,6 +64,7 @@ export function useLocalRender() {
     resultUrl,
     resultMimeType,
     resultError,
+    resultWarnings,
     startLocalRender,
   };
 }

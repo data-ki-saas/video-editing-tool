@@ -24,7 +24,7 @@ import {
   BufferTarget,
   CanvasSource,
   AudioBufferSource,
-  QUALITY_HIGH,
+  Quality,
   canEncodeVideo,
   canEncodeAudio,
   getFirstEncodableVideoCodec,
@@ -72,6 +72,11 @@ export interface LocalRenderProgress {
 export interface LocalRenderResult {
   blob: Blob;
   mimeType: string;
+  /** Non-fatal problems from this render (e.g. an overlay image that
+   * couldn't be loaded, so it's silently absent from the output) --
+   * surfaced in LocalRenderPopup rather than only logged to the console, so
+   * a partially-wrong render is diagnosable without opening devtools. */
+  warnings: string[];
 }
 
 /** Loads an overlay image via fetch()+blob URL rather than `<img
@@ -218,6 +223,7 @@ export async function exportVideoLocally(
   const videoElementsByAssetId = new Map<string, HTMLVideoElement>();
   const overlayImagesByAssetId = new Map<string, HTMLImageElement>();
   const overlayBlobUrls: string[] = [];
+  const warnings: string[] = [];
 
   try {
     for (const clip of sequenceClips) {
@@ -228,16 +234,25 @@ export async function exportVideoLocally(
     const overlayAssetIds = new Set(selections.overlayImages.map((overlay) => overlay.assetId));
     for (const assetId of overlayAssetIds) {
       const url = assetUrlById[assetId];
-      if (!url) continue;
+      if (!url) {
+        const message = `Overlay image (assetId ${assetId}) has no resolved URL -- it won't appear in this render.`;
+        console.warn(`Free render: ${message}`);
+        warnings.push(message);
+        continue;
+      }
       try {
         const { image, blobUrl } = await loadOverlayImage(url);
         overlayImagesByAssetId.set(assetId, image);
         overlayBlobUrls.push(blobUrl);
       } catch (err) {
         // Skipped -- matches CanvasPlayer's "one broken overlay shouldn't block the rest" policy.
-        // Logged (rather than fully silent) so a missing overlay in the
-        // output is diagnosable instead of just vanishing without a trace.
-        console.warn(`Free render: could not load overlay image (assetId ${assetId})`, err);
+        // Logged AND surfaced as a render warning (rather than fully silent)
+        // so a missing overlay in the output is diagnosable without opening
+        // devtools.
+        const reason = err instanceof Error ? err.message : String(err);
+        const message = `Overlay image (assetId ${assetId}) couldn't be loaded for this render: ${reason}`;
+        console.warn(`Free render: ${message}`);
+        warnings.push(message);
       }
     }
 
@@ -252,12 +267,12 @@ export async function exportVideoLocally(
 
     const videoSource = new CanvasSource(canvas, {
       codec: videoCodec,
-      quality: QUALITY_HIGH,
+      quality: new Quality("high"),
       keyFrameInterval: KEY_FRAME_INTERVAL_SECONDS,
     });
     output.addVideoTrack(videoSource);
 
-    const audioSource = audioCodec ? new AudioBufferSource({ codec: audioCodec, quality: QUALITY_HIGH }) : null;
+    const audioSource = audioCodec ? new AudioBufferSource({ codec: audioCodec, quality: new Quality("high") }) : null;
     if (audioSource) output.addAudioTrack(audioSource);
 
     await output.start();
@@ -334,7 +349,7 @@ export async function exportVideoLocally(
     await output.finalize();
 
     if (!target.buffer) throw new Error("Local render finished with no output data");
-    return { blob: new Blob([target.buffer], { type: mimeType }), mimeType };
+    return { blob: new Blob([target.buffer], { type: mimeType }), mimeType, warnings };
   } finally {
     for (const video of videoElementsByAssetId.values()) {
       video.removeAttribute("src");
