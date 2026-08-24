@@ -1,8 +1,8 @@
 "use client";
 
 /** Small chrome icons used outside the player/action-button icon sets:
- * SignOutButton's power icon, and CollapsiblePanel headers for Background
- * track / Template / Clip rectangle. */
+ * SignOutButton's power icon, and CollapsiblePanel headers like Clip
+ * rectangle. */
 import type { SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;
@@ -22,17 +22,6 @@ export function MusicNoteIcon(props: IconProps) {
       <path d="M9 18V5l12-2v13" />
       <circle cx="6" cy="18" r="3" />
       <circle cx="18" cy="16" r="3" />
-    </svg>
-  );
-}
-
-export function TemplateGridIcon(props: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" {...props}>
-      <rect x="3" y="3" width="8" height="8" rx="1" />
-      <rect x="13" y="3" width="8" height="8" rx="1" />
-      <rect x="3" y="13" width="8" height="8" rx="1" />
-      <rect x="13" y="13" width="8" height="8" rx="1" />
     </svg>
   );
 }

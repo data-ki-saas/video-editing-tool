@@ -33,10 +33,11 @@ function fitToBox(widthRatio: number, heightRatio: number) {
   return { width: widthRatio * scale, height: heightRatio * scale };
 }
 
-export function ClipRectIcon({ option }: { option: ClipRectOption }) {
+export function ClipRectIcon({ option, size = BOX_SIZE_PX }: { option: ClipRectOption; size?: number }) {
   const { width, height } = fitToBox(option.widthRatio, option.heightRatio);
+  const scale = size / BOX_SIZE_PX;
   return (
-    <svg width={BOX_SIZE_PX} height={BOX_SIZE_PX} viewBox={`0 0 ${BOX_SIZE_PX} ${BOX_SIZE_PX}`} aria-hidden="true">
+    <svg width={size} height={size} viewBox={`0 0 ${BOX_SIZE_PX} ${BOX_SIZE_PX}`} aria-hidden="true">
       <rect
         x={(BOX_SIZE_PX - width) / 2}
         y={(BOX_SIZE_PX - height) / 2}
@@ -45,7 +46,7 @@ export function ClipRectIcon({ option }: { option: ClipRectOption }) {
         rx={1.5}
         fill="none"
         stroke="currentColor"
-        strokeWidth={1.5}
+        strokeWidth={1.5 / scale}
       />
     </svg>
   );

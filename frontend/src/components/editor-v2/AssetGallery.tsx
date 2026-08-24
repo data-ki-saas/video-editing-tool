@@ -1,24 +1,25 @@
 "use client";
 
 /**
- * Thumbnail row of this project's uploaded assets, replacing the
- * always-visible upload dropzone from the original ActionArea design.
- * Clicking a tile selects that asset (drives the play area + Playground
- * timeline in ThreePaneEditor); "+ Asset" opens UploadDialog instead of a
- * permanent drop target taking up space; right-click offers Delete, plus
- * an "Add" action whose meaning depends on kind: for an image, places it
- * as an overlay on the timeline (ThreePaneEditor's handleAddOverlay); for
- * a video, appends it to the concatenated video sequence (handleAddToSequence
- * -- the first Add is what starts rendering frames at all, every later one
- * plays right after whatever's already there); for music, appends it to
- * the background-music sequence (handleAddToBackgroundSequence -- multiple
+ * This project's uploaded assets, grouped into three kind-labeled rows --
+ * Videos, Images, Music -- each independently horizontally scrollable,
+ * replacing the original single mixed-kind row (a music tile is visually
+ * distinct enough on its own, but grouping by kind up front makes each row
+ * scannable rather than needing to spot the odd tile out of a mixed
+ * strip). "+ Asset" opens UploadDialog instead of a permanent drop target
+ * taking up space; right-click offers Delete, plus an "Add" action whose
+ * meaning depends on kind: for an image, places it as an overlay on the
+ * timeline (ThreePaneEditor's handleAddOverlay); for a video, appends it
+ * to the concatenated video sequence (handleAddToSequence -- the first Add
+ * is what starts rendering frames at all, every later one plays right
+ * after whatever's already there); for music, appends it to the
+ * background-music sequence (handleAddToBackgroundSequence -- multiple
  * appended tracks concatenate, then loop as a whole across the video's
- * duration), same slot as picking one from the curated
- * BackgroundTrackSelector list. A small "+" badge marks a tile as
- * currently in use (referenced by an overlay, in the video sequence, or in
- * the background sequence), mirroring the selected-tile border rather than
- * being a separate concept. Thumbnails are a fixed square, regardless of
- * asset kind/aspect ratio.
+ * duration). A small "+" badge marks a tile as currently in use
+ * (referenced by an overlay, in the video sequence, or in the background
+ * sequence), mirroring the selected-tile border rather than being a
+ * separate concept. Thumbnails are a fixed square, regardless of asset
+ * kind/aspect ratio.
  *
  * Music tiles also get a "Play"/"Pause" action -- plays right there in the
  * tile (a plain hidden <audio>, driven entirely by JS, not the browser's
@@ -27,7 +28,7 @@
  * plays at a time; starting a second stops whichever was already playing.
  */
 import { useEffect, useRef, useState } from "react";
-import { deleteAsset, type Asset } from "@/lib/api";
+import { deleteAsset, type Asset, type AssetKind } from "@/lib/api";
 import { captureSingleFrame } from "@/lib/video/video";
 import { ReelLoader } from "@/components/ReelLoader";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
@@ -38,6 +39,15 @@ import { ContextMenu, useContextMenu } from "./ContextMenu";
 // shared by the ring's own stroke-dasharray and its progress-driven offset.
 const RING_RADIUS = 16;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+// Row order/labels for the three kind-grouped sections below -- "audio"
+// assets are music to the user, so it's labeled that way here even though
+// AssetKind (and the rest of this file) keeps calling it "audio".
+const ASSET_SECTIONS: { kind: AssetKind; label: string; emptyText: string }[] = [
+  { kind: "video", label: "Videos", emptyText: "No videos yet" },
+  { kind: "image", label: "Images", emptyText: "No images yet" },
+  { kind: "audio", label: "Music", emptyText: "No music yet" },
+];
 
 export function AssetGallery({
   assets,
@@ -154,6 +164,104 @@ export function AssetGallery({
     }
   }
 
+  function renderTile(asset: Asset) {
+    const thumbnailSrc = asset.kind === "image" ? asset.url : videoThumbnails[asset.id];
+    const isDeleting = deletingAssetIds.has(asset.id);
+    return (
+      <button
+        key={asset.id}
+        type="button"
+        title={asset.filename}
+        disabled={isDeleting}
+        onClick={() => onSelect(asset)}
+        onContextMenu={(e) => {
+          if (isDeleting) return;
+          openContextMenu(e, [
+            ...(asset.kind === "audio"
+              ? [
+                  {
+                    label: playingAssetId === asset.id ? "Pause" : "Play",
+                    onSelect: () => handleTogglePlay(asset),
+                  },
+                ]
+              : []),
+            ...(asset.kind === "image"
+              ? [{ label: "Add", onSelect: () => onAddOverlay(asset) }]
+              : asset.kind === "video"
+                ? [{ label: "Add", onSelect: () => onAddToSequence(asset) }]
+                : asset.kind === "audio"
+                  ? [{ label: "Add", onSelect: () => onAddToBackgroundSequence(asset) }]
+                  : []),
+            { label: "Delete", danger: true, onSelect: () => void handleDelete(asset) },
+          ]);
+        }}
+        className={
+          "relative aspect-square w-16 shrink-0 overflow-hidden rounded-md border-2 disabled:cursor-not-allowed " +
+          (selectedAssetId === asset.id ? "border-accent" : "border-transparent")
+        }
+      >
+        {asset.kind === "audio" ? (
+          <span className="relative flex h-full w-full items-center justify-center bg-neutral-800">
+            {playingAssetId === asset.id ? (
+              <>
+                <PauseIcon className="h-5 w-5 text-accent" />
+                <svg viewBox="0 0 36 36" className="absolute h-full w-full -rotate-90">
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r={RING_RADIUS}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className="text-white/20"
+                  />
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r={RING_RADIUS}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeDasharray={RING_CIRCUMFERENCE}
+                    strokeDashoffset={RING_CIRCUMFERENCE * (1 - playbackProgress)}
+                    className="text-accent"
+                  />
+                </svg>
+              </>
+            ) : (
+              <MusicNoteIcon className="h-5 w-5 text-muted" />
+            )}
+          </span>
+        ) : thumbnailSrc ? (
+          // eslint-disable-next-line @next/next/no-img-element -- short-lived data:/presigned URL, not a Next-optimizable static asset
+          <img src={thumbnailSrc} alt={asset.filename} className="h-full w-full object-cover" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center bg-neutral-800 text-xs text-muted">
+            {asset.kind === "video" ? "▶" : "🖼"}
+          </span>
+        )}
+
+        {usedAssetIds.has(asset.id) && (
+          <span
+            title="In use"
+            className="absolute right-0.5 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-accent-foreground"
+          >
+            +
+          </span>
+        )}
+
+        {isDeleting && (
+          <span className="absolute inset-0 flex items-center justify-center bg-black/60">
+            <svg viewBox="0 0 24 24" className="h-5 w-5 animate-spin text-white" fill="none" stroke="currentColor" strokeWidth={2}>
+              <circle cx="12" cy="12" r="9" strokeOpacity={0.3} />
+              <path d="M21 12a9 9 0 0 0-9-9" strokeLinecap="round" />
+            </svg>
+          </span>
+        )}
+      </button>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -168,107 +276,27 @@ export function AssetGallery({
         </div>
       </div>
 
-      <div className="flex flex-1 items-center gap-2 overflow-x-auto">
-        {isLoading && assets.length === 0 && <ReelLoader stage="Loading assets…" className="p-0" />}
-        {!isLoading && assets.length === 0 && <p className="self-center text-xs text-muted">No assets yet</p>}
-        {assets.map((asset) => {
-          const thumbnailSrc = asset.kind === "image" ? asset.url : videoThumbnails[asset.id];
-          const isDeleting = deletingAssetIds.has(asset.id);
-          return (
-            <button
-              key={asset.id}
-              type="button"
-              title={asset.filename}
-              disabled={isDeleting}
-              onClick={() => onSelect(asset)}
-              onContextMenu={(e) => {
-                if (isDeleting) return;
-                openContextMenu(e, [
-                  ...(asset.kind === "audio"
-                    ? [
-                        {
-                          label: playingAssetId === asset.id ? "Pause" : "Play",
-                          onSelect: () => handleTogglePlay(asset),
-                        },
-                      ]
-                    : []),
-                  ...(asset.kind === "image"
-                    ? [{ label: "Add", onSelect: () => onAddOverlay(asset) }]
-                    : asset.kind === "video"
-                      ? [{ label: "Add", onSelect: () => onAddToSequence(asset) }]
-                      : asset.kind === "audio"
-                        ? [{ label: "Add", onSelect: () => onAddToBackgroundSequence(asset) }]
-                        : []),
-                  { label: "Delete", danger: true, onSelect: () => void handleDelete(asset) },
-                ]);
-              }}
-              className={
-                "relative aspect-square w-16 shrink-0 overflow-hidden rounded-md border-2 disabled:cursor-not-allowed " +
-                (selectedAssetId === asset.id ? "border-accent" : "border-transparent")
-              }
-            >
-              {asset.kind === "audio" ? (
-                <span className="relative flex h-full w-full items-center justify-center bg-neutral-800">
-                  {playingAssetId === asset.id ? (
-                    <>
-                      <PauseIcon className="h-5 w-5 text-accent" />
-                      <svg viewBox="0 0 36 36" className="absolute h-full w-full -rotate-90">
-                        <circle
-                          cx="18"
-                          cy="18"
-                          r={RING_RADIUS}
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          className="text-white/20"
-                        />
-                        <circle
-                          cx="18"
-                          cy="18"
-                          r={RING_RADIUS}
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeDasharray={RING_CIRCUMFERENCE}
-                          strokeDashoffset={RING_CIRCUMFERENCE * (1 - playbackProgress)}
-                          className="text-accent"
-                        />
-                      </svg>
-                    </>
+      {isLoading && assets.length === 0 ? (
+        <ReelLoader stage="Loading assets…" className="p-0" />
+      ) : (
+        <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
+          {ASSET_SECTIONS.map(({ kind, label, emptyText }) => {
+            const sectionAssets = assets.filter((asset) => asset.kind === kind);
+            return (
+              <div key={kind} className="flex shrink-0 flex-col gap-1">
+                <h3 className="text-[10px] font-medium uppercase tracking-wide text-muted">{label}</h3>
+                <div className="flex min-h-16 items-center gap-2 overflow-x-auto">
+                  {sectionAssets.length === 0 ? (
+                    <p className="text-xs text-muted">{emptyText}</p>
                   ) : (
-                    <MusicNoteIcon className="h-5 w-5 text-muted" />
+                    sectionAssets.map(renderTile)
                   )}
-                </span>
-              ) : thumbnailSrc ? (
-                // eslint-disable-next-line @next/next/no-img-element -- short-lived data:/presigned URL, not a Next-optimizable static asset
-                <img src={thumbnailSrc} alt={asset.filename} className="h-full w-full object-cover" />
-              ) : (
-                <span className="flex h-full w-full items-center justify-center bg-neutral-800 text-xs text-muted">
-                  {asset.kind === "video" ? "▶" : "🖼"}
-                </span>
-              )}
-
-              {usedAssetIds.has(asset.id) && (
-                <span
-                  title="In use"
-                  className="absolute right-0.5 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-accent-foreground"
-                >
-                  +
-                </span>
-              )}
-
-              {isDeleting && (
-                <span className="absolute inset-0 flex items-center justify-center bg-black/60">
-                  <svg viewBox="0 0 24 24" className="h-5 w-5 animate-spin text-white" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <circle cx="12" cy="12" r="9" strokeOpacity={0.3} />
-                    <path d="M21 12a9 9 0 0 0-9-9" strokeLinecap="round" />
-                  </svg>
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <ContextMenu state={contextMenuState} onClose={closeContextMenu} />
     </div>

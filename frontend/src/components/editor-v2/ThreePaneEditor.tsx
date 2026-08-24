@@ -237,10 +237,15 @@ export function ThreePaneEditor({
   const canvasPlayerRef = useRef<CanvasPlayerHandle>(null);
 
   // Cosmetic-only, persisted but not history-tracked (see this file's
-  // module comment).
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
-    initialTimeline.selectedTemplateId ?? null
-  );
+  // module comment). No UI sets this anymore (the Template picker was
+  // removed), but a project saved while it existed still carries a value
+  // here, so it's kept around to round-trip on save rather than dropped.
+  const selectedTemplateId = initialTimeline.selectedTemplateId ?? null;
+  // No UI sets this anymore (the curated Background track picker was
+  // removed), but a project saved while it existed still carries a value
+  // here, and handleAddToBackgroundSequence still resets it to "none" for
+  // mutual exclusivity with a project's own asset(s) below, so it stays a
+  // real state value rather than a plain constant.
   const [selectedBackgroundTrackId, setSelectedBackgroundTrackId] = useState(
     initialTimeline.selectedBackgroundTrackId ?? "none"
   );
@@ -248,7 +253,7 @@ export function ThreePaneEditor({
   // one or more of this project's own assets -- ordered, appended to by
   // AssetGallery's right-click "Add" on a music tile (multiple tracks
   // concatenate, see BackgroundTrackStrip) -- mutually exclusive with the
-  // catalog choice, see handleAddToBackgroundSequence/handleSelectBackgroundTrack.
+  // catalog choice, see handleAddToBackgroundSequence.
   // Seeds from the old singular `selectedBackgroundAssetId` field if the
   // array form isn't present yet (the one commit where it briefly existed
   // in that shape) -- a one-time runtime seed, not a persisted migration.
@@ -750,11 +755,6 @@ export function ThreePaneEditor({
     setSelectedBackgroundTrackId("none");
   }
 
-  function handleSelectBackgroundTrack(id: string) {
-    setSelectedBackgroundTrackId(id);
-    setBackgroundSequenceAssetIds([]);
-  }
-
   function handleChangeOverlayRect(overlayIndex: number, next: CropRect) {
     setLiveOverlayRectEdit({ index: overlayIndex, rect: next });
   }
@@ -1021,10 +1021,6 @@ export function ThreePaneEditor({
           onAddToSequence={handleAddToSequence}
           onAddToBackgroundSequence={handleAddToBackgroundSequence}
           usedAssetIds={usedAssetIds}
-          selectedBackgroundTrackId={selectedBackgroundTrackId}
-          onSelectBackgroundTrack={handleSelectBackgroundTrack}
-          selectedTemplateId={selectedTemplateId}
-          onSelectTemplate={setSelectedTemplateId}
           selectedClipRectId={selections.clipRectId}
           onSelectClipRect={handleSelectClipRect}
           onOpenTextDialog={handleOpenTextDialog}

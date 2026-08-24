@@ -4,11 +4,10 @@
  * Top band of the three-pane editor, left to right: the project switcher
  * (replaces the removed left navigation sidebar), this project's asset
  * gallery (replaces the always-visible upload dropzone -- "+ Asset" opens
- * UploadDialog instead), a background-track picker, the user-actions panel
- * (templates / clip rectangles / text), and a play area. The play area is
- * playback-only -- no crop/flip editing happens here; that all lives on
- * FrameStrip's timeline (see Playground.tsx), CanvasPlayer just renders
- * the result.
+ * UploadDialog instead), the user-actions panel (clip rectangles / text),
+ * and a play area. The play area is playback-only -- no crop/flip editing
+ * happens here; that all lives on FrameStrip's timeline (see
+ * Playground.tsx), CanvasPlayer just renders the result.
  *
  * The play area shows the video SEQUENCE (sequenceClips), not whichever
  * asset is merely highlighted in the gallery: a sequence with clips in it
@@ -24,15 +23,13 @@ import { ProjectList } from "./ProjectList";
 import { AssetGallery } from "./AssetGallery";
 import { UploadDialog } from "./UploadDialog";
 import { StockMediaDialog } from "./StockMediaDialog";
-import { BackgroundTrackSelector } from "./BackgroundTrackSelector";
 import { UserActions } from "./UserActions";
 import { TextOverlayDialog } from "./TextOverlayDialog";
 import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
 import { ImageTemplatesDialog } from "./ImageTemplatesDialog";
+import { ClipRectangleDialog } from "./ClipRectangleDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
-import { CollapsiblePanel } from "./CollapsiblePanel";
-import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { Asset } from "@/lib/api";
 import type { CropRect, OverlayImage, SequenceEntry, TextOverlay, TranscriptCaption, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 import type { TextTemplateId } from "@/lib/video/textTemplates";
@@ -63,10 +60,6 @@ export function ActionArea({
   onAddToSequence,
   onAddToBackgroundSequence,
   usedAssetIds,
-  selectedBackgroundTrackId,
-  onSelectBackgroundTrack,
-  selectedTemplateId,
-  onSelectTemplate,
   selectedClipRectId,
   onSelectClipRect,
   onOpenTextDialog,
@@ -113,10 +106,6 @@ export function ActionArea({
   onAddToSequence: (asset: Asset) => void;
   onAddToBackgroundSequence: (asset: Asset) => void;
   usedAssetIds: Set<string>;
-  selectedBackgroundTrackId: string;
-  onSelectBackgroundTrack: (id: string) => void;
-  selectedTemplateId: string | null;
-  onSelectTemplate: (id: string) => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
   onOpenTextDialog: () => void;
@@ -159,6 +148,11 @@ export function ActionArea({
 }) {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
+  // Local, unlike the other three dialogs' open/close state -- selecting a
+  // ratio applies it (via onSelectClipRect, already a ThreePaneEditor-level
+  // handler) and closes itself in the same click, so nothing outside this
+  // component ever needs to know whether it's open.
+  const [isClipRectDialogOpen, setIsClipRectDialogOpen] = useState(false);
 
   const sequenceKey = sequenceClips.map((clip) => `${clip.id}:${clip.kind === "image" ? clip.durationSeconds : ""}`).join(",");
 
@@ -189,16 +183,10 @@ export function ActionArea({
         />
       </div>
 
-      <CollapsiblePanel label="Background track" icon={<MusicNoteIcon className="h-4 w-4" />} expandedClassName="w-40">
-        <BackgroundTrackSelector selectedTrackId={selectedBackgroundTrackId} onSelectTrack={onSelectBackgroundTrack} />
-      </CollapsiblePanel>
-
       <div className="w-[30rem] shrink-0 overflow-hidden border-r border-border pr-4">
         <UserActions
-          selectedTemplateId={selectedTemplateId}
-          onSelectTemplate={onSelectTemplate}
           selectedClipRectId={selectedClipRectId}
-          onSelectClipRect={onSelectClipRect}
+          onOpenClipRectDialog={() => setIsClipRectDialogOpen(true)}
           onOpenTextDialog={onOpenTextDialog}
           onOpenTranscriptDialog={onOpenTranscriptDialog}
           onOpenImageTemplatesDialog={onOpenImageTemplatesDialog}
@@ -299,6 +287,16 @@ export function ActionArea({
           baseCropRect={baseCropRect}
           onAdd={onAddImageSequenceClip}
           onClose={onCloseImageTemplatesDialog}
+        />
+      )}
+
+      {isClipRectDialogOpen && (
+        <ClipRectangleDialog
+          selectedClipRectId={selectedClipRectId}
+          onSelect={onSelectClipRect}
+          onClose={() => setIsClipRectDialogOpen(false)}
+          previewFrameUrl={previewFrameUrl}
+          frameAspectRatio={frameAspectRatio}
         />
       )}
     </div>
