@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { Timeline } from "@/lib/projects";
+import type { CompileTimelineInput } from "@/lib/timeline/compileCreatomateTimeline";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -218,12 +218,15 @@ export interface RenderTriggerResult {
 
 /** Calls this Next.js app's own /api/render route (not the FastAPI
  * backend) -- same-origin, so no CORS/API_BASE_URL involved. That route
- * authenticates via the browser's Supabase cookie session directly. */
-export async function triggerRender(projectId: string, timeline: Timeline) {
+ * authenticates via the browser's Supabase cookie session directly, then
+ * compiles `compileInput` into real Creatomate JSON itself (see
+ * lib/timeline/compileCreatomateTimeline.ts's own comment on why that
+ * can't happen here in the browser). */
+export async function triggerRender(projectId: string, compileInput: CompileTimelineInput) {
   const response = await fetch("/api/render", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ projectId, timeline }),
+    body: JSON.stringify({ projectId, compileInput }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {

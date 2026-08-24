@@ -1,0 +1,496 @@
+/**
+ * SERVER-ONLY. Turns the editor's live edit state into Creatomate's actual
+ * render JSON (`Timeline.elements`/`_appMeta`) -- the piece editor-v2 never
+ * had (see ThreePaneEditor.tsx's own module comment). Only ever imported
+ * from `app/api/render/route.ts` (Node runtime): the `creatomate` package
+ * is an "Official Node.js SDK" whose `Client.ts` pulls in `axios` and
+ * Node's `perf_hooks`, neither of which exist in a browser bundle -- this
+ * file must never be imported from a "use client" component, or the
+ * editor's client bundle fails to build. The client only ever gathers
+ * plain data (see gatherRenderClips.ts) and sends it to /api/render, which
+ * calls compileCreatomateTimeline() itself before resolving asset URLs and
+ * calling Creatomate.
+ *
+ * Building elements via the SDK's real classes (Video/Audio/Text/
+ * Composition/Keyframe/animation classes) and calling .toMap() on each,
+ * rather than hand-rolling snake_case JSON, is deliberate: Client.
+ * startRender() sends a plain object VERBATIM (no key transformation) --
+ * only an actual SDK class instance gets its camelCase properties
+ * converted to Creatomate's real wire format. Guessing the wire format by
+ * hand is exactly what the old lib/timeline/autoAssembleTimeline.ts's own
+ * comment says blocked animation support there originally.
+ *
+ * Every mapping below was verified against the actual installed SDK
+ * source (frontend/node_modules/creatomate/src/), not guessed. One
+ * load-bearing assumption remains genuinely unverified: whether a numeric
+ * Keyframe.time on a property of an element nested inside a Composition is
+ * relative to that element's own start, or absolute against the root
+ * timeline. Every place that matters is marked "SEGMENT-LOCAL TIME" below
+ * -- if a real test render (see the plan's Verification section) shows
+ * this assumption is wrong, every one of those call sites needs the same
+ * one-line fix (add the segment's own outputStartSeconds).
+ */
+import {
+  Video,
+  Audio,
+  Text,
+  Image,
+  Composition,
+  Keyframe,
+  TextTypewriter,
+  TextAppearWordByWord,
+} from "creatomate";
+import type { EditSelectionsSnapshot, Timeline, TemplateElement, AppMetaEntry } from "@/lib/projects";
+import {
+  buildRenderSegments,
+  mapSourceRangeToOutputRanges,
+  totalSequenceDuration,
+  computeEffectiveCropRect,
+  computeFlipSegments,
+  FULL_FRAME_CROP_RECT,
+  type SequenceClipInfo,
+  type CropRect,
+  type ZoomEffect,
+  type RenderSegment,
+} from "@/lib/video/video_math";
+import { getTextTemplateFontFraction } from "@/lib/video/textTemplates";
+
+export interface CompileTimelineInput {
+  selections: EditSelectionsSnapshot;
+  /** Real per-clip durations for every clip in selections.sequenceAssetIds,
+   * in order -- gathered fresh client-side right before rendering (see
+   * gatherRenderClips.ts), not reused from the preview pipeline. */
+  sequenceClips: SequenceClipInfo[];
+  /** Same shape, for the resolved background-music sequence (empty if none). */
+  backgroundClips: SequenceClipInfo[];
+  outputWidth: number;
+  outputHeight: number;
+}
+
+const BACKGROUND_MUSIC_VOLUME_PERCENT = "50%"; // matches CanvasPlayer.tsx's BACKGROUND_MUSIC_GAIN
+const CROP_EASING = "cubic-in-out";
+// A hard flip toggle isn't a smooth animation -- Creatomate's Easing union
+// has no step/hold value, so it's expressed as two keyframes this close
+// together instead.
+const FLIP_KEYFRAME_EPSILON_SECONDS = 1 / 60;
+
+let idCounter = 0;
+function nextId(prefix: string): string {
+  idCounter += 1;
+  return `${prefix}-${idCounter}`;
+}
+
+function pct(value: number): string {
+  return `${value * 100}%`;
+}
+
+/** Inverse of the crop rect -- the transform on the OVERSIZED inner video
+ * that makes only the cropped region visible through a same-size,
+ * clip:true viewport. Anchored top-left (xAnchor/yAnchor '0%') so x/y
+ * address the video's own top-left corner directly. */
+function cropRectToVideoTransform(crop: CropRect) {
+  return {
+    width: pct(1 / crop.width),
+    height: pct(1 / crop.height),
+    x: pct(-crop.x / crop.width),
+    y: pct(-crop.y / crop.height),
+  };
+}
+
+/** Breakpoint times (GLOBAL/original-timeline seconds) where the effective
+ * crop rect's slope changes within [segStart, segEnd) -- the segment's own
+ * bounds plus every overlapping ZoomEffect's start/epicenter/end, clamped
+ * into the segment. */
+function findCropBreakpoints(zoomEffects: ZoomEffect[], segStart: number, segEnd: number): number[] {
+  const points = new Set<number>([segStart, segEnd]);
+  for (const effect of zoomEffects) {
+    if (effect.endTimeSeconds <= segStart || effect.startTimeSeconds >= segEnd) continue;
+    for (const t of [effect.startTimeSeconds, effect.epicenterTimeSeconds, effect.endTimeSeconds]) {
+      if (t > segStart && t < segEnd) points.add(t);
+    }
+  }
+  return Array.from(points).sort((a, b) => a - b);
+}
+
+/** Builds the crop x/y/width/height properties (plain values, or Keyframe
+ * arrays when a ZoomEffect overlaps this segment) for one Video element. */
+function buildCropProperties(segment: RenderSegment, baseCropRect: CropRect | null, zoomEffects: ZoomEffect[]) {
+  const segStart = segment.sourceStartSeconds;
+  const segEnd = segment.sourceStartSeconds + segment.durationSeconds;
+  const base = baseCropRect ?? FULL_FRAME_CROP_RECT;
+
+  const overlaps = zoomEffects.some((effect) => effect.endTimeSeconds > segStart && effect.startTimeSeconds < segEnd);
+  if (!overlaps) {
+    return cropRectToVideoTransform(computeEffectiveCropRect(base, zoomEffects, segStart));
+  }
+
+  const breakpoints = findCropBreakpoints(zoomEffects, segStart, segEnd);
+  const width: Keyframe<string>[] = [];
+  const height: Keyframe<string>[] = [];
+  const x: Keyframe<string>[] = [];
+  const y: Keyframe<string>[] = [];
+
+  for (const t of breakpoints) {
+    const crop = computeEffectiveCropRect(base, zoomEffects, t);
+    const transform = cropRectToVideoTransform(crop);
+    // SEGMENT-LOCAL TIME -- see this file's module comment.
+    const localTime = t - segStart;
+    width.push(new Keyframe(transform.width, localTime, CROP_EASING));
+    height.push(new Keyframe(transform.height, localTime, CROP_EASING));
+    x.push(new Keyframe(transform.x, localTime, CROP_EASING));
+    y.push(new Keyframe(transform.y, localTime, CROP_EASING));
+  }
+
+  return { width, height, x, y };
+}
+
+/** One Video element per RenderSegment, each with its own crop/zoom
+ * keyframes, all on track 1 of their shared parent (sequenced
+ * back-to-back, same convention as the README's multi-clip example). */
+function buildVideoSegments(
+  segments: RenderSegment[],
+  baseCropRect: CropRect | null,
+  zoomEffects: ZoomEffect[],
+  appMeta: Record<string, AppMetaEntry>
+): Video[] {
+  return segments.map((segment) => {
+    const id = nextId("clip");
+    appMeta[id] = { role: "clip", assetId: segment.assetId };
+    const crop = buildCropProperties(segment, baseCropRect, zoomEffects);
+    return new Video({
+      id,
+      track: 1,
+      time: segment.outputStartSeconds,
+      duration: segment.durationSeconds,
+      trimStart: segment.clipLocalStartSeconds,
+      trimDuration: segment.durationSeconds,
+      fit: "fill",
+      xAnchor: "0%",
+      yAnchor: "0%",
+      ...crop,
+      // Overwritten server-side by resolveAssetSources (api/render/route.ts)
+      // from _appMeta[id].assetId -- never a real playable URL by itself.
+      source: "",
+    });
+  });
+}
+
+/** The flip/mirror wrapper -- one composition spanning the WHOLE output
+ * timeline (flip toggles are authored globally, not per-segment, and can
+ * land mid-segment), center-anchored so xScale/yScale mirror in place.
+ * Holds every video segment as its own children. Returns a plain
+ * Composition (no crop keyframes of its own) when there's nothing to
+ * flip on either axis, to avoid emitting pointless static 100% keyframes. */
+function buildFlipWrapper(
+  videoSegments: Video[],
+  flipHorizontalToggles: number[],
+  flipVerticalToggles: number[],
+  totalOutputDurationSeconds: number
+): Composition {
+  const xScale = buildFlipScaleKeyframes(flipHorizontalToggles, totalOutputDurationSeconds);
+  const yScale = buildFlipScaleKeyframes(flipVerticalToggles, totalOutputDurationSeconds);
+
+  return new Composition({
+    id: nextId("flip-wrapper"),
+    track: 1,
+    x: "50%",
+    y: "50%",
+    width: "100%",
+    height: "100%",
+    xAnchor: "50%",
+    yAnchor: "50%",
+    ...(xScale ? { xScale } : {}),
+    ...(yScale ? { yScale } : {}),
+    elements: videoSegments,
+  });
+}
+
+function buildFlipScaleKeyframes(toggles: number[], totalDurationSeconds: number): Keyframe<string>[] | null {
+  if (toggles.length === 0) return null;
+  const segments = computeFlipSegments(toggles, totalDurationSeconds);
+  const keyframes: Keyframe<string>[] = [new Keyframe("100%", 0)];
+
+  for (const segment of segments) {
+    const onAt = Math.max(0, segment.startTimeSeconds - FLIP_KEYFRAME_EPSILON_SECONDS);
+    keyframes.push(new Keyframe("100%", onAt));
+    keyframes.push(new Keyframe("-100%", segment.startTimeSeconds));
+    if (segment.endTimeSeconds < totalDurationSeconds) {
+      const offAt = Math.max(segment.startTimeSeconds, segment.endTimeSeconds - FLIP_KEYFRAME_EPSILON_SECONDS);
+      keyframes.push(new Keyframe("-100%", offAt));
+      keyframes.push(new Keyframe("100%", segment.endTimeSeconds));
+    }
+  }
+  return keyframes;
+}
+
+function rectProperties(rect: CropRect) {
+  return { x: pct(rect.x), y: pct(rect.y), width: pct(rect.width), height: pct(rect.height) };
+}
+
+/** Image overlays -- root-level siblings of the crop viewport, since their
+ * rect is a fraction of the OUTPUT frame (post-crop), matching
+ * CanvasPlayer's own compositing order (drawn after the flip transform is
+ * undone). One element per surviving output sub-range -- more than one if
+ * a trim cuts through the middle of the overlay's authored window. */
+function buildOverlayImageElements(
+  overlayImages: EditSelectionsSnapshot["overlayImages"],
+  segments: RenderSegment[],
+  nextTrack: () => number,
+  appMeta: Record<string, AppMetaEntry>
+): Image[] {
+  const elements: Image[] = [];
+  for (const overlay of overlayImages) {
+    const track = nextTrack();
+    const outputRanges = mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlay.endTimeSeconds);
+    for (const range of outputRanges) {
+      const id = nextId("overlay");
+      appMeta[id] = { role: "image-overlay", assetId: overlay.assetId };
+      elements.push(
+        new Image({
+          id,
+          track,
+          time: range.outputStartSeconds,
+          duration: range.outputEndSeconds - range.outputStartSeconds,
+          fit: "fill",
+          xAnchor: "0%",
+          yAnchor: "0%",
+          ...rectProperties(overlay.rect),
+          source: "",
+        })
+      );
+    }
+  }
+  return elements;
+}
+
+/** Text overlays -- same root-level/output-fraction placement as image
+ * overlays. fontSizeMinimum/fontSizeMaximum + textWrap replace a fixed
+ * fontSize, mirroring lib/video/textTemplates.ts's own wrap-to-fit fix
+ * rather than a single unwrapped size. Per-template style/animation
+ * mapping lives in getCreatomateTextStyle (textTemplates.ts) so the
+ * canvas-preview templates and this compiler can't drift independently. */
+function buildTextElements(
+  textOverlays: EditSelectionsSnapshot["textOverlays"],
+  segments: RenderSegment[],
+  nextTrack: () => number
+): Text[] {
+  const elements: Text[] = [];
+  for (const overlay of textOverlays) {
+    const track = nextTrack();
+    const outputRanges = mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlay.endTimeSeconds);
+    for (const range of outputRanges) {
+      const durationSeconds = range.outputEndSeconds - range.outputStartSeconds;
+      const fontFraction = getTextTemplateFontFraction(overlay.templateId);
+      elements.push(
+        new Text({
+          id: nextId("text"),
+          track,
+          time: range.outputStartSeconds,
+          duration: durationSeconds,
+          text: overlay.text,
+          textWrap: true,
+          fontSizeMinimum: "2vh",
+          fontSizeMaximum: `${fontFraction * 100}vh`,
+          xAnchor: "0%",
+          yAnchor: "0%",
+          ...rectProperties(overlay.rect),
+          ...buildTextTemplateStyle(overlay.templateId, durationSeconds),
+        })
+      );
+    }
+  }
+  return elements;
+}
+
+/** Per-template style + entrance animation. DIY scale-in entrances
+ * (Bold Pop, Bounce In) use property keyframes directly on xScale/yScale
+ * rather than Creatomate's canned Bounce/TextScale animation classes,
+ * which describe a different motion (a repeated bounce, or a scale with
+ * no controllable start value) than our one-shot pop -- see the plan's
+ * mapping table for why each template's animation was chosen. */
+function buildTextTemplateStyle(templateId: string, durationSeconds: number): Record<string, unknown> {
+  switch (templateId) {
+    case "bold-pop":
+      return {
+        fontWeight: 700,
+        fillColor: "#ffffff",
+        strokeColor: "#000000",
+        strokeWidth: "2%",
+        xAnchor: "50%",
+        yAnchor: "50%",
+        xScale: [new Keyframe("80%", 0, CROP_EASING), new Keyframe("100%", durationSeconds * 0.2, CROP_EASING)],
+        yScale: [new Keyframe("80%", 0, CROP_EASING), new Keyframe("100%", durationSeconds * 0.2, CROP_EASING)],
+      };
+    case "minimal-subtitle":
+      return {
+        fillColor: "#ffffff",
+        backgroundColor: "rgba(0,0,0,0.6)",
+        backgroundXPadding: "20%",
+        backgroundYPadding: "20%",
+        opacity: [new Keyframe(0, 0, CROP_EASING), new Keyframe(1, durationSeconds * 0.1, CROP_EASING)],
+      };
+    case "typewriter":
+      return {
+        fontFamily: "Roboto Mono",
+        fillColor: "#ffffff",
+        strokeColor: "#000000",
+        strokeWidth: "1%",
+        xAlignment: "0%",
+        enter: new TextTypewriter({ typingStart: 0, typingDuration: durationSeconds }),
+      };
+    case "bounce-in":
+      return {
+        fontWeight: 700,
+        fillColor: "#ffffff",
+        strokeColor: "#000000",
+        strokeWidth: "2%",
+        xAnchor: "50%",
+        yAnchor: "50%",
+        xScale: [new Keyframe("50%", 0, "back-out"), new Keyframe("100%", durationSeconds * 0.35, "back-out")],
+        yScale: [new Keyframe("50%", 0, "back-out"), new Keyframe("100%", durationSeconds * 0.35, "back-out")],
+      };
+    case "highlight-box":
+      return {
+        fontWeight: 700,
+        fillColor: "#1c1917",
+        backgroundColor: "#facc15",
+        backgroundXPadding: "15%",
+        backgroundYPadding: "15%",
+        backgroundBorderRadius: "15%",
+        opacity: [new Keyframe(0, 0, CROP_EASING), new Keyframe(1, durationSeconds * 0.1, CROP_EASING)],
+      };
+    case "neon-glow":
+      return {
+        fontWeight: 700,
+        fillColor: "#f0abfc",
+        shadowColor: "#e879f9",
+        shadowBlur: "3vh",
+        opacity: [new Keyframe(0, 0, CROP_EASING), new Keyframe(1, durationSeconds * 0.15, CROP_EASING)],
+      };
+    case "word-pop":
+      return {
+        fontWeight: 700,
+        fillColor: "#ffffff",
+        strokeColor: "#000000",
+        strokeWidth: "2%",
+        enter: new TextAppearWordByWord({ duration: durationSeconds, fade: true, easing: CROP_EASING }),
+      };
+    default:
+      return { fillColor: "#ffffff" };
+  }
+}
+
+/** Background music -- mirrors BackgroundTrackStrip.tsx's own
+ * concatenate-then-loop model. A single track is one looping Audio
+ * element; multiple tracks are wrapped in a looping Composition so the
+ * whole concatenated sequence repeats, not just its first track. */
+function buildBackgroundAudioElement(
+  backgroundClips: SequenceClipInfo[],
+  totalOutputDurationSeconds: number,
+  track: number,
+  appMeta: Record<string, AppMetaEntry>
+): Audio | Composition | null {
+  if (backgroundClips.length === 0 || totalOutputDurationSeconds <= 0) return null;
+
+  if (backgroundClips.length === 1) {
+    const id = nextId("music");
+    appMeta[id] = { role: "music", assetId: backgroundClips[0].assetId };
+    return new Audio({
+      id,
+      track,
+      time: 0,
+      duration: totalOutputDurationSeconds,
+      loop: true,
+      volume: BACKGROUND_MUSIC_VOLUME_PERCENT,
+      source: "",
+    });
+  }
+
+  const loopDurationSeconds = totalSequenceDuration(backgroundClips);
+  const children = backgroundClips.map((clip) => {
+    const id = nextId("music");
+    appMeta[id] = { role: "music", assetId: clip.assetId };
+    return new Audio({
+      id,
+      track: 1,
+      time: clip.startTimeSeconds,
+      duration: clip.durationSeconds,
+      volume: BACKGROUND_MUSIC_VOLUME_PERCENT,
+      source: "",
+    });
+  });
+
+  return new Composition({
+    id: nextId("music-loop"),
+    track,
+    time: 0,
+    duration: totalOutputDurationSeconds,
+    loop: true,
+    plays: Math.ceil(totalOutputDurationSeconds / Math.max(loopDurationSeconds, 0.01)),
+    elements: children,
+  });
+}
+
+export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline {
+  idCounter = 0;
+  const { selections, sequenceClips, backgroundClips, outputWidth, outputHeight } = input;
+  const appMeta: Record<string, AppMetaEntry> = {};
+
+  const totalOriginalDurationSeconds = totalSequenceDuration(sequenceClips);
+  const segments = buildRenderSegments(sequenceClips, selections.trimRanges);
+  const totalOutputDurationSeconds = segments.reduce((sum, s) => sum + s.durationSeconds, 0);
+
+  const videoSegments = buildVideoSegments(segments, selections.cropRect, selections.zoomEffects, appMeta);
+  const flipWrapper = buildFlipWrapper(
+    videoSegments,
+    selections.flipHorizontalToggles,
+    selections.flipVerticalToggles,
+    totalOutputDurationSeconds
+  );
+
+  const cropViewport = new Composition({
+    id: nextId("crop-viewport"),
+    track: 1,
+    x: "0%",
+    y: "0%",
+    width: "100%",
+    height: "100%",
+    xAnchor: "0%",
+    yAnchor: "0%",
+    clip: true,
+    elements: [flipWrapper],
+  });
+
+  // Overlay/text-overlay ranges are re-clamped against the CURRENT total
+  // duration before mapping -- a since-shrunk sequence (a clip removed
+  // after the overlay was authored) could otherwise leave a stale range
+  // pointing past the end.
+  const clampedOverlayImages = selections.overlayImages
+    .map((overlay) => ({ ...overlay, endTimeSeconds: Math.min(overlay.endTimeSeconds, totalOriginalDurationSeconds) }))
+    .filter((overlay) => overlay.startTimeSeconds < totalOriginalDurationSeconds);
+  const clampedTextOverlays = selections.textOverlays
+    .map((overlay) => ({ ...overlay, endTimeSeconds: Math.min(overlay.endTimeSeconds, totalOriginalDurationSeconds) }))
+    .filter((overlay) => overlay.startTimeSeconds < totalOriginalDurationSeconds);
+
+  let trackCursor = 2;
+  const nextTrack = () => trackCursor++;
+
+  const overlayElements = buildOverlayImageElements(clampedOverlayImages, segments, nextTrack, appMeta);
+  const textElements = buildTextElements(clampedTextOverlays, segments, nextTrack);
+  const backgroundAudio = buildBackgroundAudioElement(backgroundClips, totalOutputDurationSeconds, nextTrack(), appMeta);
+
+  const elements: TemplateElement[] = [
+    cropViewport.toMap() as TemplateElement,
+    ...overlayElements.map((el) => el.toMap() as TemplateElement),
+    ...textElements.map((el) => el.toMap() as TemplateElement),
+    ...(backgroundAudio ? [backgroundAudio.toMap() as TemplateElement] : []),
+  ];
+
+  return {
+    output_format: "mp4",
+    width: outputWidth,
+    height: outputHeight,
+    elements,
+    _appMeta: appMeta,
+  };
+}

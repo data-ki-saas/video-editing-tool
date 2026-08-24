@@ -8,13 +8,15 @@
  * ThreePaneEditor.tsx) still walks that click-by-click history underneath
  * (lib/useEditHistory.ts); this panel just doesn't surface the history
  * itself, only what it currently adds up to. Middle: status/errors from the
- * asset list and the thumbnail/volume analysis pipeline. Right: a vertical
- * settings/sign-out strip, anchored to this panel's bottom-right corner --
- * moved here from the dashboard's old persistent top bar (see
- * app/dashboard/layout.tsx) to give the editor that row of height back.
+ * asset list and the thumbnail/volume analysis pipeline, plus render
+ * status once a render has been started. Right: a vertical strip -- a
+ * bright-green Render button at the top, settings/sign-out anchored to
+ * the bottom (moved here from the dashboard's old persistent top bar, see
+ * app/dashboard/layout.tsx, to give the editor that row of height back).
  */
 import Link from "next/link";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
+import { RenderIcon } from "./icons/PlayerIcons";
 import { computeFlipSegments } from "@/lib/video/video_math";
 import { SignOutButton } from "@/components/SignOutButton";
 import { SettingsIcon } from "@/components/icons/UIIcons";
@@ -79,6 +81,45 @@ function ActiveTransformationsList({
   );
 }
 
+const TERMINAL_RENDER_STATUSES = new Set(["completed", "failed"]);
+
+function RenderStatusMessage({
+  isRendering,
+  renderStatus,
+  renderUrl,
+  renderError,
+  isRenderStuck,
+}: {
+  isRendering: boolean;
+  renderStatus: string | null;
+  renderUrl: string | null;
+  renderError: string | null;
+  isRenderStuck: boolean;
+}) {
+  if (isRendering) return <p className="text-muted">Starting render…</p>;
+  if (renderStatus === "failed") {
+    return <p className="text-red-600">Render failed{renderError ? `: ${renderError}` : ""}</p>;
+  }
+  if (renderStatus === "completed" && renderUrl) {
+    return (
+      <p className="text-foreground">
+        Render ready —{" "}
+        <a href={renderUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+          watch or download
+        </a>
+      </p>
+    );
+  }
+  if (renderStatus && !TERMINAL_RENDER_STATUSES.has(renderStatus)) {
+    return (
+      <p className="text-muted">
+        Rendering… {isRenderStuck && "this is taking longer than usual"}
+      </p>
+    );
+  }
+  return null;
+}
+
 export function FeedbackArea({
   assetsError,
   analysisError,
@@ -87,6 +128,13 @@ export function FeedbackArea({
   isUploading,
   selections,
   videoDurationSeconds,
+  canRender,
+  isRendering,
+  renderStatus,
+  renderUrl,
+  renderError,
+  isRenderStuck,
+  onRenderClick,
 }: {
   assetsError: string | null;
   analysisError: string | null;
@@ -95,8 +143,17 @@ export function FeedbackArea({
   isUploading: boolean;
   selections: EditSelectionsSnapshot;
   videoDurationSeconds: number;
+  canRender: boolean;
+  isRendering: boolean;
+  renderStatus: string | null;
+  renderUrl: string | null;
+  renderError: string | null;
+  isRenderStuck: boolean;
+  onRenderClick: () => void;
 }) {
-  const hasMessages = assetsError || analysisError || saveError || isAnalyzing || isUploading;
+  const hasRenderMessage = isRendering || renderStatus !== null;
+  const hasMessages = assetsError || analysisError || saveError || isAnalyzing || isUploading || hasRenderMessage;
+  const renderDisabled = !canRender || isRendering || (renderStatus !== null && !TERMINAL_RENDER_STATUSES.has(renderStatus));
 
   return (
     <div className="flex h-full gap-4 px-4 py-2 text-sm">
@@ -111,18 +168,38 @@ export function FeedbackArea({
         {saveError && <p className="text-red-600">Couldn&apos;t save your changes: {saveError}</p>}
         {isUploading && <p className="text-muted">Uploading…</p>}
         {isAnalyzing && !analysisError && <p className="text-muted">Analyzing video for the timeline preview…</p>}
+        <RenderStatusMessage
+          isRendering={isRendering}
+          renderStatus={renderStatus}
+          renderUrl={renderUrl}
+          renderError={renderError}
+          isRenderStuck={isRenderStuck}
+        />
       </div>
 
-      <div className="flex shrink-0 flex-col items-center justify-end gap-1 border-l border-border pl-3">
-        <Link
-          href="/settings"
-          aria-label="Settings"
-          title="Settings"
-          className="rounded-full p-2 text-muted hover:bg-foreground/10"
+      <div className="flex h-full shrink-0 flex-col items-center justify-between border-l border-border pl-3">
+        <button
+          type="button"
+          onClick={onRenderClick}
+          disabled={renderDisabled}
+          aria-label="Render"
+          title={canRender ? "Render" : "Add a video before rendering"}
+          className="rounded-full bg-green-500 p-2 text-white hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <SettingsIcon className="h-5 w-5" />
-        </Link>
-        <SignOutButton />
+          <RenderIcon className="h-5 w-5" />
+        </button>
+
+        <div className="flex flex-col items-center gap-1">
+          <Link
+            href="/settings"
+            aria-label="Settings"
+            title="Settings"
+            className="rounded-full p-2 text-muted hover:bg-foreground/10"
+          >
+            <SettingsIcon className="h-5 w-5" />
+          </Link>
+          <SignOutButton />
+        </div>
       </div>
     </div>
   );

@@ -46,3 +46,24 @@ export function LoopIcon(props: IconProps) {
     </svg>
   );
 }
+
+/** Simple clapperboard glyph for the Render action -- outline, matching
+ * LoopIcon's stroke style. */
+export function RenderIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M3 8.5V19a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8.5H3Z" />
+      <path d="m3 8.5 1.5-4.5h3L6 8.5" />
+      <path d="m9.5 8.5 1.5-4.5h3l-1.5 4.5" />
+      <path d="M16 8.5 17.5 4H20a1 1 0 0 1 1 1v3.5" />
+    </svg>
+  );
+}

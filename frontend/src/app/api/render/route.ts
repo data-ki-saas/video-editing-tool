@@ -11,6 +11,7 @@ import {
 } from "creatomate";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
+import { compileCreatomateTimeline, type CompileTimelineInput } from "@/lib/timeline/compileCreatomateTimeline";
 
 export const runtime = "nodejs";
 
@@ -21,15 +22,21 @@ const RENDER_DAILY_LIMIT = 10;
 
 interface RenderRequestBody {
   projectId: string;
-  timeline: Record<string, unknown>;
+  // Raw ingredients, not a pre-built Timeline -- the client only ever
+  // gathers plain data (see lib/timeline/gatherRenderClips.ts); the actual
+  // Creatomate JSON is compiled HERE, server-side, since
+  // compileCreatomateTimeline.ts imports the `creatomate` package itself
+  // (Node-only -- see that file's own module comment) and could never run
+  // in the browser.
+  compileInput: CompileTimelineInput;
 }
 
 function parseRequestBody(body: unknown): RenderRequestBody | null {
   if (typeof body !== "object" || body === null) return null;
-  const { projectId, timeline } = body as Record<string, unknown>;
+  const { projectId, compileInput } = body as Record<string, unknown>;
   if (typeof projectId !== "string" || !projectId) return null;
-  if (typeof timeline !== "object" || timeline === null || Array.isArray(timeline)) return null;
-  return { projectId, timeline: timeline as Record<string, unknown> };
+  if (typeof compileInput !== "object" || compileInput === null || Array.isArray(compileInput)) return null;
+  return { projectId, compileInput: compileInput as CompileTimelineInput };
 }
 
 /** Where Creatomate POSTs render completion/failure -- see
@@ -116,9 +123,9 @@ export async function POST(request: Request) {
 
   const body = parseRequestBody(rawBody);
   if (!body) {
-    return NextResponse.json({ error: "projectId and timeline are required" }, { status: 400 });
+    return NextResponse.json({ error: "projectId and compileInput are required" }, { status: 400 });
   }
-  const { projectId, timeline } = body;
+  const { projectId, compileInput } = body;
 
   const supabase = await createClient();
 
@@ -176,9 +183,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
+  let timeline: ReturnType<typeof compileCreatomateTimeline>;
+  try {
+    timeline = compileCreatomateTimeline(compileInput);
+  } catch (err) {
+    console.error("[api/render] failed to compile timeline", projectId, err);
+    return NextResponse.json({ error: "Failed to prepare this reel for render" }, { status: 400 });
+  }
+
   let resolvedTimeline: Record<string, unknown>;
   try {
-    resolvedTimeline = await resolveAssetSources(timeline, projectId, session.access_token);
+    resolvedTimeline = await resolveAssetSources(timeline as unknown as Record<string, unknown>, projectId, session.access_token);
   } catch (err) {
     console.error("[api/render] failed to resolve asset URLs", projectId, err);
     return NextResponse.json({ error: "Failed to resolve one or more assets for this render" }, { status: 502 });

@@ -67,6 +67,28 @@ function fontSizeFor(rectPx: TextTemplateRenderContext["rectPx"], fraction: numb
   return Math.max(10, rectPx.height * fraction);
 }
 
+// Each template's base font size, as a fraction of its rect's height --
+// shared between the canvas renderers below (via fontSizeFor) and
+// compileCreatomateTimeline.ts's fontSizeMaximum (which needs the same
+// fraction expressed as vh-of-output, since Creatomate has no per-rect
+// pixel concept), so the two never drift out of sync independently.
+const TEXT_TEMPLATE_FONT_FRACTIONS: Record<TextTemplateId, number> = {
+  "bold-pop": 0.5,
+  "minimal-subtitle": 0.3,
+  typewriter: 0.4,
+  "bounce-in": 0.5,
+  "highlight-box": 0.35,
+  "neon-glow": 0.5,
+  "word-pop": 0.4,
+};
+
+/** Same boundary-crossing reasoning as getTextTemplateRenderer below --
+ * templateId arrives as a plain, possibly-unknown string. Falls back to
+ * 0.4 (a reasonable middle value) for an unrecognized id. */
+export function getTextTemplateFontFraction(templateId: string): number {
+  return (TEXT_TEMPLATE_FONT_FRACTIONS as Record<string, number>)[templateId] ?? 0.4;
+}
+
 /** A brief overshoot/elastic-feeling ease for entrances that should read
  * as a "bounce" rather than a smooth glide -- distinct from video_math.ts's
  * easeInOut, which is used where a plain smooth curve is wanted instead. */
@@ -180,7 +202,7 @@ const boldPop: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   const center = rectCenter(rectPx);
   const entrance = easeInOut(Math.min(progress / 0.2, 1));
   const scale = 0.8 + 0.2 * entrance;
-  const baseFontSize = fontSizeFor(rectPx, 0.5);
+  const baseFontSize = fontSizeFor(rectPx, TEXT_TEMPLATE_FONT_FRACTIONS["bold-pop"]);
   const fontSpec = (size: number) => `bold ${size}px sans-serif`;
   const layout = fitTextToRect(ctx, text, rectPx.width, rectPx.height, baseFontSize, fontSpec);
 
@@ -214,7 +236,7 @@ const minimalSubtitle: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) 
     text,
     rectPx.width - textPaddingX * 2,
     barHeight * 0.8,
-    fontSizeFor(rectPx, 0.3),
+    fontSizeFor(rectPx, TEXT_TEMPLATE_FONT_FRACTIONS["minimal-subtitle"]),
     fontSpec
   );
 
@@ -233,7 +255,14 @@ const minimalSubtitle: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) 
 
 const typewriter: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   const fontSpec = (size: number) => `${size}px monospace`;
-  const layout = fitTextToRect(ctx, text, rectPx.width, rectPx.height, fontSizeFor(rectPx, 0.4), fontSpec);
+  const layout = fitTextToRect(
+    ctx,
+    text,
+    rectPx.width,
+    rectPx.height,
+    fontSizeFor(rectPx, TEXT_TEMPLATE_FONT_FRACTIONS["typewriter"]),
+    fontSpec
+  );
   const totalChars = layout.lines.reduce((sum, line) => sum + line.length, 0);
   let revealBudget = Math.floor(progress * totalChars);
 
@@ -262,7 +291,14 @@ const bounceIn: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   const center = rectCenter(rectPx);
   const scale = 0.5 + 0.5 * easeOutBack(Math.min(progress / 0.35, 1));
   const fontSpec = (size: number) => `bold ${size}px sans-serif`;
-  const layout = fitTextToRect(ctx, text, rectPx.width, rectPx.height, fontSizeFor(rectPx, 0.5), fontSpec);
+  const layout = fitTextToRect(
+    ctx,
+    text,
+    rectPx.width,
+    rectPx.height,
+    fontSizeFor(rectPx, TEXT_TEMPLATE_FONT_FRACTIONS["bounce-in"]),
+    fontSpec
+  );
 
   ctx.save();
   ctx.translate(center.x, center.y);
@@ -292,7 +328,7 @@ const highlightBox: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => 
     text,
     boxWidth - textPaddingX * 2,
     boxHeight * 0.8,
-    fontSizeFor(rectPx, 0.35),
+    fontSizeFor(rectPx, TEXT_TEMPLATE_FONT_FRACTIONS["highlight-box"]),
     fontSpec
   );
 
@@ -314,7 +350,14 @@ const highlightBox: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => 
 const neonGlow: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   const center = rectCenter(rectPx);
   const fontSpec = (size: number) => `bold ${size}px sans-serif`;
-  const layout = fitTextToRect(ctx, text, rectPx.width, rectPx.height, fontSizeFor(rectPx, 0.5), fontSpec);
+  const layout = fitTextToRect(
+    ctx,
+    text,
+    rectPx.width,
+    rectPx.height,
+    fontSizeFor(rectPx, TEXT_TEMPLATE_FONT_FRACTIONS["neon-glow"]),
+    fontSpec
+  );
 
   ctx.save();
   ctx.globalAlpha = easeInOut(Math.min(progress / 0.15, 1));
@@ -337,7 +380,14 @@ const neonGlow: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
 
 const wordPop: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   const fontSpec = (size: number) => `bold ${size}px sans-serif`;
-  const layout = fitTextToRect(ctx, text, rectPx.width, rectPx.height, fontSizeFor(rectPx, 0.4), fontSpec);
+  const layout = fitTextToRect(
+    ctx,
+    text,
+    rectPx.width,
+    rectPx.height,
+    fontSizeFor(rectPx, TEXT_TEMPLATE_FONT_FRACTIONS["word-pop"]),
+    fontSpec
+  );
   const totalWords = layout.lineWords.reduce((sum, line) => sum + line.length, 0);
   if (totalWords === 0) return;
 

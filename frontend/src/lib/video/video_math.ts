@@ -570,3 +570,142 @@ export function computeVolumeBuckets(samples: Float32Array, sampleRate: number, 
   const peak = Math.max(...buckets, MIN_PEAK);
   return buckets.map((value) => value / peak);
 }
+
+/**
+ * One contiguous stretch of the OUTPUT (post-trim) render timeline, all
+ * from a single physical clip -- what the Creatomate compiler emits one
+ * `Video` element per (lib/timeline/compileCreatomateTimeline.ts).
+ * `zoomEffects`/flip toggles/overlay time ranges are all authored against
+ * the ORIGINAL (pre-trim) concatenated-sequence timeline -- the same one
+ * `sourceStartSeconds` here is in -- since that's what CanvasPlayer's own
+ * elapsed-seconds clock uses throughout (skipTrimmedRanges only jumps the
+ * playback clock forward past a cut, it never renumbers anything). See
+ * mapSourceRangeToOutputRanges for translating an original-timeline window
+ * (a ZoomEffect's active range, an overlay's visible range) into its
+ * OUTPUT-time equivalent(s).
+ */
+export interface RenderSegment {
+  assetId: string;
+  sourceStartSeconds: number;
+  /** This clip's own local offset where this segment begins -- Creatomate's Video.trimStart. */
+  clipLocalStartSeconds: number;
+  /** Also this segment's duration in OUTPUT time -- trimming removes stretches, it never changes playback speed. */
+  durationSeconds: number;
+  outputStartSeconds: number;
+}
+
+// A segment shorter than this (typically left over when a trim edge lands
+// almost exactly on a clip boundary) is dropped rather than emitted as a
+// near-zero-duration render element, which Creatomate would likely reject.
+const MIN_SEGMENT_DURATION_SECONDS = 0.02;
+
+/** The complement of `trimRanges` within [0, totalDurationSeconds) -- the
+ * stretches that SURVIVE trimming, in order. Merges overlapping/touching
+ * ranges first so the gaps between them are well-defined. */
+export function invertTrimRanges(trimRanges: TrimRange[], totalDurationSeconds: number): TrimRange[] {
+  const merged = mergeTrimRanges(trimRanges);
+  const kept: TrimRange[] = [];
+  let cursor = 0;
+  for (const range of merged) {
+    if (range.startTimeSeconds > cursor) {
+      kept.push({ startTimeSeconds: cursor, endTimeSeconds: range.startTimeSeconds });
+    }
+    cursor = Math.max(cursor, range.endTimeSeconds);
+  }
+  if (cursor < totalDurationSeconds) {
+    kept.push({ startTimeSeconds: cursor, endTimeSeconds: totalDurationSeconds });
+  }
+  return kept;
+}
+
+/**
+ * Turns an ordered clip sequence + trim ranges into contiguous OUTPUT
+ * segments. Splits every kept (post-trim) stretch further at each clip
+ * boundary, so no segment ever spans more than one physical clip, even
+ * when a trim cuts across the seam between two clips.
+ */
+export function buildRenderSegments(clips: SequenceClipInfo[], trimRanges: TrimRange[]): RenderSegment[] {
+  const totalDurationSeconds = totalSequenceDuration(clips);
+  const keptRanges = invertTrimRanges(trimRanges, totalDurationSeconds);
+  const clipBoundaries = clips.map((clip) => clip.startTimeSeconds);
+
+  const segments: RenderSegment[] = [];
+  let outputCursor = 0;
+
+  for (const range of keptRanges) {
+    const splitPoints = [
+      range.startTimeSeconds,
+      ...clipBoundaries.filter((b) => b > range.startTimeSeconds && b < range.endTimeSeconds),
+      range.endTimeSeconds,
+    ];
+
+    for (let i = 0; i < splitPoints.length - 1; i++) {
+      const subStart = splitPoints[i];
+      const subEnd = splitPoints[i + 1];
+      const durationSeconds = subEnd - subStart;
+      if (durationSeconds < MIN_SEGMENT_DURATION_SECONDS) continue;
+
+      const position = resolveSequencePosition(clips, subStart);
+      if (!position) continue;
+      const clip = clips[position.clipIndex];
+
+      segments.push({
+        assetId: clip.assetId,
+        sourceStartSeconds: subStart,
+        clipLocalStartSeconds: subStart - clip.startTimeSeconds,
+        durationSeconds,
+        outputStartSeconds: outputCursor,
+      });
+      outputCursor += durationSeconds;
+    }
+  }
+
+  return segments;
+}
+
+/**
+ * Intersects [sourceStartSeconds, sourceEndSeconds) -- an overlay's visible
+ * window, a ZoomEffect's active window, a flip segment -- against every
+ * RenderSegment's own source window, translating each overlap into its
+ * OUTPUT-time equivalent. Returns more than one range when a trim cuts
+ * through the middle of the original window: the survivors on either side
+ * of the cut land at non-adjacent output times, and both are real, so both
+ * come back rather than only the first.
+ */
+export function mapSourceRangeToOutputRanges(
+  segments: RenderSegment[],
+  sourceStartSeconds: number,
+  sourceEndSeconds: number
+): { outputStartSeconds: number; outputEndSeconds: number }[] {
+  const ranges: { outputStartSeconds: number; outputEndSeconds: number }[] = [];
+  for (const segment of segments) {
+    const segmentSourceEnd = segment.sourceStartSeconds + segment.durationSeconds;
+    const overlapStart = Math.max(sourceStartSeconds, segment.sourceStartSeconds);
+    const overlapEnd = Math.min(sourceEndSeconds, segmentSourceEnd);
+    if (overlapEnd <= overlapStart) continue;
+
+    ranges.push({
+      outputStartSeconds: segment.outputStartSeconds + (overlapStart - segment.sourceStartSeconds),
+      outputEndSeconds: segment.outputStartSeconds + (overlapEnd - segment.sourceStartSeconds),
+    });
+  }
+  return ranges;
+}
+
+const DEFAULT_OUTPUT_LONG_EDGE_PX = 1920;
+
+/** Output pixel dimensions for a render, derived from the selected clip
+ * rectangle's ratio (width/height) rather than a fixed resolution -- this
+ * app supports 6 different output shapes (see ClipRectIcon.tsx's
+ * CLIP_RECT_OPTIONS), not just portrait. Long edge fixed at `longEdgePx`;
+ * both dimensions rounded to the nearest even number, since H.264 requires
+ * even width/height. */
+export function computeOutputDimensions(
+  targetRatio: number,
+  longEdgePx: number = DEFAULT_OUTPUT_LONG_EDGE_PX
+): { width: number; height: number } {
+  const roundToEven = (value: number) => Math.max(2, Math.round(value / 2) * 2);
+  return targetRatio >= 1
+    ? { width: roundToEven(longEdgePx), height: roundToEven(longEdgePx / targetRatio) }
+    : { width: roundToEven(longEdgePx * targetRatio), height: roundToEven(longEdgePx) };
+}

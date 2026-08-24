@@ -44,6 +44,7 @@ import { extractVolumeProfile } from "@/lib/video/audio";
 import {
   generateSampleTimestamps,
   findClosestTimestampIndex,
+  computeOutputDimensions,
   type CropRect,
   type OverlayImage,
   type TextOverlay,
@@ -69,8 +70,10 @@ import {
   applyTextOverlayRangeChange,
   applyDeleteTextOverlay,
 } from "@/lib/video/transformations";
-import { saveTimeline, type Timeline, type EditSelectionsSnapshot } from "@/lib/projects";
+import { saveTimeline, type Timeline, type EditSelectionsSnapshot, type Project } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
+import { useRenderStatus } from "@/lib/useRenderStatus";
+import { gatherSequenceClipInfos, gatherBackgroundClipInfos } from "@/lib/timeline/gatherRenderClips";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { BACKGROUND_TRACK_OPTIONS } from "@/lib/backgroundTracks";
 import { ActionArea } from "./ActionArea";
@@ -94,7 +97,30 @@ const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
   sequenceAssetIds: [],
 };
 
-export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: string; initialTimeline: Timeline }) {
+export function ThreePaneEditor({
+  projectId,
+  initialTimeline,
+  initialProject,
+}: {
+  projectId: string;
+  initialTimeline: Timeline;
+  initialProject: Project;
+}) {
+  const {
+    isRendering,
+    renderStatus,
+    renderUrl,
+    renderError,
+    isStuck: isRenderStuck,
+    applyProjectStatus,
+    startRender,
+  } = useRenderStatus(projectId);
+
+  useEffect(() => {
+    applyProjectStatus(initialProject);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial-mount seed only; applyProjectStatus is a fresh closure from the hook every render
+  }, []);
+
   const [assets, setAssets] = useState<Asset[]>([]);
   const [assetsLoaded, setAssetsLoaded] = useState(false);
   const [assetsError, setAssetsError] = useState<string | null>(null);
@@ -727,21 +753,52 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     ...backgroundSequenceAssetIds,
   ]);
 
-  // Resolves the background-music sequence into the ordered {name, url}
-  // list BackgroundTrackStrip needs to visualize (concatenated, then
-  // looped across the video's duration) -- a project asset sequence takes
-  // precedence over the curated catalog entry, if any.
+  // Resolves the background-music sequence into the ordered
+  // {assetId, name, url} list BackgroundTrackStrip needs to visualize
+  // (concatenated, then looped across the video's duration) and
+  // handleRenderClick needs to compile -- a project asset sequence takes
+  // precedence over the curated catalog entry, if any. `assetId` is null
+  // for a catalog track (no project asset backing it, so nothing for a
+  // render to resolve a fresh URL from) -- see gatherRenderClips.ts's own
+  // comment on why that case is skipped at render time today.
   const backgroundAssetTracks = backgroundSequenceAssetIds
     .map((id) => assets.find((asset) => asset.id === id))
     .filter((asset): asset is Asset => Boolean(asset))
-    .map((asset) => ({ name: asset.filename, url: asset.url }));
+    .map((asset) => ({ assetId: asset.id, name: asset.filename, url: asset.url }));
   const backgroundCatalogTrack = BACKGROUND_TRACK_OPTIONS.find((option) => option.id === selectedBackgroundTrackId);
   const resolvedBackgroundTracks =
     backgroundAssetTracks.length > 0
       ? backgroundAssetTracks
       : backgroundCatalogTrack?.url
-        ? [{ name: backgroundCatalogTrack.name, url: backgroundCatalogTrack.url }]
+        ? [{ assetId: null, name: backgroundCatalogTrack.name, url: backgroundCatalogTrack.url }]
         : [];
+
+  // The green Render button in FeedbackArea -- gathers each sequence/
+  // background clip's REAL duration fresh (not reused from the preview
+  // pipeline's own state, so Render works even mid-preview-load), then
+  // hands everything to the server to compile into Creatomate JSON and
+  // start the render (see lib/timeline/compileCreatomateTimeline.ts's own
+  // comment on why compiling can't happen here in the browser).
+  async function handleRenderClick() {
+    if (effectiveSequenceAssetIds.length === 0 || isRendering) return;
+
+    const gatheredSequenceClips = await gatherSequenceClipInfos(sequenceClips);
+    const gatheredBackgroundClips = await gatherBackgroundClipInfos(resolvedBackgroundTracks);
+
+    const clipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selections.clipRectId);
+    const targetRatio = clipRectOption
+      ? clipRectOption.widthRatio / clipRectOption.heightRatio
+      : (frameAspectRatio ?? 9 / 16);
+    const { width, height } = computeOutputDimensions(targetRatio);
+
+    await startRender({
+      selections,
+      sequenceClips: gatheredSequenceClips,
+      backgroundClips: gatheredBackgroundClips,
+      outputWidth: width,
+      outputHeight: height,
+    });
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -850,6 +907,13 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
             textOverlays: displayedTextOverlays,
           }}
           videoDurationSeconds={videoDurationSeconds}
+          canRender={effectiveSequenceAssetIds.length > 0}
+          isRendering={isRendering}
+          renderStatus={renderStatus}
+          renderUrl={renderUrl}
+          renderError={renderError}
+          isRenderStuck={isRenderStuck}
+          onRenderClick={handleRenderClick}
         />
       </section>
     </div>

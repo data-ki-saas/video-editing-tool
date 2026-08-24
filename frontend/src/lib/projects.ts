@@ -6,7 +6,7 @@ export interface TemplateElement {
   [key: string]: unknown;
 }
 
-export type ElementRole = "clip" | "voiceover" | "music" | "text";
+export type ElementRole = "clip" | "voiceover" | "music" | "text" | "image-overlay";
 
 export interface AppMetaEntry {
   assetId?: string;

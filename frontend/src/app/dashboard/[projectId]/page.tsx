@@ -34,5 +34,12 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
     return <ReelLoader stage="Loading your reel…" className="h-full p-6" />;
   }
 
-  return <ThreePaneEditor key={project.id} projectId={project.id} initialTimeline={project.timeline} />;
+  return (
+    <ThreePaneEditor
+      key={project.id}
+      projectId={project.id}
+      initialTimeline={project.timeline}
+      initialProject={project}
+    />
+  );
 }
