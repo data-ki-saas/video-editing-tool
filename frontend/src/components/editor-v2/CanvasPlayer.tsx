@@ -661,8 +661,15 @@ export const CanvasPlayer = forwardRef<
   }
 
   return (
-    <div className="flex h-full w-full items-center justify-center gap-1 p-2">
-      <div className="relative flex h-full max-w-full items-center justify-center overflow-hidden rounded-md bg-black">
+    <div className="flex h-full items-center gap-2 p-2">
+      {/* This box IS the visible video panel -- sized purely from the
+          canvas's own intrinsic aspect ratio (h-full + w-auto below), not
+          a width imposed by this row. The controls column is a sibling
+          with its own separate width budget, not sharing this box's --
+          squeezing the video to make room for controls inside a
+          fixed-width parent was the actual bug that reads as "less
+          width." */}
+      <div className="relative flex h-full max-w-full items-center justify-center overflow-hidden rounded-md border border-border bg-black">
         {/* No explicit sizing beyond h-full/max-w-full -- the canvas's own
             width/height attributes (set in drawFrameAt to the fixed
             reference-resolution crop size) already give it the right
@@ -681,9 +688,8 @@ export const CanvasPlayer = forwardRef<
       </div>
 
       {/* Icon-only, transparent background -- reads as video-player
-          controls rather than generic form buttons -- stacked vertically
-          beside the video instead of below it, so the video keeps the
-          full height. */}
+          controls rather than generic form buttons -- outside the video
+          panel itself, stacked vertically, own fixed width. */}
       {isReady && (
         <div className="flex shrink-0 flex-col items-center gap-1">
           <button
@@ -700,9 +706,7 @@ export const CanvasPlayer = forwardRef<
             aria-label={isLooping ? "Turn off loop playback" : "Loop playback"}
             aria-pressed={isLooping}
             title="Loop playback"
-            className={
-              "shrink-0 rounded-full p-2 hover:bg-accent/10 " + (isLooping ? "text-accent" : "text-muted")
-            }
+            className={"shrink-0 rounded-full p-2 hover:bg-accent/10 " + (isLooping ? "text-accent" : "text-muted")}
           >
             <LoopIcon className="h-5 w-5" />
           </button>

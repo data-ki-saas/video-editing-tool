@@ -180,42 +180,49 @@ export function ActionArea({
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-end p-2">
-        <div
-          className="h-full max-w-full overflow-hidden rounded-md border border-border bg-neutral-950"
-          style={{ aspectRatio: `${playAreaRatio} / 1` }}
-        >
-          {sequenceClips.length > 0 ? (
-            <CanvasPlayer
-              key={sequenceKey}
-              ref={playerRef}
-              clips={sequenceClips}
-              baseCropRect={baseCropRect}
-              zoomEffects={zoomEffects}
-              liveCropRectOverride={liveCropRectOverride}
-              flipHorizontalToggles={flipHorizontalToggles}
-              flipVerticalToggles={flipVerticalToggles}
-              trimRanges={trimRanges}
-              overlayImages={overlayImages}
-              textOverlays={textOverlays}
-              backgroundTracks={backgroundTracks}
-              assetUrlById={assetUrlById}
-              onFrameDimensions={onFrameDimensions}
-              onTimeUpdate={onPlayerTimeUpdate}
-            />
-          ) : selectedAsset?.kind === "image" ? (
-            // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset
-            <img
-              key={selectedAsset.id}
-              src={selectedAsset.url}
-              alt={selectedAsset.filename}
-              className="h-full w-full object-contain"
-            />
-          ) : (
-            <p className="flex h-full w-full items-center justify-center p-4 text-sm text-muted">
-              Right-click a video asset and choose &quot;Add&quot; to start editing
-            </p>
-          )}
-        </div>
+        {sequenceClips.length > 0 ? (
+          // CanvasPlayer sizes its own visible panel from the canvas's real
+          // intrinsic aspect ratio (already correct -- see its own module
+          // comment) -- no synthetic aspect-ratio wrapper needed here, only
+          // for the two fallback cases below that have no such panel of
+          // their own.
+          <CanvasPlayer
+            key={sequenceKey}
+            ref={playerRef}
+            clips={sequenceClips}
+            baseCropRect={baseCropRect}
+            zoomEffects={zoomEffects}
+            liveCropRectOverride={liveCropRectOverride}
+            flipHorizontalToggles={flipHorizontalToggles}
+            flipVerticalToggles={flipVerticalToggles}
+            trimRanges={trimRanges}
+            overlayImages={overlayImages}
+            textOverlays={textOverlays}
+            backgroundTracks={backgroundTracks}
+            assetUrlById={assetUrlById}
+            onFrameDimensions={onFrameDimensions}
+            onTimeUpdate={onPlayerTimeUpdate}
+          />
+        ) : (
+          <div
+            className="h-full max-w-full overflow-hidden rounded-md border border-border bg-neutral-950"
+            style={{ aspectRatio: `${playAreaRatio} / 1` }}
+          >
+            {selectedAsset?.kind === "image" ? (
+              // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset
+              <img
+                key={selectedAsset.id}
+                src={selectedAsset.url}
+                alt={selectedAsset.filename}
+                className="h-full w-full object-contain"
+              />
+            ) : (
+              <p className="flex h-full w-full items-center justify-center p-4 text-sm text-muted">
+                Right-click a video asset and choose &quot;Add&quot; to start editing
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {isUploadDialogOpen && (
