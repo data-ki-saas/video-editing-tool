@@ -84,6 +84,7 @@ import {
   computeEffectiveFlip,
   computeFlipSegments,
   computeProgress,
+  findClosestTimestampIndex,
   findTrimRangeIndexAt,
   type CropRect,
   type OverlayImage,
@@ -344,19 +345,10 @@ export function FrameStrip({
   // even-spacing index formula (see this file's module comment on why
   // that breaks for a concatenated sequence). Still only this one tile's
   // memo identity flips per tick, not all of them.
-  const activeTileIndex = useMemo(() => {
-    if (thumbnailTimestampsSeconds.length === 0) return -1;
-    let closestIndex = 0;
-    let closestDistance = Infinity;
-    for (let index = 0; index < thumbnailTimestampsSeconds.length; index++) {
-      const distance = Math.abs(thumbnailTimestampsSeconds[index] - currentTimeSeconds);
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        closestIndex = index;
-      }
-    }
-    return closestIndex;
-  }, [thumbnailTimestampsSeconds, currentTimeSeconds]);
+  const activeTileIndex = useMemo(
+    () => findClosestTimestampIndex(thumbnailTimestampsSeconds, currentTimeSeconds),
+    [thumbnailTimestampsSeconds, currentTimeSeconds]
+  );
 
   if (thumbnails.length === 0) {
     return (

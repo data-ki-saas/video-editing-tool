@@ -447,6 +447,13 @@ export interface TextOverlay {
   rect: CropRect;
 }
 
+// Default placement for a freshly-added text overlay -- the bottom third,
+// the conventional caption-safe zone, rather than dead-center. Exported
+// (rather than kept local to transformations.ts) since TextOverlayDialog
+// also needs it as the starting rect for a brand new overlay, before
+// there's any TextOverlay object yet to read a rect from.
+export const DEFAULT_TEXT_OVERLAY_RECT: CropRect = { x: 0.1, y: 0.7, width: 0.8, height: 0.2 };
+
 /** Every text overlay visible at `timeSeconds` -- same multiple-at-once,
  * half-open-interval semantics as findActiveOverlays above. */
 export function findActiveTextOverlays(overlays: TextOverlay[], timeSeconds: number): TextOverlay[] {
@@ -462,6 +469,26 @@ export function computeProgress(startTimeSeconds: number, endTimeSeconds: number
   const duration = endTimeSeconds - startTimeSeconds;
   if (duration <= 0) return 1;
   return Math.min(Math.max((timeSeconds - startTimeSeconds) / duration, 0), 1);
+}
+
+/** The index into `timestamps` closest to `targetSeconds` -- e.g. picking
+ * which extracted thumbnail best represents the current playhead position.
+ * Not an even-spacing formula (see FrameStrip.tsx's own comment on why
+ * that breaks once thumbnails are concatenated from multiple clips):
+ * a real linear scan against each tile's own timestamp. Returns -1 for an
+ * empty list. */
+export function findClosestTimestampIndex(timestamps: number[], targetSeconds: number): number {
+  if (timestamps.length === 0) return -1;
+  let closestIndex = 0;
+  let closestDistance = Infinity;
+  for (let index = 0; index < timestamps.length; index++) {
+    const distance = Math.abs(timestamps[index] - targetSeconds);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestIndex = index;
+    }
+  }
+  return closestIndex;
 }
 
 /**

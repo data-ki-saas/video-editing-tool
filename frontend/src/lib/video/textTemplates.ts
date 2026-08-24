@@ -11,8 +11,14 @@
  * this app's established preference for simple, direct-manipulation
  * controls over exposing every knob (see UserActions.tsx's own
  * TEMPLATE_OPTIONS picker for the same pattern applied to whole-project
- * style). No text-wrapping/auto-shrink for long strings in v1 -- a string
- * that overflows its rect just overflows.
+ * style).
+ *
+ * Every template wraps and auto-shrinks its text to fit rectPx via
+ * fitTextToRect below, rather than drawing one line at whatever size looks
+ * good in isolation and letting it overflow the caption box -- the same
+ * problem Creatomate's own Text element solves with textWrap +
+ * fontSizeMinimum/fontSizeMaximum, so this stays a close match for the
+ * eventual Creatomate render, not a preview-only fix.
  */
 import { easeInOut } from "./video_math";
 
@@ -71,22 +77,126 @@ function easeOutBack(t: number): number {
   return 1 + c3 * Math.pow(clamped - 1, 3) + c1 * Math.pow(clamped - 1, 2);
 }
 
+const MIN_FONT_SIZE_PX = 10;
+const LINE_HEIGHT_MULTIPLIER = 1.15;
+
+/** Greedy word-wrap at the current ctx.font -- one array of words per
+ * line, not a joined string, so callers that stagger per word (Word Pop)
+ * can still tell which line each word landed on. A single word wider than
+ * maxWidthPx on its own is left alone (no hyphenation) rather than broken
+ * mid-word; fitTextToRect's font-shrinking loop is what actually resolves
+ * that case in practice. */
+function wrapWords(ctx: CanvasRenderingContext2D, words: string[], maxWidthPx: number): string[][] {
+  const lines: string[][] = [];
+  let current: string[] = [];
+  let currentText = "";
+
+  for (const word of words) {
+    const candidateText = current.length > 0 ? `${currentText} ${word}` : word;
+    if (current.length > 0 && ctx.measureText(candidateText).width > maxWidthPx) {
+      lines.push(current);
+      current = [word];
+      currentText = word;
+    } else {
+      current.push(word);
+      currentText = candidateText;
+    }
+  }
+  if (current.length > 0) lines.push(current);
+  return lines;
+}
+
+export interface WrappedTextLayout {
+  /** Words grouped per line -- for per-word stagger (Word Pop). */
+  lineWords: string[][];
+  /** Same lines, pre-joined -- for every template that just draws whole
+   * lines. */
+  lines: string[];
+  fontSize: number;
+  lineHeightPx: number;
+}
+
+/** Wraps `text` to fit within `maxWidthPx`/`maxHeightPx`, shrinking the
+ * font size from `baseFontSizePx` down to a floor (re-wrapping at each
+ * size) until every line fits the width and the whole block fits the
+ * height -- rather than letting a long caption or a single long word
+ * overflow its box, which every template used to do (single fillText call,
+ * no wrapping at all). `fontSpec` builds the ctx.font string for a given
+ * size (so callers keep their own weight/family, e.g. "bold ...px
+ * sans-serif"). */
+function fitTextToRect(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidthPx: number,
+  maxHeightPx: number,
+  baseFontSizePx: number,
+  fontSpec: (fontSizePx: number) => string
+): WrappedTextLayout {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) {
+    return { lineWords: [], lines: [], fontSize: baseFontSizePx, lineHeightPx: baseFontSizePx * LINE_HEIGHT_MULTIPLIER };
+  }
+
+  let fontSize = baseFontSizePx;
+  while (fontSize > MIN_FONT_SIZE_PX) {
+    ctx.font = fontSpec(fontSize);
+    const lineWords = wrapWords(ctx, words, maxWidthPx);
+    const lineHeightPx = fontSize * LINE_HEIGHT_MULTIPLIER;
+    const blockHeight = lineWords.length * lineHeightPx;
+    const lines = lineWords.map((line) => line.join(" "));
+    const widestLinePx = Math.max(...lines.map((line) => ctx.measureText(line).width));
+    if (blockHeight <= maxHeightPx && widestLinePx <= maxWidthPx) {
+      return { lineWords, lines, fontSize, lineHeightPx };
+    }
+    fontSize -= 1;
+  }
+
+  ctx.font = fontSpec(MIN_FONT_SIZE_PX);
+  const lineWords = wrapWords(ctx, words, maxWidthPx);
+  return {
+    lineWords,
+    lines: lineWords.map((line) => line.join(" ")),
+    fontSize: MIN_FONT_SIZE_PX,
+    lineHeightPx: MIN_FONT_SIZE_PX * LINE_HEIGHT_MULTIPLIER,
+  };
+}
+
+/** Draws each line of a wrapped block centered on (centerX, centerY),
+ * stacked with `lineHeightPx` spacing -- the shared vertical layout every
+ * center-anchored template (Bold Pop, Bounce In, Highlight Box, Neon Glow)
+ * uses, so only the per-line draw call itself differs between them. */
+function forEachCenteredLine(
+  layout: WrappedTextLayout,
+  centerX: number,
+  centerY: number,
+  draw: (line: string, x: number, y: number) => void
+) {
+  const totalHeight = layout.lines.length * layout.lineHeightPx;
+  const startY = centerY - totalHeight / 2 + layout.lineHeightPx / 2;
+  layout.lines.forEach((line, index) => draw(line, centerX, startY + index * layout.lineHeightPx));
+}
+
 const boldPop: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   const center = rectCenter(rectPx);
   const entrance = easeInOut(Math.min(progress / 0.2, 1));
   const scale = 0.8 + 0.2 * entrance;
+  const baseFontSize = fontSizeFor(rectPx, 0.5);
+  const fontSpec = (size: number) => `bold ${size}px sans-serif`;
+  const layout = fitTextToRect(ctx, text, rectPx.width, rectPx.height, baseFontSize, fontSpec);
 
   ctx.save();
   ctx.translate(center.x, center.y);
   ctx.scale(scale, scale);
-  ctx.font = `bold ${fontSizeFor(rectPx, 0.5)}px sans-serif`;
+  ctx.font = fontSpec(layout.fontSize);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.lineWidth = fontSizeFor(rectPx, 0.5) * 0.12;
+  ctx.lineWidth = layout.fontSize * 0.12;
   ctx.strokeStyle = "black";
   ctx.fillStyle = "white";
-  ctx.strokeText(text, 0, 0);
-  ctx.fillText(text, 0, 0);
+  forEachCenteredLine(layout, 0, 0, (line, x, y) => {
+    ctx.strokeText(line, x, y);
+    ctx.fillText(line, x, y);
+  });
   ctx.restore();
 };
 
@@ -97,125 +207,172 @@ const minimalSubtitle: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) 
   const barHeight = rectPx.height * 0.7;
   const barY = rectPx.y + rectPx.height - barHeight;
   const radius = barHeight * 0.2;
+  const textPaddingX = rectPx.width * 0.06;
+  const fontSpec = (size: number) => `${size}px sans-serif`;
+  const layout = fitTextToRect(
+    ctx,
+    text,
+    rectPx.width - textPaddingX * 2,
+    barHeight * 0.8,
+    fontSizeFor(rectPx, 0.3),
+    fontSpec
+  );
+
   ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
   ctx.beginPath();
   ctx.roundRect(rectPx.x, barY, rectPx.width, barHeight, radius);
   ctx.fill();
 
-  ctx.font = `${fontSizeFor(rectPx, 0.3)}px sans-serif`;
+  ctx.font = fontSpec(layout.fontSize);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "white";
-  ctx.fillText(text, rectPx.x + rectPx.width / 2, barY + barHeight / 2);
+  forEachCenteredLine(layout, rectPx.x + rectPx.width / 2, barY + barHeight / 2, (line, x, y) => ctx.fillText(line, x, y));
   ctx.restore();
 };
 
 const typewriter: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
-  const visibleLength = Math.floor(progress * text.length);
-  const visibleText = text.slice(0, visibleLength);
+  const fontSpec = (size: number) => `${size}px monospace`;
+  const layout = fitTextToRect(ctx, text, rectPx.width, rectPx.height, fontSizeFor(rectPx, 0.4), fontSpec);
+  const totalChars = layout.lines.reduce((sum, line) => sum + line.length, 0);
+  let revealBudget = Math.floor(progress * totalChars);
 
   ctx.save();
-  ctx.font = `${fontSizeFor(rectPx, 0.4)}px monospace`;
+  ctx.font = fontSpec(layout.fontSize);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "white";
   ctx.strokeStyle = "black";
-  ctx.lineWidth = fontSizeFor(rectPx, 0.4) * 0.08;
-  const y = rectPx.y + rectPx.height / 2;
-  ctx.strokeText(visibleText, rectPx.x, y);
-  ctx.fillText(visibleText, rectPx.x, y);
+  ctx.lineWidth = layout.fontSize * 0.08;
+
+  const totalHeight = layout.lines.length * layout.lineHeightPx;
+  const startY = rectPx.y + rectPx.height / 2 - totalHeight / 2 + layout.lineHeightPx / 2;
+  layout.lines.forEach((line, index) => {
+    if (revealBudget <= 0) return;
+    const visible = line.slice(0, Math.min(revealBudget, line.length));
+    revealBudget -= visible.length;
+    const y = startY + index * layout.lineHeightPx;
+    ctx.strokeText(visible, rectPx.x, y);
+    ctx.fillText(visible, rectPx.x, y);
+  });
   ctx.restore();
 };
 
 const bounceIn: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   const center = rectCenter(rectPx);
   const scale = 0.5 + 0.5 * easeOutBack(Math.min(progress / 0.35, 1));
+  const fontSpec = (size: number) => `bold ${size}px sans-serif`;
+  const layout = fitTextToRect(ctx, text, rectPx.width, rectPx.height, fontSizeFor(rectPx, 0.5), fontSpec);
 
   ctx.save();
   ctx.translate(center.x, center.y);
   ctx.scale(scale, scale);
-  ctx.font = `bold ${fontSizeFor(rectPx, 0.5)}px sans-serif`;
+  ctx.font = fontSpec(layout.fontSize);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.lineWidth = fontSizeFor(rectPx, 0.5) * 0.12;
+  ctx.lineWidth = layout.fontSize * 0.12;
   ctx.strokeStyle = "black";
   ctx.fillStyle = "white";
-  ctx.strokeText(text, 0, 0);
-  ctx.fillText(text, 0, 0);
+  forEachCenteredLine(layout, 0, 0, (line, x, y) => {
+    ctx.strokeText(line, x, y);
+    ctx.fillText(line, x, y);
+  });
   ctx.restore();
 };
 
 const highlightBox: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   const entrance = easeInOut(Math.min(progress / 0.2, 1));
-  const width = rectPx.width * (0.85 + 0.15 * entrance);
-  const height = rectPx.height * 0.7;
+  const boxWidth = rectPx.width * (0.85 + 0.15 * entrance);
+  const boxHeight = rectPx.height * 0.7;
   const center = rectCenter(rectPx);
+  const textPaddingX = boxWidth * 0.08;
+  const fontSpec = (size: number) => `bold ${size}px sans-serif`;
+  const layout = fitTextToRect(
+    ctx,
+    text,
+    boxWidth - textPaddingX * 2,
+    boxHeight * 0.8,
+    fontSizeFor(rectPx, 0.35),
+    fontSpec
+  );
 
   ctx.save();
   ctx.globalAlpha = Math.min(progress / 0.1, 1);
   ctx.fillStyle = "#facc15";
   ctx.beginPath();
-  ctx.roundRect(center.x - width / 2, center.y - height / 2, width, height, height * 0.15);
+  ctx.roundRect(center.x - boxWidth / 2, center.y - boxHeight / 2, boxWidth, boxHeight, boxHeight * 0.15);
   ctx.fill();
 
-  ctx.font = `bold ${fontSizeFor(rectPx, 0.35)}px sans-serif`;
+  ctx.font = fontSpec(layout.fontSize);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#1c1917";
-  ctx.fillText(text, center.x, center.y);
+  forEachCenteredLine(layout, center.x, center.y, (line, x, y) => ctx.fillText(line, x, y));
   ctx.restore();
 };
 
 const neonGlow: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   const center = rectCenter(rectPx);
-  const fontSize = fontSizeFor(rectPx, 0.5);
+  const fontSpec = (size: number) => `bold ${size}px sans-serif`;
+  const layout = fitTextToRect(ctx, text, rectPx.width, rectPx.height, fontSizeFor(rectPx, 0.5), fontSpec);
 
   ctx.save();
   ctx.globalAlpha = easeInOut(Math.min(progress / 0.15, 1));
-  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.font = fontSpec(layout.fontSize);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#f0abfc";
 
   // Two passes at different blur radii build up a soft glow rather than
   // one flat blurred edge.
-  ctx.shadowColor = "#e879f9";
-  ctx.shadowBlur = fontSize * 0.6;
-  ctx.fillText(text, center.x, center.y);
-  ctx.shadowBlur = fontSize * 0.25;
-  ctx.fillText(text, center.x, center.y);
+  forEachCenteredLine(layout, center.x, center.y, (line, x, y) => {
+    ctx.shadowColor = "#e879f9";
+    ctx.shadowBlur = layout.fontSize * 0.6;
+    ctx.fillText(line, x, y);
+    ctx.shadowBlur = layout.fontSize * 0.25;
+    ctx.fillText(line, x, y);
+  });
   ctx.restore();
 };
 
 const wordPop: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
-  const words = text.split(/\s+/).filter(Boolean);
-  if (words.length === 0) return;
+  const fontSpec = (size: number) => `bold ${size}px sans-serif`;
+  const layout = fitTextToRect(ctx, text, rectPx.width, rectPx.height, fontSizeFor(rectPx, 0.4), fontSpec);
+  const totalWords = layout.lineWords.reduce((sum, line) => sum + line.length, 0);
+  if (totalWords === 0) return;
 
   ctx.save();
-  ctx.font = `bold ${fontSizeFor(rectPx, 0.4)}px sans-serif`;
+  ctx.font = fontSpec(layout.fontSize);
   ctx.textBaseline = "middle";
   const spacing = ctx.measureText(" ").width;
-  const wordWidths = words.map((word) => ctx.measureText(word).width);
-  const totalWidth = wordWidths.reduce((sum, w) => sum + w, 0) + spacing * (words.length - 1);
 
-  let x = rectPx.x + rectPx.width / 2 - totalWidth / 2;
-  const y = rectPx.y + rectPx.height / 2;
+  const totalHeight = layout.lineWords.length * layout.lineHeightPx;
+  const startY = rectPx.y + rectPx.height / 2 - totalHeight / 2 + layout.lineHeightPx / 2;
 
-  words.forEach((word, index) => {
-    const wordProgress = Math.min(Math.max(progress * words.length - index, 0), 1);
-    const eased = easeInOut(wordProgress);
-    ctx.save();
-    ctx.globalAlpha = eased;
-    ctx.translate(x + wordWidths[index] / 2, y);
-    ctx.scale(0.7 + 0.3 * eased, 0.7 + 0.3 * eased);
-    ctx.textAlign = "center";
-    ctx.fillStyle = "white";
-    ctx.strokeStyle = "black";
-    ctx.lineWidth = fontSizeFor(rectPx, 0.4) * 0.08;
-    ctx.strokeText(word, 0, 0);
-    ctx.fillText(word, 0, 0);
-    ctx.restore();
-    x += wordWidths[index] + spacing;
+  let globalWordIndex = 0;
+  layout.lineWords.forEach((words, lineIndex) => {
+    const wordWidths = words.map((word) => ctx.measureText(word).width);
+    const lineWidth = wordWidths.reduce((sum, w) => sum + w, 0) + spacing * (words.length - 1);
+    let x = rectPx.x + rectPx.width / 2 - lineWidth / 2;
+    const y = startY + lineIndex * layout.lineHeightPx;
+
+    words.forEach((word, wordIndexInLine) => {
+      const wordProgress = Math.min(Math.max(progress * totalWords - globalWordIndex, 0), 1);
+      const eased = easeInOut(wordProgress);
+      ctx.save();
+      ctx.globalAlpha = eased;
+      ctx.translate(x + wordWidths[wordIndexInLine] / 2, y);
+      ctx.scale(0.7 + 0.3 * eased, 0.7 + 0.3 * eased);
+      ctx.textAlign = "center";
+      ctx.fillStyle = "white";
+      ctx.strokeStyle = "black";
+      ctx.lineWidth = layout.fontSize * 0.08;
+      ctx.strokeText(word, 0, 0);
+      ctx.fillText(word, 0, 0);
+      ctx.restore();
+      x += wordWidths[wordIndexInLine] + spacing;
+      globalWordIndex += 1;
+    });
   });
   ctx.restore();
 };

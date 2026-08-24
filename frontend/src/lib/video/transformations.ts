@@ -26,6 +26,7 @@ import {
   findActiveZoomEffectIndex,
   toggleFlipAt,
   mergeTrimRanges,
+  DEFAULT_TEXT_OVERLAY_RECT,
   type CropRect,
   type OverlayImage,
   type TextOverlay,
@@ -327,14 +328,14 @@ export function applyAddSequenceClip(selections: EditSelectionsSnapshot, assetId
   };
 }
 
-// Default window/placement for a freshly-added text overlay. Unlike an
-// image overlay's "always the first frame," a caption is added at
-// whatever moment the playhead is on when the dialog opens -- captions
-// are placed at a specific moment on purpose, not always the start -- and
-// its default rect sits in the bottom third, the conventional
-// caption-safe zone, rather than dead-center.
+// Default duration for a freshly-added text overlay. Unlike an image
+// overlay's "always the first frame," a caption is added at whatever
+// moment the playhead is on when the dialog opens -- captions are placed
+// at a specific moment on purpose, not always the start. Its rect now
+// comes from TextOverlayDialog itself (positioned live against the actual
+// current frame), defaulting to DEFAULT_TEXT_OVERLAY_RECT (video_math.ts)
+// only when the caller doesn't pass one.
 const DEFAULT_TEXT_OVERLAY_DURATION_SECONDS = DEFAULT_OVERLAY_DURATION_SECONDS;
-const DEFAULT_TEXT_OVERLAY_RECT: CropRect = { x: 0.1, y: 0.7, width: 0.8, height: 0.2 };
 
 /** Adds a new text overlay starting at the current playhead position,
  * from TextOverlayDialog's "Add". */
@@ -343,7 +344,8 @@ export function applyAddTextOverlay(
   text: string,
   templateId: string,
   currentTimeSeconds: number,
-  videoDurationSeconds: number
+  videoDurationSeconds: number,
+  rect: CropRect = DEFAULT_TEXT_OVERLAY_RECT
 ): TransformationResult {
   const startTimeSeconds = currentTimeSeconds;
   const endTimeSeconds = Math.min(
@@ -355,7 +357,7 @@ export function applyAddTextOverlay(
     templateId,
     startTimeSeconds,
     endTimeSeconds,
-    rect: DEFAULT_TEXT_OVERLAY_RECT,
+    rect,
   };
   return {
     label: "Added text",
@@ -363,19 +365,22 @@ export function applyAddTextOverlay(
   };
 }
 
-/** Changes an existing text overlay's wording/template -- from
+/** Changes an existing text overlay's wording/template/rect -- from
  * TextOverlayDialog's "Save", reopened via TextOverlayTrack's "Edit
- * text." Its rect/time range are untouched. */
+ * text." Its time range is untouched (that's TextOverlayTrack's own drag
+ * handles' job); rect is optional since a plain edit-in-place from the
+ * dialog still repositions it live against the current frame. */
 export function applyEditTextOverlay(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   text: string,
-  templateId: string
+  templateId: string,
+  rect?: CropRect
 ): TransformationResult {
   const overlay = selections.textOverlays[overlayIndex];
   if (!overlay) return { label: "Edited text", state: selections };
   const nextOverlays = [...selections.textOverlays];
-  nextOverlays[overlayIndex] = { ...overlay, text, templateId };
+  nextOverlays[overlayIndex] = { ...overlay, text, templateId, ...(rect ? { rect } : {}) };
   return { label: "Edited text", state: { ...selections, textOverlays: nextOverlays } };
 }
 

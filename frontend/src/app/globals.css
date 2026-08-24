@@ -152,6 +152,32 @@ body {
   color: var(--foreground);
 }
 
+/* Thin, theme-colored scrollbars everywhere (Firefox's scrollbar-width/
+   -color, plus WebKit/Chromium's ::-webkit-scrollbar pseudo-elements) --
+   `--muted`/`--accent` already track the active color theme and dark
+   mode via the [data-color-theme]/.dark rules above, so this needs no
+   theme-specific overrides of its own. .hide-scrollbar elements (synced
+   horizontal strips that shouldn't show their own bar) are unaffected --
+   that's a separate, more specific rule below this one. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--muted);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--accent);
+}
+
 /* Keeps an element horizontally scrollable (for
    lib/useSyncedHorizontalScroll.ts's programmatic sync, and trackpad/wheel
    gestures over it) without its own native scrollbar chrome -- used by

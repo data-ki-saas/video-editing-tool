@@ -142,7 +142,7 @@ export function AssetGallery({
   return (
     <div className="flex h-full flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium text-foreground">Your assets</h2>
+        <h2 className="text-sm font-medium text-foreground">Assets</h2>
         <div className="flex shrink-0 gap-2">
           <button type="button" onClick={onBrowseStock} className="text-xs text-accent hover:underline">
             + Stock

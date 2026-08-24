@@ -36,10 +36,15 @@ import type { CropRect, OverlayImage, TextOverlay, TrimRange, ZoomEffect } from 
 import type { TextTemplateId } from "@/lib/video/textTemplates";
 import type { RefObject } from "react";
 
-// Caps the play area to the widest ratio in the clip-rectangle catalogue
-// (see ClipRectIcon.tsx) rather than letting it fill all remaining space --
-// derived from that list, not hardcoded, so it stays correct if the
-// catalogue changes.
+// Fallback play-area ratio before any clip rectangle has been picked yet --
+// the widest one in the catalogue (see ClipRectIcon.tsx), derived from that
+// list rather than hardcoded so it stays correct if the catalogue changes.
+// Once a ratio IS selected, the play area is sized to THAT ratio exactly
+// (see playAreaRatio below) rather than always this fallback -- sizing it
+// to the widest ratio unconditionally meant a narrower/taller selection
+// (e.g. a 9:16 portrait reel) sat inside a wider box than its own shape,
+// which is exactly the "shouldn't stretch beyond the selected ratio"
+// complaint this fixes.
 const WIDEST_CLIP_RATIO = Math.max(...CLIP_RECT_OPTIONS.map((option) => option.widthRatio / option.heightRatio));
 
 export function ActionArea({
@@ -66,6 +71,8 @@ export function ActionArea({
   editingTextOverlay,
   onSaveTextOverlay,
   onCloseTextDialog,
+  previewFrameUrl,
+  frameAspectRatio,
   baseCropRect,
   zoomEffects,
   liveCropRectOverride,
@@ -102,8 +109,13 @@ export function ActionArea({
   onOpenTextDialog: () => void;
   isTextDialogOpen: boolean;
   editingTextOverlay: TextOverlay | null;
-  onSaveTextOverlay: (text: string, templateId: string) => void;
+  onSaveTextOverlay: (text: string, templateId: string, rect: CropRect) => void;
   onCloseTextDialog: () => void;
+  // The actual current frame (closest thumbnail to the playhead) and its
+  // aspect ratio, for TextOverlayDialog's live preview -- see its own
+  // comment on why positioning happens against the real frame now.
+  previewFrameUrl: string | null;
+  frameAspectRatio: number | null;
   baseCropRect: CropRect | null;
   zoomEffects: ZoomEffect[];
   liveCropRectOverride: CropRect | null;
@@ -125,6 +137,11 @@ export function ActionArea({
   const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
 
   const sequenceKey = sequenceClips.map((clip) => clip.assetId).join(",");
+
+  const selectedClipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selectedClipRectId);
+  const playAreaRatio = selectedClipRectOption
+    ? selectedClipRectOption.widthRatio / selectedClipRectOption.heightRatio
+    : WIDEST_CLIP_RATIO;
 
   return (
     <div className="flex h-full gap-4 overflow-x-auto p-4">
@@ -163,7 +180,7 @@ export function ActionArea({
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-end overflow-hidden rounded-md border border-border bg-neutral-950 p-2">
-        <div className="h-full max-w-full" style={{ aspectRatio: `${WIDEST_CLIP_RATIO} / 1` }}>
+        <div className="h-full max-w-full" style={{ aspectRatio: `${playAreaRatio} / 1` }}>
           {sequenceClips.length > 0 ? (
             <CanvasPlayer
               key={sequenceKey}
@@ -222,7 +239,9 @@ export function ActionArea({
       {isTextDialogOpen && (
         <TextOverlayDialog
           editingOverlay={editingTextOverlay}
-          onSave={(text, templateId: TextTemplateId) => onSaveTextOverlay(text, templateId)}
+          previewFrameUrl={previewFrameUrl}
+          frameAspectRatio={frameAspectRatio}
+          onSave={(text, templateId: TextTemplateId, rect) => onSaveTextOverlay(text, templateId, rect)}
           onClose={onCloseTextDialog}
         />
       )}

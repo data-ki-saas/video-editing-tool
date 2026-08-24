@@ -41,7 +41,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listAssets, type Asset } from "@/lib/api";
 import { extractThumbnails, getVideoDuration } from "@/lib/video/video";
 import { extractVolumeProfile } from "@/lib/video/audio";
-import { generateSampleTimestamps, type CropRect, type OverlayImage, type TextOverlay, type ZoomEffect } from "@/lib/video/video_math";
+import {
+  generateSampleTimestamps,
+  findClosestTimestampIndex,
+  type CropRect,
+  type OverlayImage,
+  type TextOverlay,
+  type ZoomEffect,
+} from "@/lib/video/video_math";
 import {
   applySelectClipRect,
   applyCropRectCommit,
@@ -623,12 +630,14 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
 
   // TextOverlayDialog's Add/Save -- dispatches to add-new or edit-existing
   // depending on whether it was opened via handleOpenTextDialog or
-  // handleRequestEditTextOverlay.
-  function handleSaveTextOverlay(text: string, templateId: string) {
+  // handleRequestEditTextOverlay. `rect` comes from the dialog's own
+  // draggable preview (positioned live against the actual current frame),
+  // not a fixed default -- see TextOverlayDialog.tsx.
+  function handleSaveTextOverlay(text: string, templateId: string, rect: CropRect) {
     const { label, state } =
       editingTextOverlayIndex !== null
-        ? applyEditTextOverlay(selections, editingTextOverlayIndex, text, templateId)
-        : applyAddTextOverlay(selections, text, templateId, currentTimeSeconds, videoDurationSeconds);
+        ? applyEditTextOverlay(selections, editingTextOverlayIndex, text, templateId, rect)
+        : applyAddTextOverlay(selections, text, templateId, currentTimeSeconds, videoDurationSeconds, rect);
     pushChange(label, state);
     setIsTextDialogOpen(false);
     setEditingTextOverlayIndex(null);
@@ -673,6 +682,15 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
     : selections.zoomEffects;
 
   const frameAspectRatio = frameDimensions ? frameDimensions.width / frameDimensions.height : null;
+
+  // The thumbnail closest to the current playhead -- what TextOverlayDialog
+  // shows behind the draggable text rect, so positioning a caption happens
+  // against the actual frame it'll appear on rather than a blank/undersized
+  // guess. Same instant a freshly-added overlay starts at (see
+  // applyAddTextOverlay's currentTimeSeconds), so "what you see while
+  // placing it" and "when it first appears" are the same frame.
+  const previewFrameIndex = findClosestTimestampIndex(thumbnailTimestampsSeconds, currentTimeSeconds);
+  const previewFrameUrl = previewFrameIndex >= 0 ? thumbnails[previewFrameIndex] : null;
 
   // Splices any in-progress rect/range drag into the persisted array at
   // its own index, same pattern as displayedZoomEffects above.
@@ -752,6 +770,8 @@ export function ThreePaneEditor({ projectId, initialTimeline }: { projectId: str
           editingTextOverlay={editingTextOverlayIndex !== null ? displayedTextOverlays[editingTextOverlayIndex] : null}
           onSaveTextOverlay={handleSaveTextOverlay}
           onCloseTextDialog={handleCloseTextDialog}
+          previewFrameUrl={previewFrameUrl}
+          frameAspectRatio={frameAspectRatio}
           baseCropRect={selections.cropRect}
           zoomEffects={displayedZoomEffects}
           liveCropRectOverride={liveCropRect}
