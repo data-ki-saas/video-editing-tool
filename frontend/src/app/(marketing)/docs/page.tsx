@@ -2,62 +2,101 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Documentation",
-  description: "How Reel Creator works: create a reel, upload photos or clips, and render a finished video.",
+  description: "How Reel Creator works: getting started, adding assets, editing actions, and generating your reel.",
   alternates: { canonical: "/docs" },
 };
 
+function Category({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="flex flex-col gap-6">
+      <h2 className="text-2xl font-semibold">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function Topic({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-lg font-medium">{title}</h3>
+      <p className="text-neutral-600">{children}</p>
+    </div>
+  );
+}
+
 export default function DocsPage() {
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-16">
-      <h1 className="text-3xl font-semibold">Documentation</h1>
-
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">1. Create a reel</h2>
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-14 px-4 py-16">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-3xl font-semibold">Documentation</h1>
         <p className="text-neutral-600">
-          From your dashboard, click <strong>New Reel</strong> and tell us what kind of
-          business it&apos;s for — real estate, a hotel, an auto dealership, a garment
-          or gift shop, a hardware store, or anything else. The form that follows adapts
-          automatically to your niche.
+          Everything you need to go from a blank project to a finished, share-ready reel.
         </p>
-      </section>
+      </div>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">2. Add your photos or clips</h2>
-        <p className="text-neutral-600">
-          Upload the photos and video clips you want in the reel. On desktop, arrange
-          them on a timeline with a live preview as you edit. On mobile, add your
-          photos and we&apos;ll assemble a reel for you automatically — no editing
-          required.
-        </p>
-      </section>
+      <Category title="Editing">
+        <Topic title="Getting started">
+          From your dashboard, click <strong>New Reel</strong> and tell us what kind of business
+          it&apos;s for — real estate, a hotel, an auto dealership, a garment or gift shop, a
+          hardware store, or anything else. Fill in a few details and you&apos;ll land straight in
+          the editor.
+        </Topic>
+        <Topic title="Adding assets">
+          Upload your own photos, videos, and music, or search free stock photos and music
+          without ever leaving the editor. Right-click (or long-press) any asset to add it to
+          your reel: a video clip joins your sequence and plays after whatever&apos;s already
+          there, a photo becomes an overlay on top of your video, and a music track becomes your
+          background music. Add more than one video clip and they play back-to-back; add more
+          than one music track and they play one after another, looping for as long as your video
+          runs.
+        </Topic>
+      </Category>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">3. Render and share</h2>
-        <p className="text-neutral-600">
-          Hit render, and your finished vertical video is ready shortly after — with a
-          link you can share or download directly.
-        </p>
-      </section>
+      <Category title="Actions">
+        <Topic title="Clip (aspect ratio)">
+          Pick the shape of your finished video — widescreen, portrait, square, cinematic, and
+          more — then drag the frame to choose exactly what stays visible.
+        </Topic>
+        <Topic title="Zoom & pan">
+          Drag the frame at any point in your video to set up a smooth zoom or pan there. It eases
+          in and back out on its own — no keyframes to manage by hand.
+        </Topic>
+        <Topic title="Flip & mirror">
+          Flip your footage horizontally or vertically starting from any point in the video, and
+          flip it back later if you only want it for a stretch.
+        </Topic>
+        <Topic title="Trim">
+          Cut out any stretch of video you don&apos;t want. It&apos;s removed from playback
+          entirely, not just hidden.
+        </Topic>
+        <Topic title="Overlays">
+          Place a photo on top of your video for however long you want it visible, and drag it
+          wherever it should sit on the frame.
+        </Topic>
+        <Topic title="Text captions">
+          Type a caption, pick a style, and drag it into place. It appears for whatever stretch of
+          the video you choose, and you can come back and edit the wording, style, or position
+          any time.
+        </Topic>
+        <Topic title="Undo & redo">
+          Every change you make while editing can be undone or redone, so it&apos;s always safe to
+          experiment.
+        </Topic>
+      </Category>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">Works on your phone too</h2>
-        <p className="text-neutral-600">
-          {/* Mobile quick-create -- see frontend/src/components/QuickCreate.tsx */}
-          Creating a reel doesn&apos;t require a desktop. On a phone, Reel Creator
-          switches to a simplified flow: add your photos, tap create, and get your
-          reel — perfect for adding a listing or a new arrival on the go.
-        </p>
-      </section>
-
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">Limits</h2>
-        <p className="text-neutral-600">
+      <Category title="Generation">
+        <Topic title="Rendering your reel">
+          Once you&apos;re happy with it, hit Render. Your finished video is prepared in the
+          background, and you&apos;ll get a link to watch, share, or download as soon as
+          it&apos;s ready.
+        </Topic>
+        <Topic title="Limits">
           {/* Placeholder -- keep in sync with README.md's "Abuse guardrails" if the cap changes. */}
-          To keep things running smoothly for everyone during early access, there&apos;s
-          a daily limit on how many renders an account can start. If you hit it,
-          you&apos;ll see a clear message telling you when to try again.
-        </p>
-      </section>
+          To keep things running smoothly for everyone during early access, there&apos;s a daily
+          limit on how many reels an account can render. If you hit it, you&apos;ll see a clear
+          message telling you when to try again.
+        </Topic>
+      </Category>
     </main>
   );
 }

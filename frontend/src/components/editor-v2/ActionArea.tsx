@@ -179,8 +179,11 @@ export function ActionArea({
         />
       </div>
 
-      <div className="flex min-w-0 flex-1 items-center justify-end overflow-hidden rounded-md border border-border bg-neutral-950 p-2">
-        <div className="h-full max-w-full" style={{ aspectRatio: `${playAreaRatio} / 1` }}>
+      <div className="flex min-w-0 flex-1 items-center justify-end p-2">
+        <div
+          className="h-full max-w-full overflow-hidden rounded-md border border-border bg-neutral-950"
+          style={{ aspectRatio: `${playAreaRatio} / 1` }}
+        >
           {sequenceClips.length > 0 ? (
             <CanvasPlayer
               key={sequenceKey}
