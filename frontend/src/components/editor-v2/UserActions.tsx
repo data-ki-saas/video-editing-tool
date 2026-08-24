@@ -39,6 +39,19 @@ function TextGlyphIcon({ className }: { className?: string }) {
   );
 }
 
+// Universal "closed captions" glyph -- distinguishes the auto-caption
+// trigger from the plain "Text" one at a glance.
+function ClosedCaptionIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
+      <rect x="2.5" y="5.5" width="19" height="13" rx="2" />
+      <text x="12" y="14.5" textAnchor="middle" fontSize="7" fontWeight="700" stroke="none" fill="currentColor">
+        CC
+      </text>
+    </svg>
+  );
+}
+
 function TemplateSection({
   selectedTemplateId,
   onSelectTemplate,
@@ -108,12 +121,14 @@ export function UserActions({
   selectedClipRectId,
   onSelectClipRect,
   onOpenTextDialog,
+  onOpenTranscriptDialog,
 }: {
   selectedTemplateId: string | null;
   onSelectTemplate: (id: string) => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
   onOpenTextDialog: () => void;
+  onOpenTranscriptDialog: () => void;
 }) {
   return (
     <div className="flex h-full gap-3 overflow-x-auto">
@@ -132,6 +147,17 @@ export function UserActions({
         <TextGlyphIcon className="h-4 w-4" />
         <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
           Text
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onOpenTranscriptDialog}
+        title="Auto-captions"
+        className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pt-2 text-muted hover:bg-background"
+      >
+        <ClosedCaptionIcon className="h-4 w-4" />
+        <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+          Auto-Caption
         </span>
       </button>
     </div>

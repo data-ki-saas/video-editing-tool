@@ -454,6 +454,25 @@ export interface TextOverlay {
 // there's any TextOverlay object yet to read a rect from.
 export const DEFAULT_TEXT_OVERLAY_RECT: CropRect = { x: 0.1, y: 0.7, width: 0.8, height: 0.2 };
 
+/**
+ * Auto-generated, speech-driven captions -- Creatomate's own transcription
+ * (see lib/video/transcriptCaptionTemplates.ts and
+ * lib/timeline/compileCreatomateTimeline.ts), as opposed to TextOverlay's
+ * manually-typed captions. One config for the whole video, not a
+ * time-ranged list: there's no text to author a range around, it's simply
+ * enabled or not, with one style and one position. Never rendered in the
+ * live Canvas2D preview -- transcription only happens server-side, during
+ * an actual render (see CanvasPlayer.tsx's own comment on why it
+ * deliberately shows nothing for this).
+ */
+export interface TranscriptCaption {
+  templateId: string;
+  rect: CropRect;
+}
+
+// Same bottom-third caption-safe default as text overlays.
+export const DEFAULT_TRANSCRIPT_CAPTION_RECT: CropRect = { x: 0.1, y: 0.7, width: 0.8, height: 0.2 };
+
 /** Every text overlay visible at `timeSeconds` -- same multiple-at-once,
  * half-open-interval semantics as findActiveOverlays above. */
 export function findActiveTextOverlays(overlays: TextOverlay[], timeSeconds: number): TextOverlay[] {

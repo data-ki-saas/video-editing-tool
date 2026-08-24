@@ -17,6 +17,7 @@
 import Link from "next/link";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { RenderIcon } from "./icons/PlayerIcons";
+import { TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS } from "@/lib/video/transcriptCaptionTemplates";
 import { computeFlipSegments } from "@/lib/video/video_math";
 import { SignOutButton } from "@/components/SignOutButton";
 import { SettingsIcon } from "@/components/icons/UIIcons";
@@ -64,6 +65,12 @@ function ActiveTransformationsList({
   }
   if (selections.sequenceAssetIds.length > 1) {
     rows.push(`Sequence: ${selections.sequenceAssetIds.length} clips`);
+  }
+  if (selections.transcriptCaption) {
+    const option = TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS.find(
+      (candidate) => candidate.id === selections.transcriptCaption?.templateId
+    );
+    rows.push(`Auto-captions: ${option?.name ?? selections.transcriptCaption.templateId}`);
   }
 
   if (rows.length === 0) {

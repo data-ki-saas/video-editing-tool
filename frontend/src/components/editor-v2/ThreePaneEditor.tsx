@@ -69,6 +69,9 @@ import {
   applyTextOverlayRectCommit,
   applyTextOverlayRangeChange,
   applyDeleteTextOverlay,
+  applyEnableTranscriptCaption,
+  applyUpdateTranscriptCaption,
+  applyDisableTranscriptCaption,
 } from "@/lib/video/transformations";
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot, type Project } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
@@ -95,6 +98,7 @@ const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
   overlayImages: [],
   textOverlays: [],
   sequenceAssetIds: [],
+  transcriptCaption: null,
 };
 
 export function ThreePaneEditor({
@@ -191,6 +195,11 @@ export function ThreePaneEditor({
   const [isTextDialogOpen, setIsTextDialogOpen] = useState(false);
   const [editingTextOverlayIndex, setEditingTextOverlayIndex] = useState<number | null>(null);
 
+  // TranscriptCaptionDialog's open state -- no edit-target index needed,
+  // there's only ever one transcript caption config (see
+  // video_math.ts's TranscriptCaption).
+  const [isTranscriptDialogOpen, setIsTranscriptDialogOpen] = useState(false);
+
   const canvasPlayerRef = useRef<CanvasPlayerHandle>(null);
 
   // Cosmetic-only, persisted but not history-tracked (see this file's
@@ -243,6 +252,7 @@ export function ThreePaneEditor({
     overlayImages: rawSelections.overlayImages ?? [],
     textOverlays: rawSelections.textOverlays ?? [],
     sequenceAssetIds: rawSelections.sequenceAssetIds ?? [],
+    transcriptCaption: rawSelections.transcriptCaption ?? null,
   };
 
   // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to redo (both redo
@@ -669,6 +679,30 @@ export function ThreePaneEditor({
     setEditingTextOverlayIndex(null);
   }
 
+  function handleOpenTranscriptDialog() {
+    setIsTranscriptDialogOpen(true);
+  }
+
+  function handleCloseTranscriptDialog() {
+    setIsTranscriptDialogOpen(false);
+  }
+
+  // TranscriptCaptionDialog's Enable/Update -- dispatches based on whether
+  // auto-captions are already on, same pattern as handleSaveTextOverlay.
+  function handleSaveTranscriptCaption(templateId: string, rect: CropRect) {
+    const { label, state } = selections.transcriptCaption
+      ? applyUpdateTranscriptCaption(selections, templateId, rect)
+      : applyEnableTranscriptCaption(selections, templateId, rect);
+    pushChange(label, state);
+    setIsTranscriptDialogOpen(false);
+  }
+
+  function handleDisableTranscriptCaption() {
+    const { label, state } = applyDisableTranscriptCaption(selections);
+    pushChange(label, state);
+    setIsTranscriptDialogOpen(false);
+  }
+
   function handleChangeTextOverlayRect(overlayIndex: number, next: CropRect) {
     setLiveTextOverlayRectEdit({ index: overlayIndex, rect: next });
   }
@@ -827,6 +861,12 @@ export function ThreePaneEditor({
           editingTextOverlay={editingTextOverlayIndex !== null ? displayedTextOverlays[editingTextOverlayIndex] : null}
           onSaveTextOverlay={handleSaveTextOverlay}
           onCloseTextDialog={handleCloseTextDialog}
+          onOpenTranscriptDialog={handleOpenTranscriptDialog}
+          isTranscriptDialogOpen={isTranscriptDialogOpen}
+          transcriptCaption={selections.transcriptCaption}
+          onSaveTranscriptCaption={handleSaveTranscriptCaption}
+          onDisableTranscriptCaption={handleDisableTranscriptCaption}
+          onCloseTranscriptDialog={handleCloseTranscriptDialog}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
           baseCropRect={selections.cropRect}

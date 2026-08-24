@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { CropRect, OverlayImage, TextOverlay, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, TextOverlay, TranscriptCaption, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 
 export interface TemplateElement {
   id: string;
@@ -72,6 +72,12 @@ export interface EditSelectionsSnapshot {
   // the background-track fields below) because it changes what the
   // frames actually are.
   sequenceAssetIds: string[];
+  // Auto-generated, speech-driven captions (Creatomate's own transcription
+  // -- see lib/video/transcriptCaptionTemplates.ts), as opposed to
+  // textOverlays' manually-typed ones. One config for the whole video, not
+  // a time-ranged list -- null when disabled. History-tracked since it
+  // changes what's on screen, same tier as textOverlays.
+  transcriptCaption: TranscriptCaption | null;
 }
 
 export interface EditHistoryEntrySnapshot {

@@ -27,6 +27,7 @@ import {
   toggleFlipAt,
   mergeTrimRanges,
   DEFAULT_TEXT_OVERLAY_RECT,
+  DEFAULT_TRANSCRIPT_CAPTION_RECT,
   type CropRect,
   type OverlayImage,
   type TextOverlay,
@@ -424,4 +425,41 @@ export function applyDeleteTextOverlay(
     label: "Removed text",
     state: { ...selections, textOverlays: selections.textOverlays.filter((_, index) => index !== overlayIndex) },
   };
+}
+
+/** Turns on auto-generated (transcript) captions, from
+ * TranscriptCaptionDialog's "Enable" -- see video_math.ts's
+ * TranscriptCaption for why this is one config for the whole video rather
+ * than a time-ranged list like textOverlays. */
+export function applyEnableTranscriptCaption(
+  selections: EditSelectionsSnapshot,
+  templateId: string,
+  rect: CropRect = DEFAULT_TRANSCRIPT_CAPTION_RECT
+): TransformationResult {
+  return {
+    label: "Enabled auto-captions",
+    state: { ...selections, transcriptCaption: { templateId, rect } },
+  };
+}
+
+/** Changes an already-enabled transcript caption's style/position, from
+ * TranscriptCaptionDialog's "Update". No-op if it's been disabled since
+ * the dialog opened. */
+export function applyUpdateTranscriptCaption(
+  selections: EditSelectionsSnapshot,
+  templateId: string,
+  rect: CropRect
+): TransformationResult {
+  if (!selections.transcriptCaption) return { label: "Updated auto-captions", state: selections };
+  return {
+    label: "Updated auto-captions",
+    state: { ...selections, transcriptCaption: { templateId, rect } },
+  };
+}
+
+/** Turns auto-captions off outright -- from TranscriptCaptionDialog's
+ * "Disable". */
+export function applyDisableTranscriptCaption(selections: EditSelectionsSnapshot): TransformationResult {
+  if (!selections.transcriptCaption) return { label: "Disabled auto-captions", state: selections };
+  return { label: "Disabled auto-captions", state: { ...selections, transcriptCaption: null } };
 }

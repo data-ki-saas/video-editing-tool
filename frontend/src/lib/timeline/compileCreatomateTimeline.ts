@@ -52,8 +52,10 @@ import {
   type CropRect,
   type ZoomEffect,
   type RenderSegment,
+  type TranscriptCaption,
 } from "@/lib/video/video_math";
 import { getTextTemplateFontFraction } from "@/lib/video/textTemplates";
+import { getTranscriptCaptionConfig } from "@/lib/video/transcriptCaptionTemplates";
 
 export interface CompileTimelineInput {
   selections: EditSelectionsSnapshot;
@@ -431,6 +433,45 @@ function buildBackgroundAudioElement(
   });
 }
 
+/** Auto-generated (transcript) captions -- one Text element per
+ * RenderSegment, each transcribing that segment's OWN Video element
+ * (transcriptSource takes exactly one video element's id, and the
+ * sequence is already split into per-clip/per-trim Video elements -- see
+ * video_math.ts's TranscriptCaption doc comment for why this is fine: a
+ * caption naturally resets at a hard cut anyway). `videoSegments` is the
+ * SAME array buildVideoSegments returned, in the same order, so
+ * videoSegments[i] is exactly the Video element `segments[i]` became --
+ * no separate id bookkeeping needed. Root-level placement, same
+ * output-frame-relative rect convention as image/text overlays. */
+function buildTranscriptCaptionElements(
+  transcriptCaption: TranscriptCaption | null,
+  segments: RenderSegment[],
+  videoSegments: Video[],
+  track: number
+): Text[] {
+  if (!transcriptCaption) return [];
+  const config = getTranscriptCaptionConfig(transcriptCaption.templateId);
+
+  return segments.map((segment, index) => {
+    const sourceVideoId = videoSegments[index].properties.id as string;
+    return new Text({
+      id: nextId("transcript"),
+      track,
+      time: segment.outputStartSeconds,
+      duration: segment.durationSeconds,
+      transcriptSource: sourceVideoId,
+      transcriptEffect: config.transcriptEffect,
+      transcriptSplit: config.transcriptSplit,
+      ...(config.transcriptColor ? { transcriptColor: config.transcriptColor } : {}),
+      textWrap: true,
+      fillColor: "#ffffff",
+      xAnchor: "0%",
+      yAnchor: "0%",
+      ...rectProperties(transcriptCaption.rect),
+    });
+  });
+}
+
 export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline {
   idCounter = 0;
   const { selections, sequenceClips, backgroundClips, outputWidth, outputHeight } = input;
@@ -477,12 +518,19 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
 
   const overlayElements = buildOverlayImageElements(clampedOverlayImages, segments, nextTrack, appMeta);
   const textElements = buildTextElements(clampedTextOverlays, segments, nextTrack);
+  const transcriptCaptionElements = buildTranscriptCaptionElements(
+    selections.transcriptCaption,
+    segments,
+    videoSegments,
+    nextTrack()
+  );
   const backgroundAudio = buildBackgroundAudioElement(backgroundClips, totalOutputDurationSeconds, nextTrack(), appMeta);
 
   const elements: TemplateElement[] = [
     cropViewport.toMap() as TemplateElement,
     ...overlayElements.map((el) => el.toMap() as TemplateElement),
     ...textElements.map((el) => el.toMap() as TemplateElement),
+    ...transcriptCaptionElements.map((el) => el.toMap() as TemplateElement),
     ...(backgroundAudio ? [backgroundAudio.toMap() as TemplateElement] : []),
   ];
 

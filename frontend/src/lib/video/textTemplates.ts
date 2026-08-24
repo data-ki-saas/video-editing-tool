@@ -59,11 +59,11 @@ export interface TextTemplateRenderContext {
 
 export type TextTemplateRenderer = (context: TextTemplateRenderContext) => void;
 
-function rectCenter(rectPx: TextTemplateRenderContext["rectPx"]) {
+export function rectCenter(rectPx: TextTemplateRenderContext["rectPx"]) {
   return { x: rectPx.x + rectPx.width / 2, y: rectPx.y + rectPx.height / 2 };
 }
 
-function fontSizeFor(rectPx: TextTemplateRenderContext["rectPx"], fraction: number): number {
+export function fontSizeFor(rectPx: TextTemplateRenderContext["rectPx"], fraction: number): number {
   return Math.max(10, rectPx.height * fraction);
 }
 
@@ -146,7 +146,7 @@ export interface WrappedTextLayout {
  * no wrapping at all). `fontSpec` builds the ctx.font string for a given
  * size (so callers keep their own weight/family, e.g. "bold ...px
  * sans-serif"). */
-function fitTextToRect(
+export function fitTextToRect(
   ctx: CanvasRenderingContext2D,
   text: string,
   maxWidthPx: number,
@@ -187,7 +187,7 @@ function fitTextToRect(
  * stacked with `lineHeightPx` spacing -- the shared vertical layout every
  * center-anchored template (Bold Pop, Bounce In, Highlight Box, Neon Glow)
  * uses, so only the per-line draw call itself differs between them. */
-function forEachCenteredLine(
+export function forEachCenteredLine(
   layout: WrappedTextLayout,
   centerX: number,
   centerY: number,

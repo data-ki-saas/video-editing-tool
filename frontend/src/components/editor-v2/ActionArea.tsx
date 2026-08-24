@@ -27,13 +27,15 @@ import { StockMediaDialog } from "./StockMediaDialog";
 import { BackgroundTrackSelector } from "./BackgroundTrackSelector";
 import { UserActions } from "./UserActions";
 import { TextOverlayDialog } from "./TextOverlayDialog";
+import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { CollapsiblePanel } from "./CollapsiblePanel";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { Asset } from "@/lib/api";
-import type { CropRect, OverlayImage, TextOverlay, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type { CropRect, OverlayImage, TextOverlay, TranscriptCaption, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 import type { TextTemplateId } from "@/lib/video/textTemplates";
+import type { TranscriptCaptionTemplateId } from "@/lib/video/transcriptCaptionTemplates";
 import type { RefObject } from "react";
 
 // Fallback play-area ratio before any clip rectangle has been picked yet --
@@ -71,6 +73,12 @@ export function ActionArea({
   editingTextOverlay,
   onSaveTextOverlay,
   onCloseTextDialog,
+  onOpenTranscriptDialog,
+  isTranscriptDialogOpen,
+  transcriptCaption,
+  onSaveTranscriptCaption,
+  onDisableTranscriptCaption,
+  onCloseTranscriptDialog,
   previewFrameUrl,
   frameAspectRatio,
   baseCropRect,
@@ -111,9 +119,16 @@ export function ActionArea({
   editingTextOverlay: TextOverlay | null;
   onSaveTextOverlay: (text: string, templateId: string, rect: CropRect) => void;
   onCloseTextDialog: () => void;
+  onOpenTranscriptDialog: () => void;
+  isTranscriptDialogOpen: boolean;
+  transcriptCaption: TranscriptCaption | null;
+  onSaveTranscriptCaption: (templateId: TranscriptCaptionTemplateId, rect: CropRect) => void;
+  onDisableTranscriptCaption: () => void;
+  onCloseTranscriptDialog: () => void;
   // The actual current frame (closest thumbnail to the playhead) and its
-  // aspect ratio, for TextOverlayDialog's live preview -- see its own
-  // comment on why positioning happens against the real frame now.
+  // aspect ratio, for TextOverlayDialog/TranscriptCaptionDialog's live
+  // preview -- see TextOverlayDialog's own comment on why positioning
+  // happens against the real frame now.
   previewFrameUrl: string | null;
   frameAspectRatio: number | null;
   baseCropRect: CropRect | null;
@@ -176,6 +191,7 @@ export function ActionArea({
           selectedClipRectId={selectedClipRectId}
           onSelectClipRect={onSelectClipRect}
           onOpenTextDialog={onOpenTextDialog}
+          onOpenTranscriptDialog={onOpenTranscriptDialog}
         />
       </div>
 
@@ -253,6 +269,17 @@ export function ActionArea({
           frameAspectRatio={frameAspectRatio}
           onSave={(text, templateId: TextTemplateId, rect) => onSaveTextOverlay(text, templateId, rect)}
           onClose={onCloseTextDialog}
+        />
+      )}
+
+      {isTranscriptDialogOpen && (
+        <TranscriptCaptionDialog
+          transcriptCaption={transcriptCaption}
+          previewFrameUrl={previewFrameUrl}
+          frameAspectRatio={frameAspectRatio}
+          onSave={onSaveTranscriptCaption}
+          onDisable={onDisableTranscriptCaption}
+          onClose={onCloseTranscriptDialog}
         />
       )}
     </div>
