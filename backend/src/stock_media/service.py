@@ -116,7 +116,18 @@ async def import_stock_asset(
     try:
         if kind == "photo":
             photo = await pexels_client.get_photo(source_id)
-            download_url = photo["src"]["original"]
+            # "large2x" (Pexels' own pre-resized ~1880px-long-edge variant)
+            # rather than "original" (often 4000px+, several MB) -- this
+            # asset gets used as a video overlay, drawn at a fraction of an
+            # output frame that itself caps at 1920px on its long edge (see
+            # video_math.ts's computeOutputDimensions), so full original
+            # resolution is pure storage/transfer waste. Picking a smaller
+            # pre-generated Pexels variant avoids needing any image-
+            # processing dependency here (this backend deliberately has
+            # none -- see frontend/src/lib/image.ts's equivalent resize for
+            # direct uploads, which this endpoint bypasses entirely). Falls
+            # back to "original" if Pexels' response is ever missing it.
+            download_url = photo["src"].get("large2x") or photo["src"]["original"]
             content_type = "image/jpeg"
             asset_kind = "image"
             extension = ".jpg"
