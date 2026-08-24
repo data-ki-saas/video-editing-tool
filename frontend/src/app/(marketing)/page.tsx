@@ -86,6 +86,22 @@ export default function Home() {
           </span>
         </div>
 
+        <div className="grid w-full max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-neutral-300 p-4 text-left">
+            <p className="text-sm font-semibold text-neutral-900">Free render</p>
+            <p className="mt-1 text-sm text-neutral-600">
+              Render your reel right in your browser — instant, no cost, no daily limit.
+            </p>
+          </div>
+          <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-left">
+            <p className="text-sm font-semibold text-neutral-900">High-quality render</p>
+            <p className="mt-1 text-sm text-neutral-500">
+              A studio-quality cloud render with full effects support, including auto-captions.
+              Coming soon.
+            </p>
+          </div>
+        </div>
+
         <ol className="flex w-full max-w-md flex-col gap-2 text-left text-sm text-neutral-600">
           <li>
             <strong>1.</strong> Sign up and tell us your business type

@@ -23,8 +23,11 @@ const FRAME_JPEG_QUALITY = 0.7;
 /** Loads `url` into a detached (never-appended-to-the-page) <video> element
  * and resolves once its metadata (duration, dimensions) is available.
  * `preload: "metadata"` is used for duration-only probes (getVideoDuration)
- * to avoid buffering the whole file when only the header is needed. */
-function loadVideoElement(url: string, preload: "metadata" | "auto" = "auto"): Promise<HTMLVideoElement> {
+ * to avoid buffering the whole file when only the header is needed. Exported
+ * for lib/localRender/exportTimeline.ts, which needs a real seekable <video>
+ * per clip (not the capped preview frames extractPreviewFrames produces) to
+ * source full-quality frames during an offline export. */
+export function loadVideoElement(url: string, preload: "metadata" | "auto" = "auto"): Promise<HTMLVideoElement> {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
     video.crossOrigin = "anonymous"; // required for the canvas reads below to not taint
@@ -59,6 +62,28 @@ function captureFrameAt(video: HTMLVideoElement, timeSeconds: number, canvas: HT
         // top comment about the R2 bucket's CORS policy.
         reject(err instanceof Error ? err : new Error(String(err)));
       }
+    }
+    video.addEventListener("seeked", onSeeked);
+    video.currentTime = timeSeconds;
+  });
+}
+
+// Below this, "seeked" simply won't fire (the browser considers the video
+// already there) -- seekVideoTo resolves immediately instead of waiting
+// forever on an event that was never coming.
+const SEEK_NOOP_EPSILON_SECONDS = 1 / 120;
+
+/** Seeks `video` to `timeSeconds` and resolves once the frame there is
+ * actually decoded -- the same seek-and-wait `video` uses internally, but
+ * exposed on its own (no canvas draw) for lib/localRender/exportTimeline.ts,
+ * which needs to seek a real <video> per output frame and then composite it
+ * itself (crop/flip/overlays/text), not just grab a plain full-frame JPEG. */
+export function seekVideoTo(video: HTMLVideoElement, timeSeconds: number): Promise<void> {
+  if (Math.abs(video.currentTime - timeSeconds) < SEEK_NOOP_EPSILON_SECONDS) return Promise.resolve();
+  return new Promise((resolve) => {
+    function onSeeked() {
+      video.removeEventListener("seeked", onSeeked);
+      resolve();
     }
     video.addEventListener("seeked", onSeeked);
     video.currentTime = timeSeconds;

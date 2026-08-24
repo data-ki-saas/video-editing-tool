@@ -89,7 +89,8 @@ export async function extractVolumeProfile(url: string, bucketSeconds: number): 
  * AudioBufferSourceNode -- CanvasPlayer's existing clock/seek/trim-skip
  * logic then needs no changes at all, since it just thinks it's playing
  * one longer virtual clip. `context` is the caller's own longer-lived
- * AudioContext (the one actually used for playback), not a fresh one --
+ * context -- an AudioContext for playback, or an OfflineAudioContext for
+ * lib/localRender/exportTimeline.ts's offline mix -- not a fresh one;
  * `createBuffer` only allocates, it doesn't decode, so no separate decode
  * context is needed here.
  *
@@ -102,7 +103,7 @@ export async function extractVolumeProfile(url: string, bucketSeconds: number): 
  * a real mismatch (unlikely per the above) would play the mismatched
  * buffer's channel data at the wrong pitch/speed.
  */
-export function concatenateAudioBuffers(context: AudioContext, buffers: AudioBuffer[]): AudioBuffer {
+export function concatenateAudioBuffers(context: BaseAudioContext, buffers: AudioBuffer[]): AudioBuffer {
   const numberOfChannels = Math.max(...buffers.map((buffer) => buffer.numberOfChannels));
   const sampleRate = buffers[0].sampleRate;
   const totalLength = buffers.reduce((sum, buffer) => sum + buffer.length, 0);

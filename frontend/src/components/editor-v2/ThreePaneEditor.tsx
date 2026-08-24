@@ -76,13 +76,16 @@ import {
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot, type Project } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
 import { useRenderStatus } from "@/lib/useRenderStatus";
-import { gatherSequenceClipInfos, gatherBackgroundClipInfos } from "@/lib/timeline/gatherRenderClips";
+import { useLocalRender } from "@/lib/useLocalRender";
+import { gatherLocalSequenceClips, gatherLocalBackgroundClips } from "@/lib/localRender/gatherLocalRenderClips";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { BACKGROUND_TRACK_OPTIONS } from "@/lib/backgroundTracks";
 import { ActionArea } from "./ActionArea";
 import { Playground } from "./Playground";
 import { FeedbackArea } from "./FeedbackArea";
 import type { CanvasPlayerHandle } from "./CanvasPlayer";
+import { RenderComingSoonPopup } from "./RenderComingSoonPopup";
+import { LocalRenderPopup } from "./LocalRenderPopup";
 
 const THUMBNAIL_INTERVAL_SECONDS = 1;
 const VOLUME_BUCKET_SECONDS = 1;
@@ -117,8 +120,18 @@ export function ThreePaneEditor({
     renderError,
     isStuck: isRenderStuck,
     applyProjectStatus,
-    startRender,
   } = useRenderStatus(projectId);
+
+  const {
+    isSupported: isLocalRenderSupported,
+    unsupportedReason: localRenderUnsupportedReason,
+    isRendering: isLocalRendering,
+    progress: localRenderProgress,
+    resultUrl: localRenderUrl,
+    resultMimeType: localRenderMimeType,
+    resultError: localRenderError,
+    startLocalRender,
+  } = useLocalRender();
 
   useEffect(() => {
     applyProjectStatus(initialProject);
@@ -199,6 +212,17 @@ export function ThreePaneEditor({
   // there's only ever one transcript caption config (see
   // video_math.ts's TranscriptCaption).
   const [isTranscriptDialogOpen, setIsTranscriptDialogOpen] = useState(false);
+
+  // The cloud (Creatomate) render is temporarily disabled -- see
+  // handleRenderClick below, which shows this instead of actually starting
+  // a render.
+  const [isRenderComingSoonOpen, setIsRenderComingSoonOpen] = useState(false);
+
+  // Opened by handleLocalRenderClick right before the export starts, and
+  // stays open through completion/failure -- LocalRenderPopup itself
+  // decides what to show (loader vs. finished player vs. error) from the
+  // useLocalRender() state below.
+  const [isLocalRenderPopupOpen, setIsLocalRenderPopupOpen] = useState(false);
 
   const canvasPlayerRef = useRef<CanvasPlayerHandle>(null);
 
@@ -807,17 +831,28 @@ export function ThreePaneEditor({
         ? [{ assetId: null, name: backgroundCatalogTrack.name, url: backgroundCatalogTrack.url }]
         : [];
 
-  // The green Render button in FeedbackArea -- gathers each sequence/
-  // background clip's REAL duration fresh (not reused from the preview
-  // pipeline's own state, so Render works even mid-preview-load), then
-  // hands everything to the server to compile into Creatomate JSON and
-  // start the render (see lib/timeline/compileCreatomateTimeline.ts's own
-  // comment on why compiling can't happen here in the browser).
-  async function handleRenderClick() {
-    if (effectiveSequenceAssetIds.length === 0 || isRendering) return;
+  // The green Render button in FeedbackArea -- cloud (Creatomate) rendering
+  // is temporarily disabled, so this just surfaces a "coming soon" popup
+  // instead of gathering clip durations and calling startRender(). The free/
+  // local render button (handleLocalRenderClick) is the only one that
+  // actually renders for now.
+  function handleRenderClick() {
+    setIsRenderComingSoonOpen(true);
+  }
 
-    const gatheredSequenceClips = await gatherSequenceClipInfos(sequenceClips);
-    const gatheredBackgroundClips = await gatherBackgroundClipInfos(resolvedBackgroundTracks);
+  // The lighter-green free Render button in FeedbackArea -- renders entirely
+  // in this tab (lib/localRender/exportTimeline.ts), no server/Creatomate
+  // involved. Mirrors handleRenderClick's own "gather real durations fresh,
+  // then compute output dimensions" shape, but via the local-only gatherer
+  // (gatherLocalRenderClips.ts) since the local exporter needs each clip's
+  // actual URL, not just its duration.
+  async function handleLocalRenderClick() {
+    if (effectiveSequenceAssetIds.length === 0 || isLocalRendering) return;
+
+    setIsLocalRenderPopupOpen(true);
+
+    const gatheredSequenceClips = await gatherLocalSequenceClips(sequenceClips);
+    const gatheredBackgroundClips = await gatherLocalBackgroundClips(resolvedBackgroundTracks);
 
     const clipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selections.clipRectId);
     const targetRatio = clipRectOption
@@ -825,10 +860,11 @@ export function ThreePaneEditor({
       : (frameAspectRatio ?? 9 / 16);
     const { width, height } = computeOutputDimensions(targetRatio);
 
-    await startRender({
+    await startLocalRender({
       selections,
       sequenceClips: gatheredSequenceClips,
       backgroundClips: gatheredBackgroundClips,
+      assetUrlById,
       outputWidth: width,
       outputHeight: height,
     });
@@ -954,8 +990,25 @@ export function ThreePaneEditor({
           renderError={renderError}
           isRenderStuck={isRenderStuck}
           onRenderClick={handleRenderClick}
+          canLocalRender={effectiveSequenceAssetIds.length > 0}
+          isLocalRendering={isLocalRendering}
+          isLocalRenderSupported={isLocalRenderSupported}
+          localRenderUnsupportedReason={localRenderUnsupportedReason}
+          onLocalRenderClick={handleLocalRenderClick}
         />
       </section>
+
+      {isRenderComingSoonOpen && <RenderComingSoonPopup onClose={() => setIsRenderComingSoonOpen(false)} />}
+      {isLocalRenderPopupOpen && (
+        <LocalRenderPopup
+          isRendering={isLocalRendering}
+          progress={localRenderProgress}
+          resultUrl={localRenderUrl}
+          resultMimeType={localRenderMimeType}
+          resultError={localRenderError}
+          onClose={() => setIsLocalRenderPopupOpen(false)}
+        />
+      )}
     </div>
   );
 }

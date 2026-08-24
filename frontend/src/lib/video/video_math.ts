@@ -539,6 +539,15 @@ export function totalSequenceDuration(clips: SequenceClipInfo[]): number {
   return clips.reduce((sum, clip) => sum + clip.durationSeconds, 0);
 }
 
+// Keeps background music audible under the main clip's own audio without
+// drowning it out -- no volume control exposed for it (v1), matching this
+// app's "smart default over exposing every knob" bias. Shared between
+// CanvasPlayer.tsx's live preview and lib/localRender/exportTimeline.ts's
+// offline mix so the two never drift out of sync independently (see also
+// compileCreatomateTimeline.ts's BACKGROUND_MUSIC_VOLUME_PERCENT, which
+// mirrors this same value for the Creatomate render).
+export const BACKGROUND_MUSIC_GAIN = 0.5;
+
 /**
  * Which clip (and the local offset within it) a global elapsed-seconds
  * position in the concatenated sequence falls on -- what lets CanvasPlayer

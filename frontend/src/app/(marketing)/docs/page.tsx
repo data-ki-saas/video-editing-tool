@@ -85,16 +85,22 @@ export default function DocsPage() {
       </Category>
 
       <Category title="Generation">
-        <Topic title="Rendering your reel">
-          Once you&apos;re happy with it, hit Render. Your finished video is prepared in the
-          background, and you&apos;ll get a link to watch, share, or download as soon as
-          it&apos;s ready.
+        <Topic title="Free render">
+          Hit the free Render button to generate your reel right in your browser — no upload to a
+          rendering service, no cost, and no daily limit. It plays and downloads as soon as
+          it&apos;s done. Free rendering needs a Chromium browser (Chrome or Edge) and doesn&apos;t
+          yet support auto-captions.
+        </Topic>
+        <Topic title="High-quality render (coming soon)">
+          A second, higher-quality cloud render is on the way — full support for every editing
+          feature including auto-captions, rendered on our servers rather than your device.
         </Topic>
         <Topic title="Limits">
           {/* Placeholder -- keep in sync with README.md's "Abuse guardrails" if the cap changes. */}
           To keep things running smoothly for everyone during early access, there&apos;s a daily
-          limit on how many reels an account can render. If you hit it, you&apos;ll see a clear
-          message telling you when to try again.
+          limit on how many high-quality cloud renders an account can start. If you hit it,
+          you&apos;ll see a clear message telling you when to try again — the free render has no
+          such limit.
         </Topic>
       </Category>
     </main>

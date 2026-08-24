@@ -10,13 +10,15 @@
  * itself, only what it currently adds up to. Middle: status/errors from the
  * asset list and the thumbnail/volume analysis pipeline, plus render
  * status once a render has been started. Right: a vertical strip -- a
- * bright-green Render button at the top, settings/sign-out anchored to
- * the bottom (moved here from the dashboard's old persistent top bar, see
- * app/dashboard/layout.tsx, to give the editor that row of height back).
+ * bright-green cloud Render button and a lighter-green free/local Render
+ * button (see lib/localRender/exportTimeline.ts) stacked at the top,
+ * settings/sign-out anchored to the bottom (moved here from the
+ * dashboard's old persistent top bar, see app/dashboard/layout.tsx, to
+ * give the editor that row of height back).
  */
 import Link from "next/link";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
-import { RenderIcon } from "./icons/PlayerIcons";
+import { RenderIcon, LocalRenderIcon } from "./icons/PlayerIcons";
 import { TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS } from "@/lib/video/transcriptCaptionTemplates";
 import { computeFlipSegments } from "@/lib/video/video_math";
 import { SignOutButton } from "@/components/SignOutButton";
@@ -142,6 +144,11 @@ export function FeedbackArea({
   renderError,
   isRenderStuck,
   onRenderClick,
+  canLocalRender,
+  isLocalRendering,
+  isLocalRenderSupported,
+  localRenderUnsupportedReason,
+  onLocalRenderClick,
 }: {
   assetsError: string | null;
   analysisError: string | null;
@@ -157,10 +164,25 @@ export function FeedbackArea({
   renderError: string | null;
   isRenderStuck: boolean;
   onRenderClick: () => void;
+  canLocalRender: boolean;
+  isLocalRendering: boolean;
+  isLocalRenderSupported: boolean;
+  localRenderUnsupportedReason: string | null;
+  onLocalRenderClick: () => void;
 }) {
   const hasRenderMessage = isRendering || renderStatus !== null;
   const hasMessages = assetsError || analysisError || saveError || isAnalyzing || isUploading || hasRenderMessage;
   const renderDisabled = !canRender || isRendering || (renderStatus !== null && !TERMINAL_RENDER_STATUSES.has(renderStatus));
+
+  const hasTranscriptCaption = Boolean(selections.transcriptCaption);
+  const localRenderDisabled = !canLocalRender || isLocalRendering || hasTranscriptCaption || !isLocalRenderSupported;
+  const localRenderTitle = !canLocalRender
+    ? "Add a video before rendering"
+    : hasTranscriptCaption
+      ? "Free render doesn't support auto-captions yet — use Render instead"
+      : !isLocalRenderSupported
+        ? (localRenderUnsupportedReason ?? "Free render needs Chrome or Edge")
+        : "Free render (in your browser, no cost)";
 
   return (
     <div className="flex h-full gap-4 px-4 py-2 text-sm">
@@ -185,16 +207,29 @@ export function FeedbackArea({
       </div>
 
       <div className="flex h-full shrink-0 flex-col items-center justify-between border-l border-border pl-3">
-        <button
-          type="button"
-          onClick={onRenderClick}
-          disabled={renderDisabled}
-          aria-label="Render"
-          title={canRender ? "Render" : "Add a video before rendering"}
-          className="rounded-full bg-green-500 p-2 text-white hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <RenderIcon className="h-5 w-5" />
-        </button>
+        <div className="flex flex-col items-center gap-2">
+          <button
+            type="button"
+            onClick={onRenderClick}
+            disabled={renderDisabled}
+            aria-label="Render"
+            title={canRender ? "Render" : "Add a video before rendering"}
+            className="rounded-full bg-green-500 p-2 text-white hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <RenderIcon className="h-5 w-5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={onLocalRenderClick}
+            disabled={localRenderDisabled}
+            aria-label="Free render"
+            title={localRenderTitle}
+            className="rounded-full bg-green-300 p-2 text-white hover:bg-green-400 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <LocalRenderIcon className="h-5 w-5" />
+          </button>
+        </div>
 
         <div className="flex flex-col items-center gap-1">
           <Link

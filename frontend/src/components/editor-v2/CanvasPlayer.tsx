@@ -75,6 +75,7 @@ import {
   totalSequenceDuration,
   resolveSequencePosition,
   FULL_FRAME_CROP_RECT,
+  BACKGROUND_MUSIC_GAIN,
   type CropRect,
   type OverlayImage,
   type SequenceClipInfo,
@@ -89,11 +90,6 @@ import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
 export interface CanvasPlayerHandle {
   seekTo(seconds: number): void;
 }
-
-// Keeps background music audible under the main clip's own audio without
-// drowning it out -- no volume control exposed for it (v1), matching this
-// app's "smart default over exposing every knob" bias.
-const BACKGROUND_MUSIC_GAIN = 0.5;
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
