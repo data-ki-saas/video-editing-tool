@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Shown while and after the free/local render runs (see
+ * Shown while and after "Edge Render" (the free/local render) runs (see
  * lib/localRender/exportTimeline.ts, wired up in ThreePaneEditor.tsx's
  * handleLocalRenderClick) -- a loader while exporting, then the finished
  * video with native play/pause/seek controls plus an explicit Download
@@ -36,13 +36,13 @@ export function LocalRenderPopup({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Free render"
+      aria-label="Edge Render"
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
       onClick={isDismissable ? onClose : undefined}
     >
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg rounded-lg bg-surface p-4 shadow-lg">
         <div className="mb-3 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-foreground">Free render</h3>
+          <h3 className="text-sm font-semibold text-foreground">Edge Render</h3>
           {isDismissable && (
             <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-foreground">
               ✕
@@ -64,7 +64,7 @@ export function LocalRenderPopup({
         )}
 
         {!isRendering && resultError && (
-          <p className="text-sm text-red-600">Free render failed: {resultError}</p>
+          <p className="text-sm text-red-600">Edge Render failed: {resultError}</p>
         )}
 
         {!isRendering && resultUrl && (

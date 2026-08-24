@@ -1,5 +1,5 @@
 /**
- * Feature-detect gate for the free/local render button (see
+ * Feature-detect gate for the "Edge Render" (free/local render) button (see
  * exportTimeline.ts). Delegates to Mediabunny's own `canEncodeVideo`/
  * `canEncodeAudio`, which probe the browser's real WebCodecs encoder support
  * (not just "does the class exist") -- this is solid in Chrome/Edge, absent
@@ -14,13 +14,13 @@ const PROBE_HEIGHT = 1920;
 
 export async function checkLocalRenderSupport(): Promise<{ supported: boolean; reason?: string }> {
   if (typeof window === "undefined" || typeof VideoEncoder === "undefined" || typeof OfflineAudioContext === "undefined") {
-    return { supported: false, reason: "Free render needs a browser with WebCodecs support (Chrome or Edge)." };
+    return { supported: false, reason: "Edge Render needs a browser with WebCodecs support (Chrome or Microsoft Edge)." };
   }
 
   // Only video encode support gates the button -- exportTimeline.ts falls
   // back through AAC -> Opus/WebM -> silent video for audio, so a browser
   // that can encode video but not audio can still produce something.
   const videoOk = await canEncodeVideo("avc", { width: PROBE_WIDTH, height: PROBE_HEIGHT }).catch(() => false);
-  if (!videoOk) return { supported: false, reason: "Free render needs Chrome or Edge." };
+  if (!videoOk) return { supported: false, reason: "Edge Render needs a Chromium browser (Chrome or Microsoft Edge)." };
   return { supported: true };
 }

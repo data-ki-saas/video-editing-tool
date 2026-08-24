@@ -68,6 +68,12 @@ export function AssetGallery({
   usedAssetIds: Set<string>;
 }) {
   const [videoThumbnails, setVideoThumbnails] = useState<Record<string, string>>({});
+  // Which tiles have a delete in flight -- deleteAsset() can take a moment
+  // (Supabase row delete + R2 object cleanup server-side), so a tile stays
+  // visible with a spinner over it rather than looking unresponsive to a
+  // click that already registered. Same in-flight-ids-as-a-Set shape as
+  // StockMediaDialog.tsx's importingIds.
+  const [deletingAssetIds, setDeletingAssetIds] = useState<Set<string>>(new Set());
   const [playingAssetId, setPlayingAssetId] = useState<string | null>(null);
   const [playbackProgress, setPlaybackProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -131,11 +137,20 @@ export function AssetGallery({
 
   async function handleDelete(asset: Asset) {
     if (!window.confirm(`Delete "${asset.filename}"? This can't be undone.`)) return;
+    setDeletingAssetIds((prev) => new Set(prev).add(asset.id));
     try {
       await deleteAsset(asset.id);
       onDeleted(asset.id);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "Failed to delete this asset");
+      // Only clear the in-flight flag on failure -- on success the tile is
+      // about to unmount entirely once onDeleted() drops it from `assets`,
+      // so there's nothing left to un-flag.
+      setDeletingAssetIds((prev) => {
+        const next = new Set(prev);
+        next.delete(asset.id);
+        return next;
+      });
     }
   }
 
@@ -158,13 +173,16 @@ export function AssetGallery({
         {!isLoading && assets.length === 0 && <p className="self-center text-xs text-muted">No assets yet</p>}
         {assets.map((asset) => {
           const thumbnailSrc = asset.kind === "image" ? asset.url : videoThumbnails[asset.id];
+          const isDeleting = deletingAssetIds.has(asset.id);
           return (
             <button
               key={asset.id}
               type="button"
               title={asset.filename}
+              disabled={isDeleting}
               onClick={() => onSelect(asset)}
-              onContextMenu={(e) =>
+              onContextMenu={(e) => {
+                if (isDeleting) return;
                 openContextMenu(e, [
                   ...(asset.kind === "audio"
                     ? [
@@ -182,10 +200,10 @@ export function AssetGallery({
                         ? [{ label: "Add", onSelect: () => onAddToBackgroundSequence(asset) }]
                         : []),
                   { label: "Delete", danger: true, onSelect: () => void handleDelete(asset) },
-                ])
-              }
+                ]);
+              }}
               className={
-                "relative aspect-square w-16 shrink-0 overflow-hidden rounded-md border-2 " +
+                "relative aspect-square w-16 shrink-0 overflow-hidden rounded-md border-2 disabled:cursor-not-allowed " +
                 (selectedAssetId === asset.id ? "border-accent" : "border-transparent")
               }
             >
@@ -236,6 +254,15 @@ export function AssetGallery({
                   className="absolute right-0.5 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-accent-foreground"
                 >
                   +
+                </span>
+              )}
+
+              {isDeleting && (
+                <span className="absolute inset-0 flex items-center justify-center bg-black/60">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 animate-spin text-white" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <circle cx="12" cy="12" r="9" strokeOpacity={0.3} />
+                    <path d="M21 12a9 9 0 0 0-9-9" strokeLinecap="round" />
+                  </svg>
                 </span>
               )}
             </button>

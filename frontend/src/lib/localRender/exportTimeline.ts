@@ -133,7 +133,7 @@ async function pickOutputConfig(
     return { format: new Mp4OutputFormat({ fastStart: "in-memory" }), mimeType: "video/mp4", videoCodec: "avc", audioCodec: null };
   }
 
-  throw new Error("This browser can't encode video locally -- free render needs Chrome or Edge.");
+  throw new Error("This browser can't encode video locally -- Edge Render needs a Chromium browser (Chrome or Microsoft Edge).");
 }
 
 function findSegmentAtOutputTime(segments: RenderSegment[], outputTimeSeconds: number): RenderSegment | null {
@@ -236,7 +236,7 @@ export async function exportVideoLocally(
       const url = assetUrlById[assetId];
       if (!url) {
         const message = `Overlay image (assetId ${assetId}) has no resolved URL -- it won't appear in this render.`;
-        console.warn(`Free render: ${message}`);
+        console.warn(`Edge Render: ${message}`);
         warnings.push(message);
         continue;
       }
@@ -251,7 +251,7 @@ export async function exportVideoLocally(
         // devtools.
         const reason = err instanceof Error ? err.message : String(err);
         const message = `Overlay image (assetId ${assetId}) couldn't be loaded for this render: ${reason}`;
-        console.warn(`Free render: ${message}`);
+        console.warn(`Edge Render: ${message}`);
         warnings.push(message);
       }
     }

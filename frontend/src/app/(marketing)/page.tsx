@@ -8,11 +8,14 @@ const SITE_URL = "https://video-editing-tool-gamma.vercel.app";
 // a video reel maker that works across business types, not a single-niche
 // tool -- "for any business" and the explicit niche list both matter for
 // matching real search intent (e.g. "auto dealership video maker",
-// "real estate listing video generator"). Also covers the free render's own
-// search intent ("browser-based video renderer", "render video online free
-// no upload", "instant video render") now that it's a real, shippable
-// differentiator (no upload/wait for the cloud render, no cost) -- see
-// keywords below and the on-page "Free render" callout further down.
+// "real estate listing video generator"). Also covers "Edge Render" (the
+// free/local render)'s own search intent ("browser-based video renderer",
+// "render video online free no upload", "instant video render") now that
+// it's a real, shippable differentiator (no upload/wait for the cloud
+// render, no cost) -- see keywords below and the on-page "Edge Render"
+// callout further down. The SEO-facing copy still leads with generic terms
+// people actually search for ("free"/"browser-based"/"instant") rather than
+// the product name itself, which nobody searches for.
 export const metadata: Metadata = {
   title: "Video Reel Maker for Any Business — Free Browser-Based Rendering",
   description:
@@ -101,9 +104,9 @@ export default function Home() {
 
         <div className="grid w-full max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-lg border border-neutral-300 p-4 text-left">
-            <p className="text-sm font-semibold text-neutral-900">Free, browser-based rendering</p>
+            <p className="text-sm font-semibold text-neutral-900">Edge Render</p>
             <p className="mt-1 text-sm text-neutral-600">
-              Instant, quick video rendering right in your browser — no upload, no cost, no daily limit.
+              Free, instant, quick video rendering right in your browser — no upload, no cost, no daily limit.
             </p>
           </div>
           <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-left">
