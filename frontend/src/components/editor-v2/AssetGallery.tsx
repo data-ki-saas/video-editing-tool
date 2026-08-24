@@ -1,12 +1,12 @@
 "use client";
 
 /**
- * This project's uploaded assets, grouped into three kind-labeled rows --
- * Videos, Images, Music -- each independently horizontally scrollable,
- * replacing the original single mixed-kind row (a music tile is visually
- * distinct enough on its own, but grouping by kind up front makes each row
- * scannable rather than needing to spot the odd tile out of a mixed
- * strip). "+ Asset" opens UploadDialog instead of a permanent drop target
+ * This project's uploaded assets, grouped into three kind-labeled columns
+ * side by side -- Videos, Images, Music -- each independently vertically
+ * scrollable, replacing the original single mixed-kind row (a music tile
+ * is visually distinct enough on its own, but grouping by kind up front
+ * makes each column scannable rather than needing to spot the odd tile out
+ * of a mixed strip). "+ Asset" opens UploadDialog instead of a permanent drop target
  * taking up space; right-click offers Delete, plus an "Add" action whose
  * meaning depends on kind: for an image, places it as an overlay on the
  * timeline (ThreePaneEditor's handleAddOverlay); for a video, appends it
@@ -279,15 +279,15 @@ export function AssetGallery({
       {isLoading && assets.length === 0 ? (
         <ReelLoader stage="Loading assets…" className="p-0" />
       ) : (
-        <div className="flex flex-1 flex-col gap-2 overflow-y-auto">
+        <div className="flex flex-1 gap-2 overflow-hidden">
           {ASSET_SECTIONS.map(({ kind, label, emptyText }) => {
             const sectionAssets = assets.filter((asset) => asset.kind === kind);
             return (
-              <div key={kind} className="flex shrink-0 flex-col gap-1">
-                <h3 className="text-[10px] font-medium uppercase tracking-wide text-muted">{label}</h3>
-                <div className="flex min-h-16 items-center gap-2 overflow-x-auto">
+              <div key={kind} className="flex min-w-0 flex-1 flex-col gap-1">
+                <h3 className="text-center text-[10px] font-medium uppercase tracking-wide text-muted">{label}</h3>
+                <div className="flex flex-1 flex-col items-center gap-2 overflow-y-auto">
                   {sectionAssets.length === 0 ? (
-                    <p className="text-xs text-muted">{emptyText}</p>
+                    <p className="text-center text-[10px] text-muted">{emptyText}</p>
                   ) : (
                     sectionAssets.map(renderTile)
                   )}
