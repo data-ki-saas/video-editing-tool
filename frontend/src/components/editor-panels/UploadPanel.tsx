@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { uploadAssetWithProgress, type Asset } from "@/lib/api";
+import { downscaleImageIfNeeded } from "@/lib/image";
 
 const ACCEPTED_FILE_TYPES = "video/mp4,image/jpeg,image/png";
 
@@ -30,7 +31,8 @@ export function UploadPanel({
     setError(null);
     setLastUploaded(null);
     try {
-      const asset = await uploadAssetWithProgress(projectId, file, setProgress);
+      const uploadFile = await downscaleImageIfNeeded(file);
+      const asset = await uploadAssetWithProgress(projectId, uploadFile, setProgress);
       onUploaded(asset);
       setLastUploaded(asset.filename);
     } catch (err) {
