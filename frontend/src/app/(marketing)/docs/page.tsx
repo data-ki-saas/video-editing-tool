@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Documentation",
-  description: "How Reel Creator works: getting started, adding assets, editing actions, and generating your reel.",
+  description:
+    "How Reel Creator works: getting started, adding assets, editing actions, and generating your reel — including free, instant, browser-based rendering.",
   alternates: { canonical: "/docs" },
 };
 

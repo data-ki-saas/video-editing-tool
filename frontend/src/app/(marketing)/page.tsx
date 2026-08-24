@@ -8,16 +8,28 @@ const SITE_URL = "https://video-editing-tool-gamma.vercel.app";
 // a video reel maker that works across business types, not a single-niche
 // tool -- "for any business" and the explicit niche list both matter for
 // matching real search intent (e.g. "auto dealership video maker",
-// "real estate listing video generator").
+// "real estate listing video generator"). Also covers the free render's own
+// search intent ("browser-based video renderer", "render video online free
+// no upload", "instant video render") now that it's a real, shippable
+// differentiator (no upload/wait for the cloud render, no cost) -- see
+// keywords below and the on-page "Free render" callout further down.
 export const metadata: Metadata = {
-  title: "Video Reel Maker for Any Business",
+  title: "Video Reel Maker for Any Business — Free Browser-Based Rendering",
   description:
-    "Turn your photos and clips into a share-ready video reel — for real estate, hotels, auto dealers, garment and gift shops, hardware stores, or any business. Works on desktop and mobile. Free to start.",
+    "Turn your photos and clips into a share-ready video reel — for real estate, hotels, auto dealers, garment and gift shops, hardware stores, or any business. Render instantly right in your browser, free, with no upload or wait. Works on desktop and mobile.",
+  keywords: [
+    "video reel maker",
+    "browser-based video renderer",
+    "render video online free",
+    "instant video render",
+    "no upload video editor",
+    "real estate video maker",
+  ],
   alternates: { canonical: "/" },
   openGraph: {
     title: "Reel Creator — Video Reel Maker for Any Business",
     description:
-      "Turn your photos and clips into a share-ready video reel, for any business niche. Works on desktop and mobile.",
+      "Turn your photos and clips into a share-ready video reel, for any business niche. Free, instant, browser-based rendering — no upload, no wait. Works on desktop and mobile.",
     url: SITE_URL,
     siteName: "Reel Creator",
     type: "website",
@@ -25,7 +37,8 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary",
     title: "Reel Creator — Video Reel Maker for Any Business",
-    description: "Turn your photos and clips into a share-ready video reel, for any business niche.",
+    description:
+      "Turn your photos and clips into a share-ready video reel, for any business niche. Free, instant, browser-based rendering.",
   },
 };
 
@@ -45,7 +58,7 @@ const jsonLd = {
   applicationCategory: "MultimediaApplication",
   operatingSystem: "Web",
   description:
-    "Turn photos and clips into a share-ready video reel for any business — real estate, hospitality, auto, retail, and more.",
+    "Turn photos and clips into a share-ready video reel for any business — real estate, hospitality, auto, retail, and more. Free, instant, browser-based rendering, no upload required.",
   offers: {
     "@type": "Offer",
     price: "0",
@@ -88,9 +101,9 @@ export default function Home() {
 
         <div className="grid w-full max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-lg border border-neutral-300 p-4 text-left">
-            <p className="text-sm font-semibold text-neutral-900">Free render</p>
+            <p className="text-sm font-semibold text-neutral-900">Free, browser-based rendering</p>
             <p className="mt-1 text-sm text-neutral-600">
-              Render your reel right in your browser — instant, no cost, no daily limit.
+              Instant, quick video rendering right in your browser — no upload, no cost, no daily limit.
             </p>
           </div>
           <div className="rounded-lg border border-dashed border-neutral-300 p-4 text-left">

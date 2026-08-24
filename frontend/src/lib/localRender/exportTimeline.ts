@@ -74,19 +74,31 @@ export interface LocalRenderResult {
   mimeType: string;
 }
 
-function loadOverlayImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
+/** Loads an overlay image via fetch()+blob URL rather than `<img
+ * crossOrigin="anonymous">` directly. Both need a real CORS response to
+ * avoid tainting the canvas (the encoder reads pixels back every frame,
+ * unlike CanvasPlayer's own loadImage, which only ever displays the image
+ * and never reads it back) -- but every other place in this app loads the
+ * SAME asset URL with no crossOrigin attribute at all (AssetGallery's
+ * thumbnail, OverlayTrack, CanvasPlayer's preview). Requesting that exact
+ * URL a second time with crossOrigin set can silently fail against an
+ * already-cached non-CORS response for it. Fetching it ourselves always
+ * performs a real CORS-mode network request, and the resulting blob: URL is
+ * inherently origin-clean for canvas reads regardless of crossOrigin at
+ * all, sidestepping the whole cache-interaction question. The blob URL is
+ * tracked by the caller and revoked once the export finishes. */
+async function loadOverlayImage(url: string): Promise<{ image: HTMLImageElement; blobUrl: string }> {
+  const response = await fetch(url, { mode: "cors" });
+  if (!response.ok) throw new Error(`Could not fetch overlay image (HTTP ${response.status})`);
+  const blobUrl = URL.createObjectURL(await response.blob());
+
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
-    // Required so the encoder can read the composited canvas back out --
-    // unlike CanvasPlayer's own loadImage (preview-only, never reads canvas
-    // pixels back, so an un-tainted canvas doesn't matter there), a local
-    // export DOES read the canvas every frame (that's what encoding is), so
-    // any image drawn onto it without CORS would taint it and throw.
-    img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Could not load an overlay image for export"));
-    img.src = url;
+    img.onerror = () => reject(new Error("Could not decode overlay image for export"));
+    img.src = blobUrl;
   });
+  return { image, blobUrl };
 }
 
 /** Picks the best output container/codec combo this browser can actually
@@ -205,6 +217,7 @@ export async function exportVideoLocally(
 
   const videoElementsByAssetId = new Map<string, HTMLVideoElement>();
   const overlayImagesByAssetId = new Map<string, HTMLImageElement>();
+  const overlayBlobUrls: string[] = [];
 
   try {
     for (const clip of sequenceClips) {
@@ -217,9 +230,14 @@ export async function exportVideoLocally(
       const url = assetUrlById[assetId];
       if (!url) continue;
       try {
-        overlayImagesByAssetId.set(assetId, await loadOverlayImage(url));
-      } catch {
+        const { image, blobUrl } = await loadOverlayImage(url);
+        overlayImagesByAssetId.set(assetId, image);
+        overlayBlobUrls.push(blobUrl);
+      } catch (err) {
         // Skipped -- matches CanvasPlayer's "one broken overlay shouldn't block the rest" policy.
+        // Logged (rather than fully silent) so a missing overlay in the
+        // output is diagnosable instead of just vanishing without a trace.
+        console.warn(`Free render: could not load overlay image (assetId ${assetId})`, err);
       }
     }
 
@@ -321,6 +339,9 @@ export async function exportVideoLocally(
     for (const video of videoElementsByAssetId.values()) {
       video.removeAttribute("src");
       video.load();
+    }
+    for (const blobUrl of overlayBlobUrls) {
+      URL.revokeObjectURL(blobUrl);
     }
   }
 }
