@@ -60,18 +60,37 @@ function ImageMotionIcon({ className }: { className?: string }) {
   );
 }
 
+// Small notification-style count badge, shown on a tab trigger once it has
+// at least one item -- the at-a-glance equivalent of Clip's preview swatch
+// for the three tabs (Text, Auto-Caption, Image) that don't have a single
+// swatch-able value to show instead.
+function CountBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-medium leading-none text-accent-foreground">
+      {count}
+    </span>
+  );
+}
+
 export function UserActions({
   selectedClipRectId,
   onOpenClipRectDialog,
   onOpenTextDialog,
+  textOverlayCount,
   onOpenTranscriptDialog,
+  autoCaptionCount,
   onOpenImageTemplatesDialog,
+  imageCount,
 }: {
   selectedClipRectId: string | null;
   onOpenClipRectDialog: () => void;
   onOpenTextDialog: () => void;
+  textOverlayCount: number;
   onOpenTranscriptDialog: () => void;
+  autoCaptionCount: number;
   onOpenImageTemplatesDialog: () => void;
+  imageCount: number;
 }) {
   const selectedClipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selectedClipRectId) ?? null;
   return (
@@ -98,7 +117,10 @@ export function UserActions({
         title="Add text"
         className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pt-2 text-muted hover:bg-background"
       >
-        <TextGlyphIcon className="h-4 w-4" />
+        <span className="relative">
+          <TextGlyphIcon className="h-4 w-4" />
+          <CountBadge count={textOverlayCount} />
+        </span>
         <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
           Text
         </span>
@@ -109,7 +131,10 @@ export function UserActions({
         title="Auto-captions"
         className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pt-2 text-muted hover:bg-background"
       >
-        <ClosedCaptionIcon className="h-4 w-4" />
+        <span className="relative">
+          <ClosedCaptionIcon className="h-4 w-4" />
+          <CountBadge count={autoCaptionCount} />
+        </span>
         <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
           Auto-Caption
         </span>
@@ -120,7 +145,10 @@ export function UserActions({
         title="Animate a photo"
         className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pt-2 text-muted hover:bg-background"
       >
-        <ImageMotionIcon className="h-4 w-4" />
+        <span className="relative">
+          <ImageMotionIcon className="h-4 w-4" />
+          <CountBadge count={imageCount} />
+        </span>
         <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
           Image
         </span>

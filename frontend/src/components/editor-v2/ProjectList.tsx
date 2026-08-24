@@ -79,8 +79,8 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
                   value={project.name}
                   onCommit={(name) => handleRename(project, name)}
                   ariaLabel="Reel name"
-                  className="block w-full truncate rounded-md bg-accent px-2 py-1 text-sm text-accent-foreground"
-                  inputClassName="block w-full truncate rounded-md border border-accent-foreground/40 bg-accent px-2 py-1 text-sm text-accent-foreground outline-none"
+                  className="block w-full truncate rounded-md px-2 py-1 text-sm font-medium text-foreground"
+                  inputClassName="block w-full truncate rounded-md border border-border px-2 py-1 text-sm font-medium text-foreground outline-none"
                 />
               ) : (
                 <Link

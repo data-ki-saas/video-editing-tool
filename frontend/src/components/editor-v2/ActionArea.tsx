@@ -188,8 +188,11 @@ export function ActionArea({
           selectedClipRectId={selectedClipRectId}
           onOpenClipRectDialog={() => setIsClipRectDialogOpen(true)}
           onOpenTextDialog={onOpenTextDialog}
+          textOverlayCount={textOverlays.length}
           onOpenTranscriptDialog={onOpenTranscriptDialog}
+          autoCaptionCount={transcriptCaption ? 1 : 0}
           onOpenImageTemplatesDialog={onOpenImageTemplatesDialog}
+          imageCount={sequenceClips.filter((clip) => clip.kind === "image").length}
         />
       </div>
 
