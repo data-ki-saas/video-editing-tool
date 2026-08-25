@@ -60,7 +60,7 @@
  * plays without music that time around rather than blocking playback on it.
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { extractPreviewFrames, getVideoDuration } from "@/lib/video/video";
+import { extractPreviewFrames, getVideoDuration, drawImageFlipped } from "@/lib/video/video";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
 import {
   frameIndexAtTime,
@@ -75,6 +75,8 @@ import {
   computeOverlayRects,
   computeCoverFitSourceRect,
   computeProgress,
+  computeMainAudioGainBreakpoints,
+  AUDIO_TRANSITION_RAMP_SECONDS,
   DEFAULT_OVERLAY_FRAMING,
   buildSequenceClipInfos,
   totalSequenceDuration,
@@ -96,72 +98,6 @@ import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
 export interface CanvasPlayerHandle {
   seekTo(seconds: number): void;
 }
-
-/** Draws `image`'s [sx,sy,sWidth,sHeight] source region into
- * [destX,destY,destWidth,destHeight], optionally mirrored horizontally/
- * vertically WITHIN that destination box only -- unlike the base clip's
- * own whole-canvas flip transform (drawFrameAt's own ctx.translate/scale
- * around the full canvas), a video overlay's flip (video_math.ts's
- * OverlayFraming) only ever mirrors its own box, so the translate origin
- * here is the box's own near/far edge, not the canvas's. */
-function drawImageFlipped(
-  ctx: CanvasRenderingContext2D,
-  image: HTMLImageElement,
-  sx: number,
-  sy: number,
-  sWidth: number,
-  sHeight: number,
-  destX: number,
-  destY: number,
-  destWidth: number,
-  destHeight: number,
-  flipHorizontal: boolean,
-  flipVertical: boolean
-) {
-  ctx.save();
-  ctx.translate(flipHorizontal ? destX + destWidth : destX, flipVertical ? destY + destHeight : destY);
-  ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
-  ctx.drawImage(image, sx, sy, sWidth, sHeight, 0, 0, destWidth, destHeight);
-  ctx.restore();
-}
-
-/** The base clip's own audio volume (0..1) over time, as a step function --
- * 1 everywhere by default, dipping to `1 - audioBalance` for the duration
- * of any overlay window that wants some of its own audio mixed in (see
- * video_math.ts's VideoOverlayClip.audioBalance), so the base track
- * "ducks" rather than playing at full volume underneath. Multiple
- * Picture-in-Picture overlays CAN be active at once with different
- * balances -- the strongest ducking request wins (`Math.max` of their
- * balances), rather than compounding. Hard cuts at each boundary (no
- * fade), same convention flip toggles already use elsewhere in this file.
- * Breakpoints are returned in order, each holding until the next one. */
-function computeMainAudioGainBreakpoints(
-  overlays: VideoOverlayClip[],
-  totalDurationSeconds: number
-): { timeSeconds: number; gain: number }[] {
-  const activeOverlays = overlays.filter((o) => o.audioBalance > 0);
-  const points = new Set<number>([0, totalDurationSeconds]);
-  for (const overlay of activeOverlays) {
-    if (overlay.startTimeSeconds > 0 && overlay.startTimeSeconds < totalDurationSeconds) points.add(overlay.startTimeSeconds);
-    if (overlay.endTimeSeconds > 0 && overlay.endTimeSeconds < totalDurationSeconds) points.add(overlay.endTimeSeconds);
-  }
-  const sorted = Array.from(points).sort((a, b) => a - b);
-
-  return sorted.map((timeSeconds, index) => {
-    // Sampled just after this breakpoint (the midpoint to the next one, or
-    // the point itself for the last) to decide what's active starting HERE.
-    const sampleAt = index < sorted.length - 1 ? (timeSeconds + sorted[index + 1]) / 2 : timeSeconds;
-    const maxBalance = activeOverlays
-      .filter((o) => sampleAt >= o.startTimeSeconds && sampleAt < o.endTimeSeconds)
-      .reduce((max, o) => Math.max(max, o.audioBalance), 0);
-    return { timeSeconds, gain: 1 - maxBalance };
-  });
-}
-
-// Short linear ramp (rather than a hard setValueAtTime step) for the main-
-// track ducking and overlay-audio fade transitions below -- avoids an
-// audible click/pop at a hard volume step.
-const AUDIO_TRANSITION_RAMP_SECONDS = 0.03;
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {

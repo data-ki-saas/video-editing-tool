@@ -90,6 +90,36 @@ export function seekVideoTo(video: HTMLVideoElement, timeSeconds: number): Promi
   });
 }
 
+/** Draws `source`'s [sx,sy,sWidth,sHeight] source region into
+ * [destX,destY,destWidth,destHeight], optionally mirrored horizontally/
+ * vertically WITHIN that destination box only -- e.g. a video overlay's own
+ * flip/mirror (see video_math.ts's OverlayFraming), which only ever mirrors
+ * its own box, unlike the base clip's whole-canvas flip transform. Shared by
+ * CanvasPlayer's live preview and exportTimeline.ts's offline export, both
+ * of which composite video overlays this same way -- `source` is an
+ * HTMLVideoElement in the export path (real per-frame seeks) and an
+ * HTMLImageElement in the preview path (pre-extracted preview frames). */
+export function drawImageFlipped(
+  ctx: CanvasRenderingContext2D,
+  source: CanvasImageSource,
+  sx: number,
+  sy: number,
+  sWidth: number,
+  sHeight: number,
+  destX: number,
+  destY: number,
+  destWidth: number,
+  destHeight: number,
+  flipHorizontal: boolean,
+  flipVertical: boolean
+) {
+  ctx.save();
+  ctx.translate(flipHorizontal ? destX + destWidth : destX, flipVertical ? destY + destHeight : destY);
+  ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
+  ctx.drawImage(source, sx, sy, sWidth, sHeight, 0, 0, destWidth, destHeight);
+  ctx.restore();
+}
+
 /** Extracts frames at a fixed interval, at a given thumbnail width, sharing
  * the load/seek/capture machinery between extractThumbnails and
  * extractPreviewFrames below (they only differ in interval and size). */

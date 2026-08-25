@@ -183,22 +183,20 @@ export function FeedbackArea({
   const hasMessages = assetsError || analysisError || saveError || isAnalyzing || isUploading || hasRenderMessage;
   const renderDisabled = !canRender || isRendering || (renderStatus !== null && !TERMINAL_RENDER_STATUSES.has(renderStatus));
 
+  // lib/localRender/exportTimeline.ts still has no knowledge of Creatomate's
+  // server-side speech transcription -- transcript captions stay gated on
+  // the cloud Render button until/unless a client-side transcription path
+  // exists. Video overlays, by contrast, are fully composited locally now
+  // (see that file's own module comment), so they're no longer gated here.
   const hasTranscriptCaption = Boolean(selections.transcriptCaption);
-  // lib/localRender/exportTimeline.ts (the only render path this button
-  // triggers) has no knowledge of video overlays yet -- gated the same way
-  // as auto-captions until it does, rather than silently ignoring them.
-  const hasVideoOverlays = selections.videoOverlays.length > 0;
-  const localRenderDisabled =
-    !canLocalRender || isLocalRendering || hasTranscriptCaption || hasVideoOverlays || !isLocalRenderSupported;
+  const localRenderDisabled = !canLocalRender || isLocalRendering || hasTranscriptCaption || !isLocalRenderSupported;
   const localRenderTitle = !canLocalRender
     ? "Add a video before rendering"
     : hasTranscriptCaption
       ? "Edge Render doesn't support auto-captions yet — use Render instead"
-      : hasVideoOverlays
-        ? "Edge Render doesn't support video overlays yet — use Render instead"
-        : !isLocalRenderSupported
-          ? (localRenderUnsupportedReason ?? "Edge Render needs a Chromium browser (Chrome or Microsoft Edge)")
-          : "Edge Render (in your browser, no cost)";
+      : !isLocalRenderSupported
+        ? (localRenderUnsupportedReason ?? "Edge Render needs a Chromium browser (Chrome or Microsoft Edge)")
+        : "Edge Render (in your browser, no cost)";
 
   return (
     <div className="flex h-full gap-4 px-4 py-2 text-sm">

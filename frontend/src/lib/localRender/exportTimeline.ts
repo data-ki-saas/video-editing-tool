@@ -11,6 +11,18 @@
  * offline against real seeked <video> frames instead of a live preview
  * clock," not a new compositor.
  *
+ * Video overlays (a second video asset on its own rail -- see
+ * video_math.ts's VideoOverlayClip) are composited the same way CanvasPlayer
+ * does it, just sourced from a real seeked <video> per output frame instead
+ * of pre-extracted preview frames -- see exportVideoLocally's own
+ * videoOverlayElementsByAssetId loading and the overlay-drawing block inside
+ * its main frame loop. Overlay audio
+ * (audioBalance > 0) and the resulting main-track ducking are mixed into
+ * buildMixedAudioBuffer's offline graph the same way CanvasPlayer schedules
+ * them live, just translated from the overlay's ORIGINAL-timeline window
+ * into its OUTPUT-timeline equivalent(s) via mapSourceRangeToOutputRanges,
+ * since a trim can split one window into two non-adjacent output ranges.
+ *
  * Deliberately NOT attempted here (see the plan this shipped from):
  * WebGL/worker/texture-pool architecture, frame-perfect VideoDecoder
  * demuxing, or auto-captions (transcriptCaption needs Creatomate's
@@ -32,7 +44,7 @@ import {
   type VideoCodec,
   type AudioCodec,
 } from "mediabunny";
-import { loadVideoElement, seekVideoTo } from "@/lib/video/video";
+import { loadVideoElement, seekVideoTo, drawImageFlipped } from "@/lib/video/video";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
 import {
   buildRenderSegments,
@@ -41,9 +53,19 @@ import {
   computeProgress,
   findActiveOverlays,
   findActiveTextOverlays,
+  findActiveExclusiveOverlay,
+  findActivePictureInPictureOverlays,
+  computeOverlayRects,
+  computeCoverFitSourceRect,
+  computeMainAudioGainBreakpoints,
+  mapSourceRangeToOutputRanges,
+  totalSequenceDuration,
+  AUDIO_TRANSITION_RAMP_SECONDS,
+  DEFAULT_OVERLAY_FRAMING,
   FULL_FRAME_CROP_RECT,
   type RenderSegment,
   type SequenceClipInfo,
+  type VideoOverlayClip,
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer } from "@/lib/video/textTemplates";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
@@ -152,23 +174,27 @@ function findSegmentAtOutputTime(segments: RenderSegment[], outputTimeSeconds: n
 }
 
 /** Builds the whole render's final mixed audio (main sequence audio, cut the
- * same way the video is, plus a looping background track under it) as one
+ * same way the video is, plus a looping background track under it, plus any
+ * video overlay's own audio and the main-track ducking it causes) as one
  * AudioBuffer via OfflineAudioContext -- mirrors CanvasPlayer's own preview
- * mixing (same mainAudioVolume/backgroundVolume), but rendered once,
+ * mixing (same mainAudioVolume/backgroundVolume/ducking), but rendered once,
  * offline, instead of played live. Clips whose audio fails to decode are
  * skipped (silence for their segments) rather than failing the whole
- * export, same policy as CanvasPlayer's own sequence loading. No ducking
- * here (unlike CanvasPlayer, which ducks the main track under an active
- * overlay's own audio) -- this pipeline never attempted overlay audio at
- * all, see this file's own module comment. */
+ * export, same policy as CanvasPlayer's own sequence loading. Returns any
+ * non-fatal warnings alongside the buffer, for the caller to fold into its
+ * own LocalRenderResult.warnings. */
 async function buildMixedAudioBuffer(
   segments: RenderSegment[],
   sequenceClips: SequenceClipInfo[],
   backgroundClips: SequenceClipInfo[],
+  videoOverlays: VideoOverlayClip[],
+  assetUrlById: Record<string, string>,
+  sourceTotalDurationSeconds: number,
   totalDurationSeconds: number,
   mainAudioVolume: number,
   backgroundVolume: number
-): Promise<AudioBuffer> {
+): Promise<{ buffer: AudioBuffer; warnings: string[] }> {
+  const warnings: string[] = [];
   const totalSamples = Math.max(1, Math.round(totalDurationSeconds * AUDIO_SAMPLE_RATE));
   const offlineContext = new OfflineAudioContext(AUDIO_CHANNELS, totalSamples, AUDIO_SAMPLE_RATE);
 
@@ -185,8 +211,35 @@ async function buildMixedAudioBuffer(
   }
 
   const mainGainNode = offlineContext.createGain();
-  mainGainNode.gain.value = mainAudioVolume;
   mainGainNode.connect(offlineContext.destination);
+
+  // Ducking automation for the main track -- computed against the ORIGINAL
+  // (pre-trim) sequence timeline (same convention as VideoOverlayClip's own
+  // start/end times), then each breakpoint interval is translated into its
+  // OUTPUT-time equivalent(s) via mapSourceRangeToOutputRanges, since a trim
+  // can split one interval into two non-adjacent output ranges. Unlike
+  // CanvasPlayer (which resumes from an arbitrary live offset), this offline
+  // render always starts at output time 0, so every event schedules against
+  // an absolute output time with no resume-offset bookkeeping needed.
+  const breakpoints = computeMainAudioGainBreakpoints(videoOverlays, sourceTotalDurationSeconds);
+  const outputGainEvents: { outputStartSeconds: number; gain: number }[] = [];
+  for (let i = 0; i < breakpoints.length; i++) {
+    const rangeStartSeconds = breakpoints[i].timeSeconds;
+    const rangeEndSeconds = i + 1 < breakpoints.length ? breakpoints[i + 1].timeSeconds : sourceTotalDurationSeconds;
+    if (rangeEndSeconds <= rangeStartSeconds) continue;
+    for (const outputRange of mapSourceRangeToOutputRanges(segments, rangeStartSeconds, rangeEndSeconds)) {
+      outputGainEvents.push({ outputStartSeconds: outputRange.outputStartSeconds, gain: breakpoints[i].gain * mainAudioVolume });
+    }
+  }
+  outputGainEvents.sort((a, b) => a.outputStartSeconds - b.outputStartSeconds);
+
+  let previousGain = mainAudioVolume;
+  mainGainNode.gain.setValueAtTime(previousGain, 0);
+  for (const event of outputGainEvents) {
+    mainGainNode.gain.setValueAtTime(previousGain, event.outputStartSeconds);
+    mainGainNode.gain.linearRampToValueAtTime(event.gain, event.outputStartSeconds + AUDIO_TRANSITION_RAMP_SECONDS);
+    previousGain = event.gain;
+  }
 
   for (const segment of segments) {
     const buffer = decodedByAssetId.get(segment.assetId);
@@ -195,6 +248,52 @@ async function buildMixedAudioBuffer(
     source.buffer = buffer;
     source.connect(mainGainNode);
     source.start(segment.outputStartSeconds, segment.clipLocalStartSeconds, segment.durationSeconds);
+  }
+
+  // One AudioBufferSourceNode per (overlay, output-time chunk) that wants
+  // some of its own audio (audioBalance > 0) -- mirrors CanvasPlayer's own
+  // per-overlay scheduling (fade in/out, loop = true), just keyed to
+  // absolute output time instead of a live resume offset. An overlay whose
+  // window is split by a trim gets one source per surviving chunk.
+  const overlayAudioAssetIds = Array.from(new Set(videoOverlays.filter((o) => o.audioBalance > 0).map((o) => o.assetId)));
+  const overlayAudioByAssetId = new Map<string, AudioBuffer>();
+  for (const assetId of overlayAudioAssetIds) {
+    const url = assetUrlById[assetId];
+    if (!url) continue;
+    try {
+      overlayAudioByAssetId.set(assetId, await decodeAudioBuffer(url));
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      warnings.push(`A video overlay's own audio (assetId ${assetId}) couldn't be decoded for this render: ${reason}`);
+    }
+  }
+
+  for (const overlay of videoOverlays) {
+    if (overlay.audioBalance <= 0) continue;
+    const overlayBuffer = overlayAudioByAssetId.get(overlay.assetId);
+    if (!overlayBuffer || overlayBuffer.duration <= 0) continue;
+
+    for (const outputRange of mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlay.endTimeSeconds)) {
+      const windowDurationSeconds = outputRange.outputEndSeconds - outputRange.outputStartSeconds;
+      if (windowDurationSeconds <= 0) continue;
+      const startTimeSeconds = outputRange.outputStartSeconds;
+      const elapsedIntoWindowSeconds = outputRange.sourceOverlapStartSeconds - overlay.startTimeSeconds;
+      const fadeOutStartSeconds = Math.max(
+        startTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS,
+        startTimeSeconds + windowDurationSeconds - AUDIO_TRANSITION_RAMP_SECONDS
+      );
+
+      const overlaySource = offlineContext.createBufferSource();
+      overlaySource.buffer = overlayBuffer;
+      overlaySource.loop = true;
+      const overlayGainNode = offlineContext.createGain();
+      overlayGainNode.gain.setValueAtTime(0, startTimeSeconds);
+      overlayGainNode.gain.linearRampToValueAtTime(overlay.audioBalance, startTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS);
+      overlayGainNode.gain.setValueAtTime(overlay.audioBalance, fadeOutStartSeconds);
+      overlayGainNode.gain.linearRampToValueAtTime(0, startTimeSeconds + windowDurationSeconds);
+      overlaySource.connect(overlayGainNode).connect(offlineContext.destination);
+      overlaySource.start(startTimeSeconds, elapsedIntoWindowSeconds % overlayBuffer.duration, windowDurationSeconds);
+    }
   }
 
   if (backgroundClips.length > 0) {
@@ -218,7 +317,7 @@ async function buildMixedAudioBuffer(
     }
   }
 
-  return offlineContext.startRendering();
+  return { buffer: await offlineContext.startRendering(), warnings };
 }
 
 export async function exportVideoLocally(
@@ -241,6 +340,11 @@ export async function exportVideoLocally(
   // held for its whole segment instead of seeked per-frame like a video.
   const imageClipElementsByAssetId = new Map<string, HTMLImageElement>();
   const overlayImagesByAssetId = new Map<string, HTMLImageElement>();
+  // A video overlay's own source, keyed by assetId (shared across multiple
+  // overlay clips reusing the same asset) -- a real seekable <video>, same
+  // as videoElementsByAssetId above, so each output frame samples an actual
+  // decoded frame rather than a pre-extracted preview one.
+  const videoOverlayElementsByAssetId = new Map<string, HTMLVideoElement>();
   const overlayBlobUrls: string[] = [];
   const warnings: string[] = [];
 
@@ -277,6 +381,26 @@ export async function exportVideoLocally(
         // devtools.
         const reason = err instanceof Error ? err.message : String(err);
         const message = `Overlay image (assetId ${assetId}) couldn't be loaded for this render: ${reason}`;
+        console.warn(`Edge Render: ${message}`);
+        warnings.push(message);
+      }
+    }
+
+    const videoOverlayAssetIds = new Set(selections.videoOverlays.map((overlay) => overlay.assetId));
+    for (const assetId of videoOverlayAssetIds) {
+      const url = assetUrlById[assetId];
+      if (!url) {
+        const message = `A video overlay (assetId ${assetId}) has no resolved URL -- it won't appear in this render.`;
+        console.warn(`Edge Render: ${message}`);
+        warnings.push(message);
+        continue;
+      }
+      try {
+        videoOverlayElementsByAssetId.set(assetId, await loadVideoElement(url, "auto"));
+      } catch (err) {
+        // Skipped -- matches CanvasPlayer's "one broken overlay shouldn't block the rest" policy.
+        const reason = err instanceof Error ? err.message : String(err);
+        const message = `A video overlay (assetId ${assetId}) couldn't be loaded for this render: ${reason}`;
         console.warn(`Edge Render: ${message}`);
         warnings.push(message);
       }
@@ -319,6 +443,16 @@ export async function exportVideoLocally(
         await seekVideoTo(source, localSeconds);
       }
 
+      // At most one of these is active at a time (Full-Screen and
+      // Split-Screen claim exclusivity over each other) -- see
+      // findActiveExclusiveOverlay's own doc comment. `baseRect: null` means
+      // Full-Screen is active, so the base clip is skipped entirely below
+      // (the overlay's own draw, further down, fully covers the canvas).
+      const activeExclusiveOverlay = findActiveExclusiveOverlay(selections.videoOverlays, sourceTimeSeconds);
+      const { baseRect, overlayRect } = activeExclusiveOverlay
+        ? computeOverlayRects(activeExclusiveOverlay.layout)
+        : { baseRect: FULL_FRAME_CROP_RECT, overlayRect: null };
+
       if (source) {
         const sourceWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
         const sourceHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
@@ -334,10 +468,79 @@ export async function exportVideoLocally(
         ctx.save();
         ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
         ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
-        ctx.drawImage(source, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+        if (baseRect && activeExclusiveOverlay?.layout.type === "split-screen") {
+          // A Split-Screen half's own box generally has a DIFFERENT aspect
+          // ratio than `crop` -- cover-fit the already-cropped region into
+          // it using this window's own baseFraming pan, exactly mirroring
+          // CanvasPlayer's identical branch.
+          const baseDestX = baseRect.x * canvas.width;
+          const baseDestY = baseRect.y * canvas.height;
+          const baseDestWidth = baseRect.width * canvas.width;
+          const baseDestHeight = baseRect.height * canvas.height;
+          const { panX, panY, flipHorizontal: baseFlipH, flipVertical: baseFlipV } =
+            activeExclusiveOverlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING;
+          const { sx: bsx, sy: bsy, sWidth: bsw, sHeight: bsh } = computeCoverFitSourceRect(
+            sWidth, sHeight, baseDestWidth, baseDestHeight, panX, panY
+          );
+          drawImageFlipped(ctx, source, sx + bsx, sy + bsy, bsw, bsh, baseDestX, baseDestY, baseDestWidth, baseDestHeight, baseFlipH, baseFlipV);
+        } else if (baseRect) {
+          // null only for an active Full-Screen overlay -- its own draw
+          // below fully covers the canvas regardless, so skipping this is a
+          // pure optimization, never load-bearing for correctness.
+          ctx.drawImage(
+            source, sx, sy, sWidth, sHeight,
+            baseRect.x * canvas.width, baseRect.y * canvas.height, baseRect.width * canvas.width, baseRect.height * canvas.height
+          );
+        }
         ctx.restore();
       } else {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+
+      // Composited AFTER the flip transform above is undone -- a video
+      // overlay is independent of the base clip's own flip state.
+      if (activeExclusiveOverlay && overlayRect) {
+        const overlayVideo = videoOverlayElementsByAssetId.get(activeExclusiveOverlay.assetId);
+        if (overlayVideo) {
+          const localOffsetSeconds = activeExclusiveOverlay.sourceStartSeconds + (sourceTimeSeconds - activeExclusiveOverlay.startTimeSeconds);
+          // Loops back to the start once the window runs past one
+          // play-through of the source, same as CanvasPlayer -- frameIndexAtTime's
+          // seek equivalent (seekVideoTo below) would otherwise just clamp
+          // to the end and freeze there.
+          const loopedOffsetSeconds = overlayVideo.duration > 0 ? localOffsetSeconds % overlayVideo.duration : localOffsetSeconds;
+          await seekVideoTo(overlayVideo, loopedOffsetSeconds);
+          const destX = overlayRect.x * canvas.width;
+          const destY = overlayRect.y * canvas.height;
+          const destWidth = overlayRect.width * canvas.width;
+          const destHeight = overlayRect.height * canvas.height;
+          const { sx: osx, sy: osy, sWidth: osw, sHeight: osh } = computeCoverFitSourceRect(
+            overlayVideo.videoWidth, overlayVideo.videoHeight, destWidth, destHeight,
+            activeExclusiveOverlay.framing.panX, activeExclusiveOverlay.framing.panY
+          );
+          drawImageFlipped(
+            ctx, overlayVideo, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+            activeExclusiveOverlay.framing.flipHorizontal, activeExclusiveOverlay.framing.flipVertical
+          );
+        }
+      }
+
+      // Picture-in-Picture overlays float on top of whatever's showing --
+      // unlike the exclusive layouts, any number can be active at once.
+      for (const pip of findActivePictureInPictureOverlays(selections.videoOverlays, sourceTimeSeconds)) {
+        if (pip.layout.type !== "picture-in-picture") continue; // narrows the type for pip.layout.rect below
+        const overlayVideo = videoOverlayElementsByAssetId.get(pip.assetId);
+        if (!overlayVideo) continue;
+        const localOffsetSeconds = pip.sourceStartSeconds + (sourceTimeSeconds - pip.startTimeSeconds);
+        const loopedOffsetSeconds = overlayVideo.duration > 0 ? localOffsetSeconds % overlayVideo.duration : localOffsetSeconds;
+        await seekVideoTo(overlayVideo, loopedOffsetSeconds);
+        const destX = pip.layout.rect.x * canvas.width;
+        const destY = pip.layout.rect.y * canvas.height;
+        const destWidth = pip.layout.rect.width * canvas.width;
+        const destHeight = pip.layout.rect.height * canvas.height;
+        const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
+          overlayVideo.videoWidth, overlayVideo.videoHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY
+        );
+        drawImageFlipped(ctx, overlayVideo, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
       }
 
       for (const overlay of findActiveOverlays(selections.overlayImages, sourceTimeSeconds)) {
@@ -376,14 +579,18 @@ export async function exportVideoLocally(
     }
 
     if (audioSource) {
-      const mixedAudio = await buildMixedAudioBuffer(
+      const { buffer: mixedAudio, warnings: audioWarnings } = await buildMixedAudioBuffer(
         segments,
         sequenceClips,
         backgroundClips,
+        selections.videoOverlays,
+        assetUrlById,
+        totalSequenceDuration(sequenceClips),
         totalDurationSeconds,
         mainAudioVolume,
         backgroundVolume
       );
+      warnings.push(...audioWarnings);
       await audioSource.add(mixedAudio);
     }
 
@@ -393,6 +600,10 @@ export async function exportVideoLocally(
     return { blob: new Blob([target.buffer], { type: mimeType }), mimeType, warnings };
   } finally {
     for (const video of videoElementsByAssetId.values()) {
+      video.removeAttribute("src");
+      video.load();
+    }
+    for (const video of videoOverlayElementsByAssetId.values()) {
       video.removeAttribute("src");
       video.load();
     }

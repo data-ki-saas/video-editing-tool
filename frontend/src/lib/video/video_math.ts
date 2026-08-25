@@ -538,6 +538,51 @@ export function findActivePictureInPictureOverlays(clips: VideoOverlayClip[], ti
   return clips.filter((c) => c.layout.type === "picture-in-picture" && timeSeconds >= c.startTimeSeconds && timeSeconds < c.endTimeSeconds);
 }
 
+// Short linear ramp (rather than a hard setValueAtTime step) for the main-
+// track ducking and overlay-audio fade transitions below -- avoids an
+// audible click/pop at a hard volume step. Shared by CanvasPlayer's live
+// mixing graph and exportTimeline.ts's offline mix, so both fade at the same
+// rate.
+export const AUDIO_TRANSITION_RAMP_SECONDS = 0.03;
+
+/** The base clip's own audio volume (0..1) over time, as a step function --
+ * 1 everywhere by default, dipping to `1 - audioBalance` for the duration
+ * of any overlay window that wants some of its own audio mixed in (see
+ * VideoOverlayClip.audioBalance above), so the base track "ducks" rather
+ * than playing at full volume underneath. Multiple Picture-in-Picture
+ * overlays CAN be active at once with different balances -- the strongest
+ * ducking request wins (`Math.max` of their balances), rather than
+ * compounding. Hard cuts at each boundary (no fade) -- callers apply their
+ * own short ramp (AUDIO_TRANSITION_RAMP_SECONDS above) around each
+ * breakpoint instead. Breakpoints are returned in order, each holding until
+ * the next one. All times here are in the ORIGINAL (pre-trim) sequence
+ * timeline, same as VideoOverlayClip.startTimeSeconds/endTimeSeconds --
+ * see RenderSegment's own doc comment on that convention, and
+ * mapSourceRangeToOutputRanges below for translating a breakpoint interval
+ * into its OUTPUT-time equivalent(s) for an offline render. */
+export function computeMainAudioGainBreakpoints(
+  overlays: VideoOverlayClip[],
+  totalDurationSeconds: number
+): { timeSeconds: number; gain: number }[] {
+  const activeOverlays = overlays.filter((o) => o.audioBalance > 0);
+  const points = new Set<number>([0, totalDurationSeconds]);
+  for (const overlay of activeOverlays) {
+    if (overlay.startTimeSeconds > 0 && overlay.startTimeSeconds < totalDurationSeconds) points.add(overlay.startTimeSeconds);
+    if (overlay.endTimeSeconds > 0 && overlay.endTimeSeconds < totalDurationSeconds) points.add(overlay.endTimeSeconds);
+  }
+  const sorted = Array.from(points).sort((a, b) => a - b);
+
+  return sorted.map((timeSeconds, index) => {
+    // Sampled just after this breakpoint (the midpoint to the next one, or
+    // the point itself for the last) to decide what's active starting HERE.
+    const sampleAt = index < sorted.length - 1 ? (timeSeconds + sorted[index + 1]) / 2 : timeSeconds;
+    const maxBalance = activeOverlays
+      .filter((o) => sampleAt >= o.startTimeSeconds && sampleAt < o.endTimeSeconds)
+      .reduce((max, o) => Math.max(max, o.audioBalance), 0);
+    return { timeSeconds, gain: 1 - maxBalance };
+  });
+}
+
 /**
  * The base clip's own destination rect (null when it's fully covered, i.e.
  * Full-Screen) and the overlay's own destination rect, for a given layout --
