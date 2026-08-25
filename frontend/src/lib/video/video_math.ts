@@ -32,29 +32,6 @@ export function generateSampleTimestamps(durationSeconds: number, intervalSecond
   return timestamps;
 }
 
-// Spec: the resize notch can stretch a panel's height to within +/-25% of
-// its initial value ("either way from initial value") -- not +/-25% of
-// whatever it's currently at, which would let repeated drags creep past the
-// limit.
-export const DEFAULT_MAX_STRETCH_RATIO = 0.25;
-
-/**
- * Clamps a candidate panel height to +/-`maxStretchRatio` of its initial
- * value. Used by ResizablePanel while dragging its top notch (the bottom
- * edge never moves -- only the top does, so only height needs clamping).
- * Clamped in pixels rather than clamping the drag delta itself, so the
- * result stays correct however far the pointer has moved past the limit.
- */
-export function clampPanelHeight(
-  initialHeightPx: number,
-  candidateHeightPx: number,
-  maxStretchRatio: number = DEFAULT_MAX_STRETCH_RATIO
-): number {
-  const min = initialHeightPx * (1 - maxStretchRatio);
-  const max = initialHeightPx * (1 + maxStretchRatio);
-  return Math.min(Math.max(candidateHeightPx, min), max);
-}
-
 // Bounds for the CanvasPlayer's preview frame rate (see
 // components/editor-v2/CanvasPlayer.tsx) -- tunable in one place. Never goes
 // below MIN: a clip playing back slower than 5fps stops reading as
@@ -769,14 +746,16 @@ export function totalSequenceDuration(clips: SequenceClipInfo[]): number {
   return clips.reduce((sum, clip) => sum + clip.durationSeconds, 0);
 }
 
-// Keeps background music audible under the main clip's own audio without
-// drowning it out -- no volume control exposed for it (v1), matching this
-// app's "smart default over exposing every knob" bias. Shared between
-// CanvasPlayer.tsx's live preview and lib/localRender/exportTimeline.ts's
-// offline mix so the two never drift out of sync independently (see also
-// compileCreatomateTimeline.ts's BACKGROUND_MUSIC_VOLUME_PERCENT, which
-// mirrors this same value for the Creatomate render).
-export const BACKGROUND_MUSIC_GAIN = 0.5;
+// The background-music volume every reel started with before
+// Timeline.backgroundVolume existed -- read as that field's fallback
+// wherever it's absent (CanvasPlayer.tsx's live preview,
+// lib/localRender/exportTimeline.ts's offline mix,
+// compileCreatomateTimeline.ts's actual render), so an old reel's rendered
+// loudness doesn't change out from under it just by opening it again.
+export const DEFAULT_BACKGROUND_VOLUME = 0.5;
+// Same role for Timeline.mainAudioVolume -- the main sequence's own audio
+// always played back unducked at full volume before that field existed.
+export const DEFAULT_MAIN_AUDIO_VOLUME = 1;
 
 /**
  * Which clip (and the local offset within it) a global elapsed-seconds

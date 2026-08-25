@@ -42,7 +42,6 @@ import {
   findActiveOverlays,
   findActiveTextOverlays,
   FULL_FRAME_CROP_RECT,
-  BACKGROUND_MUSIC_GAIN,
   type RenderSegment,
   type SequenceClipInfo,
 } from "@/lib/video/video_math";
@@ -60,6 +59,11 @@ export interface LocalRenderInput {
   backgroundClips: SequenceClipInfo[];
   /** assetId -> presigned R2 URL, for resolving overlay images (see ThreePaneEditor's own assetUrlById). */
   assetUrlById: Record<string, string>;
+  // Flat 0..1 multipliers, same values CanvasPlayer's live preview mixes
+  // with (see that file's own props doc) -- kept in sync here so a local
+  // export never diverges from what the preview actually sounded like.
+  mainAudioVolume: number;
+  backgroundVolume: number;
   outputWidth: number;
   outputHeight: number;
 }
@@ -150,15 +154,20 @@ function findSegmentAtOutputTime(segments: RenderSegment[], outputTimeSeconds: n
 /** Builds the whole render's final mixed audio (main sequence audio, cut the
  * same way the video is, plus a looping background track under it) as one
  * AudioBuffer via OfflineAudioContext -- mirrors CanvasPlayer's own preview
- * mixing (same BACKGROUND_MUSIC_GAIN), but rendered once, offline, instead
- * of played live. Clips whose audio fails to decode are skipped (silence for
- * their segments) rather than failing the whole export, same policy as
- * CanvasPlayer's own sequence loading. */
+ * mixing (same mainAudioVolume/backgroundVolume), but rendered once,
+ * offline, instead of played live. Clips whose audio fails to decode are
+ * skipped (silence for their segments) rather than failing the whole
+ * export, same policy as CanvasPlayer's own sequence loading. No ducking
+ * here (unlike CanvasPlayer, which ducks the main track under an active
+ * overlay's own audio) -- this pipeline never attempted overlay audio at
+ * all, see this file's own module comment. */
 async function buildMixedAudioBuffer(
   segments: RenderSegment[],
   sequenceClips: SequenceClipInfo[],
   backgroundClips: SequenceClipInfo[],
-  totalDurationSeconds: number
+  totalDurationSeconds: number,
+  mainAudioVolume: number,
+  backgroundVolume: number
 ): Promise<AudioBuffer> {
   const totalSamples = Math.max(1, Math.round(totalDurationSeconds * AUDIO_SAMPLE_RATE));
   const offlineContext = new OfflineAudioContext(AUDIO_CHANNELS, totalSamples, AUDIO_SAMPLE_RATE);
@@ -175,12 +184,16 @@ async function buildMixedAudioBuffer(
     }
   }
 
+  const mainGainNode = offlineContext.createGain();
+  mainGainNode.gain.value = mainAudioVolume;
+  mainGainNode.connect(offlineContext.destination);
+
   for (const segment of segments) {
     const buffer = decodedByAssetId.get(segment.assetId);
     if (!buffer) continue;
     const source = offlineContext.createBufferSource();
     source.buffer = buffer;
-    source.connect(offlineContext.destination);
+    source.connect(mainGainNode);
     source.start(segment.outputStartSeconds, segment.clipLocalStartSeconds, segment.durationSeconds);
   }
 
@@ -199,7 +212,7 @@ async function buildMixedAudioBuffer(
       backgroundSource.buffer = concatenated;
       backgroundSource.loop = true;
       const gainNode = offlineContext.createGain();
-      gainNode.gain.value = BACKGROUND_MUSIC_GAIN;
+      gainNode.gain.value = backgroundVolume;
       backgroundSource.connect(gainNode).connect(offlineContext.destination);
       backgroundSource.start(0);
     }
@@ -212,7 +225,7 @@ export async function exportVideoLocally(
   input: LocalRenderInput,
   onProgress?: (progress: LocalRenderProgress) => void
 ): Promise<LocalRenderResult> {
-  const { selections, sequenceClips, backgroundClips, assetUrlById, outputWidth, outputHeight } = input;
+  const { selections, sequenceClips, backgroundClips, assetUrlById, mainAudioVolume, backgroundVolume, outputWidth, outputHeight } = input;
   if (sequenceClips.length === 0) throw new Error("Nothing to render -- add a video to the sequence first.");
 
   const baseCropRect = selections.cropRect ?? FULL_FRAME_CROP_RECT;
@@ -363,7 +376,14 @@ export async function exportVideoLocally(
     }
 
     if (audioSource) {
-      const mixedAudio = await buildMixedAudioBuffer(segments, sequenceClips, backgroundClips, totalDurationSeconds);
+      const mixedAudio = await buildMixedAudioBuffer(
+        segments,
+        sequenceClips,
+        backgroundClips,
+        totalDurationSeconds,
+        mainAudioVolume,
+        backgroundVolume
+      );
       await audioSource.add(mixedAudio);
     }
 

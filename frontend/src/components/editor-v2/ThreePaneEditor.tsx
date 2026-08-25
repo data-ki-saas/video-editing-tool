@@ -52,6 +52,8 @@ import {
   computeOutputDimensions,
   DEFAULT_OVERLAY_FRAMING,
   DEFAULT_SPLIT_SCREEN_RATIO,
+  DEFAULT_MAIN_AUDIO_VOLUME,
+  DEFAULT_BACKGROUND_VOLUME,
   type CropRect,
   type OverlayImage,
   type SequenceEntry,
@@ -334,6 +336,14 @@ export function ThreePaneEditor({
       (initialTimeline.selectedBackgroundAssetId ? [initialTimeline.selectedBackgroundAssetId] : [])
   );
 
+  // Flat 0..1 volume for each audio rail's own VolumeFader (Playground.tsx)
+  // -- cosmetic/not undo-tracked, same tier as selectedBackgroundTrackId
+  // above (see projects.ts's Timeline.mainAudioVolume doc comment). Falls
+  // back to what was hardcoded before either of these controls existed, so
+  // an old reel's rendered loudness doesn't change out from under it.
+  const [mainAudioVolume, setMainAudioVolume] = useState(initialTimeline.mainAudioVolume ?? DEFAULT_MAIN_AUDIO_VOLUME);
+  const [backgroundVolume, setBackgroundVolume] = useState(initialTimeline.backgroundVolume ?? DEFAULT_BACKGROUND_VOLUME);
+
   // Frame-affecting, history-tracked -- every change is a revertible entry
   // in FeedbackArea's change list, persisted into Timeline.editHistory so
   // reopening this reel resumes with the same history intact.
@@ -383,23 +393,25 @@ export function ThreePaneEditor({
     overlayImages: rawSelections.overlayImages ?? [],
     textOverlays: rawSelections.textOverlays ?? [],
     sequenceClips,
-    // `baseFraming`/`ratio` were added to the split-screen layout variant
-    // after some projects already had one persisted without them --
-    // backfilling both here (once, at load) heals old data at the source
-    // instead of leaving every reader (CanvasPlayer, computeOverlayRects,
-    // VideoOverlayFramingDialog) to guess a default.
-    videoOverlays: (rawSelections.videoOverlays ?? []).map((overlay) =>
-      overlay.layout.type === "split-screen" && (!overlay.layout.baseFraming || overlay.layout.ratio === undefined)
-        ? {
-            ...overlay,
-            layout: {
-              ...overlay.layout,
-              baseFraming: overlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING,
-              ratio: overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO,
-            },
-          }
-        : overlay
-    ),
+    // `framing` (every layout) and `baseFraming`/`ratio` (split-screen only)
+    // were added after some projects already had a video overlay persisted
+    // without them -- backfilling all three here (once, at load) heals old
+    // data at the source instead of leaving every reader (CanvasPlayer,
+    // computeOverlayRects, VideoOverlayFramingDialog) to guess a default.
+    videoOverlays: (rawSelections.videoOverlays ?? []).map((overlay) => {
+      const withLayout =
+        overlay.layout.type === "split-screen" && (!overlay.layout.baseFraming || overlay.layout.ratio === undefined)
+          ? {
+              ...overlay,
+              layout: {
+                ...overlay.layout,
+                baseFraming: overlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING,
+                ratio: overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO,
+              },
+            }
+          : overlay;
+      return withLayout.framing ? withLayout : { ...withLayout, framing: DEFAULT_OVERLAY_FRAMING };
+    }),
     transcriptCaption: rawSelections.transcriptCaption ?? null,
   };
 
@@ -705,6 +717,8 @@ export function ThreePaneEditor({
         selectedBackgroundAssetId: undefined,
         markers,
         assetMarkers,
+        mainAudioVolume,
+        backgroundVolume,
       };
       saveTimeline(projectId, nextTimeline)
         .then(() => setSaveError(null))
@@ -734,6 +748,8 @@ export function ThreePaneEditor({
     backgroundSequenceAssetIds,
     markers,
     assetMarkers,
+    mainAudioVolume,
+    backgroundVolume,
   ]);
 
   useEffect(() => {
@@ -1353,6 +1369,8 @@ export function ThreePaneEditor({
       sequenceClips: gatheredSequenceClips,
       backgroundClips: gatheredBackgroundClips,
       assetUrlById: freshAssetUrlById,
+      mainAudioVolume,
+      backgroundVolume,
       outputWidth: width,
       outputHeight: height,
     });
@@ -1420,6 +1438,8 @@ export function ThreePaneEditor({
           sequenceClips={playbackClips}
           videoOverlays={displayedVideoOverlays}
           backgroundTracks={resolvedBackgroundTracks}
+          mainAudioVolume={mainAudioVolume}
+          backgroundVolume={backgroundVolume}
           assetUrlById={assetUrlById}
           onFrameDimensions={setFrameDimensions}
           playerRef={canvasPlayerRef}
@@ -1437,6 +1457,10 @@ export function ThreePaneEditor({
           sequenceEntries={effectiveSequenceEntries}
           onResizeImageClip={handleResizeImageClip}
           volumeLevels={volumeLevels}
+          mainAudioVolume={mainAudioVolume}
+          onChangeMainAudioVolume={setMainAudioVolume}
+          backgroundVolume={backgroundVolume}
+          onChangeBackgroundVolume={setBackgroundVolume}
           isAnalyzing={isAnalyzing}
           currentTimeSeconds={currentTimeSeconds}
           onSeek={handleSeek}

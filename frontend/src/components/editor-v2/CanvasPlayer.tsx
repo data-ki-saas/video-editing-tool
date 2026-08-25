@@ -80,7 +80,6 @@ import {
   totalSequenceDuration,
   resolveSequencePosition,
   FULL_FRAME_CROP_RECT,
-  BACKGROUND_MUSIC_GAIN,
   type CropRect,
   type OverlayImage,
   type SequenceClipInfo,
@@ -222,6 +221,15 @@ export const CanvasPlayer = forwardRef<
     // catalog track) -- mixed into playback here, see this file's module
     // comment. Empty when no background track is selected.
     backgroundTracks: { name: string; url: string }[];
+    // Flat 0..1 multipliers set from each audio rail's own VolumeFader (see
+    // Playground.tsx) -- mainAudioVolume scales the main sequence's own
+    // audio (still ducked underneath it during an overlay window that wants
+    // its own audio mixed in, same as before this existed -- see
+    // computeMainAudioGainBreakpoints); backgroundVolume scales the
+    // background-music gain directly, replacing what was a hardcoded
+    // constant.
+    mainAudioVolume: number;
+    backgroundVolume: number;
     onFrameDimensions?: (dimensions: { width: number; height: number }) => void;
     onTimeUpdate?: (seconds: number) => void;
   }
@@ -239,6 +247,8 @@ export const CanvasPlayer = forwardRef<
     videoOverlays,
     assetUrlById,
     backgroundTracks,
+    mainAudioVolume,
+    backgroundVolume,
     onFrameDimensions,
     onTimeUpdate,
   },
@@ -629,20 +639,24 @@ export const CanvasPlayer = forwardRef<
     const initialDucking = videoOverlays
       .filter((o) => o.audioBalance > 0 && adjustedOffsetSeconds >= o.startTimeSeconds && adjustedOffsetSeconds < o.endTimeSeconds)
       .reduce((max, o) => Math.max(max, o.audioBalance), 0);
-    mainGainNode.gain.setValueAtTime(1 - initialDucking, audioContext.currentTime);
+    mainGainNode.gain.setValueAtTime((1 - initialDucking) * mainAudioVolume, audioContext.currentTime);
 
     // Short ramps rather than hard setValueAtTime steps -- a hard step is an
     // audible click/pop. The standard Web Audio pattern for "a step
     // function with brief transitions": anchor the ramp's start value (a
     // no-op numerically, but required so the ramp doesn't creep from
     // whatever far-away event preceded it) then ramp to the new value.
-    let previousGain = 1 - initialDucking;
+    // Every breakpoint.gain (a 0..1 ducking fraction against a ceiling of 1)
+    // is scaled by mainAudioVolume so ducking still happens relative to
+    // wherever the user has set the overall level, not against a fixed 1.
+    let previousGain = (1 - initialDucking) * mainAudioVolume;
     for (const breakpoint of computeMainAudioGainBreakpoints(videoOverlays, durationRef.current)) {
       if (breakpoint.timeSeconds < adjustedOffsetSeconds) continue; // already in the past relative to this resume
       const rampStartCtxTime = audioContext.currentTime + (breakpoint.timeSeconds - adjustedOffsetSeconds);
+      const targetGain = breakpoint.gain * mainAudioVolume;
       mainGainNode.gain.setValueAtTime(previousGain, rampStartCtxTime);
-      mainGainNode.gain.linearRampToValueAtTime(breakpoint.gain, rampStartCtxTime + AUDIO_TRANSITION_RAMP_SECONDS);
-      previousGain = breakpoint.gain;
+      mainGainNode.gain.linearRampToValueAtTime(targetGain, rampStartCtxTime + AUDIO_TRANSITION_RAMP_SECONDS);
+      previousGain = targetGain;
     }
 
     // One AudioBufferSourceNode per overlay that wants some of its own
@@ -698,7 +712,7 @@ export const CanvasPlayer = forwardRef<
       backgroundSource.buffer = backgroundBuffer;
       backgroundSource.loop = true;
       const gainNode = audioContext.createGain();
-      gainNode.gain.value = BACKGROUND_MUSIC_GAIN;
+      gainNode.gain.value = backgroundVolume;
       backgroundSource.connect(gainNode).connect(audioContext.destination);
       backgroundSource.start(0, adjustedOffsetSeconds % backgroundBuffer.duration);
       backgroundSourceNodeRef.current = backgroundSource;

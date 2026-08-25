@@ -38,8 +38,9 @@ import {
   type OverlayFraming,
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
-import { FlipHorizontalIcon, FlipVerticalIcon, SpeakerMutedIcon, SpeakerMixedIcon, SpeakerFullIcon } from "@/components/icons/UIIcons";
+import { FlipHorizontalIcon, FlipVerticalIcon } from "@/components/icons/UIIcons";
 import { LAYOUT_GRADIENT_TO_CLASSNAMES } from "./VideoOverlayAudioTrack";
+import { VolumeFader } from "./VolumeFader";
 
 // Keeps either half from being dragged down to a sliver too thin to grab
 // or usefully see.
@@ -218,56 +219,6 @@ function SplitScreenDivider({
   );
 }
 
-function AudioBalanceSlider({
-  value,
-  onChange,
-  colorClassName,
-}: {
-  value: number;
-  onChange: (balance: number) => void;
-  colorClassName: string;
-}) {
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  function computeBalance(clientX: number): number {
-    const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect || rect.width <= 0) return value;
-    return Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
-  }
-  function handlePointerDown(e: React.PointerEvent) {
-    onChange(computeBalance(e.clientX));
-    function handleMove(ev: PointerEvent) {
-      onChange(computeBalance(ev.clientX));
-    }
-    function handleUp() {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleUp);
-    }
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleUp);
-  }
-
-  const SpeakerIcon = value <= 0.1 ? SpeakerMutedIcon : value >= 0.9 ? SpeakerFullIcon : SpeakerMixedIcon;
-  const label = value <= 0.1 ? "Main audio" : value >= 0.9 ? "Overlay audio" : "Mixed audio";
-
-  return (
-    <div>
-      <div
-        ref={rootRef}
-        onPointerDown={handlePointerDown}
-        title={`${label} -- drag to adjust the mix`}
-        className={`relative h-4 w-full cursor-ew-resize overflow-hidden rounded-sm bg-gradient-to-r from-neutral-600 ${colorClassName}`}
-      >
-        <SpeakerIcon className="pointer-events-none absolute left-0.5 top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.9)]" />
-        <div
-          className="pointer-events-none absolute inset-y-0 w-1 -translate-x-1/2 bg-white"
-          style={{ left: `${value * 100}%`, boxShadow: "0 0 0 1px rgba(0,0,0,0.6)" }}
-        />
-      </div>
-      <div className="mt-0.5 text-[10px] text-muted">{label}</div>
-    </div>
-  );
-}
 
 const LAYOUT_BORDER_COLOR_CLASSNAMES = {
   "full-screen": "border-amber-500",
@@ -482,7 +433,7 @@ export function VideoOverlayFramingDialog({
 
             <div className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-muted">Sound</span>
-              <AudioBalanceSlider value={audioBalance} onChange={setAudioBalance} colorClassName={LAYOUT_GRADIENT_TO_CLASSNAMES[overlay.layout.type]} />
+              <VolumeFader value={audioBalance} onChange={setAudioBalance} colorClassName={LAYOUT_GRADIENT_TO_CLASSNAMES[overlay.layout.type]} />
             </div>
           </div>
         </div>

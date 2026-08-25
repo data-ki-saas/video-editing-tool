@@ -14,9 +14,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { listProjects, deleteProject, renameProject, type Project } from "@/lib/projects";
+import { listProjects, deleteProject, resetProject, renameProject, type Project } from "@/lib/projects";
 import { InlineEditableText } from "@/components/InlineEditableText";
-import { TrashIcon } from "@/components/icons/UIIcons";
+import { TrashIcon, ResetIcon } from "@/components/icons/UIIcons";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 
 export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
@@ -42,6 +42,22 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
       if (project.id === activeProjectId) router.push("/dashboard");
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "Failed to delete this reel");
+    }
+  }
+
+  async function handleReset(project: Project) {
+    if (!window.confirm(`Reset "${project.name}"? This clears every asset and edit -- the reel itself stays.`)) return;
+    try {
+      await resetProject(project.id);
+      // If this is the reel currently open under us, ThreePaneEditor's own
+      // in-memory state (assets, undo history, every open dialog) is now
+      // stale -- a full reload is the simplest way to get it to re-fetch
+      // and remount from scratch, the same as opening this reel fresh
+      // would. A reel reset from the list while a DIFFERENT reel is open
+      // needs no reload: nothing on screen refers to it.
+      if (project.id === activeProjectId) window.location.reload();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Failed to reset this reel");
     }
   }
 
@@ -73,7 +89,10 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
               key={project.id}
               className="flex items-center gap-1"
               onContextMenu={(e) =>
-                openContextMenu(e, [{ label: "Delete", danger: true, onSelect: () => void handleDelete(project) }])
+                openContextMenu(e, [
+                  { label: "Reset", onSelect: () => void handleReset(project) },
+                  { label: "Delete", danger: true, onSelect: () => void handleDelete(project) },
+                ])
               }
             >
               <div className="min-w-0 flex-1">
@@ -95,6 +114,15 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
                   </Link>
                 )}
               </div>
+              <button
+                type="button"
+                onClick={() => void handleReset(project)}
+                title={`Reset "${project.name}"`}
+                aria-label={`Reset ${project.name}`}
+                className="shrink-0 rounded-md p-1 text-muted hover:bg-background hover:text-foreground"
+              >
+                <ResetIcon className="h-3.5 w-3.5" />
+              </button>
               <button
                 type="button"
                 onClick={() => void handleDelete(project)}

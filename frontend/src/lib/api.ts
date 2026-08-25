@@ -221,6 +221,22 @@ export async function deleteProject(projectId: string) {
   }
 }
 
+// Wipes a reel's assets and render state but keeps the row -- see
+// backend's src/projects/service.py's reset_project for the R2 cleanup this
+// does (mirrors delete_project's, minus deleting the row). Doesn't touch
+// `timeline` itself; lib/projects.ts's resetProject does that other half
+// via the normal saveTimeline path once this succeeds.
+export async function resetProject(projectId: string) {
+  const response = await apiFetch(`${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}/reset`, {
+    method: "POST",
+    headers: await authHeader(),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${response.status})`);
+  }
+}
+
 export interface RenderTriggerResult {
   renderId: string;
   status: string;

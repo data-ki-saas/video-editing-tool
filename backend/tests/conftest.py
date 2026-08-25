@@ -88,6 +88,13 @@ class FakeAssetsTable:
         for asset_id in [aid for aid, row in self.assets.items() if row["project_id"] == project_id]:
             del self.assets[asset_id]
 
+    def clear_render_state(self, project_id: str) -> None:
+        row = self.projects.get(project_id)
+        if row is not None:
+            row["render_id"] = None
+            row["render_status"] = None
+            row["render_url"] = None
+
     def project_owned_by(self, project_id: str, owner_id: str) -> bool:
         project = self.projects.get(project_id)
         return project is not None and project["owner_id"] == owner_id
@@ -140,6 +147,7 @@ def fake_assets_table(monkeypatch):
     monkeypatch.setattr(repository, "count_assets_with_storage_key", table.count_with_storage_key)
     monkeypatch.setattr(projects_repository, "get_project", table.get_project)
     monkeypatch.setattr(projects_repository, "delete_project", table.delete_project)
+    monkeypatch.setattr(projects_repository, "clear_render_state", table.clear_render_state)
     return table
 
 

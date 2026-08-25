@@ -177,6 +177,17 @@ export function FlipVerticalIcon(props: IconProps) {
   );
 }
 
+// A circular arrow -- ProjectList's "Reset" button, beside its Delete
+// (TrashIcon) button.
+export function ResetIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 4v6h6" />
+      <path d="M4.5 15a8 8 0 1 0 2-8.5L4 10" />
+    </svg>
+  );
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>

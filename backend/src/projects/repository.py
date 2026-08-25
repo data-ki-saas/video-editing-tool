@@ -30,3 +30,14 @@ def get_project(project_id: str, owner_id: str) -> ProjectRecord | None:
 
 def delete_project(project_id: str) -> None:
     get_supabase_client().table(_TABLE).delete().eq("id", project_id).execute()
+
+
+# Doesn't touch `timeline` -- that jsonb column is only ever written by the
+# frontend directly via Supabase (see frontend/src/lib/projects.ts's
+# saveTimeline), same as every other edit to it. This only clears the render
+# tracking columns; service.reset_project's caller resets `timeline` itself
+# the same way any other save would.
+def clear_render_state(project_id: str) -> None:
+    get_supabase_client().table(_TABLE).update(
+        {"render_id": None, "render_status": None, "render_url": None, "render_error": None, "render_started_at": None}
+    ).eq("id", project_id).execute()

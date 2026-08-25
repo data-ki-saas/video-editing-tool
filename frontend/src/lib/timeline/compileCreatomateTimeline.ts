@@ -79,11 +79,21 @@ export interface CompileTimelineInput {
    * whose assetId is missing here falls back to the old single-play
    * behavior (safe, just won't loop). */
   videoOverlaySourceDurations?: Record<string, number>;
+  // Flat 0..1 multipliers, same values CanvasPlayer's live preview mixes
+  // with (Timeline.mainAudioVolume/backgroundVolume) -- converted to
+  // Creatomate's percent-string volume format below. No ducking here: the
+  // "KNOWN LIMITATION" comment on buildVideoOverlayElements below already
+  // covers why an overlay's own audio balance was never reproduced
+  // server-side; this is an orthogonal flat level, unaffected by that gap.
+  mainAudioVolume: number;
+  backgroundVolume: number;
   outputWidth: number;
   outputHeight: number;
 }
 
-const BACKGROUND_MUSIC_VOLUME_PERCENT = "50%"; // matches CanvasPlayer.tsx's BACKGROUND_MUSIC_GAIN
+function toVolumePercent(level: number): string {
+  return `${Math.round(Math.min(Math.max(level, 0), 1) * 100)}%`;
+}
 const CROP_EASING = "cubic-in-out";
 // A hard flip toggle isn't a smooth animation -- Creatomate's Easing union
 // has no step/hold value, so it's expressed as two keyframes this close
@@ -175,7 +185,8 @@ function buildMediaSegments(
   segments: RenderSegment[],
   baseCropRect: CropRect | null,
   zoomEffects: ZoomEffect[],
-  appMeta: Record<string, AppMetaEntry>
+  appMeta: Record<string, AppMetaEntry>,
+  mainVolumePercent: string
 ): (Video | Image)[] {
   return segments.map((segment) => {
     const crop = buildCropProperties(segment, baseCropRect, zoomEffects);
@@ -210,6 +221,7 @@ function buildMediaSegments(
       fit: "fill",
       xAnchor: "0%",
       yAnchor: "0%",
+      volume: mainVolumePercent,
       ...crop,
       // Overwritten server-side by resolveAssetSources (api/render/route.ts)
       // from _appMeta[id].assetId -- never a real playable URL by itself.
@@ -588,7 +600,8 @@ function buildBackgroundAudioElement(
   backgroundClips: SequenceClipInfo[],
   totalOutputDurationSeconds: number,
   track: number,
-  appMeta: Record<string, AppMetaEntry>
+  appMeta: Record<string, AppMetaEntry>,
+  backgroundVolumePercent: string
 ): Audio | Composition | null {
   if (backgroundClips.length === 0 || totalOutputDurationSeconds <= 0) return null;
 
@@ -601,7 +614,7 @@ function buildBackgroundAudioElement(
       time: 0,
       duration: totalOutputDurationSeconds,
       loop: true,
-      volume: BACKGROUND_MUSIC_VOLUME_PERCENT,
+      volume: backgroundVolumePercent,
       source: "",
     });
   }
@@ -615,7 +628,7 @@ function buildBackgroundAudioElement(
       track: 1,
       time: clip.startTimeSeconds,
       duration: clip.durationSeconds,
-      volume: BACKGROUND_MUSIC_VOLUME_PERCENT,
+      volume: backgroundVolumePercent,
       source: "",
     });
   });
@@ -673,14 +686,29 @@ function buildTranscriptCaptionElements(
 
 export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline {
   idCounter = 0;
-  const { selections, sequenceClips, backgroundClips, outputWidth, outputHeight, videoOverlaySourceDurations = {} } = input;
+  const {
+    selections,
+    sequenceClips,
+    backgroundClips,
+    outputWidth,
+    outputHeight,
+    videoOverlaySourceDurations = {},
+    mainAudioVolume,
+    backgroundVolume,
+  } = input;
   const appMeta: Record<string, AppMetaEntry> = {};
 
   const totalOriginalDurationSeconds = totalSequenceDuration(sequenceClips);
   const segments = buildRenderSegments(sequenceClips, selections.trimRanges);
   const totalOutputDurationSeconds = segments.reduce((sum, s) => sum + s.durationSeconds, 0);
 
-  const mediaSegments = buildMediaSegments(segments, selections.cropRect, selections.zoomEffects, appMeta);
+  const mediaSegments = buildMediaSegments(
+    segments,
+    selections.cropRect,
+    selections.zoomEffects,
+    appMeta,
+    toVolumePercent(mainAudioVolume)
+  );
   const videoSegmentPairs = segments
     .map((segment, index) => ({ segment, element: mediaSegments[index] }))
     .filter((pair): pair is { segment: RenderSegment; element: Video } => pair.segment.kind === "video");
@@ -727,7 +755,13 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const overlayElements = buildOverlayImageElements(clampedOverlayImages, segments, nextTrack, appMeta);
   const textElements = buildTextElements(clampedTextOverlays, segments, nextTrack);
   const transcriptCaptionElements = buildTranscriptCaptionElements(selections.transcriptCaption, videoSegmentPairs, nextTrack());
-  const backgroundAudio = buildBackgroundAudioElement(backgroundClips, totalOutputDurationSeconds, nextTrack(), appMeta);
+  const backgroundAudio = buildBackgroundAudioElement(
+    backgroundClips,
+    totalOutputDurationSeconds,
+    nextTrack(),
+    appMeta,
+    toVolumePercent(backgroundVolume)
+  );
 
   const elements: TemplateElement[] = [
     cropViewport.toMap() as TemplateElement,

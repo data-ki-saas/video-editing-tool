@@ -2,17 +2,20 @@
 
 /**
  * The middle band of the three-pane editor, top to bottom: the background-
- * music strip (pinned to the top, resizable by dragging its bottom edge --
- * concatenates every track in the sequence and loops the whole thing
- * across the video's duration, see BackgroundTrackStrip), the video
+ * music rail (concatenates every track in the sequence and loops the whole
+ * thing across the video's duration, see BackgroundTrackStrip), the video
  * sequence "unfolded" into a per-second thumbnail strip (sized to its own
  * natural content height -- tile height from FrameStrip's frameAspectRatio,
  * not stretched/centered to fill whatever space is left, which just
  * produced blank padding when the video's aspect ratio didn't happen to
- * match the available height), and a sound volume graph (pinned to the
- * bottom, resizable by dragging its top edge). See ResizablePanel.tsx's
- * `anchor` prop for how the background/volume panels each stay pinned to
- * their own edge of the stack while still being independently resizable.
+ * match the available height), and the main sequence's own sound rail
+ * (VolumeGraph). Both audio rails are FIXED height -- just another rail,
+ * same as every other track in the strip -- with a VolumeFader pinned to
+ * their own left edge (not scrolling with the rest of the rail) for setting
+ * that track's volume directly, rather than a resizable panel (the previous
+ * design; resizing only ever changed how much of the graph/segments you
+ * could see, it never controlled volume, and a volume control genuinely
+ * didn't exist anywhere before this).
  *
  * If the three strips' combined natural height exceeds the band
  * ThreePaneEditor allocates this component, this component scrolls
@@ -20,17 +23,19 @@
  * the frame strip to fit -- the frame strip is shown at its true size or
  * not at all, never distorted to fit a slot.
  *
- * All three strips represent the same timeline at the same
- * PIXELS_PER_SECOND scale (so their total widths line up) and share one
- * HORIZONTAL scroll position via lib/useSyncedHorizontalScroll.ts --
- * scrolling any one of them scrolls all three together, since they're
+ * The three strips' own scrollable content represents the same timeline at
+ * the same PIXELS_PER_SECOND scale (so their total widths line up) and
+ * share one HORIZONTAL scroll position via lib/useSyncedHorizontalScroll.ts
+ * -- scrolling any one of them scrolls all three together, since they're
  * meant to read as one aligned view of the clip, not three
- * independently-scrolling panels that happen to be stacked.
+ * independently-scrolling panels that happen to be stacked. The two
+ * VolumeFaders sit outside that synced-scroll area (they're fixed controls,
+ * not part of the timeline itself).
  */
-import { ResizablePanel } from "./ResizablePanel";
 import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip } from "./FrameStrip";
 import { VolumeGraph } from "./VolumeGraph";
+import { VolumeFader } from "./VolumeFader";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
 import type {
   CropRect,
@@ -44,10 +49,13 @@ import type {
 } from "@/lib/video/video_math";
 import type { TimelineMarker } from "@/lib/projects";
 
-// Initial heights before any resizing -- the +/-25% stretch range (see
-// video_math.ts's DEFAULT_MAX_STRETCH_RATIO) is computed relative to these.
-const INITIAL_BACKGROUND_STRIP_HEIGHT_PX = 40;
-const INITIAL_VOLUME_GRAPH_HEIGHT_PX = 80;
+// Fixed height for both audio rails -- same tier as every other rail in the
+// strip (TrimTrack, VideoOverlayAudioTrack, ...), not resizable.
+const AUDIO_RAIL_HEIGHT_PX = 32;
+// Fixed width for the VolumeFader pinned to each audio rail's own left
+// edge -- wide enough to be a comfortable drag target without eating much
+// of the strip's own horizontal space.
+const VOLUME_FADER_WIDTH_PX = 96;
 
 // Shared time-to-pixel scale for all three strips -- see this file's
 // module comment.
@@ -66,6 +74,10 @@ export function Playground({
   sequenceEntries,
   onResizeImageClip,
   volumeLevels,
+  mainAudioVolume,
+  onChangeMainAudioVolume,
+  backgroundVolume,
+  onChangeBackgroundVolume,
   isAnalyzing,
   currentTimeSeconds,
   onSeek,
@@ -137,6 +149,10 @@ export function Playground({
   sequenceEntries: SequenceEntry[];
   onResizeImageClip: (entryId: string, newDurationSeconds: number, clipStartSeconds: number) => void;
   volumeLevels: number[];
+  mainAudioVolume: number;
+  onChangeMainAudioVolume: (level: number) => void;
+  backgroundVolume: number;
+  onChangeBackgroundVolume: (level: number) => void;
   isAnalyzing: boolean;
   currentTimeSeconds: number;
   onSeek: (seconds: number) => void;
@@ -206,15 +222,26 @@ export function Playground({
 
   return (
     <div className="flex h-full flex-col gap-2 overflow-y-auto bg-surface px-2">
-      <ResizablePanel label="background track" anchor="top" initialHeightPx={INITIAL_BACKGROUND_STRIP_HEIGHT_PX}>
-        <BackgroundTrackStrip
-          tracks={backgroundTracks}
-          videoDurationSeconds={videoDurationSeconds}
-          pixelsPerSecond={PIXELS_PER_SECOND}
-          scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}
-          onScroll={bindOnScroll(BACKGROUND_STRIP_INDEX)}
-        />
-      </ResizablePanel>
+      <div className="flex shrink-0 gap-1" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
+        <div className="shrink-0" style={{ width: VOLUME_FADER_WIDTH_PX }}>
+          <VolumeFader
+            value={backgroundVolume}
+            onChange={onChangeBackgroundVolume}
+            colorClassName="to-accent"
+            heightClassName="h-full"
+            showLabel={false}
+          />
+        </div>
+        <div className="min-w-0 flex-1">
+          <BackgroundTrackStrip
+            tracks={backgroundTracks}
+            videoDurationSeconds={videoDurationSeconds}
+            pixelsPerSecond={PIXELS_PER_SECOND}
+            scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}
+            onScroll={bindOnScroll(BACKGROUND_STRIP_INDEX)}
+          />
+        </div>
+      </div>
 
       <div className="shrink-0">
         <FrameStrip
@@ -288,15 +315,26 @@ export function Playground({
         />
       </div>
 
-      <ResizablePanel label="sound volume" anchor="bottom" initialHeightPx={INITIAL_VOLUME_GRAPH_HEIGHT_PX}>
-        <VolumeGraph
-          levels={volumeLevels}
-          isLoading={isAnalyzing}
-          pixelsPerSecond={PIXELS_PER_SECOND}
-          scrollContainerRef={bindRef(VOLUME_GRAPH_INDEX)}
-          onScroll={bindOnScroll(VOLUME_GRAPH_INDEX)}
-        />
-      </ResizablePanel>
+      <div className="flex shrink-0 gap-1" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
+        <div className="shrink-0" style={{ width: VOLUME_FADER_WIDTH_PX }}>
+          <VolumeFader
+            value={mainAudioVolume}
+            onChange={onChangeMainAudioVolume}
+            colorClassName="to-accent"
+            heightClassName="h-full"
+            showLabel={false}
+          />
+        </div>
+        <div className="min-w-0 flex-1">
+          <VolumeGraph
+            levels={volumeLevels}
+            isLoading={isAnalyzing}
+            pixelsPerSecond={PIXELS_PER_SECOND}
+            scrollContainerRef={bindRef(VOLUME_GRAPH_INDEX)}
+            onScroll={bindOnScroll(VOLUME_GRAPH_INDEX)}
+          />
+        </div>
+      </div>
     </div>
   );
 }

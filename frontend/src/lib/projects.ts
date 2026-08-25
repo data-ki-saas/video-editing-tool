@@ -1,4 +1,4 @@
-import { deleteProject as deleteProjectViaBackend } from "@/lib/api";
+import { deleteProject as deleteProjectViaBackend, resetProject as resetProjectViaBackend } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import type {
   CropRect,
@@ -160,6 +160,17 @@ export interface Timeline {
   // need its own backend table -- storing it here, keyed by assetId, IS
   // already project-scoped-per-asset with no extra plumbing.
   assetMarkers?: Record<string, TimelineMarker[]>;
+  // Flat 0..1 volume multipliers for the main sequence's own audio and the
+  // background music track -- set from the volume button pinned to each
+  // rail's own left edge (see VolumeFader.tsx). Plain persisted settings,
+  // like selectedBackgroundTrackId above, not undo-tracked: a mix level is
+  // a setting, not a content edit. Absent means every reel saved before
+  // these controls existed -- see video_math.ts's DEFAULT_MAIN_AUDIO_VOLUME/
+  // DEFAULT_BACKGROUND_VOLUME for the exact fallback each reads as, matching
+  // what was hardcoded before this existed so an old reel's rendered
+  // loudness doesn't change out from under it.
+  mainAudioVolume?: number;
+  backgroundVolume?: number;
 }
 
 // Generic on purpose -- what fields matter for a "listing" varies entirely
@@ -263,4 +274,16 @@ export async function renameProject(projectId: string, name: string): Promise<vo
 // row itself; deleting the row straight from here would silently orphan them.
 export async function deleteProject(projectId: string): Promise<void> {
   await deleteProjectViaBackend(projectId);
+}
+
+// Clears a reel back to empty without deleting it -- the "Reset" action
+// beside "Delete" in ProjectList. resetProjectViaBackend handles the half
+// that needs backend secrets (R2 cleanup for every asset and any finished
+// render); blanking `timeline` itself is just a normal saveTimeline call,
+// same as every other edit to that column, using the same default shape
+// the `timeline` column itself is created with (see supabase/migrations/
+// 0004_add_listing_fields_and_timeline_shape.sql).
+export async function resetProject(projectId: string): Promise<void> {
+  await resetProjectViaBackend(projectId);
+  await saveTimeline(projectId, { output_format: "mp4", width: 1080, height: 1920, elements: [], _appMeta: {} });
 }
