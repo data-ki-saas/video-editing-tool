@@ -45,7 +45,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listAssets, type Asset } from "@/lib/api";
 import { extractThumbnails, getVideoDuration, captureSingleFrame } from "@/lib/video/video";
-import { extractVolumeProfile } from "@/lib/video/audio";
 import {
   generateSampleTimestamps,
   findClosestTimestampIndex,
@@ -120,7 +119,6 @@ import { RenderComingSoonPopup } from "./RenderComingSoonPopup";
 import { LocalRenderPopup } from "./LocalRenderPopup";
 
 const THUMBNAIL_INTERVAL_SECONDS = 1;
-const VOLUME_BUCKET_SECONDS = 1;
 const SAVE_DEBOUNCE_MS = 600;
 
 const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
@@ -186,7 +184,6 @@ export function ThreePaneEditor({
   // Each clip's own start time (after the first) in the concatenated
   // sequence, for FrameStrip's clip-boundary divider lines.
   const [clipBoundarySeconds, setClipBoundarySeconds] = useState<number[]>([]);
-  const [volumeLevels, setVolumeLevels] = useState<number[]>([]);
   const [videoDurationSeconds, setVideoDurationSeconds] = useState(0);
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
   const [frameDimensions, setFrameDimensions] = useState<{ width: number; height: number } | null>(null);
@@ -562,24 +559,20 @@ export function ThreePaneEditor({
     .map((clip) => `${clip.id}:${clip.kind === "image" ? clip.durationSeconds : ""}`)
     .join(",");
 
-  // Unfolds the video sequence into a per-second thumbnail strip + volume
-  // graph + duration, one clip at a time. Sequential, not concurrent --
-  // decoding a clip's audio fully decodes the whole file into memory with
-  // no streaming, so extracting N clips at once means N full decodes
-  // resident simultaneously; sequential bounds peak memory at the cost of
-  // wall-clock time. Each clip's results append to the accumulating
-  // thumbnails/volumeLevels/thumbnailTimestampsSeconds arrays as soon as
-  // that one clip finishes, so the strip fills in progressively left to
-  // right rather than waiting on the whole sequence. A clip that fails to
-  // load (bad URL, decode error) is skipped -- reported once, but doesn't
-  // block the rest of the sequence from extracting.
+  // Unfolds the video sequence into a per-second thumbnail strip + duration,
+  // one clip at a time. Sequential, not concurrent, so the strip fills in
+  // progressively left to right (each clip's results append to the
+  // accumulating thumbnails/thumbnailTimestampsSeconds arrays as soon as
+  // that one clip finishes) rather than waiting on the whole sequence at
+  // once. A clip that fails to load (bad URL, decode error) is skipped --
+  // reported once, but doesn't block the rest of the sequence from
+  // extracting.
   useEffect(() => {
     if (playbackClips.length === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setThumbnails([]);
       setThumbnailTimestampsSeconds([]);
       setClipBoundarySeconds([]);
-      setVolumeLevels([]);
       setVideoDurationSeconds(0);
       setCurrentTimeSeconds(0);
       setFrameDimensions(null);
@@ -593,7 +586,6 @@ export function ThreePaneEditor({
     setThumbnails([]);
     setThumbnailTimestampsSeconds([]);
     setClipBoundarySeconds([]);
-    setVolumeLevels([]);
     setCurrentTimeSeconds(0);
 
     function reportFailure(err: unknown) {
@@ -610,7 +602,6 @@ export function ThreePaneEditor({
       const boundaries: number[] = [];
       let accumulatedThumbnails: string[] = [];
       let accumulatedTimestamps: number[] = [];
-      let accumulatedVolumeLevels: number[] = [];
 
       for (const clip of playbackClips) {
         if (cancelled) return;
@@ -621,8 +612,7 @@ export function ThreePaneEditor({
           // An image clip has no file to probe/decode -- its duration is
           // authored (see lib/video/imageTemplates.ts), its "thumbnails"
           // are just its own URL held for every sampled tick (same
-          // shortcut AssetGallery.tsx already uses for image tiles), and
-          // it has no audio, so its volume buckets are silent.
+          // shortcut AssetGallery.tsx already uses for image tiles).
           const clipDurationSeconds = clip.durationSeconds;
           const clipTimestamps = generateSampleTimestamps(clipDurationSeconds, THUMBNAIL_INTERVAL_SECONDS).map(
             (t) => t + clipStartSeconds
@@ -631,10 +621,6 @@ export function ThreePaneEditor({
           accumulatedTimestamps = [...accumulatedTimestamps, ...clipTimestamps];
           setThumbnails(accumulatedThumbnails);
           setThumbnailTimestampsSeconds(accumulatedTimestamps);
-
-          const volumeBucketCount = generateSampleTimestamps(clipDurationSeconds, VOLUME_BUCKET_SECONDS).length;
-          accumulatedVolumeLevels = [...accumulatedVolumeLevels, ...new Array(volumeBucketCount).fill(0)];
-          setVolumeLevels(accumulatedVolumeLevels);
 
           cursor += clipDurationSeconds;
           setVideoDurationSeconds(cursor);
@@ -651,29 +637,19 @@ export function ThreePaneEditor({
         }
         if (cancelled) return;
 
-        const [thumbnailsResult, volumeResult] = await Promise.allSettled([
-          extractThumbnails(clip.url, THUMBNAIL_INTERVAL_SECONDS),
-          extractVolumeProfile(clip.url, VOLUME_BUCKET_SECONDS),
-        ]);
-        if (cancelled) return;
-
-        if (thumbnailsResult.status === "fulfilled") {
-          accumulatedThumbnails = [...accumulatedThumbnails, ...thumbnailsResult.value];
+        try {
+          const clipThumbnails = await extractThumbnails(clip.url, THUMBNAIL_INTERVAL_SECONDS);
+          if (cancelled) return;
+          accumulatedThumbnails = [...accumulatedThumbnails, ...clipThumbnails];
           const clipTimestamps = generateSampleTimestamps(clipDurationSeconds, THUMBNAIL_INTERVAL_SECONDS).map(
             (t) => t + clipStartSeconds
           );
           accumulatedTimestamps = [...accumulatedTimestamps, ...clipTimestamps];
           setThumbnails(accumulatedThumbnails);
           setThumbnailTimestampsSeconds(accumulatedTimestamps);
-        } else {
-          reportFailure(thumbnailsResult.reason);
-        }
-
-        if (volumeResult.status === "fulfilled") {
-          accumulatedVolumeLevels = [...accumulatedVolumeLevels, ...volumeResult.value];
-          setVolumeLevels(accumulatedVolumeLevels);
-        } else {
-          reportFailure(volumeResult.reason);
+        } catch (err) {
+          if (cancelled) return;
+          reportFailure(err);
         }
 
         cursor += clipDurationSeconds;
@@ -1456,7 +1432,6 @@ export function ThreePaneEditor({
           clipBoundarySeconds={clipBoundarySeconds}
           sequenceEntries={effectiveSequenceEntries}
           onResizeImageClip={handleResizeImageClip}
-          volumeLevels={volumeLevels}
           mainAudioVolume={mainAudioVolume}
           onChangeMainAudioVolume={setMainAudioVolume}
           backgroundVolume={backgroundVolume}

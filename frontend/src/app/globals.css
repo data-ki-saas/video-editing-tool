@@ -183,9 +183,10 @@ body {
 /* Keeps an element horizontally scrollable (for
    lib/useSyncedHorizontalScroll.ts's programmatic sync, and trackpad/wheel
    gestures over it) without its own native scrollbar chrome -- used by
-   BackgroundTrackStrip and FrameStrip so only the bottom-most synced strip
-   (VolumeGraph) shows a visible scrollbar for the whole Playground stack,
-   instead of three redundant ones stacked in the middle of the page. */
+   MainAudioTrackStrip and FrameStrip so only the bottom-most synced strip
+   (BackgroundTrackStrip) shows a visible scrollbar for the whole
+   Playground stack, instead of three redundant ones stacked in the middle
+   of the page. */
 .hide-scrollbar {
   scrollbar-width: none;
   -ms-overflow-style: none;

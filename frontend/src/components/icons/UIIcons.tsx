@@ -16,6 +16,19 @@ export function PowerIcon(props: IconProps) {
   );
 }
 
+// A classic mic capsule on a stand -- badges MainAudioTrackStrip's own left
+// edge, distinguishing "the reel's own captured sound" from
+// MusicNoteIcon's background-music badge on BackgroundTrackStrip.
+export function MicrophoneIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <path d="M12 17v4M9 21h6" />
+    </svg>
+  );
+}
+
 export function MusicNoteIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -184,6 +197,19 @@ export function ResetIcon(props: IconProps) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
       <path d="M4 4v6h6" />
       <path d="M4.5 15a8 8 0 1 0 2-8.5L4 10" />
+    </svg>
+  );
+}
+
+// Open scissor blades -- badges TrimTrack's own left edge, marking it as
+// "the rail that cuts" alongside its red trimmed-segment fill.
+export function ScissorsIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M8.5 8.5 20 20" />
+      <path d="M20 4 8.5 15.5" />
     </svg>
   );
 }

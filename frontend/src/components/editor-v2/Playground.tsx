@@ -1,21 +1,23 @@
 "use client";
 
 /**
- * The middle band of the three-pane editor, top to bottom: the background-
- * music rail (concatenates every track in the sequence and loops the whole
- * thing across the video's duration, see BackgroundTrackStrip), the video
- * sequence "unfolded" into a per-second thumbnail strip (sized to its own
- * natural content height -- tile height from FrameStrip's frameAspectRatio,
- * not stretched/centered to fill whatever space is left, which just
- * produced blank padding when the video's aspect ratio didn't happen to
- * match the available height), and the main sequence's own sound rail
- * (VolumeGraph). Both audio rails are FIXED height -- just another rail,
- * same as every other track in the strip -- with a VolumeFader pinned to
- * their own left edge (not scrolling with the rest of the rail) for setting
- * that track's volume directly, rather than a resizable panel (the previous
- * design; resizing only ever changed how much of the graph/segments you
- * could see, it never controlled volume, and a volume control genuinely
- * didn't exist anywhere before this).
+ * The middle band of the three-pane editor, top to bottom: the main
+ * sequence's own audio rail (MainAudioTrackStrip -- a solid span, not a
+ * waveform; see that file's own comment on why), the video sequence
+ * "unfolded" into a per-second thumbnail strip (sized to its own natural
+ * content height -- tile height from FrameStrip's frameAspectRatio, not
+ * stretched/centered to fill whatever space is left, which just produced
+ * blank padding when the video's aspect ratio didn't happen to match the
+ * available height), and the background-music rail at the very bottom
+ * (concatenates every track in the sequence and loops the whole thing
+ * across the video's duration, see BackgroundTrackStrip) -- furthest from
+ * the main video content it plays under. Both audio rails are FIXED
+ * height -- just another rail, same as every other track in the strip --
+ * with a VolumeFader pinned to their own left edge (not scrolling with the
+ * rest of the rail) for setting that track's volume directly, rather than
+ * a resizable panel (the previous design; resizing only ever changed how
+ * much of the strip you could see, it never controlled volume, and a
+ * volume control genuinely didn't exist anywhere before this).
  *
  * If the three strips' combined natural height exceeds the band
  * ThreePaneEditor allocates this component, this component scrolls
@@ -34,7 +36,7 @@
  */
 import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip } from "./FrameStrip";
-import { VolumeGraph } from "./VolumeGraph";
+import { MainAudioTrackStrip } from "./MainAudioTrackStrip";
 import { VolumeFader } from "./VolumeFader";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
 import type {
@@ -63,7 +65,7 @@ const PIXELS_PER_SECOND = 60;
 
 const BACKGROUND_STRIP_INDEX = 0;
 const FRAME_STRIP_INDEX = 1;
-const VOLUME_GRAPH_INDEX = 2;
+const MAIN_AUDIO_STRIP_INDEX = 2;
 
 export function Playground({
   backgroundTracks,
@@ -73,7 +75,6 @@ export function Playground({
   clipBoundarySeconds,
   sequenceEntries,
   onResizeImageClip,
-  volumeLevels,
   mainAudioVolume,
   onChangeMainAudioVolume,
   backgroundVolume,
@@ -148,7 +149,6 @@ export function Playground({
   // its own drag handle) vs. an ordinary video seam (a plain divider).
   sequenceEntries: SequenceEntry[];
   onResizeImageClip: (entryId: string, newDurationSeconds: number, clipStartSeconds: number) => void;
-  volumeLevels: number[];
   mainAudioVolume: number;
   onChangeMainAudioVolume: (level: number) => void;
   backgroundVolume: number;
@@ -221,118 +221,125 @@ export function Playground({
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
 
   return (
-    <div className="flex h-full flex-col gap-2 overflow-y-auto bg-surface px-2">
-      <div className="flex shrink-0 gap-1" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
-        <div className="shrink-0" style={{ width: VOLUME_FADER_WIDTH_PX }}>
-          <VolumeFader
-            value={backgroundVolume}
-            onChange={onChangeBackgroundVolume}
-            colorClassName="to-accent"
-            heightClassName="h-full"
-            showLabel={false}
-          />
+    <div className="flex h-full flex-col overflow-y-auto bg-surface px-2">
+      {/* One seamless panel (shared bg-neutral-950, no gap between rows) --
+          the main-audio rail, the frame strip, and the background-music
+          rail all represent one continuous timeline (see this file's own
+          module comment) and should read as one panel, not three separate
+          floating cards. Background music sits at the very bottom,
+          furthest from the main video content it plays under. */}
+      <div className="flex flex-col rounded-md bg-neutral-950">
+        <div className="flex shrink-0 gap-1" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
+          <div className="shrink-0" style={{ width: VOLUME_FADER_WIDTH_PX }}>
+            <VolumeFader
+              value={mainAudioVolume}
+              onChange={onChangeMainAudioVolume}
+              colorClassName="to-amber-500"
+              heightClassName="h-full"
+              showLabel={false}
+            />
+          </div>
+          <div className="min-w-0 flex-1">
+            <MainAudioTrackStrip
+              videoDurationSeconds={videoDurationSeconds}
+              pixelsPerSecond={PIXELS_PER_SECOND}
+              scrollContainerRef={bindRef(MAIN_AUDIO_STRIP_INDEX)}
+              onScroll={bindOnScroll(MAIN_AUDIO_STRIP_INDEX)}
+            />
+          </div>
         </div>
-        <div className="min-w-0 flex-1">
-          <BackgroundTrackStrip
-            tracks={backgroundTracks}
-            videoDurationSeconds={videoDurationSeconds}
-            pixelsPerSecond={PIXELS_PER_SECOND}
-            scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}
-            onScroll={bindOnScroll(BACKGROUND_STRIP_INDEX)}
-          />
-        </div>
-      </div>
 
-      <div className="shrink-0">
-        <FrameStrip
-          thumbnails={thumbnails}
-          thumbnailTimestampsSeconds={thumbnailTimestampsSeconds}
-          clipBoundarySeconds={clipBoundarySeconds}
-          sequenceEntries={sequenceEntries}
-          onResizeImageClip={onResizeImageClip}
-          isLoading={isAnalyzing}
-          durationSeconds={videoDurationSeconds}
-          currentTimeSeconds={currentTimeSeconds}
-          onSeek={onSeek}
-          baseCropRect={baseCropRect}
-          zoomEffects={zoomEffects}
-          frameAspectRatio={frameAspectRatio}
-          onChangeZoomRange={onChangeZoomRange}
-          onCommitZoomRange={onCommitZoomRange}
-          onChangeZoomEpicenter={onChangeZoomEpicenter}
-          onCommitZoomEpicenter={onCommitZoomEpicenter}
-          onDeleteZoomEffect={onDeleteZoomEffect}
-          onCropRectChange={onCropRectChange}
-          onCropRectCommit={onCropRectCommit}
-          flipHorizontalToggles={flipHorizontalToggles}
-          flipVerticalToggles={flipVerticalToggles}
-          onFlipHorizontal={onFlipHorizontal}
-          onFlipVertical={onFlipVertical}
-          trimRanges={trimRanges}
-          pendingTrimStartSeconds={pendingTrimStartSeconds}
-          onTrimTrackClick={onTrimTrackClick}
-          onMoveTrimDot={onMoveTrimDot}
-          onDeleteTrimRange={onDeleteTrimRange}
-          overlayImages={overlayImages}
-          assetUrlById={assetUrlById}
-          onChangeOverlayRect={onChangeOverlayRect}
-          onCommitOverlayRect={onCommitOverlayRect}
-          onChangeOverlayRange={onChangeOverlayRange}
-          onCommitOverlayRange={onCommitOverlayRange}
-          onDeleteOverlay={onDeleteOverlay}
-          textOverlays={textOverlays}
-          onChangeTextOverlayRect={onChangeTextOverlayRect}
-          onCommitTextOverlayRect={onCommitTextOverlayRect}
-          onChangeTextOverlayRange={onChangeTextOverlayRange}
-          onCommitTextOverlayRange={onCommitTextOverlayRange}
-          onDeleteTextOverlay={onDeleteTextOverlay}
-          onRequestEditTextOverlay={onRequestEditTextOverlay}
-          videoOverlays={videoOverlays}
-          videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
-          overlaySourceDurationSeconds={overlaySourceDurationSeconds}
-          onChangeVideoOverlayRect={onChangeVideoOverlayRect}
-          onCommitVideoOverlayRect={onCommitVideoOverlayRect}
-          onChangeVideoOverlayRange={onChangeVideoOverlayRange}
-          onCommitVideoOverlayRange={onCommitVideoOverlayRange}
-          onChangeVideoOverlayPosition={onChangeVideoOverlayPosition}
-          onCommitVideoOverlayPosition={onCommitVideoOverlayPosition}
-          onChangeVideoOverlayLayout={onChangeVideoOverlayLayout}
-          onToggleSplitScreenOrientation={onToggleSplitScreenOrientation}
-          onToggleSplitScreenSides={onToggleSplitScreenSides}
-          onOpenVideoOverlayFraming={onOpenVideoOverlayFraming}
-          onDeleteVideoOverlay={onDeleteVideoOverlay}
-          onChangeOverlayAudioBalance={onChangeOverlayAudioBalance}
-          onCommitOverlayAudioBalance={onCommitOverlayAudioBalance}
-          markers={markers}
-          onAddMarker={onAddMarker}
-          onMoveMarker={onMoveMarker}
-          onRenameMarker={onRenameMarker}
-          onDeleteMarker={onDeleteMarker}
-          onOpenAssetMarkers={onOpenAssetMarkers}
-          pixelsPerSecond={PIXELS_PER_SECOND}
-          scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}
-          onScroll={bindOnScroll(FRAME_STRIP_INDEX)}
-        />
-      </div>
-
-      <div className="flex shrink-0 gap-1" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
-        <div className="shrink-0" style={{ width: VOLUME_FADER_WIDTH_PX }}>
-          <VolumeFader
-            value={mainAudioVolume}
-            onChange={onChangeMainAudioVolume}
-            colorClassName="to-accent"
-            heightClassName="h-full"
-            showLabel={false}
-          />
-        </div>
-        <div className="min-w-0 flex-1">
-          <VolumeGraph
-            levels={volumeLevels}
+        <div className="shrink-0">
+          <FrameStrip
+            thumbnails={thumbnails}
+            thumbnailTimestampsSeconds={thumbnailTimestampsSeconds}
+            clipBoundarySeconds={clipBoundarySeconds}
+            sequenceEntries={sequenceEntries}
+            onResizeImageClip={onResizeImageClip}
             isLoading={isAnalyzing}
+            durationSeconds={videoDurationSeconds}
+            currentTimeSeconds={currentTimeSeconds}
+            onSeek={onSeek}
+            baseCropRect={baseCropRect}
+            zoomEffects={zoomEffects}
+            frameAspectRatio={frameAspectRatio}
+            onChangeZoomRange={onChangeZoomRange}
+            onCommitZoomRange={onCommitZoomRange}
+            onChangeZoomEpicenter={onChangeZoomEpicenter}
+            onCommitZoomEpicenter={onCommitZoomEpicenter}
+            onDeleteZoomEffect={onDeleteZoomEffect}
+            onCropRectChange={onCropRectChange}
+            onCropRectCommit={onCropRectCommit}
+            flipHorizontalToggles={flipHorizontalToggles}
+            flipVerticalToggles={flipVerticalToggles}
+            onFlipHorizontal={onFlipHorizontal}
+            onFlipVertical={onFlipVertical}
+            trimRanges={trimRanges}
+            pendingTrimStartSeconds={pendingTrimStartSeconds}
+            onTrimTrackClick={onTrimTrackClick}
+            onMoveTrimDot={onMoveTrimDot}
+            onDeleteTrimRange={onDeleteTrimRange}
+            overlayImages={overlayImages}
+            assetUrlById={assetUrlById}
+            onChangeOverlayRect={onChangeOverlayRect}
+            onCommitOverlayRect={onCommitOverlayRect}
+            onChangeOverlayRange={onChangeOverlayRange}
+            onCommitOverlayRange={onCommitOverlayRange}
+            onDeleteOverlay={onDeleteOverlay}
+            textOverlays={textOverlays}
+            onChangeTextOverlayRect={onChangeTextOverlayRect}
+            onCommitTextOverlayRect={onCommitTextOverlayRect}
+            onChangeTextOverlayRange={onChangeTextOverlayRange}
+            onCommitTextOverlayRange={onCommitTextOverlayRange}
+            onDeleteTextOverlay={onDeleteTextOverlay}
+            onRequestEditTextOverlay={onRequestEditTextOverlay}
+            videoOverlays={videoOverlays}
+            videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
+            overlaySourceDurationSeconds={overlaySourceDurationSeconds}
+            onChangeVideoOverlayRect={onChangeVideoOverlayRect}
+            onCommitVideoOverlayRect={onCommitVideoOverlayRect}
+            onChangeVideoOverlayRange={onChangeVideoOverlayRange}
+            onCommitVideoOverlayRange={onCommitVideoOverlayRange}
+            onChangeVideoOverlayPosition={onChangeVideoOverlayPosition}
+            onCommitVideoOverlayPosition={onCommitVideoOverlayPosition}
+            onChangeVideoOverlayLayout={onChangeVideoOverlayLayout}
+            onToggleSplitScreenOrientation={onToggleSplitScreenOrientation}
+            onToggleSplitScreenSides={onToggleSplitScreenSides}
+            onOpenVideoOverlayFraming={onOpenVideoOverlayFraming}
+            onDeleteVideoOverlay={onDeleteVideoOverlay}
+            onChangeOverlayAudioBalance={onChangeOverlayAudioBalance}
+            onCommitOverlayAudioBalance={onCommitOverlayAudioBalance}
+            markers={markers}
+            onAddMarker={onAddMarker}
+            onMoveMarker={onMoveMarker}
+            onRenameMarker={onRenameMarker}
+            onDeleteMarker={onDeleteMarker}
+            onOpenAssetMarkers={onOpenAssetMarkers}
             pixelsPerSecond={PIXELS_PER_SECOND}
-            scrollContainerRef={bindRef(VOLUME_GRAPH_INDEX)}
-            onScroll={bindOnScroll(VOLUME_GRAPH_INDEX)}
+            scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}
+            onScroll={bindOnScroll(FRAME_STRIP_INDEX)}
           />
+        </div>
+
+        <div className="flex shrink-0 gap-1" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
+          <div className="shrink-0" style={{ width: VOLUME_FADER_WIDTH_PX }}>
+            <VolumeFader
+              value={backgroundVolume}
+              onChange={onChangeBackgroundVolume}
+              colorClassName="to-accent"
+              heightClassName="h-full"
+              showLabel={false}
+            />
+          </div>
+          <div className="min-w-0 flex-1">
+            <BackgroundTrackStrip
+              tracks={backgroundTracks}
+              videoDurationSeconds={videoDurationSeconds}
+              pixelsPerSecond={PIXELS_PER_SECOND}
+              scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}
+              onScroll={bindOnScroll(BACKGROUND_STRIP_INDEX)}
+            />
+          </div>
         </div>
       </div>
     </div>

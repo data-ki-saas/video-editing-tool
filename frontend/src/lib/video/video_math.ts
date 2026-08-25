@@ -782,33 +782,6 @@ export function resolveSequencePosition(
 }
 
 /**
- * Root-mean-square loudness of `samples` (mono, -1..1 range), one value per
- * `bucketSeconds` window, normalized so the loudest bucket in the clip is
- * 1.0. Normalizing per-clip (rather than against a fixed reference level)
- * keeps the volume graph readable regardless of the source recording's
- * absolute levels.
- */
-export function computeVolumeBuckets(samples: Float32Array, sampleRate: number, bucketSeconds: number): number[] {
-  if (samples.length === 0 || sampleRate <= 0 || bucketSeconds <= 0) return [];
-
-  const bucketSizeSamples = Math.max(1, Math.round(sampleRate * bucketSeconds));
-  const buckets: number[] = [];
-
-  for (let start = 0; start < samples.length; start += bucketSizeSamples) {
-    const end = Math.min(start + bucketSizeSamples, samples.length);
-    let sumOfSquares = 0;
-    for (let i = start; i < end; i++) {
-      sumOfSquares += samples[i] * samples[i];
-    }
-    buckets.push(Math.sqrt(sumOfSquares / (end - start)));
-  }
-
-  const MIN_PEAK = 1e-6; // guards against divide-by-zero on a silent/empty track
-  const peak = Math.max(...buckets, MIN_PEAK);
-  return buckets.map((value) => value / peak);
-}
-
-/**
  * One contiguous stretch of the OUTPUT (post-trim) render timeline, all
  * from a single physical clip -- what the Creatomate compiler emits one
  * `Video` element per (lib/timeline/compileCreatomateTimeline.ts).

@@ -18,13 +18,23 @@
  * sequence loops across the video's duration, rather than looping just
  * one track.
  *
- * Total width is `videoDurationSeconds * pixelsPerSecond` -- the same
- * scale FrameStrip and VolumeGraph use, so all three line up and share one
- * scroll position (see lib/useSyncedHorizontalScroll.ts).
+ * Total width is `videoDurationSeconds * pixelsPerSecond` -- the same scale
+ * FrameStrip and MainAudioTrackStrip use, so all three line up and share
+ * one scroll position (see lib/useSyncedHorizontalScroll.ts). A
+ * MusicNoteIcon badge at the rail's own left edge (scrolls with the
+ * content, so it stays at time 0 -- same convention as TrimTrack's
+ * ScissorsIcon) tells it apart from MainAudioTrackStrip's own
+ * MicrophoneIcon badge at a glance.
+ *
+ * NOT `hide-scrollbar` -- this is the bottom-most of the three synced
+ * strips (see Playground.tsx), so its native scrollbar is left visible as
+ * the one scrollbar for the whole Playground stack (see globals.css's own
+ * comment).
  */
 import { useEffect, useState } from "react";
 import { getAudioDuration } from "@/lib/video/audio";
 import { buildSequenceClipInfos, totalSequenceDuration, type SequenceClipInfo } from "@/lib/video/video_math";
+import { MusicNoteIcon } from "@/components/icons/UIIcons";
 
 export function BackgroundTrackStrip({
   tracks,
@@ -82,21 +92,21 @@ export function BackgroundTrackStrip({
 
   if (tracks.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center bg-neutral-900 px-2 text-xs text-muted">
+      <div className="flex h-full items-center justify-center bg-neutral-950 px-2 text-xs text-muted">
         No background track selected
       </div>
     );
   }
   if (error && sequenceClips.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center bg-neutral-900 px-2 text-xs text-red-400">{error}</div>
+      <div className="flex h-full items-center justify-center bg-neutral-950 px-2 text-xs text-red-400">{error}</div>
     );
   }
 
   const sequenceDurationSeconds = totalSequenceDuration(sequenceClips);
   if (isLoading || sequenceDurationSeconds <= 0 || videoDurationSeconds <= 0) {
     return (
-      <div className="flex h-full items-center justify-center bg-neutral-900 px-2 text-xs text-muted">Loading…</div>
+      <div className="flex h-full items-center justify-center bg-neutral-950 px-2 text-xs text-muted">Loading…</div>
     );
   }
 
@@ -120,19 +130,19 @@ export function BackgroundTrackStrip({
     <div
       ref={scrollContainerRef}
       onScroll={onScroll}
-      className="hide-scrollbar h-full overflow-x-auto bg-neutral-900 px-2 py-1"
+      className="h-full overflow-x-auto bg-neutral-950 px-2"
     >
-      <div className="flex h-full gap-px" style={{ width: videoDurationSeconds * pixelsPerSecond }}>
+      <div className="relative flex h-full gap-px" style={{ width: videoDurationSeconds * pixelsPerSecond }}>
+        <MusicNoteIcon className="pointer-events-none absolute left-0.5 top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.9)]" />
         {segments.map((segment) => (
           <div
             key={segment.key}
             style={{ flexBasis: `${segment.widthFraction * 100}%` }}
             title={segment.title}
-            // Solid fill (not a translucent tint) -- matches VolumeGraph's
-            // own bars against this same bg-neutral-900 strip background.
-            // The previous bg-accent/20 + border-accent/40 nearly vanished
-            // against neutral-900 for every color theme's accent, light or
-            // dark. `gap-px` on the parent (bg-neutral-900 showing through)
+            // Solid fill (not a translucent tint) -- the previous
+            // bg-accent/20 + border-accent/40 nearly vanished against
+            // neutral-950 for every color theme's accent, light or dark.
+            // `gap-px` on the parent (bg-neutral-950 showing through)
             // already separates adjacent segments -- no border needed.
             className="shrink-0 rounded-sm bg-accent"
           />

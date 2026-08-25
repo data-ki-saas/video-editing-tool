@@ -9,8 +9,8 @@
  *
  * Each tile is a fixed `pixelsPerSecond` wide -- so this strip's total
  * width is exactly `thumbnails.length * pixelsPerSecond`, the same scale
- * Playground.tsx uses for VolumeGraph and BackgroundTrackStrip, so all
- * three line up and can share one scroll position (see
+ * Playground.tsx uses for MainAudioTrackStrip and BackgroundTrackStrip, so
+ * all three line up and can share one scroll position (see
  * lib/useSyncedHorizontalScroll.ts) -- but its HEIGHT comes from
  * `frameAspectRatio` (width / height), not from the row's own available
  * height: sizing the box itself to the video's real shape means the image

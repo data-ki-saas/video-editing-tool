@@ -16,6 +16,7 @@
  */
 import { useRef } from "react";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
+import { ScissorsIcon } from "@/components/icons/UIIcons";
 import type { TrimRange } from "@/lib/video/video_math";
 
 export function TrimTrack({
@@ -78,8 +79,10 @@ export function TrimTrack({
       ref={trackRef}
       onClick={handleClick}
       title="Click to start a trim, click again elsewhere to cut that stretch"
-      className="relative h-2 w-full shrink-0 cursor-pointer rounded-sm bg-neutral-600"
+      className="relative mb-1 h-4 w-full shrink-0 cursor-pointer rounded-sm border border-red-600 bg-neutral-600"
     >
+      <ScissorsIcon className="pointer-events-none absolute left-0.5 top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.9)]" />
+
       {trimRanges.map((range, index) => (
         <div
           key={index}
