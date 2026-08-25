@@ -91,6 +91,7 @@ import {
   applyVideoOverlayRangeChange,
   applyVideoOverlayPositionChange,
   applyChangeOverlayFraming,
+  applyChangeOverlayAudioBalance,
   applyDeleteVideoOverlay,
 } from "@/lib/video/transformations";
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot, type Project } from "@/lib/projects";
@@ -241,6 +242,8 @@ export function ThreePaneEditor({
     index: number;
     startTimeSeconds: number;
   } | null>(null);
+  // VideoOverlayAudioTrack's drag handle, same live-edit split again.
+  const [liveOverlayAudioBalanceEdit, setLiveOverlayAudioBalanceEdit] = useState<{ index: number; balance: number } | null>(null);
 
   // A representative still frame per video asset -- lifted up from
   // AssetGallery.tsx (which used to generate this locally) since
@@ -897,8 +900,20 @@ export function ThreePaneEditor({
     setLiveVideoOverlayRectEdit((prev) => (prev?.index === overlayIndex ? null : prev));
     setLiveVideoOverlayRangeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
     setLiveVideoOverlayPositionEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    setLiveOverlayAudioBalanceEdit((prev) => (prev?.index === overlayIndex ? null : prev));
     if (framingDialogOverlayIndex === overlayIndex) setFramingDialogOverlayIndex(null);
     const { label, state } = applyDeleteVideoOverlay(selections, overlayIndex);
+    pushChange(label, state);
+  }
+
+  // VideoOverlayAudioTrack's drag handle.
+  function handleChangeOverlayAudioBalance(overlayIndex: number, balance: number) {
+    setLiveOverlayAudioBalanceEdit({ index: overlayIndex, balance });
+  }
+
+  function handleCommitOverlayAudioBalance(overlayIndex: number, balance: number) {
+    setLiveOverlayAudioBalanceEdit(null);
+    const { label, state } = applyChangeOverlayAudioBalance(selections, overlayIndex, balance);
     pushChange(label, state);
   }
 
@@ -913,10 +928,11 @@ export function ThreePaneEditor({
   }
 
   // VideoOverlayFramingDialog's "Save" -- one commit, no live/commit split
-  // (see applyChangeOverlayFraming's own comment).
-  function handleSaveVideoOverlayFraming(framing: OverlayFraming) {
+  // (see applyChangeOverlayFraming's own comment). `baseFraming` is only
+  // ever passed for a Split-Screen overlay, whose dialog shows both panes.
+  function handleSaveVideoOverlayFraming(framing: OverlayFraming, baseFraming?: OverlayFraming) {
     if (framingDialogOverlayIndex === null) return;
-    const { label, state } = applyChangeOverlayFraming(selections, framingDialogOverlayIndex, framing);
+    const { label, state } = applyChangeOverlayFraming(selections, framingDialogOverlayIndex, framing, baseFraming);
     pushChange(label, state);
     setFramingDialogOverlayIndex(null);
   }
@@ -1138,6 +1154,9 @@ export function ThreePaneEditor({
     if (liveVideoOverlayRectEdit?.index === index && overlay.layout.type === "picture-in-picture") {
       return { ...overlay, layout: { ...overlay.layout, rect: liveVideoOverlayRectEdit.rect } };
     }
+    if (liveOverlayAudioBalanceEdit?.index === index) {
+      return { ...overlay, audioBalance: liveOverlayAudioBalanceEdit.balance };
+    }
     return overlay;
   });
 
@@ -1354,6 +1373,8 @@ export function ThreePaneEditor({
           onToggleSplitScreenSides={handleToggleSplitScreenSides}
           onOpenVideoOverlayFraming={handleOpenVideoOverlayFraming}
           onDeleteVideoOverlay={handleDeleteVideoOverlay}
+          onChangeOverlayAudioBalance={handleChangeOverlayAudioBalance}
+          onCommitOverlayAudioBalance={handleCommitOverlayAudioBalance}
         />
       </section>
 

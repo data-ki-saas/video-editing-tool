@@ -638,6 +638,7 @@ export function applyAddVideoOverlay(
     sourceStartSeconds: 0,
     layout: { type: "full-screen" },
     framing: DEFAULT_OVERLAY_FRAMING,
+    audioBalance: 0,
   };
   return { label: "Added overlay", state: { ...selections, videoOverlays: [...overlays, newOverlay] } };
 }
@@ -663,7 +664,7 @@ export function applyChangeVideoOverlayLayout(
       ? { type: "full-screen" }
       : layoutType === "picture-in-picture"
         ? { type: "picture-in-picture", rect: DEFAULT_PIP_RECT }
-        : { type: "split-screen", orientation: splitScreenOrientation, partnerFirst: false };
+        : { type: "split-screen", orientation: splitScreenOrientation, partnerFirst: false, baseFraming: DEFAULT_OVERLAY_FRAMING };
   if (
     isExclusiveLayout(layout) &&
     overlapsExclusiveWindow(selections.videoOverlays, overlay.startTimeSeconds, overlay.endTimeSeconds, overlayIndex)
@@ -756,17 +757,38 @@ export function applyVideoOverlayPositionChange(
  * one commit on "Save", not a live/commit split, since the dialog keeps
  * its own local draft state while open (same pattern as
  * TextOverlayDialog/TranscriptCaptionDialog) rather than touching history
- * on every drag. */
+ * on every drag. `baseFraming` is only meaningful (and only ever passed)
+ * for a Split-Screen overlay -- the dialog shows both panes for that
+ * layout, and both are saved together as one undo step rather than two. */
 export function applyChangeOverlayFraming(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
-  framing: OverlayFraming
+  framing: OverlayFraming,
+  baseFraming?: OverlayFraming
 ): TransformationResult {
   const overlay = selections.videoOverlays[overlayIndex];
   if (!overlay) return { label: "Adjusted overlay framing", state: selections };
+  const nextLayout: VideoOverlayLayout =
+    overlay.layout.type === "split-screen" && baseFraming ? { ...overlay.layout, baseFraming } : overlay.layout;
   const nextOverlays = [...selections.videoOverlays];
-  nextOverlays[overlayIndex] = { ...overlay, framing };
+  nextOverlays[overlayIndex] = { ...overlay, framing, layout: nextLayout };
   return { label: "Adjusted overlay framing", state: { ...selections, videoOverlays: nextOverlays } };
+}
+
+/** Dragging the mix handle on VideoOverlayAudioTrack -- 0 (default) plays
+ * only the base clip's own audio through this window, 1 only the
+ * overlay's, in between mixes both at that fraction of their own volume
+ * (see video_math.ts's VideoOverlayClip.audioBalance). */
+export function applyChangeOverlayAudioBalance(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  audioBalance: number
+): TransformationResult {
+  const overlay = selections.videoOverlays[overlayIndex];
+  if (!overlay) return { label: "Adjusted overlay audio mix", state: selections };
+  const nextOverlays = [...selections.videoOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, audioBalance: Math.min(Math.max(audioBalance, 0), 1) };
+  return { label: "Adjusted overlay audio mix", state: { ...selections, videoOverlays: nextOverlays } };
 }
 
 export function applyDeleteVideoOverlay(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {

@@ -115,6 +115,8 @@ export function Playground({
   onToggleSplitScreenSides,
   onOpenVideoOverlayFraming,
   onDeleteVideoOverlay,
+  onChangeOverlayAudioBalance,
+  onCommitOverlayAudioBalance,
 }: {
   backgroundTracks: { name: string; url: string }[];
   videoDurationSeconds: number;
@@ -182,6 +184,8 @@ export function Playground({
   onToggleSplitScreenSides: (overlayIndex: number) => void;
   onOpenVideoOverlayFraming: (overlayIndex: number) => void;
   onDeleteVideoOverlay: (overlayIndex: number) => void;
+  onChangeOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
+  onCommitOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
 }) {
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
 
@@ -255,6 +259,8 @@ export function Playground({
           onToggleSplitScreenSides={onToggleSplitScreenSides}
           onOpenVideoOverlayFraming={onOpenVideoOverlayFraming}
           onDeleteVideoOverlay={onDeleteVideoOverlay}
+          onChangeOverlayAudioBalance={onChangeOverlayAudioBalance}
+          onCommitOverlayAudioBalance={onCommitOverlayAudioBalance}
           pixelsPerSecond={PIXELS_PER_SECOND}
           scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}
           onScroll={bindOnScroll(FRAME_STRIP_INDEX)}

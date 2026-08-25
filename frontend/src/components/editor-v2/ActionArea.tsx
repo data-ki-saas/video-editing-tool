@@ -128,7 +128,7 @@ export function ActionArea({
   // The overlay currently open in VideoOverlayFramingDialog, if any --
   // null means closed.
   framingDialogOverlay: VideoOverlayClip | null;
-  onSaveVideoOverlayFraming: (framing: OverlayFraming) => void;
+  onSaveVideoOverlayFraming: (framing: OverlayFraming, baseFraming?: OverlayFraming) => void;
   onCloseVideoOverlayFramingDialog: () => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
@@ -333,8 +333,10 @@ export function ActionArea({
 
       {framingDialogOverlay && (
         <VideoOverlayFramingDialog
-          previewFrameUrl={videoThumbnailUrlByAssetId[framingDialogOverlay.assetId] ?? ""}
-          framing={framingDialogOverlay.framing}
+          overlay={framingDialogOverlay}
+          baseFrameUrl={previewFrameUrl ?? ""}
+          overlayFrameUrl={videoThumbnailUrlByAssetId[framingDialogOverlay.assetId] ?? ""}
+          outputAspectRatio={frameAspectRatio}
           onSave={onSaveVideoOverlayFraming}
           onClose={onCloseVideoOverlayFramingDialog}
         />

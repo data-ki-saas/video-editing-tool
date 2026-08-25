@@ -313,7 +313,19 @@ function buildOverlayImageElements(
  * the base clip's crop/zoom/flip entirely (matches CanvasPlayer's own
  * draw order/tier -- drawn after the base's flip transform is undone).
  * One function handles every layout, since from the compiler's point of
- * view it's always just "the overlay's own Video, at this rect." */
+ * view it's always just "the overlay's own Video, at this rect."
+ *
+ * KNOWN GAP: `overlay.audioBalance` (video_math.ts's VideoOverlayClip --
+ * lets the live preview duck the base track and mix in the overlay's own
+ * audio, see CanvasPlayer.tsx's computeMainAudioGainBreakpoints) is not
+ * reflected here at all -- every overlay's own `Video` element below plays
+ * with Creatomate's own default audio behavior, and the base track's
+ * volume is never ducked. Reproducing this server-side would need per-
+ * element `volume` (for the overlay's own share) plus keyframed volume
+ * automation on the base sequence's own Video elements (for ducking) --
+ * real, uncharted-for-this-file work, not attempted here since this whole
+ * path isn't reachable from the UI yet regardless (see
+ * ThreePaneEditor.tsx's handleRenderClick). */
 function buildVideoOverlayElements(
   videoOverlays: VideoOverlayClip[],
   segments: RenderSegment[],

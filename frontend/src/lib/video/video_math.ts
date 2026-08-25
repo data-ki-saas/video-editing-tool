@@ -462,7 +462,13 @@ export function findActiveOverlays(overlays: OverlayImage[], timeSeconds: number
 export type VideoOverlayLayout =
   | { type: "full-screen" }
   | { type: "picture-in-picture"; rect: CropRect } // width/height locked at creation; only x/y move by default, though the reused OverlayRectOverlay drag handle also lets a user resize it
-  | { type: "split-screen"; orientation: "horizontal" | "vertical"; partnerFirst: boolean };
+  // baseFraming lives HERE (not on VideoOverlayClip itself) because it's
+  // only ever meaningful for Split-Screen -- Full-Screen hides the base
+  // entirely (nothing to frame) and Picture-in-Picture never reshapes it
+  // (it stays full-frame underneath, needing no separate crop of its own).
+  // Independent of the OVERLAY's own `framing` (VideoOverlayClip.framing
+  // below) -- each half gets its own pan/flip.
+  | { type: "split-screen"; orientation: "horizontal" | "vertical"; partnerFirst: boolean; baseFraming: OverlayFraming };
 
 export function isExclusiveLayout(layout: VideoOverlayLayout): boolean {
   return layout.type !== "picture-in-picture";
@@ -501,6 +507,16 @@ export interface VideoOverlayClip {
   sourceStartSeconds: number;
   layout: VideoOverlayLayout;
   framing: OverlayFraming;
+  // 0 = only the base clip's own audio plays through this window (the
+  // original behavior, and the default -- preserves every overlay added
+  // before this field existed); 1 = only the overlay's own audio;
+  // in between mixes both, each at that fraction of its own natural
+  // volume (0.5 = both at half, not both at full -- avoids a jarring
+  // double-loud mix, same reasoning a constant-power audio crossfade
+  // uses). Adjusted via VideoOverlayAudioTrack.tsx's own draggable rail,
+  // positioned above VideoOverlayTrack -- see CanvasPlayer.tsx for how
+  // this is actually scheduled as gain automation during playback.
+  audioBalance: number;
 }
 
 /** The single EXCLUSIVE-layout overlay (Full-Screen or Split-Screen) active

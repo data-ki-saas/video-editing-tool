@@ -80,6 +80,7 @@ import { TrimTrack } from "./TrimTrack";
 import { OverlayTrack } from "./OverlayTrack";
 import { TextOverlayTrack } from "./TextOverlayTrack";
 import { VideoOverlayTrack } from "./VideoOverlayTrack";
+import { VideoOverlayAudioTrack } from "./VideoOverlayAudioTrack";
 import {
   computeEffectiveCropRect,
   computeEffectiveFlip,
@@ -322,6 +323,8 @@ export function FrameStrip({
   onToggleSplitScreenSides,
   onOpenVideoOverlayFraming,
   onDeleteVideoOverlay,
+  onChangeOverlayAudioBalance,
+  onCommitOverlayAudioBalance,
   pixelsPerSecond,
   scrollContainerRef,
   onScroll,
@@ -391,6 +394,8 @@ export function FrameStrip({
   onToggleSplitScreenSides: (overlayIndex: number) => void;
   onOpenVideoOverlayFraming: (overlayIndex: number) => void;
   onDeleteVideoOverlay: (overlayIndex: number) => void;
+  onChangeOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
+  onCommitOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
@@ -580,6 +585,12 @@ export function FrameStrip({
           onDeleteRange={onDeleteTrimRange}
         />
 
+        <VideoOverlayAudioTrack
+          videoOverlays={videoOverlays}
+          videoDurationSeconds={durationSeconds}
+          onChangeAudioBalance={onChangeOverlayAudioBalance}
+          onCommitAudioBalance={onCommitOverlayAudioBalance}
+        />
         <VideoOverlayTrack
           videoOverlays={videoOverlays}
           assetThumbnailUrlById={videoThumbnailUrlByAssetId}

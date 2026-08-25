@@ -125,6 +125,39 @@ function drawImageFlipped(
   ctx.restore();
 }
 
+/** The base clip's own audio volume (0..1) over time, as a step function --
+ * 1 everywhere by default, dipping to `1 - audioBalance` for the duration
+ * of any overlay window that wants some of its own audio mixed in (see
+ * video_math.ts's VideoOverlayClip.audioBalance), so the base track
+ * "ducks" rather than playing at full volume underneath. Multiple
+ * Picture-in-Picture overlays CAN be active at once with different
+ * balances -- the strongest ducking request wins (`Math.max` of their
+ * balances), rather than compounding. Hard cuts at each boundary (no
+ * fade), same convention flip toggles already use elsewhere in this file.
+ * Breakpoints are returned in order, each holding until the next one. */
+function computeMainAudioGainBreakpoints(
+  overlays: VideoOverlayClip[],
+  totalDurationSeconds: number
+): { timeSeconds: number; gain: number }[] {
+  const activeOverlays = overlays.filter((o) => o.audioBalance > 0);
+  const points = new Set<number>([0, totalDurationSeconds]);
+  for (const overlay of activeOverlays) {
+    if (overlay.startTimeSeconds > 0 && overlay.startTimeSeconds < totalDurationSeconds) points.add(overlay.startTimeSeconds);
+    if (overlay.endTimeSeconds > 0 && overlay.endTimeSeconds < totalDurationSeconds) points.add(overlay.endTimeSeconds);
+  }
+  const sorted = Array.from(points).sort((a, b) => a - b);
+
+  return sorted.map((timeSeconds, index) => {
+    // Sampled just after this breakpoint (the midpoint to the next one, or
+    // the point itself for the last) to decide what's active starting HERE.
+    const sampleAt = index < sorted.length - 1 ? (timeSeconds + sorted[index + 1]) / 2 : timeSeconds;
+    const maxBalance = activeOverlays
+      .filter((o) => sampleAt >= o.startTimeSeconds && sampleAt < o.endTimeSeconds)
+      .reduce((max, o) => Math.max(max, o.audioBalance), 0);
+    return { timeSeconds, gain: 1 - maxBalance };
+  });
+}
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -231,6 +264,17 @@ export const CanvasPlayer = forwardRef<
   // <video> or a single static image, since a video overlay must actually
   // play back over its window.
   const videoOverlayFramesByAssetIdRef = useRef<Record<string, { images: HTMLImageElement[]; frameRate: number; durationSeconds: number }>>({});
+  // Decoded audio for every video overlay source asset that at least one
+  // overlay actually wants audio from (audioBalance > 0) -- keyed by
+  // assetId, same sharing convention as videoOverlayFramesByAssetIdRef.
+  // Overlays with audioBalance === 0 (the default) never decode their
+  // asset's audio at all, since nothing would play it.
+  const videoOverlayAudioBuffersByAssetIdRef = useRef<Record<string, AudioBuffer>>({});
+  // Every overlay-audio source node currently scheduled for this playback
+  // pass (one per overlay with audioBalance > 0 and a loaded buffer,
+  // scheduled all at once in resumePlaybackFrom -- see its own comment) --
+  // stopPlaybackLoop stops and clears all of them together.
+  const overlayAudioSourceNodesRef = useRef<AudioBufferSourceNode[]>([]);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
@@ -287,6 +331,14 @@ export const CanvasPlayer = forwardRef<
       // Already stopped -- fine to ignore.
     }
     backgroundSourceNodeRef.current = null;
+    for (const node of overlayAudioSourceNodesRef.current) {
+      try {
+        node.stop();
+      } catch {
+        // Already stopped -- fine to ignore.
+      }
+    }
+    overlayAudioSourceNodesRef.current = [];
   }
 
   /** Draws the frame at `elapsedSeconds`, sampling only the region the
@@ -339,11 +391,33 @@ export const CanvasPlayer = forwardRef<
     ctx.save();
     ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
     ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
-    if (baseRect) {
+    if (baseRect && activeExclusiveOverlay?.layout.type === "split-screen") {
+      // A Split-Screen half's own box generally has a DIFFERENT aspect
+      // ratio than `crop` (the base clip's own chosen output ratio) --
+      // drawing the already-cropped [sx,sy,sWidth,sHeight] region straight
+      // into a differently-shaped box would non-uniformly STRETCH it
+      // (drawImage maps src onto dest regardless of aspect mismatch), not
+      // cleanly crop it. A further cover-fit -- using this window's own
+      // baseFraming pan, independent of the overlay's own framing -- picks
+      // which part of that already-cropped region survives instead.
+      const baseDestX = baseRect.x * canvas.width;
+      const baseDestY = baseRect.y * canvas.height;
+      const baseDestWidth = baseRect.width * canvas.width;
+      const baseDestHeight = baseRect.height * canvas.height;
+      const { panX, panY, flipHorizontal: baseFlipH, flipVertical: baseFlipV } = activeExclusiveOverlay.layout.baseFraming;
+      const { sx: bsx, sy: bsy, sWidth: bsw, sHeight: bsh } = computeCoverFitSourceRect(sWidth, sHeight, baseDestWidth, baseDestHeight, panX, panY);
+      // Composes with the global flip transform already active on this
+      // context (the outer ctx.translate/scale above) -- each mirrors
+      // around its own frame of reference, so both apply correctly
+      // together rather than one overriding the other.
+      drawImageFlipped(ctx, image, sx + bsx, sy + bsy, bsw, bsh, baseDestX, baseDestY, baseDestWidth, baseDestHeight, baseFlipH, baseFlipV);
+    } else if (baseRect) {
       // null only for an active Full-Screen video overlay -- the overlay's
       // own draw below fully covers the canvas at full opacity regardless,
       // so skipping this is a pure optimization, never load-bearing for
       // correctness (see video_math.ts's computeOverlayRects doc comment).
+      // Not Split-Screen here, so baseRect always matches crop's own
+      // aspect (the full canvas) -- no further cover-fit needed.
       ctx.drawImage(
         image, sx, sy, sWidth, sHeight,
         baseRect.x * canvas.width, baseRect.y * canvas.height, baseRect.width * canvas.width, baseRect.height * canvas.height
@@ -497,11 +571,60 @@ export const CanvasPlayer = forwardRef<
 
     const source = audioContext.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(audioContext.destination);
+    // Routed through a gain node (rather than straight to destination) so
+    // it can be "ducked" for any video overlay window that wants some of
+    // its own audio mixed in -- see computeMainAudioGainBreakpoints. A
+    // fresh node every resume, same as the source itself; nothing to clean
+    // up beyond what stopping/discarding the source already does.
+    const mainGainNode = audioContext.createGain();
+    source.connect(mainGainNode).connect(audioContext.destination);
     source.start(0, adjustedOffsetSeconds);
     sourceNodeRef.current = source;
     playStartedAtCtxTimeRef.current = audioContext.currentTime;
     pausedAtSecondsRef.current = adjustedOffsetSeconds;
+
+    for (const breakpoint of computeMainAudioGainBreakpoints(videoOverlays, durationRef.current)) {
+      if (breakpoint.timeSeconds < adjustedOffsetSeconds) continue; // already in the past relative to this resume
+      mainGainNode.gain.setValueAtTime(breakpoint.gain, audioContext.currentTime + (breakpoint.timeSeconds - adjustedOffsetSeconds));
+    }
+    // Covers the case where adjustedOffsetSeconds itself lands mid-window
+    // (no breakpoint exists exactly there since breakpoints only mark
+    // window START/END) -- sets the correct starting gain immediately
+    // rather than waiting for whatever breakpoint comes next.
+    const initialDucking = videoOverlays
+      .filter((o) => o.audioBalance > 0 && adjustedOffsetSeconds >= o.startTimeSeconds && adjustedOffsetSeconds < o.endTimeSeconds)
+      .reduce((max, o) => Math.max(max, o.audioBalance), 0);
+    mainGainNode.gain.setValueAtTime(1 - initialDucking, audioContext.currentTime);
+
+    // One AudioBufferSourceNode per overlay that wants some of its own
+    // audio (audioBalance > 0) and has actually finished decoding by now --
+    // all scheduled up front here, same "schedule everything ahead of
+    // time" idiom the single background-music loop below already uses,
+    // just per-overlay instead of one continuous loop. `loop = true`
+    // unconditionally is always safe (a no-op unless the window genuinely
+    // outlasts one play-through -- see VideoOverlayTrack.tsx's own
+    // edge-drag comment on why a window CAN now exceed its source's length).
+    overlayAudioSourceNodesRef.current = [];
+    for (const overlay of videoOverlays) {
+      if (overlay.audioBalance <= 0) continue;
+      if (overlay.endTimeSeconds <= adjustedOffsetSeconds) continue; // this window is entirely in the past
+      const overlayBuffer = videoOverlayAudioBuffersByAssetIdRef.current[overlay.assetId];
+      if (!overlayBuffer || overlayBuffer.duration <= 0) continue;
+
+      const windowStartSeconds = Math.max(overlay.startTimeSeconds, adjustedOffsetSeconds);
+      const elapsedIntoWindowSeconds = windowStartSeconds - overlay.startTimeSeconds;
+      const remainingDurationSeconds = overlay.endTimeSeconds - windowStartSeconds;
+      const startCtxTime = audioContext.currentTime + (windowStartSeconds - adjustedOffsetSeconds);
+
+      const overlaySource = audioContext.createBufferSource();
+      overlaySource.buffer = overlayBuffer;
+      overlaySource.loop = true;
+      const overlayGainNode = audioContext.createGain();
+      overlayGainNode.gain.value = overlay.audioBalance;
+      overlaySource.connect(overlayGainNode).connect(audioContext.destination);
+      overlaySource.start(startCtxTime, elapsedIntoWindowSeconds % overlayBuffer.duration, remainingDurationSeconds);
+      overlayAudioSourceNodesRef.current.push(overlaySource);
+    }
 
     // Background music loops on its own (loop = true over the whole
     // buffer) rather than being rescheduled per repeat -- its start offset
@@ -781,6 +904,50 @@ export const CanvasPlayer = forwardRef<
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on videoOverlaysLoadKey (joined assetId:url), not the videoOverlays array reference; drawFrameAt is freshly defined every render and always closes over the latest props
   }, [videoOverlaysLoadKey, isReady, isPlaying]);
+
+  // Decodes audio ONLY for a video overlay source asset that at least one
+  // overlay actually wants some audio from (audioBalance > 0) -- most
+  // overlays never touch audio at all, so this stays a no-op for them.
+  // Independent of the frame-extraction effect above (frames still load
+  // regardless of audioBalance) and of the main sequence's own decode.
+  // Takes effect on the NEXT resumePlaybackFrom (Play, or a seek while
+  // playing) -- unlike video frames, there's no way to hot-swap audio
+  // already scheduled mid-playback, so a buffer finishing decode while
+  // already playing doesn't retroactively add its sound until the next
+  // resume. A source that fails to decode is skipped -- the base track
+  // simply isn't ducked for that overlay's window (see
+  // computeMainAudioGainBreakpoints, which only ducks based on
+  // audioBalance, not on whether the buffer actually loaded).
+  const overlayAudioAssetIds = Array.from(new Set(videoOverlays.filter((o) => o.audioBalance > 0).map((o) => o.assetId)));
+  const overlayAudioLoadKey = overlayAudioAssetIds.map((assetId) => `${assetId}:${assetUrlById[assetId] ?? ""}`).join(",");
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadOverlayAudio() {
+      for (const assetId of overlayAudioAssetIds) {
+        if (cancelled) return;
+        if (videoOverlayAudioBuffersByAssetIdRef.current[assetId]) continue;
+        const url = assetUrlById[assetId];
+        if (!url) continue;
+        try {
+          // decodeAudioBuffer manages its own temporary AudioContext
+          // internally -- unrelated to audioContextRef/ensureAudioContext,
+          // which is only for the playback graph itself.
+          const buffer = await decodeAudioBuffer(url);
+          if (cancelled) return;
+          videoOverlayAudioBuffersByAssetIdRef.current[assetId] = buffer;
+        } catch {
+          // Skipped -- see this effect's own comment.
+        }
+      }
+    }
+
+    void loadOverlayAudio();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on overlayAudioLoadKey (joined assetId:url), not the videoOverlays array reference
+  }, [overlayAudioLoadKey]);
 
   // Decodes/concatenates the background-music sequence independently of the
   // main clips-loading effect above, so adding or swapping a background
