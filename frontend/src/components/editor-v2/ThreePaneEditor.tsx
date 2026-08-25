@@ -51,6 +51,7 @@ import {
   findClosestTimestampIndex,
   computeOutputDimensions,
   DEFAULT_OVERLAY_FRAMING,
+  DEFAULT_SPLIT_SCREEN_RATIO,
   type CropRect,
   type OverlayImage,
   type SequenceEntry,
@@ -382,13 +383,21 @@ export function ThreePaneEditor({
     overlayImages: rawSelections.overlayImages ?? [],
     textOverlays: rawSelections.textOverlays ?? [],
     sequenceClips,
-    // `baseFraming` was added to the split-screen layout variant after some
-    // projects already had one persisted without it -- backfilling it here
-    // (once, at load) heals old data at the source instead of leaving every
-    // reader (CanvasPlayer, VideoOverlayFramingDialog) to guess a default.
+    // `baseFraming`/`ratio` were added to the split-screen layout variant
+    // after some projects already had one persisted without them --
+    // backfilling both here (once, at load) heals old data at the source
+    // instead of leaving every reader (CanvasPlayer, computeOverlayRects,
+    // VideoOverlayFramingDialog) to guess a default.
     videoOverlays: (rawSelections.videoOverlays ?? []).map((overlay) =>
-      overlay.layout.type === "split-screen" && !overlay.layout.baseFraming
-        ? { ...overlay, layout: { ...overlay.layout, baseFraming: DEFAULT_OVERLAY_FRAMING } }
+      overlay.layout.type === "split-screen" && (!overlay.layout.baseFraming || overlay.layout.ratio === undefined)
+        ? {
+            ...overlay,
+            layout: {
+              ...overlay.layout,
+              baseFraming: overlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING,
+              ratio: overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO,
+            },
+          }
         : overlay
     ),
     transcriptCaption: rawSelections.transcriptCaption ?? null,
@@ -967,11 +976,15 @@ export function ThreePaneEditor({
   }
 
   // VideoOverlayFramingDialog's "Save" -- one commit, no live/commit split
-  // (see applyChangeOverlayFraming's own comment). `baseFraming` is only
-  // ever passed for a Split-Screen overlay, whose dialog shows both panes.
-  function handleSaveVideoOverlayFraming(framing: OverlayFraming, baseFraming?: OverlayFraming) {
+  // (see applyChangeOverlayFraming's own comment). `baseFraming`/`ratio`
+  // are only ever passed for a Split-Screen overlay, whose popup shows both
+  // halves and their divider.
+  function handleSaveVideoOverlayFraming(
+    framing: OverlayFraming,
+    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number }
+  ) {
     if (framingDialogOverlayIndex === null) return;
-    const { label, state } = applyChangeOverlayFraming(selections, framingDialogOverlayIndex, framing, baseFraming);
+    const { label, state } = applyChangeOverlayFraming(selections, framingDialogOverlayIndex, framing, options);
     pushChange(label, state);
     setFramingDialogOverlayIndex(null);
   }

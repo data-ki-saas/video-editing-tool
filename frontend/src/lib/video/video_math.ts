@@ -485,8 +485,13 @@ export type VideoOverlayLayout =
   // entirely (nothing to frame) and Picture-in-Picture never reshapes it
   // (it stays full-frame underneath, needing no separate crop of its own).
   // Independent of the OVERLAY's own `framing` (VideoOverlayClip.framing
-  // below) -- each half gets its own pan/flip.
-  | { type: "split-screen"; orientation: "horizontal" | "vertical"; partnerFirst: boolean; baseFraming: OverlayFraming };
+  // below) -- each half gets its own pan/flip. `ratio` is the fraction of
+  // the frame given to the LEADING slot (left, or top -- see
+  // computeOverlayRects below; `partnerFirst` decides which of base/overlay
+  // actually occupies that slot, independent of the ratio itself), dragged
+  // via VideoOverlayFramingDialog's own divider -- 0.5 (an even split) is
+  // the default every overlay is created with.
+  | { type: "split-screen"; orientation: "horizontal" | "vertical"; partnerFirst: boolean; baseFraming: OverlayFraming; ratio: number };
 
 export function isExclusiveLayout(layout: VideoOverlayLayout): boolean {
   return layout.type !== "picture-in-picture";
@@ -513,6 +518,12 @@ export interface OverlayFraming {
 }
 
 export const DEFAULT_OVERLAY_FRAMING: OverlayFraming = { panX: 0.5, panY: 0.5, flipHorizontal: false, flipVertical: false };
+
+// An even split -- what every Split-Screen overlay starts with, and what a
+// pre-`ratio` persisted layout (see the `?? DEFAULT_SPLIT_SCREEN_RATIO`
+// fallback in computeOverlayRects below) is treated as having meant all
+// along, since that's exactly what the old, un-adjustable 50/50 split was.
+export const DEFAULT_SPLIT_SCREEN_RATIO = 0.5;
 
 export interface VideoOverlayClip {
   assetId: string;
@@ -573,10 +584,19 @@ export function computeOverlayRects(layout: VideoOverlayLayout): { baseRect: Cro
     case "picture-in-picture":
       return { baseRect: FULL_FRAME_CROP_RECT, overlayRect: layout.rect };
     case "split-screen": {
+      // `?? DEFAULT_SPLIT_SCREEN_RATIO`: `ratio` was added after some
+      // projects already had a split-screen overlay persisted without it --
+      // see CanvasPlayer.tsx's identical `baseFraming` fallback for the
+      // full explanation. Absent, it means exactly what the old fixed
+      // 50/50 split meant.
+      const leadingSize = layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO;
+      const trailingSize = 1 - leadingSize;
       const leading: CropRect =
-        layout.orientation === "horizontal" ? { x: 0, y: 0, width: 0.5, height: 1 } : { x: 0, y: 0, width: 1, height: 0.5 };
+        layout.orientation === "horizontal" ? { x: 0, y: 0, width: leadingSize, height: 1 } : { x: 0, y: 0, width: 1, height: leadingSize };
       const trailing: CropRect =
-        layout.orientation === "horizontal" ? { x: 0.5, y: 0, width: 0.5, height: 1 } : { x: 0, y: 0.5, width: 1, height: 0.5 };
+        layout.orientation === "horizontal"
+          ? { x: leadingSize, y: 0, width: trailingSize, height: 1 }
+          : { x: 0, y: leadingSize, width: 1, height: trailingSize };
       return layout.partnerFirst ? { baseRect: trailing, overlayRect: leading } : { baseRect: leading, overlayRect: trailing };
     }
   }

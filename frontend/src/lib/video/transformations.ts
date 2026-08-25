@@ -31,6 +31,7 @@ import {
   DEFAULT_TEXT_OVERLAY_RECT,
   DEFAULT_TRANSCRIPT_CAPTION_RECT,
   DEFAULT_OVERLAY_FRAMING,
+  DEFAULT_SPLIT_SCREEN_RATIO,
   type CropRect,
   type OverlayFraming,
   type OverlayImage,
@@ -664,7 +665,7 @@ export function applyChangeVideoOverlayLayout(
       ? { type: "full-screen" }
       : layoutType === "picture-in-picture"
         ? { type: "picture-in-picture", rect: DEFAULT_PIP_RECT }
-        : { type: "split-screen", orientation: splitScreenOrientation, partnerFirst: false, baseFraming: DEFAULT_OVERLAY_FRAMING };
+        : { type: "split-screen", orientation: splitScreenOrientation, partnerFirst: false, baseFraming: DEFAULT_OVERLAY_FRAMING, ratio: DEFAULT_SPLIT_SCREEN_RATIO };
   if (
     isExclusiveLayout(layout) &&
     overlapsExclusiveWindow(selections.videoOverlays, overlay.startTimeSeconds, overlay.endTimeSeconds, overlayIndex)
@@ -753,25 +754,38 @@ export function applyVideoOverlayPositionChange(
 
 /** Removes one video overlay outright -- from VideoOverlayTrack's "Remove
  * overlay" context menu entry. */
-/** Saves the framing (pan + flip) chosen in VideoOverlayFramingDialog --
- * one commit on "Save", not a live/commit split, since the dialog keeps
- * its own local draft state while open (same pattern as
- * TextOverlayDialog/TranscriptCaptionDialog) rather than touching history
- * on every drag. `baseFraming` is only meaningful (and only ever passed)
- * for a Split-Screen overlay -- the dialog shows both panes for that
- * layout, and both are saved together as one undo step rather than two. */
+/** Saves everything VideoOverlayFramingDialog lets you fine-tune -- one
+ * commit on "Save", not a live/commit split, since the dialog keeps its
+ * own local draft state while open (same pattern as TextOverlayDialog/
+ * TranscriptCaptionDialog) rather than touching history on every drag.
+ * `baseFraming`/`ratio` are only meaningful (and only ever passed) for a
+ * Split-Screen overlay, whose popup shows both halves plus their divider;
+ * `audioBalance` duplicates VideoOverlayAudioTrack's own rail so the mix
+ * can be tuned from inside the same popup. All of it is saved together as
+ * one undo step rather than several. */
 export function applyChangeOverlayFraming(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   framing: OverlayFraming,
-  baseFraming?: OverlayFraming
+  options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number }
 ): TransformationResult {
   const overlay = selections.videoOverlays[overlayIndex];
   if (!overlay) return { label: "Adjusted overlay framing", state: selections };
   const nextLayout: VideoOverlayLayout =
-    overlay.layout.type === "split-screen" && baseFraming ? { ...overlay.layout, baseFraming } : overlay.layout;
+    overlay.layout.type === "split-screen"
+      ? {
+          ...overlay.layout,
+          baseFraming: options?.baseFraming ?? overlay.layout.baseFraming,
+          ratio: options?.ratio ?? overlay.layout.ratio,
+        }
+      : overlay.layout;
   const nextOverlays = [...selections.videoOverlays];
-  nextOverlays[overlayIndex] = { ...overlay, framing, layout: nextLayout };
+  nextOverlays[overlayIndex] = {
+    ...overlay,
+    framing,
+    layout: nextLayout,
+    audioBalance: options?.audioBalance ?? overlay.audioBalance,
+  };
   return { label: "Adjusted overlay framing", state: { ...selections, videoOverlays: nextOverlays } };
 }
 

@@ -118,6 +118,41 @@ export function MarkerFlagIcon(props: IconProps) {
   );
 }
 
+// Three volume states badged on VideoOverlayAudioTrack's mix rail -- the
+// speaker cone shape is shared, only the sound-wave marks change, so a
+// glance at the badge (independent of the drag handle's own position)
+// reads as "which audio is actually playing here" the same way the mute/
+// unmuted/mixed icon convention on a real mixing console does.
+const SPEAKER_CONE_PATH = "M4 9v6h4l5 5V4L8 9H4z";
+
+export function SpeakerMutedIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d={SPEAKER_CONE_PATH} fill="currentColor" stroke="none" />
+      <path d="M17 9l6 6M23 9l-6 6" />
+    </svg>
+  );
+}
+
+export function SpeakerMixedIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d={SPEAKER_CONE_PATH} fill="currentColor" stroke="none" />
+      <path d="M15.5 8.5a5 5 0 010 7" />
+    </svg>
+  );
+}
+
+export function SpeakerFullIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d={SPEAKER_CONE_PATH} fill="currentColor" stroke="none" />
+      <path d="M15.5 8.5a5 5 0 010 7" />
+      <path d="M18.5 5.5a9 9 0 010 13" />
+    </svg>
+  );
+}
+
 // Two arrows either side of a vertical divider -- VideoOverlayFramingDialog's
 // "Flip" (horizontal) toggle button.
 export function FlipHorizontalIcon(props: IconProps) {

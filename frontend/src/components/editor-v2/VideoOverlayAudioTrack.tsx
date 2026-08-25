@@ -18,11 +18,20 @@
  * audio" end, the same color VideoOverlayTrack's own block for it uses),
  * so red/violet/teal reads consistently as "this overlay" everywhere in
  * the timeline. The white handle's own position is the actual balance.
+ *
+ * A small speaker badge sits at the segment's own left edge, independent
+ * of the drag handle -- muted/mixed/full, mirroring the overlay's own
+ * audio (0 = overlay audio off, 1 = overlay audio only), so the mix state
+ * is readable at a glance without having to read the handle's position.
  */
 import { useRef } from "react";
+import { SpeakerMutedIcon, SpeakerMixedIcon, SpeakerFullIcon } from "@/components/icons/UIIcons";
 import { isExclusiveLayout, type VideoOverlayClip, type VideoOverlayLayout } from "@/lib/video/video_math";
 
-const LAYOUT_GRADIENT_TO_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
+// Exported so VideoOverlayFramingDialog's own duplicate audio-balance
+// control can share the exact same per-layout gradient color, instead of a
+// second constant the two could silently drift apart.
+export const LAYOUT_GRADIENT_TO_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
   "full-screen": "to-amber-500",
   "picture-in-picture": "to-violet-500",
   "split-screen": "to-teal-500",
@@ -68,15 +77,17 @@ function AudioBalanceSegment({
   const widthPercent =
     videoDurationSeconds > 0 ? ((overlay.endTimeSeconds - overlay.startTimeSeconds) / videoDurationSeconds) * 100 : 0;
   const label = audioBalance <= 0.1 ? "Main audio" : audioBalance >= 0.9 ? "Overlay audio" : "Mixed audio";
+  const SpeakerIcon = audioBalance <= 0.1 ? SpeakerMutedIcon : audioBalance >= 0.9 ? SpeakerFullIcon : SpeakerMixedIcon;
 
   return (
     <div
       ref={rootRef}
       onPointerDown={handlePointerDown}
       title={`${label} -- drag to adjust the mix`}
-      className={`absolute top-0 h-3 cursor-ew-resize overflow-hidden rounded-sm bg-gradient-to-r from-neutral-600 ${LAYOUT_GRADIENT_TO_CLASSNAMES[overlay.layout.type]}`}
+      className={`absolute top-0 h-4 cursor-ew-resize overflow-hidden rounded-sm bg-gradient-to-r from-neutral-600 ${LAYOUT_GRADIENT_TO_CLASSNAMES[overlay.layout.type]}`}
       style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
     >
+      <SpeakerIcon className="pointer-events-none absolute left-0.5 top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.9)]" />
       <div
         className="pointer-events-none absolute inset-y-0 w-1 -translate-x-1/2 bg-white"
         style={{ left: `${audioBalance * 100}%`, boxShadow: "0 0 0 1px rgba(0,0,0,0.6)" }}
@@ -105,7 +116,7 @@ export function VideoOverlayAudioTrack({
   return (
     <div className="flex flex-col gap-0.5">
       {exclusiveIndices.length > 0 && (
-        <div className="relative h-3 w-full shrink-0">
+        <div className="relative h-4 w-full shrink-0">
           {exclusiveIndices.map(({ overlay, index }) => (
             <AudioBalanceSegment
               key={index}

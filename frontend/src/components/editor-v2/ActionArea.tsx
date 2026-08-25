@@ -137,7 +137,10 @@ export function ActionArea({
   // The overlay currently open in VideoOverlayFramingDialog, if any --
   // null means closed.
   framingDialogOverlay: VideoOverlayClip | null;
-  onSaveVideoOverlayFraming: (framing: OverlayFraming, baseFraming?: OverlayFraming) => void;
+  onSaveVideoOverlayFraming: (
+    framing: OverlayFraming,
+    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number }
+  ) => void;
   onCloseVideoOverlayFramingDialog: () => void;
   // The asset currently open in AssetMarkersDialog, if any -- null means
   // closed. Resolved to the full Asset (not just an id) by ThreePaneEditor,
