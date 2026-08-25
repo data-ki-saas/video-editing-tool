@@ -760,14 +760,18 @@ export function applyVideoOverlayPositionChange(
  * TranscriptCaptionDialog) rather than touching history on every drag.
  * `baseFraming`/`ratio` are only meaningful (and only ever passed) for a
  * Split-Screen overlay, whose popup shows both halves plus their divider;
- * `audioBalance` duplicates VideoOverlayAudioTrack's own rail so the mix
- * can be tuned from inside the same popup. All of it is saved together as
- * one undo step rather than several. */
+ * `rect` is only meaningful (and only ever passed) for a Picture-in-Picture
+ * overlay, whose popup lets the box itself be resized/repositioned (see
+ * applyVideoOverlayRectChange's own doc comment for the FrameStrip
+ * equivalent of that same move/resize gesture); `audioBalance` duplicates
+ * VideoOverlayAudioTrack's own rail so the mix can be tuned from inside the
+ * same popup. All of it is saved together as one undo step rather than
+ * several. */
 export function applyChangeOverlayFraming(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   framing: OverlayFraming,
-  options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number }
+  options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
 ): TransformationResult {
   const overlay = selections.videoOverlays[overlayIndex];
   if (!overlay) return { label: "Adjusted overlay framing", state: selections };
@@ -778,7 +782,9 @@ export function applyChangeOverlayFraming(
           baseFraming: options?.baseFraming ?? overlay.layout.baseFraming,
           ratio: options?.ratio ?? overlay.layout.ratio,
         }
-      : overlay.layout;
+      : overlay.layout.type === "picture-in-picture"
+        ? { ...overlay.layout, rect: options?.rect ?? overlay.layout.rect }
+        : overlay.layout;
   const nextOverlays = [...selections.videoOverlays];
   nextOverlays[overlayIndex] = {
     ...overlay,

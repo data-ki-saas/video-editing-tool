@@ -477,10 +477,10 @@ export async function exportVideoLocally(
           const baseDestY = baseRect.y * canvas.height;
           const baseDestWidth = baseRect.width * canvas.width;
           const baseDestHeight = baseRect.height * canvas.height;
-          const { panX, panY, flipHorizontal: baseFlipH, flipVertical: baseFlipV } =
+          const { panX, panY, zoom: baseZoom, flipHorizontal: baseFlipH, flipVertical: baseFlipV } =
             activeExclusiveOverlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING;
           const { sx: bsx, sy: bsy, sWidth: bsw, sHeight: bsh } = computeCoverFitSourceRect(
-            sWidth, sHeight, baseDestWidth, baseDestHeight, panX, panY
+            sWidth, sHeight, baseDestWidth, baseDestHeight, panX, panY, baseZoom
           );
           drawImageFlipped(ctx, source, sx + bsx, sy + bsy, bsw, bsh, baseDestX, baseDestY, baseDestWidth, baseDestHeight, baseFlipH, baseFlipV);
         } else if (baseRect) {
@@ -515,7 +515,7 @@ export async function exportVideoLocally(
           const destHeight = overlayRect.height * canvas.height;
           const { sx: osx, sy: osy, sWidth: osw, sHeight: osh } = computeCoverFitSourceRect(
             overlayVideo.videoWidth, overlayVideo.videoHeight, destWidth, destHeight,
-            activeExclusiveOverlay.framing.panX, activeExclusiveOverlay.framing.panY
+            activeExclusiveOverlay.framing.panX, activeExclusiveOverlay.framing.panY, activeExclusiveOverlay.framing.zoom
           );
           drawImageFlipped(
             ctx, overlayVideo, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
@@ -538,7 +538,7 @@ export async function exportVideoLocally(
         const destWidth = pip.layout.rect.width * canvas.width;
         const destHeight = pip.layout.rect.height * canvas.height;
         const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
-          overlayVideo.videoWidth, overlayVideo.videoHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY
+          overlayVideo.videoWidth, overlayVideo.videoHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
         );
         drawImageFlipped(ctx, overlayVideo, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
       }

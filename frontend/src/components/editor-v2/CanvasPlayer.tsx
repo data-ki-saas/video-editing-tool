@@ -378,8 +378,8 @@ export const CanvasPlayer = forwardRef<
       // inside a still-open session) can hand back a split-screen layout
       // with this field simply absent, so defaulting it here (rather than
       // trusting the type) avoids a hard crash on load.
-      const { panX, panY, flipHorizontal: baseFlipH, flipVertical: baseFlipV } = activeExclusiveOverlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING;
-      const { sx: bsx, sy: bsy, sWidth: bsw, sHeight: bsh } = computeCoverFitSourceRect(sWidth, sHeight, baseDestWidth, baseDestHeight, panX, panY);
+      const { panX, panY, zoom: baseZoom, flipHorizontal: baseFlipH, flipVertical: baseFlipV } = activeExclusiveOverlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING;
+      const { sx: bsx, sy: bsy, sWidth: bsw, sHeight: bsh } = computeCoverFitSourceRect(sWidth, sHeight, baseDestWidth, baseDestHeight, panX, panY, baseZoom);
       // Composes with the global flip transform already active on this
       // context (the outer ctx.translate/scale above) -- each mirrors
       // around its own frame of reference, so both apply correctly
@@ -426,7 +426,7 @@ export const CanvasPlayer = forwardRef<
         const destHeight = overlayRect.height * canvas.height;
         const { sx: osx, sy: osy, sWidth: osw, sHeight: osh } = computeCoverFitSourceRect(
           overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight,
-          activeExclusiveOverlay.framing.panX, activeExclusiveOverlay.framing.panY
+          activeExclusiveOverlay.framing.panX, activeExclusiveOverlay.framing.panY, activeExclusiveOverlay.framing.zoom
         );
         drawImageFlipped(
           ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
@@ -455,7 +455,7 @@ export const CanvasPlayer = forwardRef<
       const destWidth = pip.layout.rect.width * canvas.width;
       const destHeight = pip.layout.rect.height * canvas.height;
       const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
-        pipImage.naturalWidth, pipImage.naturalHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY
+        pipImage.naturalWidth, pipImage.naturalHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
       );
       drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
     }

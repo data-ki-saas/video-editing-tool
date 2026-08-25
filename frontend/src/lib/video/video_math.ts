@@ -490,11 +490,19 @@ export function isExclusiveLayout(layout: VideoOverlayLayout): boolean {
 export interface OverlayFraming {
   panX: number;
   panY: number;
+  // How far to crop in past the natural "cover" fit (1 = exactly cover,
+  // matching every framing persisted before this field existed -- never
+  // below 1, since that's already the minimum scale that fully covers the
+  // box with no letterboxing). Adjusted via VideoOverlayFramingDialog's own
+  // Zoom slider; panX/panY still choose WHERE within the zoomed-in window
+  // sits, over a correspondingly smaller range of slack -- see
+  // computeCoverFitSourceRect below for how the two combine.
+  zoom: number;
   flipHorizontal: boolean;
   flipVertical: boolean;
 }
 
-export const DEFAULT_OVERLAY_FRAMING: OverlayFraming = { panX: 0.5, panY: 0.5, flipHorizontal: false, flipVertical: false };
+export const DEFAULT_OVERLAY_FRAMING: OverlayFraming = { panX: 0.5, panY: 0.5, zoom: 1, flipHorizontal: false, flipVertical: false };
 
 // An even split -- what every Split-Screen overlay starts with, and what a
 // pre-`ratio` persisted layout (see the `?? DEFAULT_SPLIT_SCREEN_RATIO`
@@ -632,30 +640,46 @@ export function computeOverlayRects(layout: VideoOverlayLayout): { baseRect: Cro
  * only ever one of the two actually matters for a given source/target
  * ratio pair (whichever dimension is being cropped), the other is ignored
  * since that axis keeps its full extent. Mirrors Creatomate's `fit:
- * "cover"` exactly when panX/panY are left at 0.5, so the live preview and
- * the real render agree on how footage of a different aspect ratio than
- * its destination box gets cropped. */
+ * "cover"` exactly when panX/panY are left at 0.5 and zoom at 1, so the
+ * live preview and the real render agree on how footage of a different
+ * aspect ratio than its destination box gets cropped.
+ *
+ * `zoom` (>= 1, default 1 -- see OverlayFraming) crops in past the natural
+ * cover fit: the sampled window's size shrinks by 1/zoom on both axes
+ * (same aspect ratio throughout, so it still exactly covers the target box
+ * once scaled up), and panX/panY then place that smaller window within the
+ * FULL source's slack, same formula as the zoom=1 case -- this is exactly
+ * why zoom=1 reproduces the original behavior unchanged. */
 export function computeCoverFitSourceRect(
   sourceWidth: number,
   sourceHeight: number,
   targetWidth: number,
   targetHeight: number,
   panX: number = 0.5,
-  panY: number = 0.5
+  panY: number = 0.5,
+  zoom: number = 1
 ): { sx: number; sy: number; sWidth: number; sHeight: number } {
   if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) {
     return { sx: 0, sy: 0, sWidth: sourceWidth, sHeight: sourceHeight };
   }
   const clampedPanX = Math.min(Math.max(panX, 0), 1);
   const clampedPanY = Math.min(Math.max(panY, 0), 1);
+  const clampedZoom = Math.max(zoom, 1);
   const sourceRatio = sourceWidth / sourceHeight;
   const targetRatio = targetWidth / targetHeight;
-  if (sourceRatio > targetRatio) {
-    const sWidth = sourceHeight * targetRatio;
-    return { sx: (sourceWidth - sWidth) * clampedPanX, sy: 0, sWidth, sHeight: sourceHeight };
-  }
-  const sHeight = sourceWidth / targetRatio;
-  return { sx: 0, sy: (sourceHeight - sHeight) * clampedPanY, sWidth: sourceWidth, sHeight };
+  const { coverWidth, coverHeight } =
+    sourceRatio > targetRatio
+      ? { coverWidth: sourceHeight * targetRatio, coverHeight: sourceHeight }
+      : { coverWidth: sourceWidth, coverHeight: sourceWidth / targetRatio };
+
+  const sWidth = coverWidth / clampedZoom;
+  const sHeight = coverHeight / clampedZoom;
+  return {
+    sx: (sourceWidth - sWidth) * clampedPanX,
+    sy: (sourceHeight - sHeight) * clampedPanY,
+    sWidth,
+    sHeight,
+  };
 }
 
 /**

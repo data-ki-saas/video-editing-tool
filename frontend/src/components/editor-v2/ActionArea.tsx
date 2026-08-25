@@ -141,7 +141,7 @@ export function ActionArea({
   framingDialogOverlay: VideoOverlayClip | null;
   onSaveVideoOverlayFraming: (
     framing: OverlayFraming,
-    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number }
+    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
   ) => void;
   onCloseVideoOverlayFramingDialog: () => void;
   // The asset currently open in AssetMarkersDialog, if any -- null means

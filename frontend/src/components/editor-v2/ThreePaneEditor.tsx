@@ -390,24 +390,27 @@ export function ThreePaneEditor({
     overlayImages: rawSelections.overlayImages ?? [],
     textOverlays: rawSelections.textOverlays ?? [],
     sequenceClips,
-    // `framing` (every layout) and `baseFraming`/`ratio` (split-screen only)
-    // were added after some projects already had a video overlay persisted
-    // without them -- backfilling all three here (once, at load) heals old
-    // data at the source instead of leaving every reader (CanvasPlayer,
+    // `framing` (every layout), `baseFraming`/`ratio` (split-screen only),
+    // and individual OverlayFraming fields added later (e.g. `zoom`) were
+    // all added after some projects already had a video overlay -- or an
+    // OverlayFraming object -- persisted without them. Backfilling here
+    // (once, at load, via a deep default-merge so an EXISTING framing
+    // object still heals a newer missing field like `zoom` rather than
+    // only covering "the whole object is absent") heals old data at the
+    // source instead of leaving every reader (CanvasPlayer, exportTimeline,
     // computeOverlayRects, VideoOverlayFramingDialog) to guess a default.
     videoOverlays: (rawSelections.videoOverlays ?? []).map((overlay) => {
-      const withLayout =
-        overlay.layout.type === "split-screen" && (!overlay.layout.baseFraming || overlay.layout.ratio === undefined)
-          ? {
-              ...overlay,
-              layout: {
-                ...overlay.layout,
-                baseFraming: overlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING,
-                ratio: overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO,
-              },
-            }
-          : overlay;
-      return withLayout.framing ? withLayout : { ...withLayout, framing: DEFAULT_OVERLAY_FRAMING };
+      const framing = { ...DEFAULT_OVERLAY_FRAMING, ...overlay.framing };
+      if (overlay.layout.type !== "split-screen") return { ...overlay, framing };
+      return {
+        ...overlay,
+        framing,
+        layout: {
+          ...overlay.layout,
+          baseFraming: { ...DEFAULT_OVERLAY_FRAMING, ...overlay.layout.baseFraming },
+          ratio: overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO,
+        },
+      };
     }),
     transcriptCaption: rawSelections.transcriptCaption ?? null,
   };
@@ -973,7 +976,7 @@ export function ThreePaneEditor({
   // halves and their divider.
   function handleSaveVideoOverlayFraming(
     framing: OverlayFraming,
-    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number }
+    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
   ) {
     if (framingDialogOverlayIndex === null) return;
     const { label, state } = applyChangeOverlayFraming(selections, framingDialogOverlayIndex, framing, options);

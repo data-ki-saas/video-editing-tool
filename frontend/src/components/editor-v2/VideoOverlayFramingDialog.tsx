@@ -6,30 +6,38 @@
  * actual FINAL FRAME (not an isolated source thumbnail) -- for Split
  * Screen, both halves at their real relative size with a draggable divider
  * between them; for Picture-in-Picture, the base frame with the PIP box
- * drawn on top at its real position; for Full-Screen, just the overlay's
- * own frame, since it's the only thing visible. Clicking/dragging inside
- * either half PANS that half's own footage (see CoverFramingRegion below);
- * for Split Screen, that same click also SELECTS which half the right
- * side's actions apply to. The RIGHT side holds Flip/Mirror (acting on
- * whichever half is selected) and a duplicate of VideoOverlayAudioTrack's
- * own audio-mix control, for convenience while already here.
+ * drawn on top at its real position, itself moveable/resizable (see
+ * PipFrame below); for Full-Screen, just the overlay's own frame, since
+ * it's the only thing visible. Clicking/dragging inside either half (or, for
+ * Picture-in-Picture, inside the box) PANS that footage (see
+ * CoverFramingRegion below); for Split Screen, that same click also SELECTS
+ * which half the right side's actions apply to. The RIGHT side holds
+ * Flip/Mirror, a Zoom slider, and a duplicate of VideoOverlayAudioTrack's
+ * own audio-mix control (all acting on whichever half is selected), for
+ * convenience while already here.
  *
  * Every layout that crops footage into a differently-shaped box than its
  * own source does so via a "cover" fit (video_math.ts's
  * computeCoverFitSourceRect) -- rendered here with the equivalent native
- * CSS (`object-fit: cover` + `object-position`), so the preview IS the real
- * crop, not a stand-in. `panX`/`panY` (source-space, 0..1) are recovered
- * from a drag by converting the on-screen pixel delta into the matching
- * shift of that same cover-fit window (computeCoverPanDelta below) --
- * flipped footage negates the drag direction first, since the visible
- * image is mirrored via a CSS transform (applied AFTER the crop is chosen,
- * so it never changes which part of the source that crop keeps).
+ * CSS (`object-fit: cover` + `object-position`, plus a `transform: scale`
+ * anchored at that same point for `zoom` past 1x), so the preview closely
+ * tracks the real crop rather than a disconnected stand-in. `panX`/`panY`
+ * (source-space, 0..1) are recovered from a drag by converting the
+ * on-screen pixel delta into the matching shift of that same cover-fit
+ * window (computeCoverPanDelta below) -- flipped footage negates the drag
+ * direction first, since the visible image is mirrored via a CSS transform
+ * (applied AFTER the crop is chosen, so it never changes which part of the
+ * source that crop keeps).
  *
  * Keeps its own local draft state and only commits on "Save" -- same
  * pattern as TextOverlayDialog/TranscriptCaptionDialog, not a live/commit
- * split against the outer edit history.
+ * split against the outer edit history. The Picture-in-Picture box's own
+ * rect (`pipRect` state) follows the same draft-until-Save convention --
+ * FrameStrip's OverlayRectOverlay drag on the timeline tile commits the
+ * SAME field (VideoOverlayLayout.rect, via applyVideoOverlayRectChange)
+ * live instead, since that's a different, always-live editing surface.
  */
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   computeCoverFitSourceRect,
   DEFAULT_OVERLAY_FRAMING,
@@ -41,6 +49,7 @@ import {
 import { FlipHorizontalIcon, FlipVerticalIcon } from "@/components/icons/UIIcons";
 import { LAYOUT_GRADIENT_TO_CLASSNAMES } from "./VideoOverlayAudioTrack";
 import { VolumeFader } from "./VolumeFader";
+import { DEFAULT_PIP_RECT } from "@/lib/video/transformations";
 
 // Keeps either half from being dragged down to a sliver too thin to grab
 // or usefully see.
@@ -62,6 +71,7 @@ function computeCoverPanDelta(
   boxHeight: number,
   panX: number,
   panY: number,
+  zoom: number,
   dxPx: number,
   dyPx: number
 ): { panX: number; panY: number } {
@@ -71,7 +81,11 @@ function computeCoverPanDelta(
       panY: Math.min(Math.max(panY - dyPx / Math.max(boxHeight, 1), 0), 1),
     };
   }
-  const { sx, sy, sWidth, sHeight } = computeCoverFitSourceRect(naturalWidth, naturalHeight, boxWidth, boxHeight, panX, panY);
+  // Zoom shrinks the sampled window (sWidth/sHeight below), which shrinks
+  // denomX/denomY (the pannable slack) to match -- passing it through here
+  // is what keeps a drag's pixel-to-pan-fraction conversion correct at any
+  // zoom level, not just 1x.
+  const { sx, sy, sWidth, sHeight } = computeCoverFitSourceRect(naturalWidth, naturalHeight, boxWidth, boxHeight, panX, panY, zoom);
   const denomX = naturalWidth - sWidth;
   const denomY = naturalHeight - sHeight;
   const nextSx = sx - dxPx * (sWidth / boxWidth);
@@ -128,7 +142,7 @@ function CoverFramingRegion({
       const effectiveDx = startFraming.flipHorizontal ? -dx : dx;
       const effectiveDy = startFraming.flipVertical ? -dy : dy;
       const next = computeCoverPanDelta(
-        naturalWidth, naturalHeight, rect.width, rect.height, startFraming.panX, startFraming.panY, effectiveDx, effectiveDy
+        naturalWidth, naturalHeight, rect.width, rect.height, startFraming.panX, startFraming.panY, startFraming.zoom, effectiveDx, effectiveDy
       );
       return { ...startFraming, ...next };
     }
@@ -153,18 +167,28 @@ function CoverFramingRegion({
       style={styleRect}
     >
       {frameUrl && (
-        // eslint-disable-next-line @next/next/no-img-element -- a short-lived thumbnail data URL, not a Next-optimizable static asset
-        <img
-          ref={imgRef}
-          src={frameUrl}
-          alt=""
-          draggable={false}
-          className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
-          style={{
-            objectPosition: `${framing.panX * 100}% ${framing.panY * 100}%`,
-            transform: `scale(${framing.flipHorizontal ? -1 : 1}, ${framing.flipVertical ? -1 : 1})`,
-          }}
-        />
+        // The zoom scale lives on this WRAPPER (anchored at the same pan
+        // point object-position already uses), not on the <img> itself --
+        // keeps it independent of the flip transform below, which anchors
+        // at the image's own center and would otherwise shift off-center
+        // once a non-1 zoom moved the effective transform origin.
+        <div
+          className="pointer-events-none absolute inset-0 overflow-hidden"
+          style={{ transform: `scale(${framing.zoom})`, transformOrigin: `${framing.panX * 100}% ${framing.panY * 100}%` }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- a short-lived thumbnail data URL, not a Next-optimizable static asset */}
+          <img
+            ref={imgRef}
+            src={frameUrl}
+            alt=""
+            draggable={false}
+            className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
+            style={{
+              objectPosition: `${framing.panX * 100}% ${framing.panY * 100}%`,
+              transform: `scale(${framing.flipHorizontal ? -1 : 1}, ${framing.flipVertical ? -1 : 1})`,
+            }}
+          />
+        </div>
       )}
     </div>
   );
@@ -219,6 +243,104 @@ function SplitScreenDivider({
   );
 }
 
+// How far outside the box's own visible edge the draggable "move" rim
+// extends, in on-screen px -- big enough to comfortably grab with a mouse or
+// finger without needing to land exactly on the (zero-width) edge itself.
+const PIP_MOVE_RIM_PX = 10;
+const PIP_MIN_SIZE_FRACTION = 0.08;
+
+/** The Picture-in-Picture box itself, as a moveable/resizable rect on top of
+ * the base frame -- distinct from CoverFramingRegion (rendered as this
+ * component's own `children`, filling its interior), which pans the
+ * OVERLAY'S OWN FOOTAGE within a box of otherwise-fixed position/size. The
+ * two would collide if both responded to a plain drag-anywhere-in-the-box
+ * gesture, so this one's own drag target is deliberately a thin rim
+ * OUTSIDE the box's visible edge (move) plus a corner dot (resize) --
+ * dragging the footage itself (inside the edge) still reaches
+ * CoverFramingRegion underneath, untouched. Reads its own container's rect
+ * off the SAME `absolute inset-0` convention as OverlayRectOverlay.tsx
+ * (that file's own equivalent for FrameStrip's timeline tile), just
+ * reimplemented locally here rather than shared, since this one splits
+ * move/resize across two different hit targets instead of the whole box. */
+function PipFrame({
+  rect,
+  onChange,
+  borderColorClassName,
+  children,
+}: {
+  rect: CropRect;
+  onChange: (next: CropRect) => void;
+  borderColorClassName: string;
+  children: ReactNode;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  function startDrag(e: React.PointerEvent, mode: "move" | "resize") {
+    e.preventDefault();
+    e.stopPropagation();
+    const measuredRect = containerRef.current?.getBoundingClientRect();
+    if (!measuredRect) return;
+    // Same "narrow into its own binding" workaround as OverlayRectOverlay's
+    // identical comment -- TS doesn't carry the guard above into the nested
+    // functions below.
+    const containerRect: DOMRect = measuredRect;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startRect = rect;
+
+    function computeNext(clientX: number, clientY: number): CropRect {
+      const dxFraction = (clientX - startX) / containerRect.width;
+      const dyFraction = (clientY - startY) / containerRect.height;
+      if (mode === "move") {
+        return {
+          ...startRect,
+          x: Math.min(Math.max(startRect.x + dxFraction, 0), 1 - startRect.width),
+          y: Math.min(Math.max(startRect.y + dyFraction, 0), 1 - startRect.height),
+        };
+      }
+      const width = Math.min(Math.max(startRect.width + dxFraction, PIP_MIN_SIZE_FRACTION), 1 - startRect.x);
+      const height = Math.min(Math.max(startRect.height + dyFraction, PIP_MIN_SIZE_FRACTION), 1 - startRect.y);
+      return { ...startRect, width, height };
+    }
+    function handleMove(ev: PointerEvent) {
+      onChange(computeNext(ev.clientX, ev.clientY));
+    }
+    function handleUp(ev: PointerEvent) {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      onChange(computeNext(ev.clientX, ev.clientY));
+    }
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
+  return (
+    <div ref={containerRef} className="pointer-events-none absolute inset-0">
+      <div
+        className={`absolute border-2 ${borderColorClassName}`}
+        style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }}
+      >
+        {/* The move target -- extends PIP_MOVE_RIM_PX beyond the box's own
+            edge on every side, so it only ever catches a pointerdown that
+            lands OUTSIDE the interior content below (which paints on top of
+            everything inside the edge, since it comes later in the DOM). */}
+        <div
+          onPointerDown={(e) => startDrag(e, "move")}
+          title="Drag to move"
+          className="pointer-events-auto absolute cursor-move"
+          style={{ inset: `-${PIP_MOVE_RIM_PX}px` }}
+        />
+        <div className="absolute inset-0 overflow-hidden">{children}</div>
+        <div
+          onPointerDown={(e) => startDrag(e, "resize")}
+          title="Drag to resize"
+          className="pointer-events-auto absolute -bottom-1.5 -right-1.5 z-10 h-3 w-3 cursor-nwse-resize rounded-full border border-white bg-violet-400"
+        />
+      </div>
+    </div>
+  );
+}
+
 
 const LAYOUT_BORDER_COLOR_CLASSNAMES = {
   "full-screen": "border-amber-500",
@@ -243,10 +365,14 @@ export function VideoOverlayFramingDialog({
   baseFrameUrl: string;
   overlayFrameUrl: string;
   outputAspectRatio: number | null;
-  onSave: (framing: OverlayFraming, options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number }) => void;
+  onSave: (
+    framing: OverlayFraming,
+    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
+  ) => void;
   onClose: () => void;
 }) {
   const isSplitScreen = overlay.layout.type === "split-screen";
+  const isPictureInPicture = overlay.layout.type === "picture-in-picture";
 
   const [framing, setFraming] = useState(overlay.framing);
   // `?? DEFAULT_*`: both fields were added to the split-screen layout after
@@ -258,6 +384,12 @@ export function VideoOverlayFramingDialog({
   const [ratio, setRatio] = useState(
     overlay.layout.type === "split-screen" ? overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO : DEFAULT_SPLIT_SCREEN_RATIO
   );
+  // The PIP box's own position/size -- draft state here, same "commit only
+  // on Save" pattern as everything else in this dialog, mirroring what
+  // FrameStrip's OverlayRectOverlay drag already lets you do on the
+  // timeline tile (see applyVideoOverlayRectChange), just easier to land
+  // precisely inside this larger popup.
+  const [pipRect, setPipRect] = useState(overlay.layout.type === "picture-in-picture" ? overlay.layout.rect : DEFAULT_PIP_RECT);
   const [audioBalance, setAudioBalance] = useState(overlay.audioBalance);
   // Which half the right-hand actions apply to -- only meaningful (and only
   // ever shown) for Split Screen, where there genuinely are two frameable
@@ -273,6 +405,7 @@ export function VideoOverlayFramingDialog({
     setFraming(overlay.framing);
     setBaseFraming(overlay.layout.type === "split-screen" ? overlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING : DEFAULT_OVERLAY_FRAMING);
     setRatio(overlay.layout.type === "split-screen" ? overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO : DEFAULT_SPLIT_SCREEN_RATIO);
+    setPipRect(overlay.layout.type === "picture-in-picture" ? overlay.layout.rect : DEFAULT_PIP_RECT);
     setAudioBalance(overlay.audioBalance);
     setSelectedSide("overlay");
   }, [overlay]);
@@ -288,6 +421,7 @@ export function VideoOverlayFramingDialog({
       baseFraming: isSplitScreen ? baseFraming : undefined,
       ratio: isSplitScreen ? ratio : undefined,
       audioBalance,
+      rect: isPictureInPicture ? pipRect : undefined,
     });
   }
 
@@ -308,8 +442,6 @@ export function VideoOverlayFramingDialog({
     : { left: 0, top: `${ratio * 100}%`, width: "100%", height: `${(1 - ratio) * 100}%` };
   const baseStyle = splitScreenPartnerFirst ? trailingStyle : leadingStyle;
   const overlayStyle = splitScreenPartnerFirst ? leadingStyle : trailingStyle;
-
-  const pipRect: CropRect | null = overlay.layout.type === "picture-in-picture" ? overlay.layout.rect : null;
 
   return (
     <div role="dialog" aria-modal="true" aria-label="Adjust framing" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
@@ -363,21 +495,23 @@ export function VideoOverlayFramingDialog({
                   />
                   <SplitScreenDivider orientation={splitScreenOrientation} ratio={ratio} onChange={setRatio} />
                 </>
-              ) : overlay.layout.type === "picture-in-picture" && pipRect ? (
+              ) : isPictureInPicture ? (
                 <>
                   {baseFrameUrl && (
                     // eslint-disable-next-line @next/next/no-img-element -- a short-lived thumbnail data URL, not a Next-optimizable static asset
                     <img src={baseFrameUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover" />
                   )}
-                  <CoverFramingRegion
-                    styleRect={{ left: `${pipRect.x * 100}%`, top: `${pipRect.y * 100}%`, width: `${pipRect.width * 100}%`, height: `${pipRect.height * 100}%` }}
-                    frameUrl={overlayFrameUrl}
-                    framing={framing}
-                    onChange={setFraming}
-                    highlighted
-                    borderColorClassName={overlayBorderColorClassName}
-                    label="Overlay video"
-                  />
+                  <PipFrame rect={pipRect} onChange={setPipRect} borderColorClassName={overlayBorderColorClassName}>
+                    <CoverFramingRegion
+                      styleRect={{ left: 0, top: 0, width: "100%", height: "100%" }}
+                      frameUrl={overlayFrameUrl}
+                      framing={framing}
+                      onChange={setFraming}
+                      highlighted={false}
+                      borderColorClassName={overlayBorderColorClassName}
+                      label="Overlay video"
+                    />
+                  </PipFrame>
                 </>
               ) : (
                 <CoverFramingRegion
@@ -399,7 +533,14 @@ export function VideoOverlayFramingDialog({
                 Editing <span className="font-medium text-foreground">{activeSide === "base" ? "main video" : "overlay video"}</span> -- click the other half to switch.
               </p>
             )}
-            {!isSplitScreen && <p className="text-[11px] text-muted">Drag the frame to choose which part stays in view.</p>}
+            {!isSplitScreen && !isPictureInPicture && (
+              <p className="text-[11px] text-muted">Drag the frame to choose which part stays in view.</p>
+            )}
+            {isPictureInPicture && (
+              <p className="text-[11px] text-muted">
+                Drag the box edge to move it, the corner to resize it, or the footage inside to choose which part stays in view.
+              </p>
+            )}
 
             <div className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-muted">Flip / Mirror</span>
@@ -429,6 +570,21 @@ export function VideoOverlayFramingDialog({
                   <FlipVerticalIcon className="h-3.5 w-3.5" />
                 </button>
               </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium text-muted">Zoom</span>
+              <input
+                type="range"
+                min={1}
+                max={3}
+                step={0.05}
+                value={activeFraming.zoom}
+                onChange={(e) => setActiveFraming({ ...activeFraming, zoom: Number(e.target.value) })}
+                title="Zoom into the footage"
+                className="h-1.5 w-full cursor-ew-resize accent-accent"
+              />
+              <span className="text-[10px] text-muted">{activeFraming.zoom.toFixed(2)}x</span>
             </div>
 
             <div className="flex flex-col gap-1">
