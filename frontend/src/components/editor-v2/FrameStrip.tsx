@@ -85,6 +85,8 @@ import {
   computeEffectiveFlip,
   computeFlipSegments,
   computeProgress,
+  computeOverlayRects,
+  isExclusiveLayout,
   findClosestTimestampIndex,
   findTrimRangeIndexAt,
   type CropRect,
@@ -111,6 +113,7 @@ const FrameTile = memo(function FrameTile({
   textOverlays,
   videoOverlayPips,
   videoThumbnailUrlById,
+  activeExclusiveOverlay,
   onChange,
   onCommit,
   onFlipHorizontal,
@@ -139,6 +142,14 @@ const FrameTile = memo(function FrameTile({
   // the two overlay kinds read as visually distinct when both are present.
   videoOverlayPips: { overlay: VideoOverlayClip; overlayIndex: number }[];
   videoThumbnailUrlById: Record<string, string>;
+  // The Full-Screen or Split-Screen overlay active at this tile's instant,
+  // if any (at most one, since those two layouts are mutually exclusive --
+  // see video_math.ts's isExclusiveLayout) -- swaps in that overlay's own
+  // thumbnail (Full-Screen) or splits the tile into the two halves
+  // CanvasPlayer's own drawFrameAt already renders (Split Screen), so the
+  // timeline strip shows the same thing the live preview does instead of
+  // silently continuing to show the base clip's own frame.
+  activeExclusiveOverlay: VideoOverlayClip | null;
   onChange?: (next: CropRect) => void;
   onCommit?: (next: CropRect) => void;
   onFlipHorizontal?: () => void;
@@ -152,6 +163,17 @@ const FrameTile = memo(function FrameTile({
 }) {
   const scaleX = flipHorizontal ? -1 : 1;
   const scaleY = flipVertical ? -1 : 1;
+  const flipStyle = scaleX !== 1 || scaleY !== 1 ? { transform: `scale(${scaleX}, ${scaleY})` } : undefined;
+
+  function rectStyle(rect: CropRect): React.CSSProperties {
+    return { left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` };
+  }
+
+  const exclusiveOverlayRects =
+    activeExclusiveOverlay && activeExclusiveOverlay.layout.type !== "picture-in-picture"
+      ? computeOverlayRects(activeExclusiveOverlay.layout)
+      : null;
+
   return (
     // overflow-hidden is load-bearing: CropRectOverlay dims outside its rect
     // via a 9999px box-shadow, which is only ever clipped by an ancestor's
@@ -171,13 +193,31 @@ const FrameTile = memo(function FrameTile({
       {/* Safe to fill the box exactly (object-cover would normally risk
           cropping) -- the box's own aspect-ratio already matches the
           image's, so there is nothing to crop. */}
-      {/* eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image */}
-      <img
-        src={src}
-        alt={`Frame at ${index}s`}
-        className="h-full w-full object-cover"
-        style={scaleX !== 1 || scaleY !== 1 ? { transform: `scale(${scaleX}, ${scaleY})` } : undefined}
-      />
+      {activeExclusiveOverlay?.layout.type === "full-screen" ? (
+        // Full-Screen: the overlay's own thumbnail fills the tile, same as
+        // CanvasPlayer fully covering the base frame for this window -- no
+        // flip transform, since CanvasPlayer never flips the overlay's own
+        // footage, only the base clip's.
+        // eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset
+        <img src={videoThumbnailUrlById[activeExclusiveOverlay.assetId] ?? ""} alt={`Frame at ${index}s`} className="h-full w-full object-cover" />
+      ) : exclusiveOverlayRects && activeExclusiveOverlay ? (
+        // Split Screen: base clip in its own half (still flipped, still the
+        // real per-second thumbnail), overlay's own thumbnail in the other
+        // half -- same division CanvasPlayer's drawFrameAt already renders.
+        <>
+          <div className="absolute overflow-hidden" style={rectStyle(exclusiveOverlayRects.baseRect!)}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image */}
+            <img src={src} alt={`Frame at ${index}s`} className="h-full w-full object-cover" style={flipStyle} />
+          </div>
+          <div className="absolute overflow-hidden" style={rectStyle(exclusiveOverlayRects.overlayRect)}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset */}
+            <img src={videoThumbnailUrlById[activeExclusiveOverlay.assetId] ?? ""} alt="" className="h-full w-full object-cover" />
+          </div>
+        </>
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image
+        <img src={src} alt={`Frame at ${index}s`} className="h-full w-full object-cover" style={flipStyle} />
+      )}
       {cropRect && (
         <CropRectOverlay
           cropRect={cropRect}
@@ -464,6 +504,23 @@ export function FrameStrip({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, videoOverlays]);
 
+  // The Full-Screen or Split-Screen overlay (if any) active at each tile's
+  // own instant -- at most one, since those two layouts are mutually
+  // exclusive with each other (isExclusiveLayout). Lets FrameTile swap in
+  // that overlay's own thumbnail / split the tile, matching what
+  // CanvasPlayer's drawFrameAt already renders for the same instant --
+  // without this, the timeline strip silently kept showing the base clip's
+  // own frame with no indication an overlay was active there at all.
+  const tileActiveExclusiveOverlay = useMemo(() => {
+    return thumbnailTimestampsSeconds.map(
+      (timestamp) =>
+        videoOverlays.find(
+          (overlay) => isExclusiveLayout(overlay.layout) && timestamp >= overlay.startTimeSeconds && timestamp < overlay.endTimeSeconds
+        ) ?? null
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, thumbnailTimestampsSeconds, videoOverlays]);
+
   // The tile whose OWN timestamp is closest to the playhead -- NOT an
   // even-spacing index formula (see this file's module comment on why
   // that breaks for a concatenated sequence). Still only this one tile's
@@ -549,6 +606,7 @@ export function FrameStrip({
               textOverlays={tileTextOverlays[index]}
               videoOverlayPips={tileVideoOverlayPips[index]}
               videoThumbnailUrlById={videoThumbnailUrlByAssetId}
+              activeExclusiveOverlay={tileActiveExclusiveOverlay[index]}
               onChange={index === activeTileIndex ? onCropRectChange : undefined}
               onCommit={index === activeTileIndex ? onCropRectCommit : undefined}
               onFlipHorizontal={index === activeTileIndex ? onFlipHorizontal : undefined}

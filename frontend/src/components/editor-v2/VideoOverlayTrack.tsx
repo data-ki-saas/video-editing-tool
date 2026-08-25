@@ -95,12 +95,12 @@ function VideoOverlaySegment({
         const next = Math.min(Math.max(startTimeSeconds + dxSeconds, prevBoundSeconds, 0), endTimeSeconds - MIN_DURATION_SECONDS);
         return [next, endTimeSeconds];
       }
-      // The source's own in-point is fixed at 0 for v1, so
-      // startTimeSeconds + sourceDurationSeconds is a hard ceiling on how
-      // much of it there IS to play from here -- a clamp neither
-      // OverlayTrack's own edge-drag nor ZoomEffectsTrack's needs, since
-      // neither has a source duration of its own to run out of.
-      const maxEnd = Math.min(nextBoundSeconds, videoDurationSeconds, startTimeSeconds + sourceDurationSeconds);
+      // No cap at the source's own duration -- stretching the window past
+      // one play-through loops the source to fill it (see CanvasPlayer.tsx
+      // and compileCreatomateTimeline.ts), same convention this app's
+      // background-music tracks already use. Only bounded by a neighboring
+      // exclusive overlay and the sequence's own end.
+      const maxEnd = Math.min(nextBoundSeconds, videoDurationSeconds);
       const next = Math.max(Math.min(endTimeSeconds + dxSeconds, maxEnd), startTimeSeconds + MIN_DURATION_SECONDS);
       return [startTimeSeconds, next];
     }
@@ -145,8 +145,21 @@ function VideoOverlaySegment({
   }
 
   const leftPercent = videoDurationSeconds > 0 ? (overlay.startTimeSeconds / videoDurationSeconds) * 100 : 0;
-  const widthPercent =
-    videoDurationSeconds > 0 ? ((overlay.endTimeSeconds - overlay.startTimeSeconds) / videoDurationSeconds) * 100 : 0;
+  const durationSeconds = overlay.endTimeSeconds - overlay.startTimeSeconds;
+  const widthPercent = videoDurationSeconds > 0 ? (durationSeconds / videoDurationSeconds) * 100 : 0;
+
+  // One tick per loop boundary -- where the source starts over because the
+  // window is longer than one play-through of it (see the edge-drag
+  // comment above). Positioned as a fraction of THIS segment's own width,
+  // not the whole track's, so it stays correctly placed as the segment is
+  // dragged/resized. None at all once the window fits within a single
+  // play-through, or before the source's own duration has been probed.
+  const loopTickPercents: number[] = [];
+  if (Number.isFinite(sourceDurationSeconds) && sourceDurationSeconds > 0) {
+    for (let boundary = sourceDurationSeconds; boundary < durationSeconds; boundary += sourceDurationSeconds) {
+      loopTickPercents.push((boundary / durationSeconds) * 100);
+    }
+  }
 
   const layoutMenuEntries = (Object.keys(LAYOUT_LABELS) as VideoOverlayLayout["type"][])
     .filter((type) => type !== overlay.layout.type)
@@ -165,6 +178,14 @@ function VideoOverlaySegment({
         // eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset
         <img src={thumbnailUrl} alt="" className="h-3 w-3 shrink-0 rounded-sm object-cover" />
       )}
+      {loopTickPercents.map((percent, tickIndex) => (
+        <div
+          key={tickIndex}
+          title="Repeats here"
+          className="pointer-events-none absolute inset-y-0 w-px bg-black/40"
+          style={{ left: `${percent}%` }}
+        />
+      ))}
       <div
         onPointerDown={(e) => startEdgeDrag(e, "start")}
         className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-black/20"

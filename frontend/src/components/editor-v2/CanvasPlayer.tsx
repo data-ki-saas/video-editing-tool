@@ -202,7 +202,7 @@ export const CanvasPlayer = forwardRef<
   // pipeline the main sequence's own clips use below, not a live seeked
   // <video> or a single static image, since a video overlay must actually
   // play back over its window.
-  const videoOverlayFramesByAssetIdRef = useRef<Record<string, { images: HTMLImageElement[]; frameRate: number }>>({});
+  const videoOverlayFramesByAssetIdRef = useRef<Record<string, { images: HTMLImageElement[]; frameRate: number; durationSeconds: number }>>({});
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
@@ -332,7 +332,12 @@ export const CanvasPlayer = forwardRef<
       const frames = videoOverlayFramesByAssetIdRef.current[activeExclusiveOverlay.assetId];
       if (frames) {
         const localOffsetSeconds = activeExclusiveOverlay.sourceStartSeconds + (elapsedSeconds - activeExclusiveOverlay.startTimeSeconds);
-        const overlayFrameIndex = frameIndexAtTime(localOffsetSeconds, frames.frameRate, frames.images.length);
+        // Loops back to the start once the window runs past one
+        // play-through of the source (see VideoOverlayTrack.tsx's own
+        // edge-drag comment) -- frameIndexAtTime alone would just clamp to
+        // the last frame and freeze there instead.
+        const loopedOffsetSeconds = frames.durationSeconds > 0 ? localOffsetSeconds % frames.durationSeconds : localOffsetSeconds;
+        const overlayFrameIndex = frameIndexAtTime(loopedOffsetSeconds, frames.frameRate, frames.images.length);
         const overlayImage = frames.images[overlayFrameIndex];
         const destX = overlayRect.x * canvas.width;
         const destY = overlayRect.y * canvas.height;
@@ -353,7 +358,8 @@ export const CanvasPlayer = forwardRef<
       const frames = videoOverlayFramesByAssetIdRef.current[pip.assetId];
       if (!frames) continue;
       const localOffsetSeconds = pip.sourceStartSeconds + (elapsedSeconds - pip.startTimeSeconds);
-      const pipFrameIndex = frameIndexAtTime(localOffsetSeconds, frames.frameRate, frames.images.length);
+      const loopedOffsetSeconds = frames.durationSeconds > 0 ? localOffsetSeconds % frames.durationSeconds : localOffsetSeconds;
+      const pipFrameIndex = frameIndexAtTime(loopedOffsetSeconds, frames.frameRate, frames.images.length);
       const pipImage = frames.images[pipFrameIndex];
       const destX = pip.layout.rect.x * canvas.width;
       const destY = pip.layout.rect.y * canvas.height;
@@ -729,7 +735,7 @@ export const CanvasPlayer = forwardRef<
           const frameRate = pickPreviewFrameRate(duration, navigator.hardwareConcurrency || 4);
           const images = await extractPreviewFrames(url, frameRate).then((frames) => Promise.all(frames.map(loadImage)));
           if (cancelled) return;
-          videoOverlayFramesByAssetIdRef.current[assetId] = { images, frameRate };
+          videoOverlayFramesByAssetIdRef.current[assetId] = { images, frameRate, durationSeconds: duration };
           if (isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
         } catch {
           // Skipped -- drawFrameAt just shows nothing for this overlay's window.

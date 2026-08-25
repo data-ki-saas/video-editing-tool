@@ -69,6 +69,16 @@ export interface CompileTimelineInput {
   sequenceClips: SequenceClipInfo[];
   /** Same shape, for the resolved background-music sequence (empty if none). */
   backgroundClips: SequenceClipInfo[];
+  /** Each video overlay source asset's own real probed duration, by
+   * assetId -- gathered fresh client-side the same way sequenceClips'
+   * durations are (ThreePaneEditor already caches this for
+   * VideoOverlayTrack's edge-drag clamp; reused here). Needed so a video
+   * overlay stretched past one play-through of its source (see
+   * VideoOverlayTrack.tsx's edge-drag) renders as a real Creatomate loop
+   * instead of trying to trim more of the source than exists. An overlay
+   * whose assetId is missing here falls back to the old single-play
+   * behavior (safe, just won't loop). */
+  videoOverlaySourceDurations?: Record<string, number>;
   outputWidth: number;
   outputHeight: number;
 }
@@ -308,12 +318,28 @@ function buildVideoOverlayElements(
   videoOverlays: VideoOverlayClip[],
   segments: RenderSegment[],
   nextTrack: () => number,
-  appMeta: Record<string, AppMetaEntry>
+  appMeta: Record<string, AppMetaEntry>,
+  videoOverlaySourceDurations: Record<string, number>
 ): Video[] {
   const elements: Video[] = [];
   for (const overlay of videoOverlays) {
     const track = nextTrack();
     const { overlayRect } = computeOverlayRects(overlay.layout);
+    const sourceDurationSeconds = videoOverlaySourceDurations[overlay.assetId];
+    // Only loop when we actually know the source is shorter than the
+    // window -- an unknown duration falls back to the old single-play
+    // behavior rather than guessing.
+    const shouldLoop = sourceDurationSeconds !== undefined && sourceDurationSeconds > 0 && sourceDurationSeconds < overlay.endTimeSeconds - overlay.startTimeSeconds;
+    // KNOWN LIMITATION: if `shouldLoop` is true AND a trim cut splits this
+    // overlay into more than one outputRange below, `trimStart` for the
+    // second-and-later ranges is computed as if the source never wrapped --
+    // correct for the FIRST range, but potentially wrong for a later one
+    // that starts partway through a second (or later) loop cycle. Verified
+    // fine for the common case (no trim cut through an active overlay); a
+    // real test render is needed before relying on the split+loop
+    // combination specifically (this whole path isn't reachable from the
+    // UI yet regardless -- see ThreePaneEditor.tsx's handleRenderClick,
+    // which shows a "coming soon" popup instead of ever calling this).
     const outputRanges = mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlay.endTimeSeconds);
     for (const range of outputRanges) {
       const id = nextId("overlay");
@@ -326,7 +352,11 @@ function buildVideoOverlayElements(
           time: range.outputStartSeconds,
           duration: range.outputEndSeconds - range.outputStartSeconds,
           trimStart,
-          trimDuration: range.outputEndSeconds - range.outputStartSeconds,
+          // One play-through's worth when looping (Creatomate repeats the
+          // trimmed range to fill `duration`); otherwise the old
+          // "trim exactly this sub-range" behavior.
+          trimDuration: shouldLoop ? sourceDurationSeconds : range.outputEndSeconds - range.outputStartSeconds,
+          ...(shouldLoop ? { loop: true } : {}),
           fit: "cover",
           xAnchor: "0%",
           yAnchor: "0%",
@@ -597,7 +627,7 @@ function buildTranscriptCaptionElements(
 
 export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline {
   idCounter = 0;
-  const { selections, sequenceClips, backgroundClips, outputWidth, outputHeight } = input;
+  const { selections, sequenceClips, backgroundClips, outputWidth, outputHeight, videoOverlaySourceDurations = {} } = input;
   const appMeta: Record<string, AppMetaEntry> = {};
 
   const totalOriginalDurationSeconds = totalSequenceDuration(sequenceClips);
@@ -647,7 +677,7 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   let trackCursor = 2;
   const nextTrack = () => trackCursor++;
 
-  const videoOverlayElements = buildVideoOverlayElements(clampedVideoOverlays, segments, nextTrack, appMeta);
+  const videoOverlayElements = buildVideoOverlayElements(clampedVideoOverlays, segments, nextTrack, appMeta, videoOverlaySourceDurations);
   const overlayElements = buildOverlayImageElements(clampedOverlayImages, segments, nextTrack, appMeta);
   const textElements = buildTextElements(clampedTextOverlays, segments, nextTrack);
   const transcriptCaptionElements = buildTranscriptCaptionElements(selections.transcriptCaption, videoSegmentPairs, nextTrack());
