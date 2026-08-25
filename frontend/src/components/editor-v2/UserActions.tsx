@@ -8,8 +8,11 @@
  * "Clip" is the odd one out only in that its modal (ClipRectangleDialog)
  * applies a choice the instant it's clicked rather than needing a save
  * step, so once something's selected this tab also grows a small preview
- * swatch of it at the bottom, the only at-a-glance state any of these four
- * tabs surface without opening their dialog.
+ * swatch of it at the bottom. The other three tabs pin their own
+ * at-a-glance state to the same bottom spot: Text/Image show a count badge
+ * once they have at least one item (CountBadge), Auto-Caption shows a
+ * filled On/Off pill instead since it's a single whole-video setting, not a
+ * count (AutoCaptionStatus).
  *
  * There is no separate "Transform" or "Arrange" menu (Zoom In/Out, Pan &
  * Tilt, Flip, Mirror, Delete, Trim, Drag) -- the clip rectangle is the
@@ -60,15 +63,32 @@ function ImageMotionIcon({ className }: { className?: string }) {
   );
 }
 
-// Small notification-style count badge, shown on a tab trigger once it has
-// at least one item -- the at-a-glance equivalent of Clip's preview swatch
-// for the three tabs (Text, Auto-Caption, Image) that don't have a single
-// swatch-able value to show instead.
+// Small notification-style count badge, pinned to the bottom of a tab
+// trigger once it has at least one item -- the at-a-glance equivalent of
+// Clip's own preview swatch (also bottom-pinned via mt-auto) for the two
+// tabs (Text, Image) that don't have a single swatch-able value to show
+// instead.
 function CountBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
-    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-medium leading-none text-accent-foreground">
+    <span className="mt-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-medium leading-none text-accent-foreground">
       {count}
+    </span>
+  );
+}
+
+// Auto-Caption has no "count" that means anything (it's one config for the
+// whole video, on or off) -- a filled on/white-text pill reads clearly
+// against any of the app's light/dark/color themes, unlike plain colored
+// text sitting directly on the page background.
+function AutoCaptionStatus({ enabled }: { enabled: boolean }) {
+  return (
+    <span
+      className={`mt-auto rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white ${
+        enabled ? "bg-green-600" : "bg-red-600"
+      }`}
+    >
+      {enabled ? "On" : "Off"}
     </span>
   );
 }
@@ -79,7 +99,7 @@ export function UserActions({
   onOpenTextDialog,
   textOverlayCount,
   onOpenTranscriptDialog,
-  autoCaptionCount,
+  autoCaptionEnabled,
   onOpenImageTemplatesDialog,
   imageCount,
 }: {
@@ -88,7 +108,7 @@ export function UserActions({
   onOpenTextDialog: () => void;
   textOverlayCount: number;
   onOpenTranscriptDialog: () => void;
-  autoCaptionCount: number;
+  autoCaptionEnabled: boolean;
   onOpenImageTemplatesDialog: () => void;
   imageCount: number;
 }) {
@@ -115,43 +135,37 @@ export function UserActions({
         type="button"
         onClick={onOpenTextDialog}
         title="Add text"
-        className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pt-2 text-muted hover:bg-background"
+        className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
       >
-        <span className="relative">
-          <TextGlyphIcon className="h-4 w-4" />
-          <CountBadge count={textOverlayCount} />
-        </span>
+        <TextGlyphIcon className="h-4 w-4" />
         <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
           Text
         </span>
+        <CountBadge count={textOverlayCount} />
       </button>
       <button
         type="button"
         onClick={onOpenTranscriptDialog}
         title="Auto-captions"
-        className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pt-2 text-muted hover:bg-background"
+        className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
       >
-        <span className="relative">
-          <ClosedCaptionIcon className="h-4 w-4" />
-          <CountBadge count={autoCaptionCount} />
-        </span>
+        <ClosedCaptionIcon className="h-4 w-4" />
         <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
           Auto-Caption
         </span>
+        <AutoCaptionStatus enabled={autoCaptionEnabled} />
       </button>
       <button
         type="button"
         onClick={onOpenImageTemplatesDialog}
         title="Animate a photo"
-        className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pt-2 text-muted hover:bg-background"
+        className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
       >
-        <span className="relative">
-          <ImageMotionIcon className="h-4 w-4" />
-          <CountBadge count={imageCount} />
-        </span>
+        <ImageMotionIcon className="h-4 w-4" />
         <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
           Image
         </span>
+        <CountBadge count={imageCount} />
       </button>
     </div>
   );

@@ -8,6 +8,7 @@ from moto.server import ThreadedMotoServer
 from src.assets import repository
 from src.core.auth import CurrentUser, get_current_user
 from src.core.config import settings
+from src.projects import repository as projects_repository
 
 TEST_USER = CurrentUser(id="test-user-id", email="test@example.com")
 
@@ -27,6 +28,7 @@ def moto_r2_server():
         region_name="us-east-1",
     )
     client.create_bucket(Bucket="test-bucket")
+    client.create_bucket(Bucket="test-renders-bucket")
 
     yield endpoint
     server.stop()
@@ -38,6 +40,13 @@ def r2_settings(moto_r2_server, monkeypatch):
     monkeypatch.setattr(settings, "r2_access_key_id", "test")
     monkeypatch.setattr(settings, "r2_secret_access_key", "test")
     monkeypatch.setattr(settings, "r2_bucket_name", "test-bucket")
+    # Deliberately a distinct token from the uploads bucket's above, same as
+    # in a real deploy (see DEPLOY.md step 2b) -- both point at the same moto
+    # server, just a different bucket, which is all delete_render_object cares
+    # about for these tests.
+    monkeypatch.setattr(settings, "r2_renders_access_key_id", "test")
+    monkeypatch.setattr(settings, "r2_renders_secret_access_key", "test")
+    monkeypatch.setattr(settings, "r2_renders_bucket_name", "test-renders-bucket")
 
 
 class FakeAssetsTable:
@@ -48,10 +57,36 @@ class FakeAssetsTable:
         self.projects: dict[str, dict] = {}
         self.assets: dict[str, dict] = {}
 
-    def add_project(self, owner_id: str) -> str:
+    def add_project(
+        self,
+        owner_id: str,
+        *,
+        render_id: str | None = None,
+        render_status: str | None = None,
+        render_url: str | None = None,
+    ) -> str:
         project_id = str(uuid.uuid4())
-        self.projects[project_id] = {"id": project_id, "owner_id": owner_id}
+        self.projects[project_id] = {
+            "id": project_id,
+            "owner_id": owner_id,
+            "render_id": render_id,
+            "render_status": render_status,
+            "render_url": render_url,
+        }
         return project_id
+
+    def get_project(self, project_id: str, owner_id: str) -> projects_repository.ProjectRecord | None:
+        row = self.projects.get(project_id)
+        if row is None or row["owner_id"] != owner_id:
+            return None
+        return projects_repository.ProjectRecord(
+            id=row["id"], render_id=row["render_id"], render_status=row["render_status"], render_url=row["render_url"]
+        )
+
+    def delete_project(self, project_id: str) -> None:
+        self.projects.pop(project_id, None)
+        for asset_id in [aid for aid, row in self.assets.items() if row["project_id"] == project_id]:
+            del self.assets[asset_id]
 
     def project_owned_by(self, project_id: str, owner_id: str) -> bool:
         project = self.projects.get(project_id)
@@ -103,6 +138,8 @@ def fake_assets_table(monkeypatch):
     monkeypatch.setattr(repository, "delete_asset", table.delete)
     monkeypatch.setattr(repository, "find_by_content_hash", table.find_by_content_hash)
     monkeypatch.setattr(repository, "count_assets_with_storage_key", table.count_with_storage_key)
+    monkeypatch.setattr(projects_repository, "get_project", table.get_project)
+    monkeypatch.setattr(projects_repository, "delete_project", table.delete_project)
     return table
 
 

@@ -25,6 +25,21 @@ def get_r2_client():
     )
 
 
+@lru_cache
+def get_r2_renders_client():
+    """Separate client/credentials from get_r2_client() above -- the renders
+    bucket uses its own API token (see settings.r2_renders_access_key_id),
+    same R2 account. Only used to delete a render object on project delete;
+    worker/src/server.js owns writing to this bucket."""
+    return boto3.client(
+        "s3",
+        endpoint_url=settings.r2_endpoint_url,
+        aws_access_key_id=settings.r2_renders_access_key_id,
+        aws_secret_access_key=settings.r2_renders_secret_access_key,
+        region_name="auto",
+    )
+
+
 def upload_file(local_path: Path, key: str, content_type: str) -> None:
     get_r2_client().upload_file(
         str(local_path),
@@ -37,6 +52,14 @@ def upload_file(local_path: Path, key: str, content_type: str) -> None:
 
 def delete_object(key: str) -> None:
     get_r2_client().delete_object(Bucket=settings.r2_bucket_name, Key=key)
+
+
+def delete_render_object(project_id: str, render_id: str) -> None:
+    """Matches the key format worker/src/server.js's transferRenderToR2 wrote
+    it under -- see that function's own `key` line. Only called once a
+    render has actually landed in the renders bucket (render_url set)."""
+    key = f"renders/{project_id}/{render_id}.mp4"
+    get_r2_renders_client().delete_object(Bucket=settings.r2_renders_bucket_name, Key=key)
 
 
 def presigned_get_url(key: str) -> str:

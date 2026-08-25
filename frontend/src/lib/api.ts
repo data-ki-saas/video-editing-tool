@@ -210,6 +210,17 @@ export async function importStockAsset(
   return handleResponse<Asset>(response);
 }
 
+export async function deleteProject(projectId: string) {
+  const response = await apiFetch(`${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "DELETE",
+    headers: await authHeader(),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${response.status})`);
+  }
+}
+
 export interface RenderTriggerResult {
   renderId: string;
   status: string;

@@ -128,7 +128,13 @@ export function BackgroundTrackStrip({
             key={segment.key}
             style={{ flexBasis: `${segment.widthFraction * 100}%` }}
             title={segment.title}
-            className="shrink-0 rounded-sm border border-accent/40 bg-accent/20"
+            // Solid fill (not a translucent tint) -- matches VolumeGraph's
+            // own bars against this same bg-neutral-900 strip background.
+            // The previous bg-accent/20 + border-accent/40 nearly vanished
+            // against neutral-900 for every color theme's accent, light or
+            // dark. `gap-px` on the parent (bg-neutral-900 showing through)
+            // already separates adjacent segments -- no border needed.
+            className="shrink-0 rounded-sm bg-accent"
           />
         ))}
       </div>

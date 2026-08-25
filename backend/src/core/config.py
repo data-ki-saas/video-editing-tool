@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
     r2_bucket_name: str = ""
+    # The finished-renders bucket is public (fed by worker/, see its own
+    # README) and secured by a SEPARATE API token from the uploads bucket
+    # above (see DEPLOY.md step 2b) -- these three exist only so
+    # projects/service.py can delete a project's render object on reel
+    # delete; nothing here ever writes to this bucket, worker/ does that.
+    r2_renders_access_key_id: str = ""
+    r2_renders_secret_access_key: str = ""
+    r2_renders_bucket_name: str = ""
     # Overrides the computed R2 endpoint — set only in tests, to point boto3's
     # S3 client at a local mock server instead of real R2.
     r2_endpoint_override: str = ""

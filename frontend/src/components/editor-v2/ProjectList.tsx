@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { listProjects, deleteProject, renameProject, type Project } from "@/lib/projects";
 import { InlineEditableText } from "@/components/InlineEditableText";
+import { TrashIcon } from "@/components/icons/UIIcons";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 
 export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
@@ -70,27 +71,39 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
           return (
             <li
               key={project.id}
+              className="flex items-center gap-1"
               onContextMenu={(e) =>
                 openContextMenu(e, [{ label: "Delete", danger: true, onSelect: () => void handleDelete(project) }])
               }
             >
-              {isActive ? (
-                <InlineEditableText
-                  value={project.name}
-                  onCommit={(name) => handleRename(project, name)}
-                  ariaLabel="Reel name"
-                  className="block w-full truncate rounded-md px-2 py-1 text-sm font-medium text-foreground"
-                  inputClassName="block w-full truncate rounded-md border border-border px-2 py-1 text-sm font-medium text-foreground outline-none"
-                />
-              ) : (
-                <Link
-                  href={`/dashboard/${project.id}`}
-                  title={project.name}
-                  className="block truncate rounded-md px-2 py-1 text-sm text-foreground hover:bg-background"
-                >
-                  {project.name}
-                </Link>
-              )}
+              <div className="min-w-0 flex-1">
+                {isActive ? (
+                  <InlineEditableText
+                    value={project.name}
+                    onCommit={(name) => handleRename(project, name)}
+                    ariaLabel="Reel name"
+                    className="block w-full truncate rounded-md px-2 py-1 text-sm font-medium text-foreground"
+                    inputClassName="block w-full truncate rounded-md border border-border px-2 py-1 text-sm font-medium text-foreground outline-none"
+                  />
+                ) : (
+                  <Link
+                    href={`/dashboard/${project.id}`}
+                    title={project.name}
+                    className="block truncate rounded-md px-2 py-1 text-sm text-foreground hover:bg-background"
+                  >
+                    {project.name}
+                  </Link>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleDelete(project)}
+                title={`Delete "${project.name}"`}
+                aria-label={`Delete ${project.name}`}
+                className="shrink-0 rounded-md p-1 text-muted hover:bg-background hover:text-red-600"
+              >
+                <TrashIcon className="h-3.5 w-3.5" />
+              </button>
             </li>
           );
         })}

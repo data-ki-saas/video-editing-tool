@@ -153,9 +153,12 @@ the next push that touches `supabase/migrations/`.
    for you (a proxied `CNAME`) — you don't hand-write one in the Cloudflare
    DNS tab yourself. This is what makes delivery global/cached with zero
    egress fees.
-3. **Create a separate API token** scoped to *only* this bucket — do not
-   reuse the uploads bucket's token. The worker never needs to touch the
-   uploads bucket, and vice versa.
+3. **Create a separate API token** scoped to *only* this bucket, with
+   read/write/delete permission — do not reuse the uploads bucket's token.
+   Give this same renders-bucket token to *both* the worker (writes a
+   finished render) and the backend (deletes one when its reel is
+   deleted) — the uploads bucket's own token is never used for the renders
+   bucket, and vice versa.
 4. Collect:
 
    | Value | Placeholder used below |
@@ -203,6 +206,9 @@ the next push that touches `supabase/migrations/`.
    | `R2_ACCESS_KEY_ID` | ✅ | `<R2_ACCESS_KEY_ID>` |
    | `R2_SECRET_ACCESS_KEY` | ✅ | `<R2_SECRET_ACCESS_KEY>` |
    | `R2_BUCKET_NAME` | ✅ | `<R2_BUCKET_NAME>` |
+   | `R2_RENDERS_ACCESS_KEY_ID` | ✅ | `<R2_RENDERS_ACCESS_KEY_ID>` (the renders-bucket token from step 2b below -- same one given to the worker; only used here to delete a render on reel delete, never to write) |
+   | `R2_RENDERS_SECRET_ACCESS_KEY` | ✅ | `<R2_RENDERS_SECRET_ACCESS_KEY>` |
+   | `R2_RENDERS_BUCKET_NAME` | ✅ | `<R2_RENDERS_BUCKET_NAME>` |
    | `CORS_ORIGINS` | ✅ | `<YOUR_VERCEL_URL>` (exact scheme, no trailing slash; comma-separate multiple origins) |
    | `DEEPSEEK_API_KEY` | ✅ (unless using Anthropic) | `<DEEPSEEK_API_KEY>` |
    | `LLM_PROVIDER` | optional | `deepseek` (or `anthropic`) |
@@ -382,6 +388,9 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | `R2_ACCESS_KEY_ID` | `""` | Cloudflare > **R2 > Manage API Tokens > Create API Token** (scope: uploads bucket, step 2a) — shown after creating the token |
 | `R2_SECRET_ACCESS_KEY` | `""` | Same token-creation screen as above — **shown once only**, copy it immediately |
 | `R2_BUCKET_NAME` | `""` | The name you gave the uploads bucket when you created it (step 2a) |
+| `R2_RENDERS_ACCESS_KEY_ID` | `""` | Same renders-bucket token as the worker's `R2_ACCESS_KEY_ID` below (step 2b) — deleting a project deletes its finished render too, which lives in this bucket |
+| `R2_RENDERS_SECRET_ACCESS_KEY` | `""` | Same token-creation screen as above — shown once, copy immediately |
+| `R2_RENDERS_BUCKET_NAME` | `""` | The name you gave the renders bucket when you created it (step 2b) |
 | `R2_ENDPOINT_OVERRIDE` | `""` | **Don't set this** — tests only |
 | `R2_SIGNED_URL_EXPIRES_SECONDS` | `3600` | Not fetched — pick a number, optional to set |
 | `LLM_PROVIDER` | `deepseek` | Not fetched — `deepseek` or `anthropic`, optional to set |

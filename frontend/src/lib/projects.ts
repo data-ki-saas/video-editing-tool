@@ -1,3 +1,4 @@
+import { deleteProject as deleteProjectViaBackend } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import type { CropRect, OverlayImage, SequenceEntry, TextOverlay, TranscriptCaption, TrimRange, ZoomEffect } from "@/lib/video/video_math";
 
@@ -215,8 +216,11 @@ export async function renameProject(projectId: string, name: string): Promise<vo
   }
 }
 
+// Routed through the FastAPI backend (not a direct Supabase delete like the
+// other functions above) -- a project owns R2 objects (every asset's
+// storage_key, plus a finished render) that Postgres's `assets` FK cascade
+// never reaches. src/projects/service.py cleans those up before removing the
+// row itself; deleting the row straight from here would silently orphan them.
 export async function deleteProject(projectId: string): Promise<void> {
-  const supabase = createClient();
-  const { error } = await supabase.from("projects").delete().eq("id", projectId);
-  if (error) throw new Error(error.message);
+  await deleteProjectViaBackend(projectId);
 }
