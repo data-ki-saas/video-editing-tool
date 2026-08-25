@@ -31,7 +31,16 @@ import { ClipRectangleDialog } from "./ClipRectangleDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import type { Asset } from "@/lib/api";
-import type { CropRect, OverlayImage, SequenceEntry, TextOverlay, TranscriptCaption, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type {
+  CropRect,
+  OverlayImage,
+  SequenceEntry,
+  TextOverlay,
+  TranscriptCaption,
+  TrimRange,
+  VideoOverlayClip,
+  ZoomEffect,
+} from "@/lib/video/video_math";
 import type { TextTemplateId } from "@/lib/video/textTemplates";
 import type { TranscriptCaptionTemplateId } from "@/lib/video/transcriptCaptionTemplates";
 import type { RefObject } from "react";
@@ -58,8 +67,10 @@ export function ActionArea({
   onAssetDeleted,
   onAddOverlay,
   onAddToSequence,
+  onAddVideoOverlay,
   onAddToBackgroundSequence,
   usedAssetIds,
+  videoThumbnailUrlByAssetId,
   selectedClipRectId,
   onSelectClipRect,
   onOpenTextDialog,
@@ -88,6 +99,7 @@ export function ActionArea({
   overlayImages,
   textOverlays,
   sequenceClips,
+  videoOverlays,
   backgroundTracks,
   assetUrlById,
   onFrameDimensions,
@@ -104,8 +116,10 @@ export function ActionArea({
   onAssetDeleted: (assetId: string) => void;
   onAddOverlay: (asset: Asset) => void;
   onAddToSequence: (asset: Asset) => void;
+  onAddVideoOverlay: (asset: Asset) => void;
   onAddToBackgroundSequence: (asset: Asset) => void;
   usedAssetIds: Set<string>;
+  videoThumbnailUrlByAssetId: Record<string, string>;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
   onOpenTextDialog: () => void;
@@ -138,6 +152,7 @@ export function ActionArea({
   overlayImages: OverlayImage[];
   textOverlays: TextOverlay[];
   sequenceClips: (SequenceEntry & { url: string })[];
+  videoOverlays: VideoOverlayClip[];
   backgroundTracks: { name: string; url: string }[];
   assetUrlById: Record<string, string>;
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
@@ -178,8 +193,10 @@ export function ActionArea({
           onDeleted={onAssetDeleted}
           onAddOverlay={onAddOverlay}
           onAddToSequence={onAddToSequence}
+          onAddVideoOverlay={onAddVideoOverlay}
           onAddToBackgroundSequence={onAddToBackgroundSequence}
           usedAssetIds={usedAssetIds}
+          videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
         />
       </div>
 
@@ -215,6 +232,7 @@ export function ActionArea({
             trimRanges={trimRanges}
             overlayImages={overlayImages}
             textOverlays={textOverlays}
+            videoOverlays={videoOverlays}
             backgroundTracks={backgroundTracks}
             assetUrlById={assetUrlById}
             onFrameDimensions={onFrameDimensions}

@@ -44,7 +44,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listAssets, type Asset } from "@/lib/api";
-import { extractThumbnails, getVideoDuration } from "@/lib/video/video";
+import { extractThumbnails, getVideoDuration, captureSingleFrame } from "@/lib/video/video";
 import { extractVolumeProfile } from "@/lib/video/audio";
 import {
   generateSampleTimestamps,
@@ -54,6 +54,8 @@ import {
   type OverlayImage,
   type SequenceEntry,
   type TextOverlay,
+  type VideoOverlayClip,
+  type VideoOverlayLayout,
   type ZoomEffect,
 } from "@/lib/video/video_math";
 import {
@@ -80,6 +82,14 @@ import {
   applyEnableTranscriptCaption,
   applyUpdateTranscriptCaption,
   applyDisableTranscriptCaption,
+  applyAddVideoOverlay,
+  applyChangeVideoOverlayLayout,
+  applyToggleSplitScreenOrientation,
+  applyToggleSplitScreenSides,
+  applyVideoOverlayRectChange,
+  applyVideoOverlayRangeChange,
+  applyVideoOverlayPositionChange,
+  applyDeleteVideoOverlay,
 } from "@/lib/video/transformations";
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot, type Project } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
@@ -109,6 +119,7 @@ const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
   overlayImages: [],
   textOverlays: [],
   sequenceClips: [],
+  videoOverlays: [],
   transcriptCaption: null,
 };
 
@@ -211,6 +222,35 @@ export function ThreePaneEditor({
     endTimeSeconds: number;
   } | null>(null);
 
+  // Video overlays (see video_math.ts's VideoOverlayClip) get the same
+  // three-way live-edit split as image/text overlays: a Picture-in-Picture
+  // box's rect drag (reusing OverlayRectOverlay on FrameStrip's active
+  // tile, exactly like an image overlay), an edge drag on
+  // VideoOverlayTrack (trims duration), and a body drag on the same track
+  // (the new "move without changing duration" gesture -- see that file's
+  // own module comment).
+  const [liveVideoOverlayRectEdit, setLiveVideoOverlayRectEdit] = useState<{ index: number; rect: CropRect } | null>(null);
+  const [liveVideoOverlayRangeEdit, setLiveVideoOverlayRangeEdit] = useState<{
+    index: number;
+    startTimeSeconds: number;
+    endTimeSeconds: number;
+  } | null>(null);
+  const [liveVideoOverlayPositionEdit, setLiveVideoOverlayPositionEdit] = useState<{
+    index: number;
+    startTimeSeconds: number;
+  } | null>(null);
+
+  // A representative still frame per video asset -- lifted up from
+  // AssetGallery.tsx (which used to generate this locally) since
+  // VideoOverlayTrack.tsx needs the exact same thumbnails and lives in a
+  // sibling subtree, not a descendant of AssetGallery.
+  const [videoThumbnailUrlByAssetId, setVideoThumbnailUrlByAssetId] = useState<Record<string, string>>({});
+  // Each video overlay source asset's own probed full duration, by
+  // assetId -- VideoOverlayTrack's edge-drag needs this to clamp a
+  // Full-Screen/Split-Screen overlay's window so it never asks to play
+  // more of the source than exists (its in-point is fixed at 0 for v1).
+  const [overlaySourceDurationSeconds, setOverlaySourceDurationSeconds] = useState<Record<string, number>>({});
+
   // TextOverlayDialog's open/edit-target state -- null editingTextOverlayIndex
   // means "Add" (a fresh overlay); otherwise it's pre-filled for editing
   // that existing overlay's text/template.
@@ -311,6 +351,7 @@ export function ThreePaneEditor({
     overlayImages: rawSelections.overlayImages ?? [],
     textOverlays: rawSelections.textOverlays ?? [],
     sequenceClips,
+    videoOverlays: rawSelections.videoOverlays ?? [],
     transcriptCaption: rawSelections.transcriptCaption ?? null,
   };
 
@@ -383,6 +424,57 @@ export function ThreePaneEditor({
   // BackgroundTrackStrip to resolve an id to its actual file without each
   // needing their own asset-list lookup.
   const assetUrlById = Object.fromEntries(assets.map((asset) => [asset.id, asset.url]));
+
+  // Generates one representative frame per video asset, once, the first
+  // time it shows up here -- images use their own URL directly (no
+  // extraction needed) and are skipped. Previously local to AssetGallery.tsx;
+  // moved up here since VideoOverlayTrack.tsx needs the same thumbnails.
+  useEffect(() => {
+    let cancelled = false;
+    for (const asset of assets) {
+      if (asset.kind !== "video" || videoThumbnailUrlByAssetId[asset.id]) continue;
+      captureSingleFrame(asset.url)
+        .then((frame) => {
+          if (!cancelled) setVideoThumbnailUrlByAssetId((prev) => ({ ...prev, [asset.id]: frame }));
+        })
+        .catch(() => {
+          // Leaves this tile/overlay block on its fallback icon -- not
+          // worth surfacing a thumbnail failure as a page-level error.
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [assets, videoThumbnailUrlByAssetId]);
+
+  // Probes every video overlay's source asset's own real duration once,
+  // by assetId -- VideoOverlayTrack's edge-drag clamp needs this (see its
+  // own comment). Re-runs when a project loads with overlays already
+  // referencing assets not yet probed, not only right after adding one.
+  const videoOverlayAssetIds = useMemo(
+    () => Array.from(new Set(selections.videoOverlays.map((overlay) => overlay.assetId))),
+    [selections.videoOverlays]
+  );
+  useEffect(() => {
+    let cancelled = false;
+    for (const assetId of videoOverlayAssetIds) {
+      if (overlaySourceDurationSeconds[assetId] !== undefined) continue;
+      const url = assetUrlById[assetId];
+      if (!url) continue;
+      getVideoDuration(url)
+        .then((duration) => {
+          if (!cancelled) setOverlaySourceDurationSeconds((prev) => ({ ...prev, [assetId]: duration }));
+        })
+        .catch(() => {
+          // Leaves this asset's cap unresolved -- VideoOverlayTrack's edge-drag
+          // just degrades to only the neighbor/sequence clamps for it.
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- assetUrlById is a fresh object every render; videoOverlayAssetIds (memoized) is what actually gates this
+  }, [videoOverlayAssetIds]);
 
   // The sequence to actually play: persisted sequenceClips, filtered to
   // entries whose asset still resolves (so a deleted asset silently drops
@@ -608,7 +700,8 @@ export function ThreePaneEditor({
 
     const referencesDeletedAsset =
       selections.overlayImages.some((overlay) => overlay.assetId === assetId) ||
-      selections.sequenceClips.some((entry) => entry.assetId === assetId);
+      selections.sequenceClips.some((entry) => entry.assetId === assetId) ||
+      selections.videoOverlays.some((overlay) => overlay.assetId === assetId);
     if (referencesDeletedAsset) {
       const { label, state } = {
         label: "Removed deleted asset",
@@ -616,6 +709,7 @@ export function ThreePaneEditor({
           ...selections,
           overlayImages: selections.overlayImages.filter((overlay) => overlay.assetId !== assetId),
           sequenceClips: selections.sequenceClips.filter((entry) => entry.assetId !== assetId),
+          videoOverlays: selections.videoOverlays.filter((overlay) => overlay.assetId !== assetId),
         },
       };
       pushChange(label, state);
@@ -709,6 +803,89 @@ export function ThreePaneEditor({
   // there.
   function handleAddToSequence(asset: Asset) {
     const { label, state } = applyAddSequenceClip(selections, asset.id);
+    pushChange(label, state);
+  }
+
+  // Right-click "Overlay" on a video asset in AssetGallery -- places it on
+  // its own rail at the current playhead, defaulting to a Full-Screen
+  // layout the user can switch afterward (see VideoOverlayTrack.tsx). Needs
+  // the source asset's own probed duration to size/clamp the default window
+  // against -- reuses the cache built by the probing effect above, or
+  // probes it fresh (and caches it) if this is the first time this asset's
+  // been used this way.
+  async function handleAddVideoOverlay(asset: Asset) {
+    let sourceDurationSeconds = overlaySourceDurationSeconds[asset.id];
+    if (sourceDurationSeconds === undefined) {
+      try {
+        sourceDurationSeconds = await getVideoDuration(asset.url);
+        setOverlaySourceDurationSeconds((prev) => ({ ...prev, [asset.id]: sourceDurationSeconds! }));
+      } catch {
+        sourceDurationSeconds = Infinity; // probe failed -- the edge-drag clamp still falls back to [0, videoDurationSeconds]
+      }
+    }
+    const { label, state } = applyAddVideoOverlay(selections, asset.id, sourceDurationSeconds, currentTimeSeconds, videoDurationSeconds);
+    pushChange(label, state);
+  }
+
+  // VideoOverlayTrack's right-click "Switch to..." entries -- an instant
+  // change, no drag/commit split needed.
+  function handleChangeVideoOverlayLayout(overlayIndex: number, layoutType: VideoOverlayLayout["type"]) {
+    const { label, state } = applyChangeVideoOverlayLayout(selections, overlayIndex, layoutType);
+    pushChange(label, state);
+  }
+
+  // VideoOverlayTrack's small inline icons on an active Split Screen
+  // segment -- both instant one-click toggles.
+  function handleToggleSplitScreenOrientation(overlayIndex: number) {
+    const { label, state } = applyToggleSplitScreenOrientation(selections, overlayIndex);
+    pushChange(label, state);
+  }
+
+  function handleToggleSplitScreenSides(overlayIndex: number) {
+    const { label, state } = applyToggleSplitScreenSides(selections, overlayIndex);
+    pushChange(label, state);
+  }
+
+  // A Picture-in-Picture overlay's box, dragged via the reused
+  // OverlayRectOverlay handles on FrameStrip's active tile -- same
+  // live-edit/commit split as handleChangeOverlayRect/handleCommitOverlayRect
+  // below, for the pre-existing image-overlay feature.
+  function handleChangeVideoOverlayRect(overlayIndex: number, next: CropRect) {
+    setLiveVideoOverlayRectEdit({ index: overlayIndex, rect: next });
+  }
+
+  function handleCommitVideoOverlayRect(overlayIndex: number, next: CropRect) {
+    setLiveVideoOverlayRectEdit(null);
+    const { label, state } = applyVideoOverlayRectChange(selections, overlayIndex, next);
+    pushChange(label, state);
+  }
+
+  // VideoOverlayTrack's edge-drag (trim) and body-drag (move) gestures.
+  function handleChangeVideoOverlayRange(overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
+    setLiveVideoOverlayRangeEdit({ index: overlayIndex, startTimeSeconds, endTimeSeconds });
+  }
+
+  function handleCommitVideoOverlayRange(overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
+    setLiveVideoOverlayRangeEdit(null);
+    const { label, state } = applyVideoOverlayRangeChange(selections, overlayIndex, startTimeSeconds, endTimeSeconds);
+    pushChange(label, state);
+  }
+
+  function handleChangeVideoOverlayPosition(overlayIndex: number, startTimeSeconds: number) {
+    setLiveVideoOverlayPositionEdit({ index: overlayIndex, startTimeSeconds });
+  }
+
+  function handleCommitVideoOverlayPosition(overlayIndex: number, startTimeSeconds: number) {
+    setLiveVideoOverlayPositionEdit(null);
+    const { label, state } = applyVideoOverlayPositionChange(selections, overlayIndex, startTimeSeconds);
+    pushChange(label, state);
+  }
+
+  function handleDeleteVideoOverlay(overlayIndex: number) {
+    setLiveVideoOverlayRectEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    setLiveVideoOverlayRangeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    setLiveVideoOverlayPositionEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    const { label, state } = applyDeleteVideoOverlay(selections, overlayIndex);
     pushChange(label, state);
   }
 
@@ -913,12 +1090,32 @@ export function ThreePaneEditor({
     return overlay;
   });
 
+  // Splices any in-progress rect/range/position drag into the persisted
+  // array at its own index, same pattern as displayedOverlayImages above --
+  // a rect edit only ever applies to a Picture-in-Picture layout (the only
+  // one with a rect), checked defensively even though the UI never offers
+  // one for any other layout.
+  const displayedVideoOverlays: VideoOverlayClip[] = selections.videoOverlays.map((overlay, index) => {
+    if (liveVideoOverlayRangeEdit?.index === index) {
+      return { ...overlay, startTimeSeconds: liveVideoOverlayRangeEdit.startTimeSeconds, endTimeSeconds: liveVideoOverlayRangeEdit.endTimeSeconds };
+    }
+    if (liveVideoOverlayPositionEdit?.index === index) {
+      const duration = overlay.endTimeSeconds - overlay.startTimeSeconds;
+      return { ...overlay, startTimeSeconds: liveVideoOverlayPositionEdit.startTimeSeconds, endTimeSeconds: liveVideoOverlayPositionEdit.startTimeSeconds + duration };
+    }
+    if (liveVideoOverlayRectEdit?.index === index && overlay.layout.type === "picture-in-picture") {
+      return { ...overlay, layout: { ...overlay.layout, rect: liveVideoOverlayRectEdit.rect } };
+    }
+    return overlay;
+  });
+
   // Every asset currently referenced by at least one overlay, in the video
   // sequence, or in the background-music sequence -- drives AssetGallery's
   // "+" in-use badge.
   const usedAssetIds = new Set([
     ...selections.overlayImages.map((overlay) => overlay.assetId),
     ...selections.sequenceClips.map((entry) => entry.assetId),
+    ...selections.videoOverlays.map((overlay) => overlay.assetId),
     ...backgroundSequenceAssetIds,
   ]);
 
@@ -1019,8 +1216,10 @@ export function ThreePaneEditor({
           onAssetDeleted={handleAssetDeleted}
           onAddOverlay={handleAddOverlay}
           onAddToSequence={handleAddToSequence}
+          onAddVideoOverlay={handleAddVideoOverlay}
           onAddToBackgroundSequence={handleAddToBackgroundSequence}
           usedAssetIds={usedAssetIds}
+          videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
           selectedClipRectId={selections.clipRectId}
           onSelectClipRect={handleSelectClipRect}
           onOpenTextDialog={handleOpenTextDialog}
@@ -1049,6 +1248,7 @@ export function ThreePaneEditor({
           overlayImages={displayedOverlayImages}
           textOverlays={displayedTextOverlays}
           sequenceClips={playbackClips}
+          videoOverlays={displayedVideoOverlays}
           backgroundTracks={resolvedBackgroundTracks}
           assetUrlById={assetUrlById}
           onFrameDimensions={setFrameDimensions}
@@ -1103,6 +1303,19 @@ export function ThreePaneEditor({
           onCommitTextOverlayRange={handleCommitTextOverlayRange}
           onDeleteTextOverlay={handleDeleteTextOverlay}
           onRequestEditTextOverlay={handleRequestEditTextOverlay}
+          videoOverlays={displayedVideoOverlays}
+          videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
+          overlaySourceDurationSeconds={overlaySourceDurationSeconds}
+          onChangeVideoOverlayRect={handleChangeVideoOverlayRect}
+          onCommitVideoOverlayRect={handleCommitVideoOverlayRect}
+          onChangeVideoOverlayRange={handleChangeVideoOverlayRange}
+          onCommitVideoOverlayRange={handleCommitVideoOverlayRange}
+          onChangeVideoOverlayPosition={handleChangeVideoOverlayPosition}
+          onCommitVideoOverlayPosition={handleCommitVideoOverlayPosition}
+          onChangeVideoOverlayLayout={handleChangeVideoOverlayLayout}
+          onToggleSplitScreenOrientation={handleToggleSplitScreenOrientation}
+          onToggleSplitScreenSides={handleToggleSplitScreenSides}
+          onDeleteVideoOverlay={handleDeleteVideoOverlay}
         />
       </section>
 
@@ -1118,6 +1331,7 @@ export function ThreePaneEditor({
             zoomEffects: displayedZoomEffects,
             overlayImages: displayedOverlayImages,
             textOverlays: displayedTextOverlays,
+            videoOverlays: displayedVideoOverlays,
           }}
           videoDurationSeconds={videoDurationSeconds}
           canRender={effectiveSequenceEntries.length > 0}

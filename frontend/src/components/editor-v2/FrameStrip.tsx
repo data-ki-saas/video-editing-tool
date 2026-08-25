@@ -79,6 +79,7 @@ import { FlipTrack } from "./FlipTrack";
 import { TrimTrack } from "./TrimTrack";
 import { OverlayTrack } from "./OverlayTrack";
 import { TextOverlayTrack } from "./TextOverlayTrack";
+import { VideoOverlayTrack } from "./VideoOverlayTrack";
 import {
   computeEffectiveCropRect,
   computeEffectiveFlip,
@@ -91,6 +92,8 @@ import {
   type SequenceEntry,
   type TextOverlay,
   type TrimRange,
+  type VideoOverlayClip,
+  type VideoOverlayLayout,
   type ZoomEffect,
 } from "@/lib/video/video_math";
 
@@ -106,6 +109,8 @@ const FrameTile = memo(function FrameTile({
   overlays,
   assetUrlById,
   textOverlays,
+  videoOverlayPips,
+  videoThumbnailUrlById,
   onChange,
   onCommit,
   onFlipHorizontal,
@@ -114,6 +119,8 @@ const FrameTile = memo(function FrameTile({
   onOverlayRectCommit,
   onTextOverlayRectChange,
   onTextOverlayRectCommit,
+  onVideoOverlayRectChange,
+  onVideoOverlayRectCommit,
 }: {
   src: string;
   index: number;
@@ -126,6 +133,12 @@ const FrameTile = memo(function FrameTile({
   overlays: { overlay: OverlayImage; overlayIndex: number }[];
   assetUrlById: Record<string, string>;
   textOverlays: { overlay: TextOverlay; overlayIndex: number; progress: number }[];
+  // Picture-in-Picture video overlays active at this tile's instant --
+  // rendered with the same OverlayRectOverlay component image overlays
+  // already use (move/resize drag), just styled violet instead of cyan so
+  // the two overlay kinds read as visually distinct when both are present.
+  videoOverlayPips: { overlay: VideoOverlayClip; overlayIndex: number }[];
+  videoThumbnailUrlById: Record<string, string>;
   onChange?: (next: CropRect) => void;
   onCommit?: (next: CropRect) => void;
   onFlipHorizontal?: () => void;
@@ -134,6 +147,8 @@ const FrameTile = memo(function FrameTile({
   onOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
   onTextOverlayRectChange?: (overlayIndex: number, next: CropRect) => void;
   onTextOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
+  onVideoOverlayRectChange?: (overlayIndex: number, next: CropRect) => void;
+  onVideoOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
 }) {
   const scaleX = flipHorizontal ? -1 : 1;
   const scaleY = flipVertical ? -1 : 1;
@@ -192,6 +207,20 @@ const FrameTile = memo(function FrameTile({
           }
         />
       ))}
+      {videoOverlayPips.map(({ overlay, overlayIndex }) => {
+        if (overlay.layout.type !== "picture-in-picture") return null;
+        return (
+          <OverlayRectOverlay
+            key={overlayIndex}
+            rect={overlay.layout.rect}
+            imageUrl={videoThumbnailUrlById[overlay.assetId] ?? ""}
+            borderColorClassName="border-violet-400"
+            handleColorClassName="bg-violet-400"
+            onChange={onVideoOverlayRectChange ? (next) => onVideoOverlayRectChange(overlayIndex, next) : undefined}
+            onCommit={onVideoOverlayRectCommit ? (next) => onVideoOverlayRectCommit(overlayIndex, next) : undefined}
+          />
+        );
+      })}
     </div>
   );
 });
@@ -239,6 +268,19 @@ export function FrameStrip({
   onCommitTextOverlayRange,
   onDeleteTextOverlay,
   onRequestEditTextOverlay,
+  videoOverlays,
+  videoThumbnailUrlByAssetId,
+  overlaySourceDurationSeconds,
+  onChangeVideoOverlayRect,
+  onCommitVideoOverlayRect,
+  onChangeVideoOverlayRange,
+  onCommitVideoOverlayRange,
+  onChangeVideoOverlayPosition,
+  onCommitVideoOverlayPosition,
+  onChangeVideoOverlayLayout,
+  onToggleSplitScreenOrientation,
+  onToggleSplitScreenSides,
+  onDeleteVideoOverlay,
   pixelsPerSecond,
   scrollContainerRef,
   onScroll,
@@ -290,6 +332,19 @@ export function FrameStrip({
   onCommitTextOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onDeleteTextOverlay: (overlayIndex: number) => void;
   onRequestEditTextOverlay: (overlayIndex: number) => void;
+  videoOverlays: VideoOverlayClip[];
+  videoThumbnailUrlByAssetId: Record<string, string>;
+  overlaySourceDurationSeconds: Record<string, number>;
+  onChangeVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onCommitVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onChangeVideoOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCommitVideoOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onChangeVideoOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onCommitVideoOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onChangeVideoOverlayLayout: (overlayIndex: number, layoutType: VideoOverlayLayout["type"]) => void;
+  onToggleSplitScreenOrientation: (overlayIndex: number) => void;
+  onToggleSplitScreenSides: (overlayIndex: number) => void;
+  onDeleteVideoOverlay: (overlayIndex: number) => void;
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
@@ -393,6 +448,22 @@ export function FrameStrip({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, textOverlays]);
 
+  // Same shape as tileOverlays above, but for the Picture-in-Picture-layout
+  // video overlays active at each tile's own instant -- the only layout
+  // with a rect to drag on the active tile (Full-Screen/Split-Screen have
+  // no on-canvas rect at all, per video_math.ts's VideoOverlayLayout).
+  const tileVideoOverlayPips = useMemo(() => {
+    return thumbnailTimestampsSeconds.map((timestamp) =>
+      videoOverlays
+        .map((overlay, overlayIndex) => ({ overlay, overlayIndex }))
+        .filter(
+          ({ overlay }) =>
+            overlay.layout.type === "picture-in-picture" && timestamp >= overlay.startTimeSeconds && timestamp < overlay.endTimeSeconds
+        )
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, thumbnailTimestampsSeconds, videoOverlays]);
+
   // The tile whose OWN timestamp is closest to the playhead -- NOT an
   // even-spacing index formula (see this file's module comment on why
   // that breaks for a concatenated sequence). Still only this one tile's
@@ -446,6 +517,21 @@ export function FrameStrip({
           onDeleteRange={onDeleteTrimRange}
         />
 
+        <VideoOverlayTrack
+          videoOverlays={videoOverlays}
+          assetThumbnailUrlById={videoThumbnailUrlByAssetId}
+          overlaySourceDurationSeconds={overlaySourceDurationSeconds}
+          videoDurationSeconds={durationSeconds}
+          onChangeRange={onChangeVideoOverlayRange}
+          onCommitRange={onCommitVideoOverlayRange}
+          onChangePosition={onChangeVideoOverlayPosition}
+          onCommitPosition={onCommitVideoOverlayPosition}
+          onChangeLayout={onChangeVideoOverlayLayout}
+          onToggleOrientation={onToggleSplitScreenOrientation}
+          onToggleSides={onToggleSplitScreenSides}
+          onDelete={onDeleteVideoOverlay}
+        />
+
         <div onClick={handleClick} className="flex cursor-pointer items-center">
           {thumbnails.map((src, index) => (
             <FrameTile
@@ -461,6 +547,8 @@ export function FrameStrip({
               overlays={tileOverlays[index]}
               assetUrlById={assetUrlById}
               textOverlays={tileTextOverlays[index]}
+              videoOverlayPips={tileVideoOverlayPips[index]}
+              videoThumbnailUrlById={videoThumbnailUrlByAssetId}
               onChange={index === activeTileIndex ? onCropRectChange : undefined}
               onCommit={index === activeTileIndex ? onCropRectCommit : undefined}
               onFlipHorizontal={index === activeTileIndex ? onFlipHorizontal : undefined}
@@ -469,6 +557,8 @@ export function FrameStrip({
               onOverlayRectCommit={index === activeTileIndex ? onCommitOverlayRect : undefined}
               onTextOverlayRectChange={index === activeTileIndex ? onChangeTextOverlayRect : undefined}
               onTextOverlayRectCommit={index === activeTileIndex ? onCommitTextOverlayRect : undefined}
+              onVideoOverlayRectChange={index === activeTileIndex ? onChangeVideoOverlayRect : undefined}
+              onVideoOverlayRectCommit={index === activeTileIndex ? onCommitVideoOverlayRect : undefined}
             />
           ))}
         </div>

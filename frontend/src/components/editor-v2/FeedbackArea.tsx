@@ -65,6 +65,15 @@ function ActiveTransformationsList({
   for (const overlay of selections.textOverlays) {
     rows.push(`Text "${overlay.text}" ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
   }
+  for (const overlay of selections.videoOverlays) {
+    const layoutLabel =
+      overlay.layout.type === "full-screen"
+        ? "Full-Screen"
+        : overlay.layout.type === "picture-in-picture"
+          ? "Picture-in-Picture"
+          : "Split Screen";
+    rows.push(`Overlay (${layoutLabel}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
+  }
   if (selections.sequenceClips.length > 1) {
     rows.push(`Sequence: ${selections.sequenceClips.length} clips`);
   }
@@ -175,14 +184,21 @@ export function FeedbackArea({
   const renderDisabled = !canRender || isRendering || (renderStatus !== null && !TERMINAL_RENDER_STATUSES.has(renderStatus));
 
   const hasTranscriptCaption = Boolean(selections.transcriptCaption);
-  const localRenderDisabled = !canLocalRender || isLocalRendering || hasTranscriptCaption || !isLocalRenderSupported;
+  // lib/localRender/exportTimeline.ts (the only render path this button
+  // triggers) has no knowledge of video overlays yet -- gated the same way
+  // as auto-captions until it does, rather than silently ignoring them.
+  const hasVideoOverlays = selections.videoOverlays.length > 0;
+  const localRenderDisabled =
+    !canLocalRender || isLocalRendering || hasTranscriptCaption || hasVideoOverlays || !isLocalRenderSupported;
   const localRenderTitle = !canLocalRender
     ? "Add a video before rendering"
     : hasTranscriptCaption
       ? "Edge Render doesn't support auto-captions yet — use Render instead"
-      : !isLocalRenderSupported
-        ? (localRenderUnsupportedReason ?? "Edge Render needs a Chromium browser (Chrome or Microsoft Edge)")
-        : "Edge Render (in your browser, no cost)";
+      : hasVideoOverlays
+        ? "Edge Render doesn't support video overlays yet — use Render instead"
+        : !isLocalRenderSupported
+          ? (localRenderUnsupportedReason ?? "Edge Render needs a Chromium browser (Chrome or Microsoft Edge)")
+          : "Edge Render (in your browser, no cost)";
 
   return (
     <div className="flex h-full gap-4 px-4 py-2 text-sm">

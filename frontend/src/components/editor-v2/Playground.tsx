@@ -32,7 +32,16 @@ import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip } from "./FrameStrip";
 import { VolumeGraph } from "./VolumeGraph";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
-import type { CropRect, OverlayImage, SequenceEntry, TextOverlay, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type {
+  CropRect,
+  OverlayImage,
+  SequenceEntry,
+  TextOverlay,
+  TrimRange,
+  VideoOverlayClip,
+  VideoOverlayLayout,
+  ZoomEffect,
+} from "@/lib/video/video_math";
 
 // Initial heights before any resizing -- the +/-25% stretch range (see
 // video_math.ts's DEFAULT_MAX_STRETCH_RATIO) is computed relative to these.
@@ -92,6 +101,19 @@ export function Playground({
   onCommitTextOverlayRange,
   onDeleteTextOverlay,
   onRequestEditTextOverlay,
+  videoOverlays,
+  videoThumbnailUrlByAssetId,
+  overlaySourceDurationSeconds,
+  onChangeVideoOverlayRect,
+  onCommitVideoOverlayRect,
+  onChangeVideoOverlayRange,
+  onCommitVideoOverlayRange,
+  onChangeVideoOverlayPosition,
+  onCommitVideoOverlayPosition,
+  onChangeVideoOverlayLayout,
+  onToggleSplitScreenOrientation,
+  onToggleSplitScreenSides,
+  onDeleteVideoOverlay,
 }: {
   backgroundTracks: { name: string; url: string }[];
   videoDurationSeconds: number;
@@ -141,6 +163,19 @@ export function Playground({
   onCommitTextOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onDeleteTextOverlay: (overlayIndex: number) => void;
   onRequestEditTextOverlay: (overlayIndex: number) => void;
+  videoOverlays: VideoOverlayClip[];
+  videoThumbnailUrlByAssetId: Record<string, string>;
+  overlaySourceDurationSeconds: Record<string, number>;
+  onChangeVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onCommitVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onChangeVideoOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCommitVideoOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onChangeVideoOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onCommitVideoOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onChangeVideoOverlayLayout: (overlayIndex: number, layoutType: VideoOverlayLayout["type"]) => void;
+  onToggleSplitScreenOrientation: (overlayIndex: number) => void;
+  onToggleSplitScreenSides: (overlayIndex: number) => void;
+  onDeleteVideoOverlay: (overlayIndex: number) => void;
 }) {
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
 
@@ -200,6 +235,19 @@ export function Playground({
           onCommitTextOverlayRange={onCommitTextOverlayRange}
           onDeleteTextOverlay={onDeleteTextOverlay}
           onRequestEditTextOverlay={onRequestEditTextOverlay}
+          videoOverlays={videoOverlays}
+          videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
+          overlaySourceDurationSeconds={overlaySourceDurationSeconds}
+          onChangeVideoOverlayRect={onChangeVideoOverlayRect}
+          onCommitVideoOverlayRect={onCommitVideoOverlayRect}
+          onChangeVideoOverlayRange={onChangeVideoOverlayRange}
+          onCommitVideoOverlayRange={onCommitVideoOverlayRange}
+          onChangeVideoOverlayPosition={onChangeVideoOverlayPosition}
+          onCommitVideoOverlayPosition={onCommitVideoOverlayPosition}
+          onChangeVideoOverlayLayout={onChangeVideoOverlayLayout}
+          onToggleSplitScreenOrientation={onToggleSplitScreenOrientation}
+          onToggleSplitScreenSides={onToggleSplitScreenSides}
+          onDeleteVideoOverlay={onDeleteVideoOverlay}
           pixelsPerSecond={PIXELS_PER_SECOND}
           scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}
           onScroll={bindOnScroll(FRAME_STRIP_INDEX)}

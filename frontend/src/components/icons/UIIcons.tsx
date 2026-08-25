@@ -44,6 +44,30 @@ export function CropToolIcon(props: IconProps) {
   );
 }
 
+// Two rectangles side by side -- toggling calls the split-screen
+// orientation switch (VideoOverlayTrack's own icon button); rotates 90deg
+// via CSS when the active layout is vertical instead of needing a second
+// icon.
+export function SplitScreenOrientationIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="2.5" y="4" width="8" height="16" rx="1.5" />
+      <rect x="13.5" y="4" width="8" height="16" rx="1.5" />
+    </svg>
+  );
+}
+
+// Two opposing arrows -- swaps which half a split-screen overlay's footage
+// occupies.
+export function SwapIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M7 7h13l-3.5-3.5" />
+      <path d="M17 17H4l3.5 3.5" />
+    </svg>
+  );
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>

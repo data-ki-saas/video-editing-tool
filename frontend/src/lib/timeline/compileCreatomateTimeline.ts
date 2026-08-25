@@ -47,12 +47,14 @@ import {
   totalSequenceDuration,
   computeEffectiveCropRect,
   computeFlipSegments,
+  computeOverlayRects,
   FULL_FRAME_CROP_RECT,
   type SequenceClipInfo,
   type CropRect,
   type ZoomEffect,
   type RenderSegment,
   type TranscriptCaption,
+  type VideoOverlayClip,
 } from "@/lib/video/video_math";
 import { getTextTemplateFontFraction } from "@/lib/video/textTemplates";
 import { getTranscriptCaptionConfig } from "@/lib/video/transcriptCaptionTemplates";
@@ -294,6 +296,97 @@ function buildOverlayImageElements(
   return elements;
 }
 
+/** One root-level Video element per surviving output sub-range, for a
+ * VIDEO overlay's own footage -- sized to whatever computeOverlayRects
+ * says for its layout (full frame for Full-Screen, a Picture-in-Picture
+ * box, or a Split Screen half). NOT nested inside cropViewport: ignores
+ * the base clip's crop/zoom/flip entirely (matches CanvasPlayer's own
+ * draw order/tier -- drawn after the base's flip transform is undone).
+ * One function handles every layout, since from the compiler's point of
+ * view it's always just "the overlay's own Video, at this rect." */
+function buildVideoOverlayElements(
+  videoOverlays: VideoOverlayClip[],
+  segments: RenderSegment[],
+  nextTrack: () => number,
+  appMeta: Record<string, AppMetaEntry>
+): Video[] {
+  const elements: Video[] = [];
+  for (const overlay of videoOverlays) {
+    const track = nextTrack();
+    const { overlayRect } = computeOverlayRects(overlay.layout);
+    const outputRanges = mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlay.endTimeSeconds);
+    for (const range of outputRanges) {
+      const id = nextId("overlay");
+      appMeta[id] = { role: "video-overlay", assetId: overlay.assetId };
+      const trimStart = overlay.sourceStartSeconds + (range.sourceOverlapStartSeconds - overlay.startTimeSeconds);
+      elements.push(
+        new Video({
+          id,
+          track,
+          time: range.outputStartSeconds,
+          duration: range.outputEndSeconds - range.outputStartSeconds,
+          trimStart,
+          trimDuration: range.outputEndSeconds - range.outputStartSeconds,
+          fit: "cover",
+          xAnchor: "0%",
+          yAnchor: "0%",
+          ...rectProperties(overlayRect),
+          source: "",
+        })
+      );
+    }
+  }
+  return elements;
+}
+
+/** Keyframes cropViewport's OWN x/y/width/height -- full frame outside
+ * every Split Screen window, shrunk/repositioned to the base clip's half
+ * inside one. Everything nested inside cropViewport (flipWrapper, the
+ * per-segment crop elements) is UNTOUCHED -- their percentages are
+ * relative to this container, so re-boxing the container alone reproduces
+ * the correct cropped+flipped picture at half size. Full-Screen/
+ * Picture-in-Picture overlays never call this -- their windows leave
+ * cropViewport static (a Full-Screen overlay's own opaque element already
+ * fully covers the base regardless of its own viewport's shape; a
+ * Picture-in-Picture box doesn't touch the base's shape at all). Hard-cut,
+ * epsilon-separated step keyframes, same convention as buildFlipWrapper's
+ * own keyframes. Returns null (leave cropViewport static) when there are
+ * no Split Screen windows, to avoid emitting pointless keyframes. */
+function buildOverlayCropViewportRect(
+  videoOverlays: VideoOverlayClip[],
+  segments: RenderSegment[]
+): { x: Keyframe<string>[]; y: Keyframe<string>[]; width: Keyframe<string>[]; height: Keyframe<string>[] } | null {
+  const splitScreenOverlays = videoOverlays.filter((overlay) => overlay.layout.type === "split-screen");
+  if (splitScreenOverlays.length === 0) return null;
+
+  const FULL = { x: "0%", y: "0%", width: "100%", height: "100%" };
+  const x = [new Keyframe(FULL.x, 0)];
+  const y = [new Keyframe(FULL.y, 0)];
+  const width = [new Keyframe(FULL.width, 0)];
+  const height = [new Keyframe(FULL.height, 0)];
+
+  const windows = splitScreenOverlays
+    .flatMap((overlay) => {
+      const { baseRect } = computeOverlayRects(overlay.layout);
+      return mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlay.endTimeSeconds).map((range) => ({
+        ...range,
+        baseRect: baseRect!, // always defined for a split-screen layout
+      }));
+    })
+    .sort((a, b) => a.outputStartSeconds - b.outputStartSeconds);
+
+  for (const w of windows) {
+    const rect = rectProperties(w.baseRect);
+    const onAt = Math.max(0, w.outputStartSeconds - FLIP_KEYFRAME_EPSILON_SECONDS);
+    const offAt = Math.max(w.outputStartSeconds, w.outputEndSeconds - FLIP_KEYFRAME_EPSILON_SECONDS);
+    x.push(new Keyframe(FULL.x, onAt), new Keyframe(rect.x, w.outputStartSeconds), new Keyframe(rect.x, offAt), new Keyframe(FULL.x, w.outputEndSeconds));
+    y.push(new Keyframe(FULL.y, onAt), new Keyframe(rect.y, w.outputStartSeconds), new Keyframe(rect.y, offAt), new Keyframe(FULL.y, w.outputEndSeconds));
+    width.push(new Keyframe(FULL.width, onAt), new Keyframe(rect.width, w.outputStartSeconds), new Keyframe(rect.width, offAt), new Keyframe(FULL.width, w.outputEndSeconds));
+    height.push(new Keyframe(FULL.height, onAt), new Keyframe(rect.height, w.outputStartSeconds), new Keyframe(rect.height, offAt), new Keyframe(FULL.height, w.outputEndSeconds));
+  }
+  return { x, y, width, height };
+}
+
 /** Text overlays -- same root-level/output-fraction placement as image
  * overlays. fontSizeMinimum/fontSizeMaximum + textWrap replace a fixed
  * fontSize, mirroring lib/video/textTemplates.ts's own wrap-to-fit fix
@@ -522,13 +615,18 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     totalOutputDurationSeconds
   );
 
+  // Clamped/filtered against the CURRENT total duration for the same
+  // "a since-shrunk sequence shouldn't leave a stale range" reason as
+  // clampedOverlayImages/clampedTextOverlays below.
+  const clampedVideoOverlays = selections.videoOverlays
+    .map((overlay) => ({ ...overlay, endTimeSeconds: Math.min(overlay.endTimeSeconds, totalOriginalDurationSeconds) }))
+    .filter((overlay) => overlay.startTimeSeconds < totalOriginalDurationSeconds);
+
+  const overlayCropViewportRect = buildOverlayCropViewportRect(clampedVideoOverlays, segments);
   const cropViewport = new Composition({
     id: nextId("crop-viewport"),
     track: 1,
-    x: "0%",
-    y: "0%",
-    width: "100%",
-    height: "100%",
+    ...(overlayCropViewportRect ?? { x: "0%", y: "0%", width: "100%", height: "100%" }),
     xAnchor: "0%",
     yAnchor: "0%",
     clip: true,
@@ -549,6 +647,7 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   let trackCursor = 2;
   const nextTrack = () => trackCursor++;
 
+  const videoOverlayElements = buildVideoOverlayElements(clampedVideoOverlays, segments, nextTrack, appMeta);
   const overlayElements = buildOverlayImageElements(clampedOverlayImages, segments, nextTrack, appMeta);
   const textElements = buildTextElements(clampedTextOverlays, segments, nextTrack);
   const transcriptCaptionElements = buildTranscriptCaptionElements(selections.transcriptCaption, videoSegmentPairs, nextTrack());
@@ -556,6 +655,7 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
 
   const elements: TemplateElement[] = [
     cropViewport.toMap() as TemplateElement,
+    ...videoOverlayElements.map((el) => el.toMap() as TemplateElement),
     ...overlayElements.map((el) => el.toMap() as TemplateElement),
     ...textElements.map((el) => el.toMap() as TemplateElement),
     ...transcriptCaptionElements.map((el) => el.toMap() as TemplateElement),

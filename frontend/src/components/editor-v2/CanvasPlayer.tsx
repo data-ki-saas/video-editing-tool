@@ -70,6 +70,10 @@ import {
   skipTrimmedRanges,
   findActiveOverlays,
   findActiveTextOverlays,
+  findActiveExclusiveOverlay,
+  findActivePictureInPictureOverlays,
+  computeOverlayRects,
+  computeCoverFitSourceRect,
   computeProgress,
   buildSequenceClipInfos,
   totalSequenceDuration,
@@ -81,6 +85,7 @@ import {
   type SequenceClipInfo,
   type SequenceEntry,
   type TextOverlay,
+  type VideoOverlayClip,
   type TrimRange,
   type ZoomEffect,
 } from "@/lib/video/video_math";
@@ -139,6 +144,12 @@ export const CanvasPlayer = forwardRef<
     // named template (see lib/video/textTemplates.ts) -- drawn after image
     // overlays, so text always sits above them.
     textOverlays: TextOverlay[];
+    // A second video asset on its own rail, with a switchable layout (see
+    // video_math.ts's VideoOverlayClip) -- drawn right after the base
+    // frame (before image/text overlays), same tier as those. `assetUrlById`
+    // (below) resolves each overlay's assetId the same way it already does
+    // for image overlays.
+    videoOverlays: VideoOverlayClip[];
     assetUrlById: Record<string, string>;
     // Resolved background-music sequence (project assets and/or a curated
     // catalog track) -- mixed into playback here, see this file's module
@@ -158,6 +169,7 @@ export const CanvasPlayer = forwardRef<
     trimRanges,
     overlayImages,
     textOverlays,
+    videoOverlays,
     assetUrlById,
     backgroundTracks,
     onFrameDimensions,
@@ -184,6 +196,13 @@ export const CanvasPlayer = forwardRef<
   // (see the loading effect below), so drawFrameAt just skips an overlay
   // whose image hasn't resolved yet rather than waiting on it.
   const overlayImagesRef = useRef<Record<string, HTMLImageElement>>({});
+  // Extracted preview frames for every video overlay's own source asset,
+  // keyed by assetId (shared across multiple overlay clips reusing the
+  // same asset, not per-clip) -- same extractPreviewFrames/frameIndexAtTime
+  // pipeline the main sequence's own clips use below, not a live seeked
+  // <video> or a single static image, since a video overlay must actually
+  // play back over its window.
+  const videoOverlayFramesByAssetIdRef = useRef<Record<string, { images: HTMLImageElement[]; frameRate: number }>>({});
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
@@ -279,6 +298,11 @@ export const CanvasPlayer = forwardRef<
     const flipHorizontal = computeEffectiveFlip(flipHorizontalToggles, elapsedSeconds);
     const flipVertical = computeEffectiveFlip(flipVerticalToggles, elapsedSeconds);
 
+    const activeExclusiveOverlay = findActiveExclusiveOverlay(videoOverlays, elapsedSeconds);
+    const { baseRect, overlayRect } = activeExclusiveOverlay
+      ? computeOverlayRects(activeExclusiveOverlay.layout)
+      : { baseRect: FULL_FRAME_CROP_RECT, overlayRect: null };
+
     // Flip/mirror via the canvas transform, not by touching sx/sy/sWidth/
     // sHeight -- scale(-1) + translate the origin to the far edge maps the
     // same source region onto a horizontally/vertically reversed
@@ -287,8 +311,59 @@ export const CanvasPlayer = forwardRef<
     ctx.save();
     ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
     ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
-    ctx.drawImage(image, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
+    if (baseRect) {
+      // null only for an active Full-Screen video overlay -- the overlay's
+      // own draw below fully covers the canvas at full opacity regardless,
+      // so skipping this is a pure optimization, never load-bearing for
+      // correctness (see video_math.ts's computeOverlayRects doc comment).
+      ctx.drawImage(
+        image, sx, sy, sWidth, sHeight,
+        baseRect.x * canvas.width, baseRect.y * canvas.height, baseRect.width * canvas.width, baseRect.height * canvas.height
+      );
+    }
     ctx.restore();
+
+    // Composited AFTER the flip transform is undone (ctx.restore() above)
+    // -- a video overlay is independent of the base clip's flip state, not
+    // something that should mirror along with it. Full-Screen fills the
+    // whole canvas (covering the skipped/undrawn base above); Split Screen
+    // fills its own half.
+    if (activeExclusiveOverlay && overlayRect) {
+      const frames = videoOverlayFramesByAssetIdRef.current[activeExclusiveOverlay.assetId];
+      if (frames) {
+        const localOffsetSeconds = activeExclusiveOverlay.sourceStartSeconds + (elapsedSeconds - activeExclusiveOverlay.startTimeSeconds);
+        const overlayFrameIndex = frameIndexAtTime(localOffsetSeconds, frames.frameRate, frames.images.length);
+        const overlayImage = frames.images[overlayFrameIndex];
+        const destX = overlayRect.x * canvas.width;
+        const destY = overlayRect.y * canvas.height;
+        const destWidth = overlayRect.width * canvas.width;
+        const destHeight = overlayRect.height * canvas.height;
+        const { sx: osx, sy: osy, sWidth: osw, sHeight: osh } = computeCoverFitSourceRect(
+          overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight
+        );
+        ctx.drawImage(overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight);
+      }
+    }
+
+    // Picture-in-Picture overlays float on top of whatever's showing
+    // (the base clip, or an active Full-Screen/Split-Screen overlay above)
+    // -- unlike the exclusive layouts, any number can be active at once.
+    for (const pip of findActivePictureInPictureOverlays(videoOverlays, elapsedSeconds)) {
+      if (pip.layout.type !== "picture-in-picture") continue; // narrows the type for pip.layout.rect below
+      const frames = videoOverlayFramesByAssetIdRef.current[pip.assetId];
+      if (!frames) continue;
+      const localOffsetSeconds = pip.sourceStartSeconds + (elapsedSeconds - pip.startTimeSeconds);
+      const pipFrameIndex = frameIndexAtTime(localOffsetSeconds, frames.frameRate, frames.images.length);
+      const pipImage = frames.images[pipFrameIndex];
+      const destX = pip.layout.rect.x * canvas.width;
+      const destY = pip.layout.rect.y * canvas.height;
+      const destWidth = pip.layout.rect.width * canvas.width;
+      const destHeight = pip.layout.rect.height * canvas.height;
+      const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
+        pipImage.naturalWidth, pipImage.naturalHeight, destWidth, destHeight
+      );
+      ctx.drawImage(pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight);
+    }
 
     // Composited AFTER the flip transform is undone (ctx.restore() above)
     // -- an overlay image is independent of the base clip's flip state,
@@ -585,6 +660,7 @@ export const CanvasPlayer = forwardRef<
     trimRanges,
     overlayImages,
     textOverlays,
+    videoOverlays,
     isReady,
     isPlaying,
   ]);
@@ -626,6 +702,47 @@ export const CanvasPlayer = forwardRef<
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
   }, [overlayImages, assetUrlById, isReady, isPlaying]);
+
+  // Extracts every video overlay's own source asset's preview frames once
+  // (cached in videoOverlayFramesByAssetIdRef by assetId, shared across
+  // multiple overlay clips reusing the same asset), sequentially --
+  // independent of the main clips-loading effect above, so adding/adjusting
+  // an overlay doesn't re-extract the base sequence's own frames. Same
+  // pipeline the main sequence uses (extractPreviewFrames/
+  // pickPreviewFrameRate), not a live seeked <video> -- see this file's
+  // module comment on why the base sequence already works this way. A
+  // source that fails to load is skipped -- drawFrameAt just shows nothing
+  // for that overlay's window rather than erroring.
+  const videoOverlayAssetIds = Array.from(new Set(videoOverlays.map((overlay) => overlay.assetId)));
+  const videoOverlaysLoadKey = videoOverlayAssetIds.map((assetId) => `${assetId}:${assetUrlById[assetId] ?? ""}`).join(",");
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadVideoOverlayFrames() {
+      for (const assetId of videoOverlayAssetIds) {
+        if (cancelled) return;
+        if (videoOverlayFramesByAssetIdRef.current[assetId]) continue;
+        const url = assetUrlById[assetId];
+        if (!url) continue;
+        try {
+          const duration = await getVideoDuration(url);
+          const frameRate = pickPreviewFrameRate(duration, navigator.hardwareConcurrency || 4);
+          const images = await extractPreviewFrames(url, frameRate).then((frames) => Promise.all(frames.map(loadImage)));
+          if (cancelled) return;
+          videoOverlayFramesByAssetIdRef.current[assetId] = { images, frameRate };
+          if (isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
+        } catch {
+          // Skipped -- drawFrameAt just shows nothing for this overlay's window.
+        }
+      }
+    }
+
+    void loadVideoOverlayFrames();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on videoOverlaysLoadKey (joined assetId:url), not the videoOverlays array reference; drawFrameAt is freshly defined every render and always closes over the latest props
+  }, [videoOverlaysLoadKey, isReady, isPlaying]);
 
   // Decodes/concatenates the background-music sequence independently of the
   // main clips-loading effect above, so adding or swapping a background

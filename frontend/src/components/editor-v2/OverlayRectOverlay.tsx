@@ -27,6 +27,8 @@ export function OverlayRectOverlay({
   renderInner,
   onChange,
   onCommit,
+  borderColorClassName = "border-cyan-400",
+  handleColorClassName = "bg-cyan-400",
 }: {
   rect: CropRect;
   imageUrl?: string;
@@ -35,6 +37,12 @@ export function OverlayRectOverlay({
   renderInner?: ReactNode;
   onChange?: (next: CropRect) => void;
   onCommit?: (next: CropRect) => void;
+  /** Lets a caller distinguish its own overlay kind from a plain image
+   * overlay's default cyan when both can appear on the same tile at once
+   * -- see FrameStrip.tsx's Picture-in-Picture video overlays, styled
+   * violet instead. */
+  borderColorClassName?: string;
+  handleColorClassName?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isInteractive = Boolean(onChange && onCommit);
@@ -94,7 +102,7 @@ export function OverlayRectOverlay({
         onPointerDown={(e) => startDrag(e, "move")}
         onClick={(e) => isInteractive && stopClickBubble(e)}
         className={
-          "absolute overflow-hidden border-2 border-dashed border-cyan-400" +
+          `absolute overflow-hidden border-2 border-dashed ${borderColorClassName}` +
           (isInteractive ? " pointer-events-auto cursor-move" : "")
         }
         style={{
@@ -113,7 +121,7 @@ export function OverlayRectOverlay({
           <div
             onPointerDown={(e) => startDrag(e, "resize")}
             onClick={stopClickBubble}
-            className="pointer-events-auto absolute -bottom-1.5 -right-1.5 z-10 h-3 w-3 cursor-nwse-resize rounded-full border border-white bg-cyan-400"
+            className={`pointer-events-auto absolute -bottom-1.5 -right-1.5 z-10 h-3 w-3 cursor-nwse-resize rounded-full border border-white ${handleColorClassName}`}
           />
         )}
       </div>

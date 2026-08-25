@@ -26,6 +26,7 @@ import {
   findActiveZoomEffectIndex,
   toggleFlipAt,
   mergeTrimRanges,
+  isExclusiveLayout,
   FULL_FRAME_CROP_RECT,
   DEFAULT_TEXT_OVERLAY_RECT,
   DEFAULT_TRANSCRIPT_CAPTION_RECT,
@@ -33,6 +34,8 @@ import {
   type OverlayImage,
   type SequenceEntry,
   type TextOverlay,
+  type VideoOverlayClip,
+  type VideoOverlayLayout,
   type ZoomEffect,
 } from "./video_math";
 import { buildKenBurnsEffect } from "./imageTemplates";
@@ -570,4 +573,183 @@ export function applyUpdateTranscriptCaption(
 export function applyDisableTranscriptCaption(selections: EditSelectionsSnapshot): TransformationResult {
   if (!selections.transcriptCaption) return { label: "Disabled auto-captions", state: selections };
   return { label: "Disabled auto-captions", state: { ...selections, transcriptCaption: null } };
+}
+
+// Default window for a freshly-placed video overlay -- same "modest,
+// clearly-adjustable" sizing rationale as DEFAULT_OVERLAY_DURATION_SECONDS.
+export const DEFAULT_VIDEO_OVERLAY_DURATION_SECONDS = 3;
+// A freshly-switched Picture-in-Picture box's starting position/size --
+// bottom-right corner, a modest fraction of the frame. Only a starting
+// point: the reused OverlayRectOverlay drag handles let the user move AND
+// resize it afterward (see video_math.ts's VideoOverlayLayout doc comment).
+export const DEFAULT_PIP_RECT: CropRect = { x: 0.64, y: 0.62, width: 0.32, height: 0.32 };
+
+function overlapsExclusiveWindow(
+  clips: VideoOverlayClip[],
+  startTimeSeconds: number,
+  endTimeSeconds: number,
+  excludeIndex?: number
+): boolean {
+  return clips.some(
+    (c, i) =>
+      i !== excludeIndex &&
+      isExclusiveLayout(c.layout) &&
+      startTimeSeconds < c.endTimeSeconds &&
+      endTimeSeconds > c.startTimeSeconds
+  );
+}
+
+/** Adds a new video overlay at the current playhead, defaulting to
+ * Full-Screen -- the "swap the visual" starting point, needing no further
+ * setup like a rect or orientation. The user switches layout afterward via
+ * VideoOverlayTrack's own right-click menu (applyChangeVideoOverlayLayout
+ * below). If the playhead lands inside an existing EXCLUSIVE-layout overlay
+ * (Full-Screen/Split-Screen), starts right after it instead of overlapping
+ * -- a fresh overlay always starts exclusive, so this check always applies.
+ * `sourceDurationSeconds` caps the window so it never asks to play more of
+ * the source than exists (the in-point is fixed at 0 for v1). */
+export function applyAddVideoOverlay(
+  selections: EditSelectionsSnapshot,
+  assetId: string,
+  sourceDurationSeconds: number,
+  currentTimeSeconds: number,
+  videoDurationSeconds: number
+): TransformationResult {
+  const overlays = selections.videoOverlays;
+  const containing = overlays.find(
+    (o) => isExclusiveLayout(o.layout) && currentTimeSeconds >= o.startTimeSeconds && currentTimeSeconds < o.endTimeSeconds
+  );
+  const startTimeSeconds = containing ? containing.endTimeSeconds : currentTimeSeconds;
+  const nextExclusiveStart = overlays
+    .filter((o) => isExclusiveLayout(o.layout) && o.startTimeSeconds >= startTimeSeconds)
+    .reduce((min, o) => Math.min(min, o.startTimeSeconds), Infinity);
+  const sourceCap = sourceDurationSeconds > 0 ? startTimeSeconds + sourceDurationSeconds : Infinity;
+  const sequenceCap = videoDurationSeconds > startTimeSeconds ? videoDurationSeconds : Infinity;
+  const maxEnd = Math.min(nextExclusiveStart, sourceCap, sequenceCap);
+  const endTimeSeconds = Math.min(startTimeSeconds + DEFAULT_VIDEO_OVERLAY_DURATION_SECONDS, maxEnd);
+  if (endTimeSeconds <= startTimeSeconds) return { label: "Added overlay", state: selections };
+
+  const newOverlay: VideoOverlayClip = {
+    assetId,
+    startTimeSeconds,
+    endTimeSeconds,
+    sourceStartSeconds: 0,
+    layout: { type: "full-screen" },
+  };
+  return { label: "Added overlay", state: { ...selections, videoOverlays: [...overlays, newOverlay] } };
+}
+
+/** Switches a placed overlay's layout in place -- Full-Screen, Picture-in-
+ * Picture, or Split Screen -- from VideoOverlayTrack's right-click menu.
+ * Switching TO an exclusive layout (Full-Screen/Split-Screen) needs a
+ * collision check against every OTHER exclusive-layout overlay (switching
+ * away from Picture-in-Picture loses its "floats over anything" immunity);
+ * switching TO Picture-in-Picture never needs one. */
+export function applyChangeVideoOverlayLayout(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  layoutType: VideoOverlayLayout["type"]
+): TransformationResult {
+  const overlay = selections.videoOverlays[overlayIndex];
+  if (!overlay) return { label: "Changed overlay layout", state: selections };
+  const layout: VideoOverlayLayout =
+    layoutType === "full-screen"
+      ? { type: "full-screen" }
+      : layoutType === "picture-in-picture"
+        ? { type: "picture-in-picture", rect: DEFAULT_PIP_RECT }
+        : { type: "split-screen", orientation: "horizontal", partnerFirst: false };
+  if (
+    isExclusiveLayout(layout) &&
+    overlapsExclusiveWindow(selections.videoOverlays, overlay.startTimeSeconds, overlay.endTimeSeconds, overlayIndex)
+  ) {
+    return { label: "Changed overlay layout", state: selections }; // no room -- no-op
+  }
+  const nextOverlays = [...selections.videoOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, layout };
+  return { label: "Changed overlay layout", state: { ...selections, videoOverlays: nextOverlays } };
+}
+
+/** Toggles a Split Screen overlay between side-by-side and top-and-bottom --
+ * from the small orientation icon on its own VideoOverlayTrack segment.
+ * No-op for any other layout. */
+export function applyToggleSplitScreenOrientation(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {
+  const overlay = selections.videoOverlays[overlayIndex];
+  if (!overlay || overlay.layout.type !== "split-screen") return { label: "Changed split screen orientation", state: selections };
+  const nextOverlays = [...selections.videoOverlays];
+  nextOverlays[overlayIndex] = {
+    ...overlay,
+    layout: { ...overlay.layout, orientation: overlay.layout.orientation === "horizontal" ? "vertical" : "horizontal" },
+  };
+  return { label: "Changed split screen orientation", state: { ...selections, videoOverlays: nextOverlays } };
+}
+
+/** Swaps which half a Split Screen overlay's footage occupies -- from the
+ * small swap icon on its own VideoOverlayTrack segment. No-op for any other
+ * layout. */
+export function applyToggleSplitScreenSides(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {
+  const overlay = selections.videoOverlays[overlayIndex];
+  if (!overlay || overlay.layout.type !== "split-screen") return { label: "Swapped split screen sides", state: selections };
+  const nextOverlays = [...selections.videoOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, layout: { ...overlay.layout, partnerFirst: !overlay.layout.partnerFirst } };
+  return { label: "Swapped split screen sides", state: { ...selections, videoOverlays: nextOverlays } };
+}
+
+/** Moving/resizing a Picture-in-Picture overlay's box via the reused
+ * OverlayRectOverlay drag handles on FrameStrip's active tile -- position
+ * only for any other layout is a no-op (nothing else has a rect to move). */
+export function applyVideoOverlayRectChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  rect: CropRect
+): TransformationResult {
+  const overlay = selections.videoOverlays[overlayIndex];
+  if (!overlay || overlay.layout.type !== "picture-in-picture") return { label: "Moved overlay", state: selections };
+  const nextOverlays = [...selections.videoOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, layout: { ...overlay.layout, rect } };
+  return { label: "Moved overlay", state: { ...selections, videoOverlays: nextOverlays } };
+}
+
+/** Dragging a video overlay's segment edges on VideoOverlayTrack -- trims
+ * how much of the source plays. Clamping (neighbors -- only against other
+ * EXCLUSIVE overlays when this one is exclusive, never against
+ * Picture-in-Picture clips -- [0, videoDurationSeconds], and the source's
+ * own duration) happens in the track's own drag math; this just commits
+ * the result. */
+export function applyVideoOverlayRangeChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  startTimeSeconds: number,
+  endTimeSeconds: number
+): TransformationResult {
+  const overlay = selections.videoOverlays[overlayIndex];
+  if (!overlay) return { label: "Trimmed overlay", state: selections };
+  const nextOverlays = [...selections.videoOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, startTimeSeconds, endTimeSeconds };
+  return { label: "Trimmed overlay", state: { ...selections, videoOverlays: nextOverlays } };
+}
+
+/** Dragging the MIDDLE of a video overlay's segment on VideoOverlayTrack --
+ * slides the whole block along the timeline, keeping duration and source
+ * in-point both fixed. */
+export function applyVideoOverlayPositionChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  startTimeSeconds: number
+): TransformationResult {
+  const overlay = selections.videoOverlays[overlayIndex];
+  if (!overlay) return { label: "Moved overlay", state: selections };
+  const durationSeconds = overlay.endTimeSeconds - overlay.startTimeSeconds;
+  const nextOverlays = [...selections.videoOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, startTimeSeconds, endTimeSeconds: startTimeSeconds + durationSeconds };
+  return { label: "Moved overlay", state: { ...selections, videoOverlays: nextOverlays } };
+}
+
+/** Removes one video overlay outright -- from VideoOverlayTrack's "Remove
+ * overlay" context menu entry. */
+export function applyDeleteVideoOverlay(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {
+  if (!selections.videoOverlays[overlayIndex]) return { label: "Removed overlay", state: selections };
+  return {
+    label: "Removed overlay",
+    state: { ...selections, videoOverlays: selections.videoOverlays.filter((_, index) => index !== overlayIndex) },
+  };
 }

@@ -1,13 +1,22 @@
 import { deleteProject as deleteProjectViaBackend } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
-import type { CropRect, OverlayImage, SequenceEntry, TextOverlay, TranscriptCaption, TrimRange, ZoomEffect } from "@/lib/video/video_math";
+import type {
+  CropRect,
+  OverlayImage,
+  SequenceEntry,
+  TextOverlay,
+  TranscriptCaption,
+  TrimRange,
+  VideoOverlayClip,
+  ZoomEffect,
+} from "@/lib/video/video_math";
 
 export interface TemplateElement {
   id: string;
   [key: string]: unknown;
 }
 
-export type ElementRole = "clip" | "voiceover" | "music" | "text" | "image-overlay";
+export type ElementRole = "clip" | "voiceover" | "music" | "text" | "image-overlay" | "video-overlay";
 
 export interface AppMetaEntry {
   assetId?: string;
@@ -78,6 +87,12 @@ export interface EditSelectionsSnapshot {
   // (unlike the background-track fields below) because it changes what the
   // frames actually are.
   sequenceClips: SequenceEntry[];
+  // A second video asset placed on its own rail for a time window, with a
+  // switchable layout (Full-Screen swap / Picture-in-Picture / Split
+  // Screen) -- see video_math.ts's VideoOverlayClip. Duration-neutral
+  // (unlike the sequence itself): placing one never changes the total
+  // output length.
+  videoOverlays: VideoOverlayClip[];
   // Auto-generated, speech-driven captions (Creatomate's own transcription
   // -- see lib/video/transcriptCaptionTemplates.ts), as opposed to
   // textOverlays' manually-typed ones. One config for the whole video, not

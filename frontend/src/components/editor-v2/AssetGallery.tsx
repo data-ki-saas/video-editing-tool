@@ -7,19 +7,21 @@
  * is visually distinct enough on its own, but grouping by kind up front
  * makes each column scannable rather than needing to spot the odd tile out
  * of a mixed strip). "+ Asset" opens UploadDialog instead of a permanent drop target
- * taking up space; right-click offers Delete, plus an "Add" action whose
- * meaning depends on kind: for an image, places it as an overlay on the
- * timeline (ThreePaneEditor's handleAddOverlay); for a video, appends it
- * to the concatenated video sequence (handleAddToSequence -- the first Add
- * is what starts rendering frames at all, every later one plays right
- * after whatever's already there); for music, appends it to the
- * background-music sequence (handleAddToBackgroundSequence -- multiple
- * appended tracks concatenate, then loop as a whole across the video's
- * duration). A small "+" badge marks a tile as currently in use
- * (referenced by an overlay, in the video sequence, or in the background
- * sequence), mirroring the selected-tile border rather than being a
- * separate concept. Thumbnails are a fixed square, regardless of asset
- * kind/aspect ratio.
+ * taking up space; right-click offers Delete, plus an action whose meaning
+ * depends on kind: for an image, "Add" places it as an overlay on the
+ * timeline (ThreePaneEditor's handleAddOverlay); for a video, "Append"
+ * appends it to the concatenated video sequence (handleAddToSequence --
+ * the first Append is what starts rendering frames at all, every later one
+ * plays right after whatever's already there), and "Overlay" places it on
+ * its own rail with a switchable Full-Screen/Picture-in-Picture/Split
+ * Screen layout (handleAddVideoOverlay -- see VideoOverlayTrack.tsx); for
+ * music, "Add" appends it to the background-music sequence
+ * (handleAddToBackgroundSequence -- multiple appended tracks concatenate,
+ * then loop as a whole across the video's duration). A small "+" badge
+ * marks a tile as currently in use (referenced by an overlay, in the video
+ * sequence, or in the background sequence), mirroring the selected-tile
+ * border rather than being a separate concept. Thumbnails are a fixed
+ * square, regardless of asset kind/aspect ratio.
  *
  * Music tiles also get a "Play"/"Pause" action -- plays right there in the
  * tile (a plain hidden <audio>, driven entirely by JS, not the browser's
@@ -29,7 +31,6 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { deleteAsset, type Asset, type AssetKind } from "@/lib/api";
-import { captureSingleFrame } from "@/lib/video/video";
 import { ReelLoader } from "@/components/ReelLoader";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import { PauseIcon } from "./icons/PlayerIcons";
@@ -59,8 +60,10 @@ export function AssetGallery({
   onDeleted,
   onAddOverlay,
   onAddToSequence,
+  onAddVideoOverlay,
   onAddToBackgroundSequence,
   usedAssetIds,
+  videoThumbnailUrlByAssetId,
 }: {
   assets: Asset[];
   // Distinguishes "still fetching the list" from "fetched, there really
@@ -74,10 +77,16 @@ export function AssetGallery({
   onDeleted: (assetId: string) => void;
   onAddOverlay: (asset: Asset) => void;
   onAddToSequence: (asset: Asset) => void;
+  onAddVideoOverlay: (asset: Asset) => void;
   onAddToBackgroundSequence: (asset: Asset) => void;
   usedAssetIds: Set<string>;
+  // assetId -> a single representative still frame, one per video asset --
+  // lifted up to ThreePaneEditor (rather than generated locally here, as
+  // this component used to) since VideoOverlayTrack.tsx also needs the
+  // exact same thumbnails and lives in a sibling subtree, not a descendant
+  // of this component.
+  videoThumbnailUrlByAssetId: Record<string, string>;
 }) {
-  const [videoThumbnails, setVideoThumbnails] = useState<Record<string, string>>({});
   // Which tiles have a delete in flight -- deleteAsset() can take a moment
   // (Supabase row delete + R2 object cleanup server-side), so a tile stays
   // visible with a spinner over it rather than looking unresponsive to a
@@ -124,27 +133,6 @@ export function AssetGallery({
     return () => audioRef.current?.pause();
   }, []);
 
-  // Generates one representative frame per video asset, once, the first
-  // time it shows up here -- images use their own URL directly (no
-  // extraction needed) and are skipped.
-  useEffect(() => {
-    let cancelled = false;
-    for (const asset of assets) {
-      if (asset.kind !== "video" || videoThumbnails[asset.id]) continue;
-      captureSingleFrame(asset.url)
-        .then((frame) => {
-          if (!cancelled) setVideoThumbnails((prev) => ({ ...prev, [asset.id]: frame }));
-        })
-        .catch(() => {
-          // Leaves this tile on the fallback icon below -- not worth
-          // surfacing a gallery-thumbnail failure as a page-level error.
-        });
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [assets, videoThumbnails]);
-
   async function handleDelete(asset: Asset) {
     if (!window.confirm(`Delete "${asset.filename}"? This can't be undone.`)) return;
     setDeletingAssetIds((prev) => new Set(prev).add(asset.id));
@@ -165,7 +153,7 @@ export function AssetGallery({
   }
 
   function renderTile(asset: Asset) {
-    const thumbnailSrc = asset.kind === "image" ? asset.url : videoThumbnails[asset.id];
+    const thumbnailSrc = asset.kind === "image" ? asset.url : videoThumbnailUrlByAssetId[asset.id];
     const isDeleting = deletingAssetIds.has(asset.id);
     return (
       <button
@@ -188,7 +176,10 @@ export function AssetGallery({
             ...(asset.kind === "image"
               ? [{ label: "Add", onSelect: () => onAddOverlay(asset) }]
               : asset.kind === "video"
-                ? [{ label: "Add", onSelect: () => onAddToSequence(asset) }]
+                ? [
+                    { label: "Append", onSelect: () => onAddToSequence(asset) },
+                    { label: "Overlay", onSelect: () => onAddVideoOverlay(asset) },
+                  ]
                 : asset.kind === "audio"
                   ? [{ label: "Add", onSelect: () => onAddToBackgroundSequence(asset) }]
                   : []),

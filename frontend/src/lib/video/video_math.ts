@@ -433,6 +433,123 @@ export function findActiveOverlays(overlays: OverlayImage[], timeSeconds: number
 }
 
 /**
+ * A second video asset, placed on its own timeline rail for a time window,
+ * with a LAYOUT the user can switch afterward (see VideoOverlayTrack.tsx's
+ * right-click menu and transformations.ts's applyChangeVideoOverlayLayout)
+ * without re-placing, re-trimming, or losing the chosen source clip:
+ *  - "full-screen": the overlay's footage fully replaces the base clip's
+ *    picture for the window (a classic "cut away to other footage, then
+ *    cut back" edit -- the base clip's own audio/timeline keep running
+ *    underneath, only the picture is swapped).
+ *  - "picture-in-picture": a small movable/resizable box on top of the
+ *    base clip, which stays fully visible underneath (see FrameStrip.tsx's
+ *    tile-level OverlayRectOverlay -- reused here exactly as image overlays
+ *    already use it, including drag-to-move/resize).
+ *  - "split-screen": the frame divides in two, base clip in one half,
+ *    overlay footage in the other -- `orientation` picks side-by-side vs
+ *    top-and-bottom, `partnerFirst` picks which half the overlay occupies.
+ *
+ * Full-Screen and Split-Screen are mutually exclusive with EACH OTHER (and
+ * with each other's own kind) in time -- both claim "what defines the base
+ * picture" for their window, so two can't apply at once (see
+ * isExclusiveLayout below). Picture-in-Picture never claims exclusivity --
+ * it floats on top of whatever's showing, so any number of PIP clips can
+ * coexist/overlap, including overlapping a Full-Screen/Split-Screen window.
+ *
+ * Named "VideoOverlayClip"/"VideoOverlayLayout" (not "OverlayClip") to avoid
+ * colliding with the pre-existing, unrelated OverlayImage type above.
+ */
+export type VideoOverlayLayout =
+  | { type: "full-screen" }
+  | { type: "picture-in-picture"; rect: CropRect } // width/height locked at creation; only x/y move by default, though the reused OverlayRectOverlay drag handle also lets a user resize it
+  | { type: "split-screen"; orientation: "horizontal" | "vertical"; partnerFirst: boolean };
+
+export function isExclusiveLayout(layout: VideoOverlayLayout): boolean {
+  return layout.type !== "picture-in-picture";
+}
+
+export interface VideoOverlayClip {
+  assetId: string;
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  // Offset INTO the source asset's own footage where playback starts --
+  // fixed at 0 for v1 (no source-scrubbing/slip-trim UI yet). Part of the
+  // schema now, not bolted on later, so a future slip-trim feature is a
+  // pure UI addition with no breaking type change.
+  sourceStartSeconds: number;
+  layout: VideoOverlayLayout;
+}
+
+/** The single EXCLUSIVE-layout overlay (Full-Screen or Split-Screen) active
+ * at `timeSeconds`, if any -- at most one can ever be active, since those
+ * two layouts are mutually exclusive with each other. */
+export function findActiveExclusiveOverlay(clips: VideoOverlayClip[], timeSeconds: number): VideoOverlayClip | null {
+  return clips.find((c) => isExclusiveLayout(c.layout) && timeSeconds >= c.startTimeSeconds && timeSeconds < c.endTimeSeconds) ?? null;
+}
+
+/** Every Picture-in-Picture overlay active at `timeSeconds` -- unlike the
+ * exclusive layouts, more than one CAN be visible at once. */
+export function findActivePictureInPictureOverlays(clips: VideoOverlayClip[], timeSeconds: number): VideoOverlayClip[] {
+  return clips.filter((c) => c.layout.type === "picture-in-picture" && timeSeconds >= c.startTimeSeconds && timeSeconds < c.endTimeSeconds);
+}
+
+/**
+ * The base clip's own destination rect (null when it's fully covered, i.e.
+ * Full-Screen) and the overlay's own destination rect, for a given layout --
+ * the ONE place this geometry is computed, shared by CanvasPlayer's
+ * drawImage destination rects and compileCreatomateTimeline's element
+ * positioning, so preview and render can never disagree on where a seam
+ * falls or which side is which.
+ *
+ * `baseRect: null` for Full-Screen does NOT need special-case handling
+ * anywhere that draws in back-to-front order: the overlay's own element is
+ * drawn AFTER the base (CanvasPlayer) / on a later track (Creatomate), at
+ * full opacity, filling the entire frame -- it already fully covers the
+ * base whether or not the base was drawn underneath it. Skipping the base
+ * draw for Full-Screen is a pure performance optimization, never required
+ * for correctness.
+ */
+export function computeOverlayRects(layout: VideoOverlayLayout): { baseRect: CropRect | null; overlayRect: CropRect } {
+  switch (layout.type) {
+    case "full-screen":
+      return { baseRect: null, overlayRect: FULL_FRAME_CROP_RECT };
+    case "picture-in-picture":
+      return { baseRect: FULL_FRAME_CROP_RECT, overlayRect: layout.rect };
+    case "split-screen": {
+      const leading: CropRect =
+        layout.orientation === "horizontal" ? { x: 0, y: 0, width: 0.5, height: 1 } : { x: 0, y: 0, width: 1, height: 0.5 };
+      const trailing: CropRect =
+        layout.orientation === "horizontal" ? { x: 0.5, y: 0, width: 0.5, height: 1 } : { x: 0, y: 0.5, width: 1, height: 0.5 };
+      return layout.partnerFirst ? { baseRect: trailing, overlayRect: leading } : { baseRect: leading, overlayRect: trailing };
+    }
+  }
+}
+
+/** Source-rect for a "cover" fit -- scales sourceWidth x sourceHeight up to
+ * fully cover a targetWidth x targetHeight box, center-cropping whichever
+ * dimension overflows. Mirrors Creatomate's `fit: "cover"` exactly, so the
+ * live preview and the real render agree on how footage of a different
+ * aspect ratio than its destination box gets cropped. */
+export function computeCoverFitSourceRect(
+  sourceWidth: number,
+  sourceHeight: number,
+  targetWidth: number,
+  targetHeight: number
+): { sx: number; sy: number; sWidth: number; sHeight: number } {
+  if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) {
+    return { sx: 0, sy: 0, sWidth: sourceWidth, sHeight: sourceHeight };
+  }
+  const sourceRatio = sourceWidth / sourceHeight;
+  const targetRatio = targetWidth / targetHeight;
+  if (sourceRatio > targetRatio) {
+    const sWidth = sourceHeight * targetRatio;
+    return { sx: (sourceWidth - sWidth) / 2, sy: 0, sWidth, sHeight: sourceHeight };
+  }
+  const sHeight = sourceWidth / targetRatio;
+  return { sx: 0, sy: (sourceHeight - sHeight) / 2, sWidth: sourceWidth, sHeight };
+}
+
+/**
  * Text composited on top of the base video for a time range, rendered via
  * a named template (see lib/video/textTemplates.ts) rather than free-form
  * styling -- the template owns font/color/animation, this just says WHAT
@@ -736,8 +853,8 @@ export function mapSourceRangeToOutputRanges(
   segments: RenderSegment[],
   sourceStartSeconds: number,
   sourceEndSeconds: number
-): { outputStartSeconds: number; outputEndSeconds: number }[] {
-  const ranges: { outputStartSeconds: number; outputEndSeconds: number }[] = [];
+): { outputStartSeconds: number; outputEndSeconds: number; sourceOverlapStartSeconds: number; sourceOverlapEndSeconds: number }[] {
+  const ranges: { outputStartSeconds: number; outputEndSeconds: number; sourceOverlapStartSeconds: number; sourceOverlapEndSeconds: number }[] = [];
   for (const segment of segments) {
     const segmentSourceEnd = segment.sourceStartSeconds + segment.durationSeconds;
     const overlapStart = Math.max(sourceStartSeconds, segment.sourceStartSeconds);
@@ -747,6 +864,8 @@ export function mapSourceRangeToOutputRanges(
     ranges.push({
       outputStartSeconds: segment.outputStartSeconds + (overlapStart - segment.sourceStartSeconds),
       outputEndSeconds: segment.outputStartSeconds + (overlapEnd - segment.sourceStartSeconds),
+      sourceOverlapStartSeconds: overlapStart,
+      sourceOverlapEndSeconds: overlapEnd,
     });
   }
   return ranges;
