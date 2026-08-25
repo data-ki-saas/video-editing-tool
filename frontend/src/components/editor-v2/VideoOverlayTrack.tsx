@@ -27,22 +27,30 @@
  * didn't land on an edge.
  */
 import { useRef } from "react";
-import { ContextMenu, useContextMenu } from "./ContextMenu";
-import { SplitScreenOrientationIcon, SwapIcon } from "@/components/icons/UIIcons";
+import { ContextMenu, useContextMenu, type ContextMenuAction } from "./ContextMenu";
+import {
+  SplitScreenOrientationIcon,
+  SwapIcon,
+  FramingIcon,
+  PictureInPictureIcon,
+  FullScreenIcon,
+} from "@/components/icons/UIIcons";
 import { isExclusiveLayout, type VideoOverlayClip, type VideoOverlayLayout } from "@/lib/video/video_math";
 
 const MIN_DURATION_SECONDS = 0.2;
 
-const LAYOUT_LABELS: Record<VideoOverlayLayout["type"], string> = {
-  "full-screen": "Full-Screen",
-  "picture-in-picture": "Picture-in-Picture",
-  "split-screen": "Split Screen",
-};
-
+// Matches each rail color used below -- also used to tint the matching
+// entry's label in the right-click menu (Switch to X), so the menu reads
+// as "which color am I about to turn this into" rather than plain text.
 const LAYOUT_COLOR_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
   "full-screen": "border-amber-700 bg-amber-500",
   "picture-in-picture": "border-violet-700 bg-violet-500",
   "split-screen": "border-teal-700 bg-teal-500",
+};
+const LAYOUT_TEXT_COLOR_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
+  "full-screen": "text-amber-600",
+  "picture-in-picture": "text-violet-600",
+  "split-screen": "text-teal-600",
 };
 
 function VideoOverlaySegment({
@@ -59,6 +67,7 @@ function VideoOverlaySegment({
   onChangeLayout,
   onToggleOrientation,
   onToggleSides,
+  onOpenFraming,
   onDelete,
 }: {
   overlay: VideoOverlayClip;
@@ -71,9 +80,10 @@ function VideoOverlaySegment({
   onCommitRange: (start: number, end: number) => void;
   onChangePosition: (start: number) => void;
   onCommitPosition: (start: number) => void;
-  onChangeLayout: (layoutType: VideoOverlayLayout["type"]) => void;
+  onChangeLayout: (layoutType: VideoOverlayLayout["type"], splitScreenOrientation?: "horizontal" | "vertical") => void;
   onToggleOrientation: () => void;
   onToggleSides: () => void;
+  onOpenFraming: () => void;
   onDelete: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -148,22 +158,57 @@ function VideoOverlaySegment({
   const durationSeconds = overlay.endTimeSeconds - overlay.startTimeSeconds;
   const widthPercent = videoDurationSeconds > 0 ? (durationSeconds / videoDurationSeconds) * 100 : 0;
 
-  // One tick per loop boundary -- where the source starts over because the
-  // window is longer than one play-through of it (see the edge-drag
-  // comment above). Positioned as a fraction of THIS segment's own width,
-  // not the whole track's, so it stays correctly placed as the segment is
-  // dragged/resized. None at all once the window fits within a single
-  // play-through, or before the source's own duration has been probed.
+  // The source's own real duration is known and shorter than the current
+  // window -- i.e. this overlay is stretched past one play-through and
+  // will loop. Shown as a visibly dimmed region for "this part is a
+  // repeat" (much harder to miss than a bare line), with a crisp tick at
+  // every repeat boundary inside it. Nothing rendered at all once the
+  // window fits within a single play-through, or before the source's own
+  // duration has been probed.
+  const hasKnownSourceDuration = Number.isFinite(sourceDurationSeconds) && sourceDurationSeconds > 0;
+  const repeatsWithinWindow = hasKnownSourceDuration && sourceDurationSeconds < durationSeconds;
+  const repeatRegionPercent = repeatsWithinWindow ? ((durationSeconds - sourceDurationSeconds) / durationSeconds) * 100 : 0;
   const loopTickPercents: number[] = [];
-  if (Number.isFinite(sourceDurationSeconds) && sourceDurationSeconds > 0) {
+  if (repeatsWithinWindow) {
     for (let boundary = sourceDurationSeconds; boundary < durationSeconds; boundary += sourceDurationSeconds) {
       loopTickPercents.push((boundary / durationSeconds) * 100);
     }
   }
 
-  const layoutMenuEntries = (Object.keys(LAYOUT_LABELS) as VideoOverlayLayout["type"][])
-    .filter((type) => type !== overlay.layout.type)
-    .map((type) => ({ label: `Switch to ${LAYOUT_LABELS[type]}`, onSelect: () => onChangeLayout(type) }));
+  const layoutMenuEntries: ContextMenuAction[] = [];
+  if (overlay.layout.type !== "full-screen") {
+    layoutMenuEntries.push({
+      label: "Switch to Full-Screen",
+      textColorClassName: LAYOUT_TEXT_COLOR_CLASSNAMES["full-screen"],
+      onSelect: () => onChangeLayout("full-screen"),
+    });
+  }
+  if (overlay.layout.type !== "picture-in-picture") {
+    layoutMenuEntries.push({
+      label: "Switch to Picture-in-Picture",
+      textColorClassName: LAYOUT_TEXT_COLOR_CLASSNAMES["picture-in-picture"],
+      onSelect: () => onChangeLayout("picture-in-picture"),
+    });
+  }
+  // A plain `layout.type === "split-screen"` boolean stored separately
+  // doesn't let TS narrow `layout.orientation` back through it later --
+  // capturing the orientation itself (null when not split-screen) sidesteps
+  // that instead of re-checking the discriminant inline every time.
+  const currentSplitScreenOrientation = overlay.layout.type === "split-screen" ? overlay.layout.orientation : null;
+  if (currentSplitScreenOrientation !== "horizontal") {
+    layoutMenuEntries.push({
+      label: "Switch to Split Screen — Side by Side",
+      textColorClassName: LAYOUT_TEXT_COLOR_CLASSNAMES["split-screen"],
+      onSelect: () => onChangeLayout("split-screen", "horizontal"),
+    });
+  }
+  if (currentSplitScreenOrientation !== "vertical") {
+    layoutMenuEntries.push({
+      label: "Switch to Split Screen — Top & Bottom",
+      textColorClassName: LAYOUT_TEXT_COLOR_CLASSNAMES["split-screen"],
+      onSelect: () => onChangeLayout("split-screen", "vertical"),
+    });
+  }
 
   return (
     <div
@@ -171,19 +216,35 @@ function VideoOverlaySegment({
       onPointerDown={startBodyDrag}
       onContextMenu={(e) => openContextMenu(e, [...layoutMenuEntries, { label: "Remove overlay", danger: true, onSelect: onDelete }])}
       title="Drag the middle to move, an edge to trim; right-click to change layout or remove"
-      className={`absolute top-0 flex h-4 cursor-grab items-center gap-1 overflow-hidden rounded-sm border px-1 ${LAYOUT_COLOR_CLASSNAMES[overlay.layout.type]}`}
+      className={`absolute top-0 flex h-5 cursor-grab items-center gap-1 overflow-hidden rounded-sm border px-1 ${LAYOUT_COLOR_CLASSNAMES[overlay.layout.type]}`}
       style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
     >
       {thumbnailUrl && (
         // eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset
-        <img src={thumbnailUrl} alt="" className="h-3 w-3 shrink-0 rounded-sm object-cover" />
+        <img src={thumbnailUrl} alt="" className="z-10 h-3 w-3 shrink-0 rounded-sm object-cover" />
+      )}
+      <button
+        type="button"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={onOpenFraming}
+        title="Adjust framing -- recenter or flip this overlay's own footage"
+        className="pointer-events-auto z-10 shrink-0 rounded-sm bg-black/25 p-0.5 text-white hover:bg-black/50"
+      >
+        <FramingIcon className="h-2.5 w-2.5" />
+      </button>
+      {repeatsWithinWindow && (
+        <div
+          className="pointer-events-none absolute inset-y-0 right-0 bg-black/35"
+          style={{ width: `${repeatRegionPercent}%` }}
+          title={`Repeats every ${sourceDurationSeconds.toFixed(1)}s`}
+        />
       )}
       {loopTickPercents.map((percent, tickIndex) => (
         <div
           key={tickIndex}
           title="Repeats here"
-          className="pointer-events-none absolute inset-y-0 w-px bg-black/40"
-          style={{ left: `${percent}%` }}
+          className="pointer-events-none absolute inset-y-0 w-[2px] bg-white"
+          style={{ left: `${percent}%`, boxShadow: "0 0 0 1px rgba(0,0,0,0.55)" }}
         />
       ))}
       <div
@@ -194,6 +255,22 @@ function VideoOverlaySegment({
         onPointerDown={(e) => startEdgeDrag(e, "end")}
         className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-black/20"
       />
+      {overlay.layout.type === "full-screen" && (
+        <span
+          title="Full-Screen"
+          className="pointer-events-none absolute right-1.5 top-1/2 z-10 -translate-y-1/2 rounded-sm bg-black/30 p-0.5 text-white"
+        >
+          <FullScreenIcon className="h-2.5 w-2.5" />
+        </span>
+      )}
+      {overlay.layout.type === "picture-in-picture" && (
+        <span
+          title="Picture-in-Picture"
+          className="pointer-events-none absolute right-1.5 top-1/2 z-10 -translate-y-1/2 rounded-sm bg-black/30 p-0.5 text-white"
+        >
+          <PictureInPictureIcon className="h-2.5 w-2.5" />
+        </span>
+      )}
       {overlay.layout.type === "split-screen" && (
         <div className="pointer-events-auto absolute right-1.5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
           <button
@@ -236,6 +313,7 @@ export function VideoOverlayTrack({
   onChangeLayout,
   onToggleOrientation,
   onToggleSides,
+  onOpenFraming,
   onDelete,
 }: {
   videoOverlays: VideoOverlayClip[];
@@ -246,9 +324,10 @@ export function VideoOverlayTrack({
   onCommitRange: (overlayIndex: number, start: number, end: number) => void;
   onChangePosition: (overlayIndex: number, start: number) => void;
   onCommitPosition: (overlayIndex: number, start: number) => void;
-  onChangeLayout: (overlayIndex: number, layoutType: VideoOverlayLayout["type"]) => void;
+  onChangeLayout: (overlayIndex: number, layoutType: VideoOverlayLayout["type"], splitScreenOrientation?: "horizontal" | "vertical") => void;
   onToggleOrientation: (overlayIndex: number) => void;
   onToggleSides: (overlayIndex: number) => void;
+  onOpenFraming: (overlayIndex: number) => void;
   onDelete: (overlayIndex: number) => void;
 }) {
   if (videoOverlays.length === 0) return null;
@@ -272,9 +351,11 @@ export function VideoOverlayTrack({
       onCommitRange: (start: number, end: number) => onCommitRange(index, start, end),
       onChangePosition: (start: number) => onChangePosition(index, start),
       onCommitPosition: (start: number) => onCommitPosition(index, start),
-      onChangeLayout: (layoutType: VideoOverlayLayout["type"]) => onChangeLayout(index, layoutType),
+      onChangeLayout: (layoutType: VideoOverlayLayout["type"], splitScreenOrientation?: "horizontal" | "vertical") =>
+        onChangeLayout(index, layoutType, splitScreenOrientation),
       onToggleOrientation: () => onToggleOrientation(index),
       onToggleSides: () => onToggleSides(index),
+      onOpenFraming: () => onOpenFraming(index),
       onDelete: () => onDelete(index),
     };
   }
@@ -282,7 +363,7 @@ export function VideoOverlayTrack({
   return (
     <div className="flex flex-col gap-0.5">
       {exclusiveSorted.length > 0 && (
-        <div className="relative h-4 w-full shrink-0">
+        <div className="relative h-5 w-full shrink-0">
           {exclusiveSorted.map(({ index }, pos) => (
             <VideoOverlaySegment
               key={index}
@@ -296,7 +377,7 @@ export function VideoOverlayTrack({
         </div>
       )}
       {pipEntries.map(({ index }) => (
-        <div key={index} className="relative h-4 w-full shrink-0">
+        <div key={index} className="relative h-5 w-full shrink-0">
           <VideoOverlaySegment {...segmentProps(index, 0, videoDurationSeconds)} />
         </div>
       ))}

@@ -320,6 +320,7 @@ export function FrameStrip({
   onChangeVideoOverlayLayout,
   onToggleSplitScreenOrientation,
   onToggleSplitScreenSides,
+  onOpenVideoOverlayFraming,
   onDeleteVideoOverlay,
   pixelsPerSecond,
   scrollContainerRef,
@@ -381,9 +382,14 @@ export function FrameStrip({
   onCommitVideoOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onChangeVideoOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
   onCommitVideoOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
-  onChangeVideoOverlayLayout: (overlayIndex: number, layoutType: VideoOverlayLayout["type"]) => void;
+  onChangeVideoOverlayLayout: (
+    overlayIndex: number,
+    layoutType: VideoOverlayLayout["type"],
+    splitScreenOrientation?: "horizontal" | "vertical"
+  ) => void;
   onToggleSplitScreenOrientation: (overlayIndex: number) => void;
   onToggleSplitScreenSides: (overlayIndex: number) => void;
+  onOpenVideoOverlayFraming: (overlayIndex: number) => void;
   onDeleteVideoOverlay: (overlayIndex: number) => void;
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
@@ -586,6 +592,7 @@ export function FrameStrip({
           onChangeLayout={onChangeVideoOverlayLayout}
           onToggleOrientation={onToggleSplitScreenOrientation}
           onToggleSides={onToggleSplitScreenSides}
+          onOpenFraming={onOpenVideoOverlayFraming}
           onDelete={onDeleteVideoOverlay}
         />
 

@@ -113,6 +113,7 @@ export function Playground({
   onChangeVideoOverlayLayout,
   onToggleSplitScreenOrientation,
   onToggleSplitScreenSides,
+  onOpenVideoOverlayFraming,
   onDeleteVideoOverlay,
 }: {
   backgroundTracks: { name: string; url: string }[];
@@ -172,9 +173,14 @@ export function Playground({
   onCommitVideoOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onChangeVideoOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
   onCommitVideoOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
-  onChangeVideoOverlayLayout: (overlayIndex: number, layoutType: VideoOverlayLayout["type"]) => void;
+  onChangeVideoOverlayLayout: (
+    overlayIndex: number,
+    layoutType: VideoOverlayLayout["type"],
+    splitScreenOrientation?: "horizontal" | "vertical"
+  ) => void;
   onToggleSplitScreenOrientation: (overlayIndex: number) => void;
   onToggleSplitScreenSides: (overlayIndex: number) => void;
+  onOpenVideoOverlayFraming: (overlayIndex: number) => void;
   onDeleteVideoOverlay: (overlayIndex: number) => void;
 }) {
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
@@ -247,6 +253,7 @@ export function Playground({
           onChangeVideoOverlayLayout={onChangeVideoOverlayLayout}
           onToggleSplitScreenOrientation={onToggleSplitScreenOrientation}
           onToggleSplitScreenSides={onToggleSplitScreenSides}
+          onOpenVideoOverlayFraming={onOpenVideoOverlayFraming}
           onDeleteVideoOverlay={onDeleteVideoOverlay}
           pixelsPerSecond={PIXELS_PER_SECOND}
           scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}

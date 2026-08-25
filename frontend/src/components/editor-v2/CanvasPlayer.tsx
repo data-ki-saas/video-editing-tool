@@ -97,6 +97,34 @@ export interface CanvasPlayerHandle {
   seekTo(seconds: number): void;
 }
 
+/** Draws `image`'s [sx,sy,sWidth,sHeight] source region into
+ * [destX,destY,destWidth,destHeight], optionally mirrored horizontally/
+ * vertically WITHIN that destination box only -- unlike the base clip's
+ * own whole-canvas flip transform (drawFrameAt's own ctx.translate/scale
+ * around the full canvas), a video overlay's flip (video_math.ts's
+ * OverlayFraming) only ever mirrors its own box, so the translate origin
+ * here is the box's own near/far edge, not the canvas's. */
+function drawImageFlipped(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  sx: number,
+  sy: number,
+  sWidth: number,
+  sHeight: number,
+  destX: number,
+  destY: number,
+  destWidth: number,
+  destHeight: number,
+  flipHorizontal: boolean,
+  flipVertical: boolean
+) {
+  ctx.save();
+  ctx.translate(flipHorizontal ? destX + destWidth : destX, flipVertical ? destY + destHeight : destY);
+  ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
+  ctx.drawImage(image, sx, sy, sWidth, sHeight, 0, 0, destWidth, destHeight);
+  ctx.restore();
+}
+
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -344,9 +372,13 @@ export const CanvasPlayer = forwardRef<
         const destWidth = overlayRect.width * canvas.width;
         const destHeight = overlayRect.height * canvas.height;
         const { sx: osx, sy: osy, sWidth: osw, sHeight: osh } = computeCoverFitSourceRect(
-          overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight
+          overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight,
+          activeExclusiveOverlay.framing.panX, activeExclusiveOverlay.framing.panY
         );
-        ctx.drawImage(overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight);
+        drawImageFlipped(
+          ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+          activeExclusiveOverlay.framing.flipHorizontal, activeExclusiveOverlay.framing.flipVertical
+        );
       }
     }
 
@@ -366,9 +398,9 @@ export const CanvasPlayer = forwardRef<
       const destWidth = pip.layout.rect.width * canvas.width;
       const destHeight = pip.layout.rect.height * canvas.height;
       const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
-        pipImage.naturalWidth, pipImage.naturalHeight, destWidth, destHeight
+        pipImage.naturalWidth, pipImage.naturalHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY
       );
-      ctx.drawImage(pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight);
+      drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
     }
 
     // Composited AFTER the flip transform is undone (ctx.restore() above)

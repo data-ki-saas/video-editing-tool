@@ -468,6 +468,28 @@ export function isExclusiveLayout(layout: VideoOverlayLayout): boolean {
   return layout.type !== "picture-in-picture";
 }
 
+/**
+ * How the overlay's OWN footage is framed within whatever box its layout
+ * gives it -- independent of the layout choice itself (switching layout
+ * keeps these), adjusted via VideoOverlayTrack's own framing button (a
+ * popup showing the overlay's source frame; click/drag to recenter, plus
+ * flip toggles -- see VideoOverlayFramingDialog.tsx). Every layout that
+ * crops the overlay's footage into a differently-shaped box than its own
+ * (Full-Screen, Split-Screen, and a Picture-in-Picture box whose aspect
+ * doesn't match the source) does so via a "cover" fit
+ * (computeCoverFitSourceRect below) -- `panX`/`panY` choose WHICH part of
+ * the source survives that crop, instead of always dead-centering it.
+ * Fractions (0..1) of the SOURCE frame.
+ */
+export interface OverlayFraming {
+  panX: number;
+  panY: number;
+  flipHorizontal: boolean;
+  flipVertical: boolean;
+}
+
+export const DEFAULT_OVERLAY_FRAMING: OverlayFraming = { panX: 0.5, panY: 0.5, flipHorizontal: false, flipVertical: false };
+
 export interface VideoOverlayClip {
   assetId: string;
   startTimeSeconds: number;
@@ -478,6 +500,7 @@ export interface VideoOverlayClip {
   // pure UI addition with no breaking type change.
   sourceStartSeconds: number;
   layout: VideoOverlayLayout;
+  framing: OverlayFraming;
 }
 
 /** The single EXCLUSIVE-layout overlay (Full-Screen or Split-Screen) active
@@ -526,27 +549,37 @@ export function computeOverlayRects(layout: VideoOverlayLayout): { baseRect: Cro
 }
 
 /** Source-rect for a "cover" fit -- scales sourceWidth x sourceHeight up to
- * fully cover a targetWidth x targetHeight box, center-cropping whichever
- * dimension overflows. Mirrors Creatomate's `fit: "cover"` exactly, so the
- * live preview and the real render agree on how footage of a different
- * aspect ratio than its destination box gets cropped. */
+ * fully cover a targetWidth x targetHeight box, cropping whichever
+ * dimension overflows. `panX`/`panY` (fractions 0..1 of the source,
+ * default 0.5 = centered -- see OverlayFraming) choose WHERE within that
+ * overflow the crop is taken from, instead of always dead-centering it --
+ * only ever one of the two actually matters for a given source/target
+ * ratio pair (whichever dimension is being cropped), the other is ignored
+ * since that axis keeps its full extent. Mirrors Creatomate's `fit:
+ * "cover"` exactly when panX/panY are left at 0.5, so the live preview and
+ * the real render agree on how footage of a different aspect ratio than
+ * its destination box gets cropped. */
 export function computeCoverFitSourceRect(
   sourceWidth: number,
   sourceHeight: number,
   targetWidth: number,
-  targetHeight: number
+  targetHeight: number,
+  panX: number = 0.5,
+  panY: number = 0.5
 ): { sx: number; sy: number; sWidth: number; sHeight: number } {
   if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) {
     return { sx: 0, sy: 0, sWidth: sourceWidth, sHeight: sourceHeight };
   }
+  const clampedPanX = Math.min(Math.max(panX, 0), 1);
+  const clampedPanY = Math.min(Math.max(panY, 0), 1);
   const sourceRatio = sourceWidth / sourceHeight;
   const targetRatio = targetWidth / targetHeight;
   if (sourceRatio > targetRatio) {
     const sWidth = sourceHeight * targetRatio;
-    return { sx: (sourceWidth - sWidth) / 2, sy: 0, sWidth, sHeight: sourceHeight };
+    return { sx: (sourceWidth - sWidth) * clampedPanX, sy: 0, sWidth, sHeight: sourceHeight };
   }
   const sHeight = sourceWidth / targetRatio;
-  return { sx: 0, sy: (sourceHeight - sHeight) / 2, sWidth: sourceWidth, sHeight };
+  return { sx: 0, sy: (sourceHeight - sHeight) * clampedPanY, sWidth: sourceWidth, sHeight };
 }
 
 /**

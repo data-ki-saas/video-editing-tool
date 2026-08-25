@@ -320,8 +320,8 @@ function buildVideoOverlayElements(
   nextTrack: () => number,
   appMeta: Record<string, AppMetaEntry>,
   videoOverlaySourceDurations: Record<string, number>
-): Video[] {
-  const elements: Video[] = [];
+): (Video | Composition)[] {
+  const elements: (Video | Composition)[] = [];
   for (const overlay of videoOverlays) {
     const track = nextTrack();
     const { overlayRect } = computeOverlayRects(overlay.layout);
@@ -340,28 +340,62 @@ function buildVideoOverlayElements(
     // combination specifically (this whole path isn't reachable from the
     // UI yet regardless -- see ThreePaneEditor.tsx's handleRenderClick,
     // which shows a "coming soon" popup instead of ever calling this).
+    //
+    // KNOWN LIMITATION: `framing.panX`/`panY` (video_math.ts's
+    // OverlayFraming) are NOT applied here -- reproducing them server-side
+    // needs the source asset's own pixel aspect ratio, which nothing
+    // gathers today (CanvasPlayer knows it client-side, from the loaded
+    // frame's naturalWidth/naturalHeight, but that's never sent to this
+    // compiler). `fit: "cover"` below always centers, same as before this
+    // feature existed. `flipHorizontal`/`flipVertical` ARE applied (they
+    // don't need aspect-ratio info -- see the wrapping Composition below,
+    // same xScale/yScale-mirror technique buildFlipWrapper already uses
+    // for the whole frame, just centered on this element's own box instead).
+    const needsFlipWrapper = overlay.framing.flipHorizontal || overlay.framing.flipVertical;
     const outputRanges = mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlay.endTimeSeconds);
     for (const range of outputRanges) {
       const id = nextId("overlay");
       appMeta[id] = { role: "video-overlay", assetId: overlay.assetId };
       const trimStart = overlay.sourceStartSeconds + (range.sourceOverlapStartSeconds - overlay.startTimeSeconds);
+      const video = new Video({
+        id,
+        track,
+        time: range.outputStartSeconds,
+        duration: range.outputEndSeconds - range.outputStartSeconds,
+        trimStart,
+        // One play-through's worth when looping (Creatomate repeats the
+        // trimmed range to fill `duration`); otherwise the old
+        // "trim exactly this sub-range" behavior.
+        trimDuration: shouldLoop ? sourceDurationSeconds : range.outputEndSeconds - range.outputStartSeconds,
+        ...(shouldLoop ? { loop: true } : {}),
+        fit: "cover",
+        // Full-frame relative to its own wrapping Composition when flipped
+        // (see below); otherwise positioned directly at overlayRect same as
+        // before.
+        ...(needsFlipWrapper
+          ? { x: "0%", y: "0%", width: "100%", height: "100%", xAnchor: "0%", yAnchor: "0%" }
+          : { ...rectProperties(overlayRect), xAnchor: "0%", yAnchor: "0%" }),
+        source: "",
+      });
+
+      if (!needsFlipWrapper) {
+        elements.push(video);
+        continue;
+      }
       elements.push(
-        new Video({
-          id,
+        new Composition({
+          id: nextId("overlay-flip"),
           track,
-          time: range.outputStartSeconds,
-          duration: range.outputEndSeconds - range.outputStartSeconds,
-          trimStart,
-          // One play-through's worth when looping (Creatomate repeats the
-          // trimmed range to fill `duration`); otherwise the old
-          // "trim exactly this sub-range" behavior.
-          trimDuration: shouldLoop ? sourceDurationSeconds : range.outputEndSeconds - range.outputStartSeconds,
-          ...(shouldLoop ? { loop: true } : {}),
-          fit: "cover",
-          xAnchor: "0%",
-          yAnchor: "0%",
-          ...rectProperties(overlayRect),
-          source: "",
+          x: pct(overlayRect.x + overlayRect.width / 2),
+          y: pct(overlayRect.y + overlayRect.height / 2),
+          width: pct(overlayRect.width),
+          height: pct(overlayRect.height),
+          xAnchor: "50%",
+          yAnchor: "50%",
+          xScale: overlay.framing.flipHorizontal ? "-100%" : "100%",
+          yScale: overlay.framing.flipVertical ? "-100%" : "100%",
+          clip: true,
+          elements: [video],
         })
       );
     }

@@ -17,6 +17,12 @@ export interface ContextMenuAction {
   label: string;
   onSelect: () => void;
   danger?: boolean;
+  // Lets a caller tint one entry's label to match the timeline rail it
+  // acts on (e.g. VideoOverlayTrack's "Switch to..." entries, each colored
+  // like the block they'd produce) instead of the default foreground/danger
+  // colors -- a plain Tailwind text-color class, e.g. "text-amber-600".
+  // Ignored when `danger` is also set (danger's red always wins).
+  textColorClassName?: string;
 }
 
 interface ContextMenuState {
@@ -102,7 +108,7 @@ export function ContextMenu({ state, onClose }: { state: ContextMenuState | null
           }}
           className={
             "block w-full px-3 py-1.5 text-left text-sm hover:bg-background " +
-            (action.danger ? "text-red-600" : "text-foreground")
+            (action.danger ? "text-red-600" : action.textColorClassName ?? "text-foreground")
           }
         >
           {action.label}

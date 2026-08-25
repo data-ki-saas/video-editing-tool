@@ -31,6 +31,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { deleteAsset, type Asset, type AssetKind } from "@/lib/api";
+import { getVideoDuration } from "@/lib/video/video";
+import { getAudioDuration } from "@/lib/video/audio";
 import { ReelLoader } from "@/components/ReelLoader";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import { PauseIcon } from "./icons/PlayerIcons";
@@ -40,6 +42,15 @@ import { ContextMenu, useContextMenu } from "./ContextMenu";
 // shared by the ring's own stroke-dasharray and its progress-driven offset.
 const RING_RADIUS = 16;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+/** m:ss, no leading zero on minutes -- e.g. 12.7s -> "0:13", 75s -> "1:15".
+ * Rounds rather than truncates so a 59.6s clip reads "1:00", not "0:59". */
+function formatDuration(seconds: number): string {
+  const rounded = Math.round(seconds);
+  const minutes = Math.floor(rounded / 60);
+  const wholeSeconds = rounded % 60;
+  return `${minutes}:${wholeSeconds.toString().padStart(2, "0")}`;
+}
 
 // Row order/labels for the three kind-grouped sections below -- "audio"
 // assets are music to the user, so it's labeled that way here even though
@@ -97,6 +108,29 @@ export function AssetGallery({
   const [playbackProgress, setPlaybackProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
+
+  // Each video/music tile's own real duration, painted as a small badge
+  // (see the "0:12" pill in renderTile below) -- probed once per asset,
+  // the first time it shows up here. Images have no duration to show.
+  const [assetDurationSeconds, setAssetDurationSeconds] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    for (const asset of assets) {
+      if (asset.kind === "image" || assetDurationSeconds[asset.id] !== undefined) continue;
+      const probe = asset.kind === "video" ? getVideoDuration(asset.url) : getAudioDuration(asset.url);
+      probe
+        .then((duration) => {
+          if (!cancelled) setAssetDurationSeconds((prev) => ({ ...prev, [asset.id]: duration }));
+        })
+        .catch(() => {
+          // Leaves this tile without a duration badge -- not worth
+          // surfacing a probe failure as a page-level error.
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [assets, assetDurationSeconds]);
 
   function getAudioElement() {
     if (audioRef.current) return audioRef.current;
@@ -238,6 +272,12 @@ export function AssetGallery({
             className="absolute right-0.5 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-accent-foreground"
           >
             +
+          </span>
+        )}
+
+        {asset.kind !== "image" && assetDurationSeconds[asset.id] !== undefined && (
+          <span className="absolute bottom-0.5 left-0.5 rounded-sm bg-black/70 px-1 py-px text-[9px] leading-none text-white">
+            {formatDuration(assetDurationSeconds[asset.id])}
           </span>
         )}
 

@@ -57,6 +57,33 @@ export function SplitScreenOrientationIcon(props: IconProps) {
   );
 }
 
+// A frame with a smaller filled frame inset at its corner -- the
+// universal picture-in-picture glyph, badged on a Picture-in-Picture
+// VideoOverlayTrack segment the same way SplitScreenOrientationIcon badges
+// a Split Screen one.
+export function PictureInPictureIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="3" y="5" width="18" height="14" rx="1.5" />
+      <rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+// Four corner brackets -- badged on a Full-Screen VideoOverlayTrack
+// segment, same convention as PictureInPictureIcon/
+// SplitScreenOrientationIcon above.
+export function FullScreenIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 9V4h5" />
+      <path d="M20 9V4h-5" />
+      <path d="M4 15v5h5" />
+      <path d="M20 15v5h-5" />
+    </svg>
+  );
+}
+
 // Two opposing arrows -- swaps which half a split-screen overlay's footage
 // occupies.
 export function SwapIcon(props: IconProps) {
@@ -64,6 +91,42 @@ export function SwapIcon(props: IconProps) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
       <path d="M7 7h13l-3.5-3.5" />
       <path d="M17 17H4l3.5 3.5" />
+    </svg>
+  );
+}
+
+// A viewfinder with a centered crosshair -- opens VideoOverlayTrack's
+// framing popup (recenter + flip the overlay's own footage within
+// whatever box its layout gives it).
+export function FramingIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M12 8v8M8 12h8" />
+    </svg>
+  );
+}
+
+// Two arrows either side of a vertical divider -- VideoOverlayFramingDialog's
+// "Flip" (horizontal) toggle button.
+export function FlipHorizontalIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 3v18" strokeDasharray="2 2" />
+      <path d="M7 8l-3 4 3 4" />
+      <path d="M17 8l3 4-3 4" />
+    </svg>
+  );
+}
+
+// Same idea, rotated -- VideoOverlayFramingDialog's "Mirror" (vertical)
+// toggle button.
+export function FlipVerticalIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M3 12h18" strokeDasharray="2 2" />
+      <path d="M8 7l4-3 4 3" />
+      <path d="M8 17l4 3 4-3" />
     </svg>
   );
 }

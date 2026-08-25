@@ -54,6 +54,7 @@ import {
   type OverlayImage,
   type SequenceEntry,
   type TextOverlay,
+  type OverlayFraming,
   type VideoOverlayClip,
   type VideoOverlayLayout,
   type ZoomEffect,
@@ -89,6 +90,7 @@ import {
   applyVideoOverlayRectChange,
   applyVideoOverlayRangeChange,
   applyVideoOverlayPositionChange,
+  applyChangeOverlayFraming,
   applyDeleteVideoOverlay,
 } from "@/lib/video/transformations";
 import { saveTimeline, type Timeline, type EditSelectionsSnapshot, type Project } from "@/lib/projects";
@@ -262,6 +264,12 @@ export function ThreePaneEditor({
   // video_math.ts's TranscriptCaption).
   const [isTranscriptDialogOpen, setIsTranscriptDialogOpen] = useState(false);
   const [isImageTemplatesDialogOpen, setIsImageTemplatesDialogOpen] = useState(false);
+
+  // VideoOverlayFramingDialog's open/edit-target state -- opened from the
+  // crosshair button on a VideoOverlayTrack segment, per-overlay index
+  // (null means closed, not "add new" -- there's always an existing
+  // overlay to fine-tune, unlike the text dialog's add-vs-edit duality).
+  const [framingDialogOverlayIndex, setFramingDialogOverlayIndex] = useState<number | null>(null);
 
   // The cloud (Creatomate) render is temporarily disabled -- see
   // handleRenderClick below, which shows this instead of actually starting
@@ -829,8 +837,12 @@ export function ThreePaneEditor({
 
   // VideoOverlayTrack's right-click "Switch to..." entries -- an instant
   // change, no drag/commit split needed.
-  function handleChangeVideoOverlayLayout(overlayIndex: number, layoutType: VideoOverlayLayout["type"]) {
-    const { label, state } = applyChangeVideoOverlayLayout(selections, overlayIndex, layoutType);
+  function handleChangeVideoOverlayLayout(
+    overlayIndex: number,
+    layoutType: VideoOverlayLayout["type"],
+    splitScreenOrientation?: "horizontal" | "vertical"
+  ) {
+    const { label, state } = applyChangeVideoOverlayLayout(selections, overlayIndex, layoutType, splitScreenOrientation);
     pushChange(label, state);
   }
 
@@ -885,8 +897,28 @@ export function ThreePaneEditor({
     setLiveVideoOverlayRectEdit((prev) => (prev?.index === overlayIndex ? null : prev));
     setLiveVideoOverlayRangeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
     setLiveVideoOverlayPositionEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    if (framingDialogOverlayIndex === overlayIndex) setFramingDialogOverlayIndex(null);
     const { label, state } = applyDeleteVideoOverlay(selections, overlayIndex);
     pushChange(label, state);
+  }
+
+  // VideoOverlayTrack's crosshair button -- opens VideoOverlayFramingDialog
+  // for that overlay.
+  function handleOpenVideoOverlayFraming(overlayIndex: number) {
+    setFramingDialogOverlayIndex(overlayIndex);
+  }
+
+  function handleCloseVideoOverlayFramingDialog() {
+    setFramingDialogOverlayIndex(null);
+  }
+
+  // VideoOverlayFramingDialog's "Save" -- one commit, no live/commit split
+  // (see applyChangeOverlayFraming's own comment).
+  function handleSaveVideoOverlayFraming(framing: OverlayFraming) {
+    if (framingDialogOverlayIndex === null) return;
+    const { label, state } = applyChangeOverlayFraming(selections, framingDialogOverlayIndex, framing);
+    pushChange(label, state);
+    setFramingDialogOverlayIndex(null);
   }
 
   // "Image" button in UserActions -- opens ImageTemplatesDialog fresh.
@@ -1202,6 +1234,8 @@ export function ThreePaneEditor({
     });
   }
 
+  const framingDialogOverlay = framingDialogOverlayIndex !== null ? displayedVideoOverlays[framingDialogOverlayIndex] ?? null : null;
+
   return (
     <div className="flex h-full flex-col">
       <section style={{ flexBasis: "30%" }} className="shrink-0 overflow-hidden border-b border-border">
@@ -1220,6 +1254,9 @@ export function ThreePaneEditor({
           onAddToBackgroundSequence={handleAddToBackgroundSequence}
           usedAssetIds={usedAssetIds}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
+          framingDialogOverlay={framingDialogOverlay}
+          onSaveVideoOverlayFraming={handleSaveVideoOverlayFraming}
+          onCloseVideoOverlayFramingDialog={handleCloseVideoOverlayFramingDialog}
           selectedClipRectId={selections.clipRectId}
           onSelectClipRect={handleSelectClipRect}
           onOpenTextDialog={handleOpenTextDialog}
@@ -1315,6 +1352,7 @@ export function ThreePaneEditor({
           onChangeVideoOverlayLayout={handleChangeVideoOverlayLayout}
           onToggleSplitScreenOrientation={handleToggleSplitScreenOrientation}
           onToggleSplitScreenSides={handleToggleSplitScreenSides}
+          onOpenVideoOverlayFraming={handleOpenVideoOverlayFraming}
           onDeleteVideoOverlay={handleDeleteVideoOverlay}
         />
       </section>

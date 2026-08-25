@@ -28,11 +28,13 @@ import { TextOverlayDialog } from "./TextOverlayDialog";
 import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
 import { ImageTemplatesDialog } from "./ImageTemplatesDialog";
 import { ClipRectangleDialog } from "./ClipRectangleDialog";
+import { VideoOverlayFramingDialog } from "./VideoOverlayFramingDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import type { Asset } from "@/lib/api";
 import type {
   CropRect,
+  OverlayFraming,
   OverlayImage,
   SequenceEntry,
   TextOverlay,
@@ -71,6 +73,9 @@ export function ActionArea({
   onAddToBackgroundSequence,
   usedAssetIds,
   videoThumbnailUrlByAssetId,
+  framingDialogOverlay,
+  onSaveVideoOverlayFraming,
+  onCloseVideoOverlayFramingDialog,
   selectedClipRectId,
   onSelectClipRect,
   onOpenTextDialog,
@@ -120,6 +125,11 @@ export function ActionArea({
   onAddToBackgroundSequence: (asset: Asset) => void;
   usedAssetIds: Set<string>;
   videoThumbnailUrlByAssetId: Record<string, string>;
+  // The overlay currently open in VideoOverlayFramingDialog, if any --
+  // null means closed.
+  framingDialogOverlay: VideoOverlayClip | null;
+  onSaveVideoOverlayFraming: (framing: OverlayFraming) => void;
+  onCloseVideoOverlayFramingDialog: () => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
   onOpenTextDialog: () => void;
@@ -318,6 +328,15 @@ export function ActionArea({
           onClose={() => setIsClipRectDialogOpen(false)}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
+        />
+      )}
+
+      {framingDialogOverlay && (
+        <VideoOverlayFramingDialog
+          previewFrameUrl={videoThumbnailUrlByAssetId[framingDialogOverlay.assetId] ?? ""}
+          framing={framingDialogOverlay.framing}
+          onSave={onSaveVideoOverlayFraming}
+          onClose={onCloseVideoOverlayFramingDialog}
         />
       )}
     </div>

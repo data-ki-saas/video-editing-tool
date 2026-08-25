@@ -30,7 +30,9 @@ import {
   FULL_FRAME_CROP_RECT,
   DEFAULT_TEXT_OVERLAY_RECT,
   DEFAULT_TRANSCRIPT_CAPTION_RECT,
+  DEFAULT_OVERLAY_FRAMING,
   type CropRect,
+  type OverlayFraming,
   type OverlayImage,
   type SequenceEntry,
   type TextOverlay,
@@ -635,20 +637,24 @@ export function applyAddVideoOverlay(
     endTimeSeconds,
     sourceStartSeconds: 0,
     layout: { type: "full-screen" },
+    framing: DEFAULT_OVERLAY_FRAMING,
   };
   return { label: "Added overlay", state: { ...selections, videoOverlays: [...overlays, newOverlay] } };
 }
 
 /** Switches a placed overlay's layout in place -- Full-Screen, Picture-in-
- * Picture, or Split Screen -- from VideoOverlayTrack's right-click menu.
- * Switching TO an exclusive layout (Full-Screen/Split-Screen) needs a
- * collision check against every OTHER exclusive-layout overlay (switching
- * away from Picture-in-Picture loses its "floats over anything" immunity);
- * switching TO Picture-in-Picture never needs one. */
+ * Picture, or Split Screen (Side by Side / Top & Bottom, both directly
+ * selectable from the right-click menu, not hidden behind a follow-up
+ * toggle) -- from VideoOverlayTrack's right-click menu. Switching TO an
+ * exclusive layout (Full-Screen/Split-Screen) needs a collision check
+ * against every OTHER exclusive-layout overlay (switching away from
+ * Picture-in-Picture loses its "floats over anything" immunity); switching
+ * TO Picture-in-Picture never needs one. */
 export function applyChangeVideoOverlayLayout(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
-  layoutType: VideoOverlayLayout["type"]
+  layoutType: VideoOverlayLayout["type"],
+  splitScreenOrientation: "horizontal" | "vertical" = "horizontal"
 ): TransformationResult {
   const overlay = selections.videoOverlays[overlayIndex];
   if (!overlay) return { label: "Changed overlay layout", state: selections };
@@ -657,7 +663,7 @@ export function applyChangeVideoOverlayLayout(
       ? { type: "full-screen" }
       : layoutType === "picture-in-picture"
         ? { type: "picture-in-picture", rect: DEFAULT_PIP_RECT }
-        : { type: "split-screen", orientation: "horizontal", partnerFirst: false };
+        : { type: "split-screen", orientation: splitScreenOrientation, partnerFirst: false };
   if (
     isExclusiveLayout(layout) &&
     overlapsExclusiveWindow(selections.videoOverlays, overlay.startTimeSeconds, overlay.endTimeSeconds, overlayIndex)
@@ -746,6 +752,23 @@ export function applyVideoOverlayPositionChange(
 
 /** Removes one video overlay outright -- from VideoOverlayTrack's "Remove
  * overlay" context menu entry. */
+/** Saves the framing (pan + flip) chosen in VideoOverlayFramingDialog --
+ * one commit on "Save", not a live/commit split, since the dialog keeps
+ * its own local draft state while open (same pattern as
+ * TextOverlayDialog/TranscriptCaptionDialog) rather than touching history
+ * on every drag. */
+export function applyChangeOverlayFraming(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  framing: OverlayFraming
+): TransformationResult {
+  const overlay = selections.videoOverlays[overlayIndex];
+  if (!overlay) return { label: "Adjusted overlay framing", state: selections };
+  const nextOverlays = [...selections.videoOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, framing };
+  return { label: "Adjusted overlay framing", state: { ...selections, videoOverlays: nextOverlays } };
+}
+
 export function applyDeleteVideoOverlay(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {
   if (!selections.videoOverlays[overlayIndex]) return { label: "Removed overlay", state: selections };
   return {
