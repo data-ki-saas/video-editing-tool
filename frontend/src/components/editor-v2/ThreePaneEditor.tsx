@@ -50,6 +50,7 @@ import {
   generateSampleTimestamps,
   findClosestTimestampIndex,
   computeOutputDimensions,
+  DEFAULT_OVERLAY_FRAMING,
   type CropRect,
   type OverlayImage,
   type SequenceEntry,
@@ -94,13 +95,20 @@ import {
   applyChangeOverlayAudioBalance,
   applyDeleteVideoOverlay,
 } from "@/lib/video/transformations";
-import { saveTimeline, type Timeline, type EditSelectionsSnapshot, type Project } from "@/lib/projects";
+import {
+  saveTimeline,
+  type Timeline,
+  type EditSelectionsSnapshot,
+  type Project,
+  type TimelineMarker,
+} from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
 import { useRenderStatus } from "@/lib/useRenderStatus";
 import { useLocalRender } from "@/lib/useLocalRender";
 import { gatherLocalSequenceClips, gatherLocalBackgroundClips } from "@/lib/localRender/gatherLocalRenderClips";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { BACKGROUND_TRACK_OPTIONS } from "@/lib/backgroundTracks";
+import { DEFAULT_MARKER_LABEL } from "./MarkerTrack";
 import { ActionArea } from "./ActionArea";
 import { Playground } from "./Playground";
 import { FeedbackArea } from "./FeedbackArea";
@@ -274,6 +282,18 @@ export function ThreePaneEditor({
   // overlay to fine-tune, unlike the text dialog's add-vs-edit duality).
   const [framingDialogOverlayIndex, setFramingDialogOverlayIndex] = useState<number | null>(null);
 
+  // Named points on the main sequence's own timeline (MarkerTrack.tsx) --
+  // cosmetic/not undo-tracked, same tier as selectedBackgroundTrackId (see
+  // projects.ts's TimelineMarker doc comment for why).
+  const [markers, setMarkers] = useState<TimelineMarker[]>(initialTimeline.markers ?? []);
+  // Named points into a SPECIFIC ASSET's own source footage, keyed by
+  // assetId -- opened via AssetMarkersDialog (a flag icon on a
+  // VideoOverlayTrack segment, alongside its framing button). Also
+  // cosmetic/not undo-tracked.
+  const [assetMarkers, setAssetMarkers] = useState<Record<string, TimelineMarker[]>>(initialTimeline.assetMarkers ?? {});
+  // Which asset's AssetMarkersDialog is open, if any.
+  const [assetMarkersDialogAssetId, setAssetMarkersDialogAssetId] = useState<string | null>(null);
+
   // The cloud (Creatomate) render is temporarily disabled -- see
   // handleRenderClick below, which shows this instead of actually starting
   // a render.
@@ -362,7 +382,15 @@ export function ThreePaneEditor({
     overlayImages: rawSelections.overlayImages ?? [],
     textOverlays: rawSelections.textOverlays ?? [],
     sequenceClips,
-    videoOverlays: rawSelections.videoOverlays ?? [],
+    // `baseFraming` was added to the split-screen layout variant after some
+    // projects already had one persisted without it -- backfilling it here
+    // (once, at load) heals old data at the source instead of leaving every
+    // reader (CanvasPlayer, VideoOverlayFramingDialog) to guess a default.
+    videoOverlays: (rawSelections.videoOverlays ?? []).map((overlay) =>
+      overlay.layout.type === "split-screen" && !overlay.layout.baseFraming
+        ? { ...overlay, layout: { ...overlay.layout, baseFraming: DEFAULT_OVERLAY_FRAMING } }
+        : overlay
+    ),
     transcriptCaption: rawSelections.transcriptCaption ?? null,
   };
 
@@ -666,6 +694,8 @@ export function ThreePaneEditor({
         selectedBackgroundTrackId,
         backgroundSequenceAssetIds,
         selectedBackgroundAssetId: undefined,
+        markers,
+        assetMarkers,
       };
       saveTimeline(projectId, nextTimeline)
         .then(() => setSaveError(null))
@@ -693,6 +723,8 @@ export function ThreePaneEditor({
     selectedTemplateId,
     selectedBackgroundTrackId,
     backgroundSequenceAssetIds,
+    markers,
+    assetMarkers,
   ]);
 
   useEffect(() => {
@@ -708,6 +740,13 @@ export function ThreePaneEditor({
     setAssets((prev) => prev.filter((asset) => asset.id !== assetId));
     setSelectedAsset((prev) => (prev?.id === assetId ? null : prev));
     setBackgroundSequenceAssetIds((prev) => prev.filter((id) => id !== assetId));
+    setAssetMarkers((prev) => {
+      if (!(assetId in prev)) return prev;
+      const next = { ...prev };
+      delete next[assetId];
+      return next;
+    });
+    setAssetMarkersDialogAssetId((prev) => (prev === assetId ? null : prev));
 
     const referencesDeletedAsset =
       selections.overlayImages.some((overlay) => overlay.assetId === assetId) ||
@@ -935,6 +974,59 @@ export function ThreePaneEditor({
     const { label, state } = applyChangeOverlayFraming(selections, framingDialogOverlayIndex, framing, baseFraming);
     pushChange(label, state);
     setFramingDialogOverlayIndex(null);
+  }
+
+  // MarkerTrack's click-to-place/drag/rename/delete on the main sequence's
+  // own timeline -- cosmetic (see this file's own `markers` state comment),
+  // so these just update plain state and let the debounced-save effect
+  // below persist it, no pushChange/history involved.
+  function handleAddMarker(timeSeconds: number) {
+    setMarkers((prev) => [...prev, { timeSeconds, label: DEFAULT_MARKER_LABEL }]);
+  }
+  function handleMoveMarker(index: number, timeSeconds: number) {
+    setMarkers((prev) => prev.map((marker, i) => (i === index ? { ...marker, timeSeconds } : marker)));
+  }
+  function handleRenameMarker(index: number, label: string) {
+    setMarkers((prev) => prev.map((marker, i) => (i === index ? { ...marker, label } : marker)));
+  }
+  function handleDeleteMarker(index: number) {
+    setMarkers((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  // The flag icon on a VideoOverlayTrack segment -- opens AssetMarkersDialog
+  // for that overlay's own source asset (markers are keyed by assetId, not
+  // by this specific placement -- see assetMarkers' own state comment).
+  function handleOpenAssetMarkers(assetId: string) {
+    setAssetMarkersDialogAssetId(assetId);
+  }
+  function handleCloseAssetMarkersDialog() {
+    setAssetMarkersDialogAssetId(null);
+  }
+  function handleAddAssetMarker(timeSeconds: number) {
+    const assetId = assetMarkersDialogAssetId;
+    if (!assetId) return;
+    setAssetMarkers((prev) => ({ ...prev, [assetId]: [...(prev[assetId] ?? []), { timeSeconds, label: DEFAULT_MARKER_LABEL }] }));
+  }
+  function handleMoveAssetMarker(index: number, timeSeconds: number) {
+    const assetId = assetMarkersDialogAssetId;
+    if (!assetId) return;
+    setAssetMarkers((prev) => ({
+      ...prev,
+      [assetId]: (prev[assetId] ?? []).map((marker, i) => (i === index ? { ...marker, timeSeconds } : marker)),
+    }));
+  }
+  function handleRenameAssetMarker(index: number, label: string) {
+    const assetId = assetMarkersDialogAssetId;
+    if (!assetId) return;
+    setAssetMarkers((prev) => ({
+      ...prev,
+      [assetId]: (prev[assetId] ?? []).map((marker, i) => (i === index ? { ...marker, label } : marker)),
+    }));
+  }
+  function handleDeleteAssetMarker(index: number) {
+    const assetId = assetMarkersDialogAssetId;
+    if (!assetId) return;
+    setAssetMarkers((prev) => ({ ...prev, [assetId]: (prev[assetId] ?? []).filter((_, i) => i !== index) }));
   }
 
   // "Image" button in UserActions -- opens ImageTemplatesDialog fresh.
@@ -1254,6 +1346,8 @@ export function ThreePaneEditor({
   }
 
   const framingDialogOverlay = framingDialogOverlayIndex !== null ? displayedVideoOverlays[framingDialogOverlayIndex] ?? null : null;
+  const assetMarkersDialogAsset = assetMarkersDialogAssetId !== null ? assets.find((a) => a.id === assetMarkersDialogAssetId) ?? null : null;
+  const assetMarkersDialogMarkers = assetMarkersDialogAssetId !== null ? assetMarkers[assetMarkersDialogAssetId] ?? [] : [];
 
   return (
     <div className="flex h-full flex-col">
@@ -1276,6 +1370,13 @@ export function ThreePaneEditor({
           framingDialogOverlay={framingDialogOverlay}
           onSaveVideoOverlayFraming={handleSaveVideoOverlayFraming}
           onCloseVideoOverlayFramingDialog={handleCloseVideoOverlayFramingDialog}
+          assetMarkersDialogAsset={assetMarkersDialogAsset}
+          assetMarkersDialogMarkers={assetMarkersDialogMarkers}
+          onAddAssetMarker={handleAddAssetMarker}
+          onMoveAssetMarker={handleMoveAssetMarker}
+          onRenameAssetMarker={handleRenameAssetMarker}
+          onDeleteAssetMarker={handleDeleteAssetMarker}
+          onCloseAssetMarkersDialog={handleCloseAssetMarkersDialog}
           selectedClipRectId={selections.clipRectId}
           onSelectClipRect={handleSelectClipRect}
           onOpenTextDialog={handleOpenTextDialog}
@@ -1375,6 +1476,12 @@ export function ThreePaneEditor({
           onDeleteVideoOverlay={handleDeleteVideoOverlay}
           onChangeOverlayAudioBalance={handleChangeOverlayAudioBalance}
           onCommitOverlayAudioBalance={handleCommitOverlayAudioBalance}
+          markers={markers}
+          onAddMarker={handleAddMarker}
+          onMoveMarker={handleMoveMarker}
+          onRenameMarker={handleRenameMarker}
+          onDeleteMarker={handleDeleteMarker}
+          onOpenAssetMarkers={handleOpenAssetMarkers}
         />
       </section>
 

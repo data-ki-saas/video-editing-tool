@@ -32,12 +32,19 @@ import {
   SplitScreenOrientationIcon,
   SwapIcon,
   FramingIcon,
+  MarkerFlagIcon,
   PictureInPictureIcon,
   FullScreenIcon,
 } from "@/components/icons/UIIcons";
-import { isExclusiveLayout, type VideoOverlayClip, type VideoOverlayLayout } from "@/lib/video/video_math";
+import { isExclusiveLayout, snapToNearest, type VideoOverlayClip, type VideoOverlayLayout } from "@/lib/video/video_math";
 
 const MIN_DURATION_SECONDS = 0.2;
+
+// Pixel distance (converted to seconds via the drag's own trackRect) within
+// which a drag magnetically snaps to a nearby time reference -- a
+// reasonable magnetic-snap distance, not so large it fights normal
+// fine-grained dragging.
+const SNAP_THRESHOLD_PX = 8;
 
 // Matches each rail color used below -- also used to tint the matching
 // entry's label in the right-click menu (Switch to X), so the menu reads
@@ -60,6 +67,7 @@ function VideoOverlaySegment({
   videoDurationSeconds,
   prevBoundSeconds,
   nextBoundSeconds,
+  snapPointsSeconds,
   onChangeRange,
   onCommitRange,
   onChangePosition,
@@ -68,6 +76,7 @@ function VideoOverlaySegment({
   onToggleOrientation,
   onToggleSides,
   onOpenFraming,
+  onOpenAssetMarkers,
   onDelete,
 }: {
   overlay: VideoOverlayClip;
@@ -76,6 +85,7 @@ function VideoOverlaySegment({
   videoDurationSeconds: number;
   prevBoundSeconds: number; // 0 if this is the first exclusive clip (or always 0 for a PIP clip, which has no neighbor)
   nextBoundSeconds: number; // videoDurationSeconds if this is the last exclusive clip (or always videoDurationSeconds for a PIP clip)
+  snapPointsSeconds: number[];
   onChangeRange: (start: number, end: number) => void;
   onCommitRange: (start: number, end: number) => void;
   onChangePosition: (start: number) => void;
@@ -84,6 +94,7 @@ function VideoOverlaySegment({
   onToggleOrientation: () => void;
   onToggleSides: () => void;
   onOpenFraming: () => void;
+  onOpenAssetMarkers: () => void;
   onDelete: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -98,11 +109,14 @@ function VideoOverlaySegment({
     const trackRect = track.getBoundingClientRect();
     const startX = e.clientX;
     const { startTimeSeconds, endTimeSeconds } = overlay;
+    const snapThresholdSeconds = (SNAP_THRESHOLD_PX / trackRect.width) * videoDurationSeconds;
 
     function computeNext(clientX: number): [number, number] {
       const dxSeconds = ((clientX - startX) / trackRect.width) * videoDurationSeconds;
       if (edge === "start") {
-        const next = Math.min(Math.max(startTimeSeconds + dxSeconds, prevBoundSeconds, 0), endTimeSeconds - MIN_DURATION_SECONDS);
+        const clamped = Math.min(Math.max(startTimeSeconds + dxSeconds, prevBoundSeconds, 0), endTimeSeconds - MIN_DURATION_SECONDS);
+        const snapped = snapToNearest(clamped, snapPointsSeconds, snapThresholdSeconds);
+        const next = Math.min(Math.max(snapped, prevBoundSeconds, 0), endTimeSeconds - MIN_DURATION_SECONDS);
         return [next, endTimeSeconds];
       }
       // No cap at the source's own duration -- stretching the window past
@@ -111,7 +125,9 @@ function VideoOverlaySegment({
       // background-music tracks already use. Only bounded by a neighboring
       // exclusive overlay and the sequence's own end.
       const maxEnd = Math.min(nextBoundSeconds, videoDurationSeconds);
-      const next = Math.max(Math.min(endTimeSeconds + dxSeconds, maxEnd), startTimeSeconds + MIN_DURATION_SECONDS);
+      const clamped = Math.max(Math.min(endTimeSeconds + dxSeconds, maxEnd), startTimeSeconds + MIN_DURATION_SECONDS);
+      const snapped = snapToNearest(clamped, snapPointsSeconds, snapThresholdSeconds);
+      const next = Math.max(Math.min(snapped, maxEnd), startTimeSeconds + MIN_DURATION_SECONDS);
       return [startTimeSeconds, next];
     }
 
@@ -137,10 +153,13 @@ function VideoOverlaySegment({
     const durationSeconds = overlay.endTimeSeconds - overlay.startTimeSeconds;
     const minStart = prevBoundSeconds;
     const maxStart = Math.min(nextBoundSeconds, videoDurationSeconds) - durationSeconds;
+    const snapThresholdSeconds = (SNAP_THRESHOLD_PX / trackRect.width) * videoDurationSeconds;
 
     function computeNext(clientX: number): number {
       const dxSeconds = ((clientX - startX) / trackRect.width) * videoDurationSeconds;
-      return Math.min(Math.max(overlay.startTimeSeconds + dxSeconds, minStart), Math.max(maxStart, minStart));
+      const clamped = Math.min(Math.max(overlay.startTimeSeconds + dxSeconds, minStart), Math.max(maxStart, minStart));
+      const snapped = snapToNearest(clamped, snapPointsSeconds, snapThresholdSeconds);
+      return Math.min(Math.max(snapped, minStart), Math.max(maxStart, minStart));
     }
     function handleMove(ev: PointerEvent) {
       onChangePosition(computeNext(ev.clientX));
@@ -232,6 +251,15 @@ function VideoOverlaySegment({
       >
         <FramingIcon className="h-2.5 w-2.5" />
       </button>
+      <button
+        type="button"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={onOpenAssetMarkers}
+        title="Markers -- name moments in this clip's own footage"
+        className="pointer-events-auto z-10 shrink-0 rounded-sm bg-black/25 p-0.5 text-white hover:bg-black/50"
+      >
+        <MarkerFlagIcon className="h-2.5 w-2.5" />
+      </button>
       {repeatsWithinWindow && (
         <div
           className="pointer-events-none absolute inset-y-0 right-0 bg-black/35"
@@ -306,6 +334,7 @@ export function VideoOverlayTrack({
   assetThumbnailUrlById,
   overlaySourceDurationSeconds,
   videoDurationSeconds,
+  snapPointsSeconds,
   onChangeRange,
   onCommitRange,
   onChangePosition,
@@ -314,12 +343,14 @@ export function VideoOverlayTrack({
   onToggleOrientation,
   onToggleSides,
   onOpenFraming,
+  onOpenAssetMarkers,
   onDelete,
 }: {
   videoOverlays: VideoOverlayClip[];
   assetThumbnailUrlById: Record<string, string>;
   overlaySourceDurationSeconds: Record<string, number>;
   videoDurationSeconds: number;
+  snapPointsSeconds: number[];
   onChangeRange: (overlayIndex: number, start: number, end: number) => void;
   onCommitRange: (overlayIndex: number, start: number, end: number) => void;
   onChangePosition: (overlayIndex: number, start: number) => void;
@@ -328,6 +359,7 @@ export function VideoOverlayTrack({
   onToggleOrientation: (overlayIndex: number) => void;
   onToggleSides: (overlayIndex: number) => void;
   onOpenFraming: (overlayIndex: number) => void;
+  onOpenAssetMarkers: (assetId: string) => void;
   onDelete: (overlayIndex: number) => void;
 }) {
   if (videoOverlays.length === 0) return null;
@@ -347,6 +379,7 @@ export function VideoOverlayTrack({
       videoDurationSeconds,
       prevBoundSeconds,
       nextBoundSeconds,
+      snapPointsSeconds,
       onChangeRange: (start: number, end: number) => onChangeRange(index, start, end),
       onCommitRange: (start: number, end: number) => onCommitRange(index, start, end),
       onChangePosition: (start: number) => onChangePosition(index, start),
@@ -356,6 +389,7 @@ export function VideoOverlayTrack({
       onToggleOrientation: () => onToggleOrientation(index),
       onToggleSides: () => onToggleSides(index),
       onOpenFraming: () => onOpenFraming(index),
+      onOpenAssetMarkers: () => onOpenAssetMarkers(overlay.assetId),
       onDelete: () => onDelete(index),
     };
   }

@@ -163,7 +163,10 @@ export function VideoOverlayFramingDialog({
   onClose: () => void;
 }) {
   const [framing, setFraming] = useState(overlay.framing);
-  const [baseFraming, setBaseFraming] = useState(overlay.layout.type === "split-screen" ? overlay.layout.baseFraming : DEFAULT_OVERLAY_FRAMING);
+  // `?? DEFAULT_OVERLAY_FRAMING`: baseFraming was added to the split-screen
+  // layout after some projects already had one persisted without it -- see
+  // CanvasPlayer.tsx's identical fallback for the full explanation.
+  const [baseFraming, setBaseFraming] = useState(overlay.layout.type === "split-screen" ? overlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING : DEFAULT_OVERLAY_FRAMING);
 
   // Re-syncs if a different overlay's framing dialog is opened while this
   // one is already mounted (same reasoning as TextOverlayDialog's own
@@ -171,7 +174,7 @@ export function VideoOverlayFramingDialog({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setFraming(overlay.framing);
-    setBaseFraming(overlay.layout.type === "split-screen" ? overlay.layout.baseFraming : DEFAULT_OVERLAY_FRAMING);
+    setBaseFraming(overlay.layout.type === "split-screen" ? overlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING : DEFAULT_OVERLAY_FRAMING);
   }, [overlay]);
 
   function handleReset() {

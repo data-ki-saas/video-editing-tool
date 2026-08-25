@@ -81,6 +81,8 @@ import { OverlayTrack } from "./OverlayTrack";
 import { TextOverlayTrack } from "./TextOverlayTrack";
 import { VideoOverlayTrack } from "./VideoOverlayTrack";
 import { VideoOverlayAudioTrack } from "./VideoOverlayAudioTrack";
+import { MarkerTrack } from "./MarkerTrack";
+import type { TimelineMarker } from "@/lib/projects";
 import {
   computeEffectiveCropRect,
   computeEffectiveFlip,
@@ -325,6 +327,12 @@ export function FrameStrip({
   onDeleteVideoOverlay,
   onChangeOverlayAudioBalance,
   onCommitOverlayAudioBalance,
+  onOpenAssetMarkers,
+  markers,
+  onAddMarker,
+  onMoveMarker,
+  onRenameMarker,
+  onDeleteMarker,
   pixelsPerSecond,
   scrollContainerRef,
   onScroll,
@@ -396,6 +404,12 @@ export function FrameStrip({
   onDeleteVideoOverlay: (overlayIndex: number) => void;
   onChangeOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
   onCommitOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
+  onOpenAssetMarkers: (assetId: string) => void;
+  markers: TimelineMarker[];
+  onAddMarker: (timeSeconds: number) => void;
+  onMoveMarker: (index: number, timeSeconds: number) => void;
+  onRenameMarker: (index: number, label: string) => void;
+  onDeleteMarker: (index: number) => void;
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
@@ -515,6 +529,26 @@ export function FrameStrip({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, videoOverlays]);
 
+  // Every meaningful time reference on this strip, combined into one list
+  // for VideoOverlayTrack's drag-to-snap (see its own comment and
+  // video_math.ts's snapToNearest) -- 0/full duration/the playhead, every
+  // clip seam, every zoom effect's own edges, every trim range's own edges,
+  // and every video overlay's own edges (including the one currently being
+  // dragged, which is harmless -- see VideoOverlayTrack.tsx's doc comment).
+  const videoOverlaySnapPointsSeconds = useMemo(() => {
+    const points = [0, durationSeconds, currentTimeSeconds, ...clipBoundarySeconds];
+    for (const effect of zoomEffects) {
+      points.push(effect.startTimeSeconds, effect.epicenterTimeSeconds, effect.endTimeSeconds);
+    }
+    for (const range of trimRanges) {
+      points.push(range.startTimeSeconds, range.endTimeSeconds);
+    }
+    for (const overlay of videoOverlays) {
+      points.push(overlay.startTimeSeconds, overlay.endTimeSeconds);
+    }
+    return points;
+  }, [durationSeconds, currentTimeSeconds, clipBoundarySeconds, zoomEffects, trimRanges, videoOverlays]);
+
   // The Full-Screen or Split-Screen overlay (if any) active at each tile's
   // own instant -- at most one, since those two layouts are mutually
   // exclusive with each other (isExclusiveLayout). Lets FrameTile swap in
@@ -576,6 +610,16 @@ export function FrameStrip({
           whatever space Playground.tsx allocates -- see FrameTile's
           comment for why forcing that produced unwanted blank padding. */}
       <div ref={trackRef} className="relative flex w-max flex-col">
+        <MarkerTrack
+          markers={markers}
+          totalDurationSeconds={durationSeconds}
+          snapPointsSeconds={videoOverlaySnapPointsSeconds}
+          onAdd={onAddMarker}
+          onMove={onMoveMarker}
+          onRename={onRenameMarker}
+          onDelete={onDeleteMarker}
+        />
+
         <TrimTrack
           trimRanges={trimRanges}
           pendingTrimStartSeconds={pendingTrimStartSeconds}
@@ -596,6 +640,7 @@ export function FrameStrip({
           assetThumbnailUrlById={videoThumbnailUrlByAssetId}
           overlaySourceDurationSeconds={overlaySourceDurationSeconds}
           videoDurationSeconds={durationSeconds}
+          snapPointsSeconds={videoOverlaySnapPointsSeconds}
           onChangeRange={onChangeVideoOverlayRange}
           onCommitRange={onCommitVideoOverlayRange}
           onChangePosition={onChangeVideoOverlayPosition}
@@ -604,6 +649,7 @@ export function FrameStrip({
           onToggleOrientation={onToggleSplitScreenOrientation}
           onToggleSides={onToggleSplitScreenSides}
           onOpenFraming={onOpenVideoOverlayFraming}
+          onOpenAssetMarkers={onOpenAssetMarkers}
           onDelete={onDeleteVideoOverlay}
         />
 

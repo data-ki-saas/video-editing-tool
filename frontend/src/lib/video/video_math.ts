@@ -106,6 +106,24 @@ export function frameIndexAtTime(elapsedSeconds: number, frameRate: number, fram
   return Math.min(Math.max(index, 0), frameCount - 1);
 }
 
+/** Snaps `value` to whichever of `snapPointsSeconds` is closest, if any is
+ * within `thresholdSeconds` -- otherwise returns `value` unchanged. Used
+ * for magnetic snapping while dragging a timeline block (see
+ * VideoOverlayTrack.tsx), matching how every real NLE timeline snaps drags
+ * to nearby clip boundaries, effect edges, and the playhead. */
+export function snapToNearest(value: number, snapPointsSeconds: number[], thresholdSeconds: number): number {
+  let closest = value;
+  let closestDistance = thresholdSeconds;
+  for (const point of snapPointsSeconds) {
+    const distance = Math.abs(point - value);
+    if (distance <= closestDistance) {
+      closest = point;
+      closestDistance = distance;
+    }
+  }
+  return closest;
+}
+
 // All CropRect fields are FRACTIONS (0..1) of the frame's width/height --
 // resolution-independent, so the same rect applies unchanged to the live
 // canvas, every thumbnail, and any future re-extraction at a different

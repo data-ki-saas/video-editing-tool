@@ -42,6 +42,7 @@ import type {
   VideoOverlayLayout,
   ZoomEffect,
 } from "@/lib/video/video_math";
+import type { TimelineMarker } from "@/lib/projects";
 
 // Initial heights before any resizing -- the +/-25% stretch range (see
 // video_math.ts's DEFAULT_MAX_STRETCH_RATIO) is computed relative to these.
@@ -117,6 +118,12 @@ export function Playground({
   onDeleteVideoOverlay,
   onChangeOverlayAudioBalance,
   onCommitOverlayAudioBalance,
+  markers,
+  onAddMarker,
+  onMoveMarker,
+  onRenameMarker,
+  onDeleteMarker,
+  onOpenAssetMarkers,
 }: {
   backgroundTracks: { name: string; url: string }[];
   videoDurationSeconds: number;
@@ -186,6 +193,14 @@ export function Playground({
   onDeleteVideoOverlay: (overlayIndex: number) => void;
   onChangeOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
   onCommitOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
+  markers: TimelineMarker[];
+  onAddMarker: (timeSeconds: number) => void;
+  onMoveMarker: (index: number, timeSeconds: number) => void;
+  onRenameMarker: (index: number, label: string) => void;
+  onDeleteMarker: (index: number) => void;
+  // The flag icon on a VideoOverlayTrack segment -- opens AssetMarkersDialog
+  // for that overlay's own source asset.
+  onOpenAssetMarkers: (assetId: string) => void;
 }) {
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
 
@@ -261,6 +276,12 @@ export function Playground({
           onDeleteVideoOverlay={onDeleteVideoOverlay}
           onChangeOverlayAudioBalance={onChangeOverlayAudioBalance}
           onCommitOverlayAudioBalance={onCommitOverlayAudioBalance}
+          markers={markers}
+          onAddMarker={onAddMarker}
+          onMoveMarker={onMoveMarker}
+          onRenameMarker={onRenameMarker}
+          onDeleteMarker={onDeleteMarker}
+          onOpenAssetMarkers={onOpenAssetMarkers}
           pixelsPerSecond={PIXELS_PER_SECOND}
           scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}
           onScroll={bindOnScroll(FRAME_STRIP_INDEX)}

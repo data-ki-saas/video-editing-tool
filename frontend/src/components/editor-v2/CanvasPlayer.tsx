@@ -75,6 +75,7 @@ import {
   computeOverlayRects,
   computeCoverFitSourceRect,
   computeProgress,
+  DEFAULT_OVERLAY_FRAMING,
   buildSequenceClipInfos,
   totalSequenceDuration,
   resolveSequencePosition,
@@ -157,6 +158,11 @@ function computeMainAudioGainBreakpoints(
     return { timeSeconds, gain: 1 - maxBalance };
   });
 }
+
+// Short linear ramp (rather than a hard setValueAtTime step) for the main-
+// track ducking and overlay-audio fade transitions below -- avoids an
+// audible click/pop at a hard volume step.
+const AUDIO_TRANSITION_RAMP_SECONDS = 0.03;
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -341,6 +347,22 @@ export const CanvasPlayer = forwardRef<
     overlayAudioSourceNodesRef.current = [];
   }
 
+  /** The one canonical "how long is this overlay's source, for looping
+   * purposes" duration -- prefers the DECODED audio buffer's exact duration
+   * (sample-count-derived, no estimation) over the video's own probed
+   * duration (container metadata, can differ by a few ms) whenever both
+   * exist for the same asset, so video-frame looping and audio looping
+   * never drift apart from using two different numbers for what's supposed
+   * to be the same "one play-through" length. Falls back to the video's own
+   * probed duration when no audio is loaded for this asset (most overlays,
+   * since audioBalance defaults to 0 and nothing decodes their audio at all). */
+  function getCanonicalOverlayDurationSeconds(assetId: string): number | null {
+    const audioBuffer = videoOverlayAudioBuffersByAssetIdRef.current[assetId];
+    if (audioBuffer && audioBuffer.duration > 0) return audioBuffer.duration;
+    const frames = videoOverlayFramesByAssetIdRef.current[assetId];
+    return frames ? frames.durationSeconds : null;
+  }
+
   /** Draws the frame at `elapsedSeconds`, sampling only the region the
    * current crop/zoom (or a live in-progress drag override) says to keep,
    * scaled to fill the canvas -- this IS the crop, not a guide over an
@@ -404,7 +426,13 @@ export const CanvasPlayer = forwardRef<
       const baseDestY = baseRect.y * canvas.height;
       const baseDestWidth = baseRect.width * canvas.width;
       const baseDestHeight = baseRect.height * canvas.height;
-      const { panX, panY, flipHorizontal: baseFlipH, flipVertical: baseFlipV } = activeExclusiveOverlay.layout.baseFraming;
+      // `?? DEFAULT_OVERLAY_FRAMING`: baseFraming was added to the
+      // split-screen layout after some projects already had one persisted
+      // without it -- an old timeline (or an old undo-history snapshot
+      // inside a still-open session) can hand back a split-screen layout
+      // with this field simply absent, so defaulting it here (rather than
+      // trusting the type) avoids a hard crash on load.
+      const { panX, panY, flipHorizontal: baseFlipH, flipVertical: baseFlipV } = activeExclusiveOverlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING;
       const { sx: bsx, sy: bsy, sWidth: bsw, sHeight: bsh } = computeCoverFitSourceRect(sWidth, sHeight, baseDestWidth, baseDestHeight, panX, panY);
       // Composes with the global flip transform already active on this
       // context (the outer ctx.translate/scale above) -- each mirrors
@@ -437,8 +465,13 @@ export const CanvasPlayer = forwardRef<
         // Loops back to the start once the window runs past one
         // play-through of the source (see VideoOverlayTrack.tsx's own
         // edge-drag comment) -- frameIndexAtTime alone would just clamp to
-        // the last frame and freeze there instead.
-        const loopedOffsetSeconds = frames.durationSeconds > 0 ? localOffsetSeconds % frames.durationSeconds : localOffsetSeconds;
+        // the last frame and freeze there instead. Uses the canonical
+        // duration (prefers decoded audio's exact length over the video's
+        // own probed estimate) so video looping never drifts from audio
+        // looping over repeated play-throughs -- see
+        // getCanonicalOverlayDurationSeconds.
+        const canonicalDurationSeconds = getCanonicalOverlayDurationSeconds(activeExclusiveOverlay.assetId) ?? frames.durationSeconds;
+        const loopedOffsetSeconds = canonicalDurationSeconds > 0 ? localOffsetSeconds % canonicalDurationSeconds : localOffsetSeconds;
         const overlayFrameIndex = frameIndexAtTime(loopedOffsetSeconds, frames.frameRate, frames.images.length);
         const overlayImage = frames.images[overlayFrameIndex];
         const destX = overlayRect.x * canvas.width;
@@ -464,7 +497,11 @@ export const CanvasPlayer = forwardRef<
       const frames = videoOverlayFramesByAssetIdRef.current[pip.assetId];
       if (!frames) continue;
       const localOffsetSeconds = pip.sourceStartSeconds + (elapsedSeconds - pip.startTimeSeconds);
-      const loopedOffsetSeconds = frames.durationSeconds > 0 ? localOffsetSeconds % frames.durationSeconds : localOffsetSeconds;
+      // See the exclusive-overlay branch above for why this prefers the
+      // canonical (audio-derived, when available) duration over the video's
+      // own probed one.
+      const canonicalDurationSeconds = getCanonicalOverlayDurationSeconds(pip.assetId) ?? frames.durationSeconds;
+      const loopedOffsetSeconds = canonicalDurationSeconds > 0 ? localOffsetSeconds % canonicalDurationSeconds : localOffsetSeconds;
       const pipFrameIndex = frameIndexAtTime(loopedOffsetSeconds, frames.frameRate, frames.images.length);
       const pipImage = frames.images[pipFrameIndex];
       const destX = pip.layout.rect.x * canvas.width;
@@ -583,18 +620,30 @@ export const CanvasPlayer = forwardRef<
     playStartedAtCtxTimeRef.current = audioContext.currentTime;
     pausedAtSecondsRef.current = adjustedOffsetSeconds;
 
-    for (const breakpoint of computeMainAudioGainBreakpoints(videoOverlays, durationRef.current)) {
-      if (breakpoint.timeSeconds < adjustedOffsetSeconds) continue; // already in the past relative to this resume
-      mainGainNode.gain.setValueAtTime(breakpoint.gain, audioContext.currentTime + (breakpoint.timeSeconds - adjustedOffsetSeconds));
-    }
     // Covers the case where adjustedOffsetSeconds itself lands mid-window
     // (no breakpoint exists exactly there since breakpoints only mark
     // window START/END) -- sets the correct starting gain immediately
-    // rather than waiting for whatever breakpoint comes next.
+    // rather than waiting for whatever breakpoint comes next. Also seeds
+    // the ramp loop below, so its first transition starts from what's
+    // actually already playing rather than an assumed 1.
     const initialDucking = videoOverlays
       .filter((o) => o.audioBalance > 0 && adjustedOffsetSeconds >= o.startTimeSeconds && adjustedOffsetSeconds < o.endTimeSeconds)
       .reduce((max, o) => Math.max(max, o.audioBalance), 0);
     mainGainNode.gain.setValueAtTime(1 - initialDucking, audioContext.currentTime);
+
+    // Short ramps rather than hard setValueAtTime steps -- a hard step is an
+    // audible click/pop. The standard Web Audio pattern for "a step
+    // function with brief transitions": anchor the ramp's start value (a
+    // no-op numerically, but required so the ramp doesn't creep from
+    // whatever far-away event preceded it) then ramp to the new value.
+    let previousGain = 1 - initialDucking;
+    for (const breakpoint of computeMainAudioGainBreakpoints(videoOverlays, durationRef.current)) {
+      if (breakpoint.timeSeconds < adjustedOffsetSeconds) continue; // already in the past relative to this resume
+      const rampStartCtxTime = audioContext.currentTime + (breakpoint.timeSeconds - adjustedOffsetSeconds);
+      mainGainNode.gain.setValueAtTime(previousGain, rampStartCtxTime);
+      mainGainNode.gain.linearRampToValueAtTime(breakpoint.gain, rampStartCtxTime + AUDIO_TRANSITION_RAMP_SECONDS);
+      previousGain = breakpoint.gain;
+    }
 
     // One AudioBufferSourceNode per overlay that wants some of its own
     // audio (audioBalance > 0) and has actually finished decoding by now --
@@ -620,7 +669,19 @@ export const CanvasPlayer = forwardRef<
       overlaySource.buffer = overlayBuffer;
       overlaySource.loop = true;
       const overlayGainNode = audioContext.createGain();
-      overlayGainNode.gain.value = overlay.audioBalance;
+      // Fades in/out at this window's own start/end rather than a hard
+      // start/stop (same click/pop concern as the main-track ducking
+      // above), ending the fade-out exactly when the source itself stops
+      // (per its own `duration` param below). Clamped so a very short
+      // window's fade-out never starts before its fade-in has finished.
+      const fadeOutStartCtxTime = Math.max(
+        startCtxTime + AUDIO_TRANSITION_RAMP_SECONDS,
+        startCtxTime + remainingDurationSeconds - AUDIO_TRANSITION_RAMP_SECONDS
+      );
+      overlayGainNode.gain.setValueAtTime(0, startCtxTime);
+      overlayGainNode.gain.linearRampToValueAtTime(overlay.audioBalance, startCtxTime + AUDIO_TRANSITION_RAMP_SECONDS);
+      overlayGainNode.gain.setValueAtTime(overlay.audioBalance, fadeOutStartCtxTime);
+      overlayGainNode.gain.linearRampToValueAtTime(0, startCtxTime + remainingDurationSeconds);
       overlaySource.connect(overlayGainNode).connect(audioContext.destination);
       overlaySource.start(startCtxTime, elapsedIntoWindowSeconds % overlayBuffer.duration, remainingDurationSeconds);
       overlayAudioSourceNodesRef.current.push(overlaySource);

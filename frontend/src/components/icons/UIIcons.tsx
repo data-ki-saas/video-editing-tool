@@ -107,6 +107,17 @@ export function FramingIcon(props: IconProps) {
   );
 }
 
+// A small flag on a pole -- opens a VideoOverlayTrack segment's own
+// AssetMarkersDialog, next to its FramingIcon button.
+export function MarkerFlagIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M5 21V4" />
+      <path d="M5 4h13l-3.5 4L18 12H5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 // Two arrows either side of a vertical divider -- VideoOverlayFramingDialog's
 // "Flip" (horizontal) toggle button.
 export function FlipHorizontalIcon(props: IconProps) {
