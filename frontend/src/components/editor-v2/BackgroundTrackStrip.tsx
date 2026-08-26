@@ -26,11 +26,12 @@
  * ScissorsIcon) tells it apart from MainAudioTrackStrip's own
  * MicrophoneIcon badge at a glance.
  *
- * `hide-scrollbar`, same as the other two synced strips -- a native
- * scrollbar here ate into this rail's own fixed AUDIO_RAIL_HEIGHT_PX
- * height (Playground.tsx), squeezing it shorter than every other rail.
- * All three stay horizontally scrollable via trackpad/wheel regardless;
- * none of them need their own visible scrollbar chrome.
+ * `hide-scrollbar`, same as MainAudioTrackStrip -- a native scrollbar here
+ * ate into this rail's own fixed AUDIO_RAIL_HEIGHT_PX height
+ * (Playground.tsx), squeezing it shorter than every other rail. FrameStrip
+ * keeps its own scrollbar visible instead, so the synced group as a whole
+ * still has one discoverable, draggable affordance -- dragging it (or a
+ * trackpad/wheel gesture over any of the three) scrolls this rail too.
  */
 import { useEffect, useState } from "react";
 import { getAudioDuration } from "@/lib/video/audio";

@@ -182,10 +182,12 @@ body {
 
 /* Keeps an element horizontally scrollable (for
    lib/useSyncedHorizontalScroll.ts's programmatic sync, and trackpad/wheel
-   gestures over it) without its own native scrollbar chrome -- used by all
-   three of Playground.tsx's synced strips (FrameStrip, MainAudioTrackStrip,
-   BackgroundTrackStrip) so a scrollbar doesn't eat into any one rail's own
-   fixed height. */
+   gestures over it) without its own native scrollbar chrome -- used by the
+   two fixed-height audio rails among Playground.tsx's synced strips
+   (MainAudioTrackStrip, BackgroundTrackStrip) so a scrollbar doesn't eat
+   into their own fixed height. FrameStrip, the third synced strip, does
+   NOT use this -- it keeps its native scrollbar as the one visible,
+   draggable affordance for the whole synced group. */
 .hide-scrollbar {
   scrollbar-width: none;
   -ms-overflow-style: none;

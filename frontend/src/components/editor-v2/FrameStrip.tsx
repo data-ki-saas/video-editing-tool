@@ -691,7 +691,13 @@ export function FrameStrip({
     <div
       ref={scrollContainerRef}
       onScroll={onScroll}
-      className="hide-scrollbar max-h-full overflow-x-auto bg-neutral-950 px-2"
+      // Unlike MainAudioTrackStrip/BackgroundTrackStrip, this one keeps its
+      // native scrollbar visible -- it's the only draggable affordance for
+      // the whole synced group (see lib/useSyncedHorizontalScroll.ts), and
+      // with nothing visible a mouse user had no way to discover or reach
+      // the end of a track longer than the viewport (trackpad/wheel-only
+      // scrolling wasn't discoverable enough).
+      className="max-h-full overflow-x-auto bg-neutral-950 px-2"
     >
       {/* w-max so this div's own width is the strip's true total length --
           the playhead and ZoomEffectsTrack below both size/position

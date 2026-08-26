@@ -20,8 +20,10 @@
  * other synced strips use) gives this rail a sense of elapsed time on its
  * own, without needing to line it up against FrameStrip's tiles to tell.
  *
- * `hide-scrollbar`, same as the other two synced strips -- see
- * globals.css's own comment.
+ * `hide-scrollbar`, same as BackgroundTrackStrip -- see globals.css's own
+ * comment. FrameStrip keeps its native scrollbar visible instead (the one
+ * draggable affordance for the whole synced group); this rail still stays
+ * scrollable via trackpad/wheel or by dragging FrameStrip's scrollbar.
  *
  * Click-to-seek works here exactly like FrameStrip's own click handler --
  * this rail is part of the same shared timeline, so scrubbing shouldn't
