@@ -11,7 +11,10 @@
  * left edge, which offset that rail's own timeline start from FrameStrip's
  * (both no longer share one x=0), throwing off the visual alignment between
  * the shared playhead and where each rail's content actually sits at a
- * given time. A badge takes only its own small footprint instead.
+ * given time. A badge takes only its own small footprint instead. Always
+ * renders with its own standard inline look -- Playground.tsx overlays it
+ * (alongside a rail-identity icon) by wrapping it in its own absolutely
+ * positioned container, rather than overriding this component's classes.
  *
  * The popup is portaled to `document.body` and positioned in fixed
  * viewport coordinates (same reasoning as ContextMenu's own positioning) --
@@ -30,17 +33,11 @@ export function VolumeBadge({
   onChange,
   onCommit,
   colorClassName,
-  className,
 }: {
   value: number;
   onChange: (level: number) => void;
   onCommit: (level: number) => void;
   colorClassName: string;
-  // Overrides the badge button's own classes -- defaults to this
-  // component's standard inline look (VideoOverlayTrack's segment badges);
-  // callers that overlay the badge on top of other content (Playground's
-  // audio rails) pass their own absolute-positioning classes instead.
-  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -86,10 +83,7 @@ export function VolumeBadge({
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => setOpen((prev) => !prev)}
         title={`Volume -- ${percent}%, click to adjust`}
-        className={
-          className ??
-          "pointer-events-auto z-10 flex shrink-0 items-center gap-0.5 rounded-sm bg-black/25 px-0.5 py-0.5 text-white hover:bg-black/50"
-        }
+        className="pointer-events-auto z-10 flex shrink-0 items-center gap-0.5 rounded-sm bg-black/25 px-0.5 py-0.5 text-white hover:bg-black/50"
       >
         <SpeakerIcon className="h-2.5 w-2.5" />
         <span className="text-[8px] font-medium leading-none">{percent}%</span>

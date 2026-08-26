@@ -16,9 +16,12 @@
  * loops the whole thing across the video's duration, see
  * BackgroundTrackStrip) -- furthest from the main video content it plays
  * under. Both audio rails are FIXED height -- just another rail, same as
- * every other track in the strip -- with a VolumeBadge (see
- * ./VolumeBadge.tsx) overlaid on their own left edge for setting that
- * track's volume directly, rather than a resizable panel (the previous
+ * every other track in the strip -- with a rail-identity icon (MicrophoneIcon
+ * for MainAudioTrackStrip, MusicNoteIcon for BackgroundTrackStrip -- see
+ * @/components/icons/UIIcons) followed by a VolumeBadge (see
+ * ./VolumeBadge.tsx) overlaid on their own left edge, in that order, for
+ * telling the two rails apart at a glance and setting that track's volume
+ * directly, rather than a resizable panel (the previous
  * design; resizing only ever changed how much of the strip you could see,
  * it never controlled volume, and a volume control genuinely didn't exist
  * anywhere before this). An earlier version used a horizontal VolumeFader
@@ -60,6 +63,7 @@ import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip } from "./FrameStrip";
 import { MainAudioTrackStrip } from "./MainAudioTrackStrip";
 import { VolumeBadge } from "./VolumeBadge";
+import { MicrophoneIcon, MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { CutawaySegment } from "./CutawayTrack";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
 import type {
@@ -342,13 +346,20 @@ export function Playground({
         </div>
 
         <div className="relative shrink-0" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
-          <VolumeBadge
-            value={mainAudioVolume}
-            onChange={onChangeMainAudioVolume}
-            onCommit={onChangeMainAudioVolume}
-            colorClassName="to-amber-500"
-            className="pointer-events-auto absolute left-0.5 top-1/2 z-10 flex shrink-0 -translate-y-1/2 items-center gap-0.5 rounded-sm bg-black/25 px-0.5 py-0.5 text-white hover:bg-black/50"
-          />
+          <div className="absolute left-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
+            <span
+              title="This reel's own captured sound"
+              className="flex shrink-0 items-center justify-center rounded-sm bg-black/25 p-0.5 text-white"
+            >
+              <MicrophoneIcon className="h-2.5 w-2.5" />
+            </span>
+            <VolumeBadge
+              value={mainAudioVolume}
+              onChange={onChangeMainAudioVolume}
+              onCommit={onChangeMainAudioVolume}
+              colorClassName="to-amber-500"
+            />
+          </div>
           <MainAudioTrackStrip
             videoDurationSeconds={videoDurationSeconds}
             pixelsPerSecond={PIXELS_PER_SECOND}
@@ -359,13 +370,20 @@ export function Playground({
         </div>
 
         <div className="relative shrink-0" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
-          <VolumeBadge
-            value={backgroundVolume}
-            onChange={onChangeBackgroundVolume}
-            onCommit={onChangeBackgroundVolume}
-            colorClassName="to-accent"
-            className="pointer-events-auto absolute left-0.5 top-1/2 z-10 flex shrink-0 -translate-y-1/2 items-center gap-0.5 rounded-sm bg-black/25 px-0.5 py-0.5 text-white hover:bg-black/50"
-          />
+          <div className="absolute left-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
+            <span
+              title="Background music"
+              className="flex shrink-0 items-center justify-center rounded-sm bg-black/25 p-0.5 text-white"
+            >
+              <MusicNoteIcon className="h-2.5 w-2.5" />
+            </span>
+            <VolumeBadge
+              value={backgroundVolume}
+              onChange={onChangeBackgroundVolume}
+              onCommit={onChangeBackgroundVolume}
+              colorClassName="to-accent"
+            />
+          </div>
           <BackgroundTrackStrip
             tracks={backgroundTracks}
             videoDurationSeconds={videoDurationSeconds}

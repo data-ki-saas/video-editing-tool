@@ -20,12 +20,10 @@
  *
  * Total width is `videoDurationSeconds * pixelsPerSecond` -- the same scale
  * FrameStrip and MainAudioTrackStrip use, so all three line up and share
- * one scroll position (see lib/useSyncedHorizontalScroll.ts). (Used to also
- * carry its own MusicNoteIcon badge at the rail's left edge for telling the
- * two rails apart at a glance -- dropped once Playground.tsx started
- * overlaying a VolumeBadge on that same corner, which would have sat right
- * on top of it; the two rails' own colors plus their fixed top/bottom order
- * already tell them apart.)
+ * one scroll position (see lib/useSyncedHorizontalScroll.ts). (This rail
+ * doesn't render its own MusicNoteIcon badge -- Playground.tsx overlays
+ * one, followed by the VolumeBadge, on this rail's left edge; see that
+ * file's own module comment.)
  *
  * `hide-scrollbar`, same as FrameStrip/MainAudioTrackStrip -- a native
  * scrollbar here ate into this rail's own fixed AUDIO_RAIL_HEIGHT_PX height

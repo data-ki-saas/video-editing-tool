@@ -10,11 +10,9 @@
  * -- this IS the reel's primary audio, not a secondary layer under it, and
  * should read that way at a glance. Sits directly below FrameStrip in
  * Playground.tsx -- immediately under the video frames it's the audio for.
- * (Used to also carry its own MicrophoneIcon badge at the rail's left edge
- * for telling the two rails apart at a glance -- dropped once Playground.tsx
- * started overlaying a VolumeBadge on that same corner, which would have
- * sat right on top of it; the two rails' own colors plus their fixed
- * top/bottom order already tell them apart.)
+ * (This rail doesn't render its own MicrophoneIcon badge -- Playground.tsx
+ * overlays one, followed by the VolumeBadge, on this rail's left edge; see
+ * that file's own module comment.)
  *
  * A one-second ruler (a horizontal line the full width of the rail, with a
  * tick crossing it every second at the same `pixelsPerSecond` scale the
