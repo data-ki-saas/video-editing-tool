@@ -131,11 +131,11 @@ export function MarkerFlagIcon(props: IconProps) {
   );
 }
 
-// Three volume states badged on VideoOverlayAudioTrack's mix rail -- the
-// speaker cone shape is shared, only the sound-wave marks change, so a
-// glance at the badge (independent of the drag handle's own position)
-// reads as "which audio is actually playing here" the same way the mute/
-// unmuted/mixed icon convention on a real mixing console does.
+// Three volume states badged on every VolumeFader (and VideoOverlayTrack's
+// own per-segment volume popup) -- the speaker cone shape is shared, only
+// the sound-wave marks change, so a glance at the badge (independent of the
+// drag handle's own position) reads as "how loud is this" the same way the
+// mute/unmuted/mixed icon convention on a real mixing console does.
 const SPEAKER_CONE_PATH = "M4 9v6h4l5 5V4L8 9H4z";
 
 export function SpeakerMutedIcon(props: IconProps) {

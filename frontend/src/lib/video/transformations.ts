@@ -764,9 +764,9 @@ export function applyVideoOverlayPositionChange(
  * overlay, whose popup lets the box itself be resized/repositioned (see
  * applyVideoOverlayRectChange's own doc comment for the FrameStrip
  * equivalent of that same move/resize gesture); `audioBalance` duplicates
- * VideoOverlayAudioTrack's own rail so the mix can be tuned from inside the
- * same popup. All of it is saved together as one undo step rather than
- * several. */
+ * VideoOverlayTrack's own per-segment volume badge so the mix can be tuned
+ * from inside the same popup. All of it is saved together as one undo step
+ * rather than several. */
 export function applyChangeOverlayFraming(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
@@ -795,8 +795,8 @@ export function applyChangeOverlayFraming(
   return { label: "Adjusted overlay framing", state: { ...selections, videoOverlays: nextOverlays } };
 }
 
-/** Dragging the mix handle on VideoOverlayAudioTrack -- 0 (default) plays
- * only the base clip's own audio through this window, 1 only the
+/** Dragging VideoOverlayTrack's own per-segment volume slider -- 0 (default)
+ * plays only the base clip's own audio through this window, 1 only the
  * overlay's, in between mixes both at that fraction of their own volume
  * (see video_math.ts's VideoOverlayClip.audioBalance). */
 export function applyChangeOverlayAudioBalance(

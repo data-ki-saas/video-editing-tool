@@ -80,7 +80,6 @@ import { TrimTrack } from "./TrimTrack";
 import { OverlayTrack } from "./OverlayTrack";
 import { TextOverlayTrack } from "./TextOverlayTrack";
 import { VideoOverlayTrack } from "./VideoOverlayTrack";
-import { VideoOverlayAudioTrack } from "./VideoOverlayAudioTrack";
 import { MarkerTrack } from "./MarkerTrack";
 import type { TimelineMarker } from "@/lib/projects";
 import {
@@ -629,12 +628,6 @@ export function FrameStrip({
           onDeleteRange={onDeleteTrimRange}
         />
 
-        <VideoOverlayAudioTrack
-          videoOverlays={videoOverlays}
-          videoDurationSeconds={durationSeconds}
-          onChangeAudioBalance={onChangeOverlayAudioBalance}
-          onCommitAudioBalance={onCommitOverlayAudioBalance}
-        />
         <VideoOverlayTrack
           videoOverlays={videoOverlays}
           assetThumbnailUrlById={videoThumbnailUrlByAssetId}
@@ -651,6 +644,8 @@ export function FrameStrip({
           onOpenFraming={onOpenVideoOverlayFraming}
           onOpenAssetMarkers={onOpenAssetMarkers}
           onDelete={onDeleteVideoOverlay}
+          onChangeAudioBalance={onChangeOverlayAudioBalance}
+          onCommitAudioBalance={onCommitOverlayAudioBalance}
         />
 
         <div onClick={handleClick} className="flex cursor-pointer items-center">

@@ -12,9 +12,9 @@
  * Picture-in-Picture, inside the box) PANS that footage (see
  * CoverFramingRegion below); for Split Screen, that same click also SELECTS
  * which half the right side's actions apply to. The RIGHT side holds
- * Flip/Mirror, a Zoom slider, and a duplicate of VideoOverlayAudioTrack's
- * own audio-mix control (all acting on whichever half is selected), for
- * convenience while already here.
+ * Flip/Mirror, a Zoom slider, and a duplicate of VideoOverlayTrack's own
+ * per-segment volume control (all acting on whichever half is selected),
+ * for convenience while already here.
  *
  * Every layout that crops footage into a differently-shaped box than its
  * own source does so via a "cover" fit (video_math.ts's
@@ -47,7 +47,7 @@ import {
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
 import { FlipHorizontalIcon, FlipVerticalIcon } from "@/components/icons/UIIcons";
-import { LAYOUT_GRADIENT_TO_CLASSNAMES } from "./VideoOverlayAudioTrack";
+import { LAYOUT_GRADIENT_TO_CLASSNAMES } from "./VideoOverlayTrack";
 import { VolumeFader } from "./VolumeFader";
 import { DEFAULT_PIP_RECT } from "@/lib/video/transformations";
 
@@ -589,7 +589,12 @@ export function VideoOverlayFramingDialog({
 
             <div className="flex flex-col gap-1">
               <span className="text-[11px] font-medium text-muted">Sound</span>
-              <VolumeFader value={audioBalance} onChange={setAudioBalance} colorClassName={LAYOUT_GRADIENT_TO_CLASSNAMES[overlay.layout.type]} />
+              <VolumeFader
+                value={audioBalance}
+                onChange={setAudioBalance}
+                colorClassName={LAYOUT_GRADIENT_TO_CLASSNAMES[overlay.layout.type]}
+                className="h-4 w-full"
+              />
             </div>
           </div>
         </div>

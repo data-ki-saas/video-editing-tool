@@ -3,8 +3,8 @@
 /**
  * Project switcher, living inside the Action Area (left of the asset
  * gallery) rather than as a persistent full-height sidebar. Replaces that
- * role from the now-removed DashboardSidebar -- "Settings" is kept here too
- * since it had no other home once the sidebar went away.
+ * role from the now-removed DashboardSidebar -- Settings lives in
+ * TopMenuBar instead (top-right), not duplicated here.
  *
  * The active reel's name is inline-editable right here instead of a
  * separate page header strip (which just duplicated it) -- there's no Link
@@ -136,10 +136,6 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
           );
         })}
       </ul>
-
-      <Link href="/settings" className="shrink-0 text-xs text-muted hover:underline">
-        Settings
-      </Link>
 
       <ContextMenu state={contextMenuState} onClose={closeContextMenu} />
     </div>

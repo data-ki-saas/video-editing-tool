@@ -52,7 +52,7 @@ import type {
 import type { TimelineMarker } from "@/lib/projects";
 
 // Fixed height for both audio rails -- same tier as every other rail in the
-// strip (TrimTrack, VideoOverlayAudioTrack, ...), not resizable.
+// strip (TrimTrack, VideoOverlayTrack, ...), not resizable.
 const AUDIO_RAIL_HEIGHT_PX = 32;
 // Fixed width for the VolumeFader pinned to each audio rail's own left
 // edge -- wide enough to be a comfortable drag target without eating much
@@ -235,8 +235,7 @@ export function Playground({
               value={mainAudioVolume}
               onChange={onChangeMainAudioVolume}
               colorClassName="to-amber-500"
-              heightClassName="h-full"
-              showLabel={false}
+              className="h-full w-full"
             />
           </div>
           <div className="min-w-0 flex-1">
@@ -327,8 +326,7 @@ export function Playground({
               value={backgroundVolume}
               onChange={onChangeBackgroundVolume}
               colorClassName="to-accent"
-              heightClassName="h-full"
-              showLabel={false}
+              className="h-full w-full"
             />
           </div>
           <div className="min-w-0 flex-1">

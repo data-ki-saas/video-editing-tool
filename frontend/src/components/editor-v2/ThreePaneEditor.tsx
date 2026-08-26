@@ -12,7 +12,7 @@
  *
  * A fixed-height TopMenuBar (render actions left, settings/sign-out right)
  * sits above three horizontal bands that split the remaining height
- * 3:5 -- action area, playground -- plus a one-line feedback strip pinned
+ * 3:7 -- action area, playground -- plus a one-line feedback strip pinned
  * to the bottom. This component owns the cross-band state (the full asset
  * list, the video sequence, the frame-affecting edit history, playback
  * position, crop/zoom/flip/trim/overlay/text) and the thumbnail/volume
@@ -253,7 +253,7 @@ export function ThreePaneEditor({
     index: number;
     startTimeSeconds: number;
   } | null>(null);
-  // VideoOverlayAudioTrack's drag handle, same live-edit split again.
+  // VideoOverlayTrack's own per-segment volume slider, same live-edit split again.
   const [liveOverlayAudioBalanceEdit, setLiveOverlayAudioBalanceEdit] = useState<{ index: number; balance: number } | null>(null);
 
   // A representative still frame per video asset -- lifted up from
@@ -952,7 +952,7 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
-  // VideoOverlayAudioTrack's drag handle.
+  // VideoOverlayTrack's own per-segment volume slider.
   function handleChangeOverlayAudioBalance(overlayIndex: number, balance: number) {
     setLiveOverlayAudioBalanceEdit({ index: overlayIndex, balance });
   }
@@ -1450,7 +1450,7 @@ export function ThreePaneEditor({
         />
       </section>
 
-      <section className="min-h-0 flex-[5] overflow-hidden border-b border-border">
+      <section className="min-h-0 flex-[7] overflow-hidden border-b border-border">
         <Playground
           backgroundTracks={resolvedBackgroundTracks}
           videoDurationSeconds={videoDurationSeconds}

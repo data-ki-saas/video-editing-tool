@@ -527,9 +527,9 @@ export interface VideoOverlayClip {
   // in between mixes both, each at that fraction of its own natural
   // volume (0.5 = both at half, not both at full -- avoids a jarring
   // double-loud mix, same reasoning a constant-power audio crossfade
-  // uses). Adjusted via VideoOverlayAudioTrack.tsx's own draggable rail,
-  // positioned above VideoOverlayTrack -- see CanvasPlayer.tsx for how
-  // this is actually scheduled as gain automation during playback.
+  // uses). Adjusted via VideoOverlayTrack.tsx's own per-segment volume
+  // badge/popup -- see CanvasPlayer.tsx for how this is actually scheduled
+  // as gain automation during playback.
   audioBalance: number;
 }
 
