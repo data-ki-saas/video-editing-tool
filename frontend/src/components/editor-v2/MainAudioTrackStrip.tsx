@@ -8,22 +8,24 @@
  * or concatenation to do, just the one span. Deliberately a strong, solid
  * color distinct from BackgroundTrackStrip's muted accent-colored segments
  * -- this IS the reel's primary audio, not a secondary layer under it, and
- * should read that way at a glance. A MicrophoneIcon badge at the rail's
- * own left edge (scrolls with the content, so it stays at time 0 -- same
- * convention as TrimTrack's ScissorsIcon) tells it apart from
- * BackgroundTrackStrip's own MusicNoteIcon badge at a glance, in case the
- * color alone isn't enough. Sits directly below FrameStrip in Playground.tsx
- * -- immediately under the video frames it's the audio for.
+ * should read that way at a glance. Sits directly below FrameStrip in
+ * Playground.tsx -- immediately under the video frames it's the audio for.
+ * (Used to also carry its own MicrophoneIcon badge at the rail's left edge
+ * for telling the two rails apart at a glance -- dropped once Playground.tsx
+ * started overlaying a VolumeBadge on that same corner, which would have
+ * sat right on top of it; the two rails' own colors plus their fixed
+ * top/bottom order already tell them apart.)
  *
  * A one-second ruler (a horizontal line the full width of the rail, with a
  * tick crossing it every second at the same `pixelsPerSecond` scale the
  * other synced strips use) gives this rail a sense of elapsed time on its
  * own, without needing to line it up against FrameStrip's tiles to tell.
  *
- * `hide-scrollbar`, same as BackgroundTrackStrip -- see globals.css's own
- * comment. FrameStrip keeps its native scrollbar visible instead (the one
- * draggable affordance for the whole synced group); this rail still stays
- * scrollable via trackpad/wheel or by dragging FrameStrip's scrollbar.
+ * `hide-scrollbar`, same as FrameStrip/BackgroundTrackStrip -- see
+ * globals.css's own comment. Playground.tsx's own proxy scrollbar row, at
+ * the very bottom of the whole synced group (below both audio rails), is
+ * the one visible, draggable affordance; this rail still stays scrollable
+ * via trackpad/wheel too.
  *
  * Click-to-seek works here exactly like FrameStrip's own click handler --
  * this rail is part of the same shared timeline, so scrubbing shouldn't
@@ -33,7 +35,6 @@
  * one of its own.
  */
 import { useRef } from "react";
-import { MicrophoneIcon } from "@/components/icons/UIIcons";
 
 export function MainAudioTrackStrip({
   videoDurationSeconds,
@@ -82,7 +83,6 @@ export function MainAudioTrackStrip({
         className="relative h-full cursor-pointer rounded-sm bg-amber-500"
         style={{ width: videoDurationSeconds * pixelsPerSecond }}
       >
-        <MicrophoneIcon className="pointer-events-none absolute left-0.5 top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.9)]" />
         <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-black/30" />
         {secondTicks.map((second) => (
           <div

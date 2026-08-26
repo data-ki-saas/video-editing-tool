@@ -16,12 +16,19 @@
  * loops the whole thing across the video's duration, see
  * BackgroundTrackStrip) -- furthest from the main video content it plays
  * under. Both audio rails are FIXED height -- just another rail, same as
- * every other track in the strip -- with a VolumeFader pinned to their own
- * left edge (not scrolling with the rest of the rail) for setting that
+ * every other track in the strip -- with a VolumeBadge (see
+ * ./VolumeBadge.tsx) overlaid on their own left edge for setting that
  * track's volume directly, rather than a resizable panel (the previous
  * design; resizing only ever changed how much of the strip you could see,
  * it never controlled volume, and a volume control genuinely didn't exist
- * anywhere before this).
+ * anywhere before this). An earlier version used a horizontal VolumeFader
+ * in its own fixed-width column beside the rail instead of an overlaid
+ * badge -- that column offset the rail's own content start from
+ * FrameStrip's, so the same instant landed at two different x positions
+ * depending which strip you looked at (and a click on the audio rail
+ * didn't seek to where it visually looked like it would). A badge takes
+ * only its own small footprint, so all three strips' content now starts at
+ * the same x=0.
  *
  * If the three strips' combined natural height exceeds the band
  * ThreePaneEditor allocates this component, this component scrolls
@@ -35,13 +42,24 @@
  * -- scrolling any one of them scrolls all three together, since they're
  * meant to read as one aligned view of the clip, not three
  * independently-scrolling panels that happen to be stacked. The two
- * VolumeFaders sit outside that synced-scroll area (they're fixed controls,
- * not part of the timeline itself).
+ * VolumeBadges sit outside that synced-scroll area (they're fixed
+ * controls, not part of the timeline itself) -- they're overlaid, not
+ * absent from layout flow entirely, so they stay visible regardless of
+ * scroll position.
+ *
+ * All three strips hide their own native scrollbar (`hide-scrollbar`, see
+ * globals.css) -- a fourth synced element, a thin proxy scrollbar row below
+ * BackgroundTrackStrip (the last rail), supplies the one visible, draggable
+ * scrollbar for the whole group instead. Putting it below every rail rather
+ * than on any one of them keeps the group reading as one panel: a
+ * scrollbar directly on FrameStrip (an earlier version of this) sat
+ * visually between it and the two audio rails, splitting the "one seamless
+ * panel" apart.
  */
 import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip } from "./FrameStrip";
 import { MainAudioTrackStrip } from "./MainAudioTrackStrip";
-import { VolumeFader } from "./VolumeFader";
+import { VolumeBadge } from "./VolumeBadge";
 import type { CutawaySegment } from "./CutawayTrack";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
 import type {
@@ -59,10 +77,10 @@ import type { TimelineMarker } from "@/lib/projects";
 // Fixed height for both audio rails -- same tier as every other rail in the
 // strip (TrimTrack's h-4, VideoOverlayTrack's h-5, ...), not resizable.
 const AUDIO_RAIL_HEIGHT_PX = 16;
-// Fixed width for the VolumeFader pinned to each audio rail's own left
-// edge -- wide enough to be a comfortable drag target without eating much
-// of the strip's own horizontal space.
-const VOLUME_FADER_WIDTH_PX = 96;
+// Height of the proxy scrollbar row below BackgroundTrackStrip -- just
+// enough for a comfortable drag target for the thin themed scrollbar
+// (globals.css's own `* { scrollbar-width: thin }`), not a full rail tier.
+const PROXY_SCROLLBAR_HEIGHT_PX = 10;
 
 // Shared time-to-pixel scale for all three strips -- see this file's
 // module comment.
@@ -71,6 +89,7 @@ const PIXELS_PER_SECOND = 60;
 const BACKGROUND_STRIP_INDEX = 0;
 const FRAME_STRIP_INDEX = 1;
 const MAIN_AUDIO_STRIP_INDEX = 2;
+const PROXY_SCROLLBAR_INDEX = 3;
 
 export function Playground({
   backgroundTracks,
@@ -235,7 +254,7 @@ export function Playground({
   // OverlaySourceStartDialog for that specific overlay placement.
   onOpenSourceStart: (overlayIndex: number) => void;
 }) {
-  const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
+  const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(4);
 
   return (
     <div className="flex h-full flex-col overflow-y-auto bg-surface px-2">
@@ -322,44 +341,52 @@ export function Playground({
           />
         </div>
 
-        <div className="flex shrink-0 gap-1" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
-          <div className="shrink-0" style={{ width: VOLUME_FADER_WIDTH_PX }}>
-            <VolumeFader
-              value={mainAudioVolume}
-              onChange={onChangeMainAudioVolume}
-              colorClassName="to-amber-500"
-              className="h-full w-full"
-            />
-          </div>
-          <div className="min-w-0 flex-1">
-            <MainAudioTrackStrip
-              videoDurationSeconds={videoDurationSeconds}
-              pixelsPerSecond={PIXELS_PER_SECOND}
-              onSeek={onSeek}
-              scrollContainerRef={bindRef(MAIN_AUDIO_STRIP_INDEX)}
-              onScroll={bindOnScroll(MAIN_AUDIO_STRIP_INDEX)}
-            />
-          </div>
+        <div className="relative shrink-0" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
+          <VolumeBadge
+            value={mainAudioVolume}
+            onChange={onChangeMainAudioVolume}
+            onCommit={onChangeMainAudioVolume}
+            colorClassName="to-amber-500"
+            className="pointer-events-auto absolute left-0.5 top-1/2 z-10 flex shrink-0 -translate-y-1/2 items-center gap-0.5 rounded-sm bg-black/25 px-0.5 py-0.5 text-white hover:bg-black/50"
+          />
+          <MainAudioTrackStrip
+            videoDurationSeconds={videoDurationSeconds}
+            pixelsPerSecond={PIXELS_PER_SECOND}
+            onSeek={onSeek}
+            scrollContainerRef={bindRef(MAIN_AUDIO_STRIP_INDEX)}
+            onScroll={bindOnScroll(MAIN_AUDIO_STRIP_INDEX)}
+          />
         </div>
 
-        <div className="flex shrink-0 gap-1" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
-          <div className="shrink-0" style={{ width: VOLUME_FADER_WIDTH_PX }}>
-            <VolumeFader
-              value={backgroundVolume}
-              onChange={onChangeBackgroundVolume}
-              colorClassName="to-accent"
-              className="h-full w-full"
-            />
-          </div>
-          <div className="min-w-0 flex-1">
-            <BackgroundTrackStrip
-              tracks={backgroundTracks}
-              videoDurationSeconds={videoDurationSeconds}
-              pixelsPerSecond={PIXELS_PER_SECOND}
-              scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}
-              onScroll={bindOnScroll(BACKGROUND_STRIP_INDEX)}
-            />
-          </div>
+        <div className="relative shrink-0" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
+          <VolumeBadge
+            value={backgroundVolume}
+            onChange={onChangeBackgroundVolume}
+            onCommit={onChangeBackgroundVolume}
+            colorClassName="to-accent"
+            className="pointer-events-auto absolute left-0.5 top-1/2 z-10 flex shrink-0 -translate-y-1/2 items-center gap-0.5 rounded-sm bg-black/25 px-0.5 py-0.5 text-white hover:bg-black/50"
+          />
+          <BackgroundTrackStrip
+            tracks={backgroundTracks}
+            videoDurationSeconds={videoDurationSeconds}
+            pixelsPerSecond={PIXELS_PER_SECOND}
+            scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}
+            onScroll={bindOnScroll(BACKGROUND_STRIP_INDEX)}
+          />
+        </div>
+
+        {/* Proxy scrollbar for the whole synced group -- see this file's
+            own module comment. No visible content of its own, just a
+            spacer matching the other strips' own total width so its
+            native scrollbar's thumb size/travel matches theirs exactly. */}
+        <div
+          ref={bindRef(PROXY_SCROLLBAR_INDEX)}
+          onScroll={bindOnScroll(PROXY_SCROLLBAR_INDEX)}
+          className="shrink-0 overflow-x-auto overflow-y-hidden rounded-b-md bg-neutral-950 px-2"
+          style={{ height: PROXY_SCROLLBAR_HEIGHT_PX }}
+          title="Scroll the timeline"
+        >
+          <div style={{ width: videoDurationSeconds * PIXELS_PER_SECOND, height: 1 }} />
         </div>
       </div>
     </div>

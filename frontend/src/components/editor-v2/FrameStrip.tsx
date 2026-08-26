@@ -691,13 +691,14 @@ export function FrameStrip({
     <div
       ref={scrollContainerRef}
       onScroll={onScroll}
-      // Unlike MainAudioTrackStrip/BackgroundTrackStrip, this one keeps its
-      // native scrollbar visible -- it's the only draggable affordance for
-      // the whole synced group (see lib/useSyncedHorizontalScroll.ts), and
-      // with nothing visible a mouse user had no way to discover or reach
-      // the end of a track longer than the viewport (trackpad/wheel-only
-      // scrolling wasn't discoverable enough).
-      className="max-h-full overflow-x-auto bg-neutral-950 px-2"
+      // hide-scrollbar, same as MainAudioTrackStrip/BackgroundTrackStrip --
+      // see globals.css's own comment. Playground.tsx's own proxy scrollbar
+      // row (at the very bottom of the whole synced group, below both audio
+      // rails) is the one visible, draggable affordance now -- an earlier
+      // version put a visible scrollbar directly on this strip instead, but
+      // that landed it visually between this strip and the two audio rails
+      // instead of below the whole group.
+      className="hide-scrollbar max-h-full overflow-x-auto bg-neutral-950 px-2"
     >
       {/* w-max so this div's own width is the strip's true total length --
           the playhead and ZoomEffectsTrack below both size/position

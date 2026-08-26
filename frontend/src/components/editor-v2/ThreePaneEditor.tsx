@@ -352,7 +352,7 @@ export function ThreePaneEditor({
       (initialTimeline.selectedBackgroundAssetId ? [initialTimeline.selectedBackgroundAssetId] : [])
   );
 
-  // Flat 0..1 volume for each audio rail's own VolumeFader (Playground.tsx)
+  // Flat 0..1 volume for each audio rail's own VolumeBadge (Playground.tsx)
   // -- cosmetic/not undo-tracked, same tier as selectedBackgroundTrackId
   // above (see projects.ts's Timeline.mainAudioVolume doc comment). Falls
   // back to what was hardcoded before either of these controls existed, so

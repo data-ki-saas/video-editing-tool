@@ -20,23 +20,24 @@
  *
  * Total width is `videoDurationSeconds * pixelsPerSecond` -- the same scale
  * FrameStrip and MainAudioTrackStrip use, so all three line up and share
- * one scroll position (see lib/useSyncedHorizontalScroll.ts). A
- * MusicNoteIcon badge at the rail's own left edge (scrolls with the
- * content, so it stays at time 0 -- same convention as TrimTrack's
- * ScissorsIcon) tells it apart from MainAudioTrackStrip's own
- * MicrophoneIcon badge at a glance.
+ * one scroll position (see lib/useSyncedHorizontalScroll.ts). (Used to also
+ * carry its own MusicNoteIcon badge at the rail's left edge for telling the
+ * two rails apart at a glance -- dropped once Playground.tsx started
+ * overlaying a VolumeBadge on that same corner, which would have sat right
+ * on top of it; the two rails' own colors plus their fixed top/bottom order
+ * already tell them apart.)
  *
- * `hide-scrollbar`, same as MainAudioTrackStrip -- a native scrollbar here
- * ate into this rail's own fixed AUDIO_RAIL_HEIGHT_PX height
- * (Playground.tsx), squeezing it shorter than every other rail. FrameStrip
- * keeps its own scrollbar visible instead, so the synced group as a whole
- * still has one discoverable, draggable affordance -- dragging it (or a
- * trackpad/wheel gesture over any of the three) scrolls this rail too.
+ * `hide-scrollbar`, same as FrameStrip/MainAudioTrackStrip -- a native
+ * scrollbar here ate into this rail's own fixed AUDIO_RAIL_HEIGHT_PX height
+ * (Playground.tsx), squeezing it shorter than every other rail.
+ * Playground.tsx's own proxy scrollbar row, at the very bottom of the whole
+ * synced group (below both audio rails), is the one discoverable,
+ * draggable affordance for the group -- dragging it (or a trackpad/wheel
+ * gesture over any of the three strips) scrolls this rail too.
  */
 import { useEffect, useState } from "react";
 import { getAudioDuration } from "@/lib/video/audio";
 import { buildSequenceClipInfos, totalSequenceDuration, type SequenceClipInfo } from "@/lib/video/video_math";
-import { MusicNoteIcon } from "@/components/icons/UIIcons";
 
 export function BackgroundTrackStrip({
   tracks,
@@ -135,7 +136,6 @@ export function BackgroundTrackStrip({
       className="hide-scrollbar h-full overflow-x-auto bg-neutral-950 px-2"
     >
       <div className="relative flex h-full gap-px" style={{ width: videoDurationSeconds * pixelsPerSecond }}>
-        <MusicNoteIcon className="pointer-events-none absolute left-0.5 top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.9)]" />
         {segments.map((segment) => (
           <div
             key={segment.key}

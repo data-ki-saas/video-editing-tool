@@ -26,7 +26,7 @@
  * pointerdown that reaches the segment's own root only happens when it
  * didn't land on an edge.
  *
- * Each segment also carries its own volume badge (see VolumeBadge below) --
+ * Each segment also carries its own volume badge (see ./VolumeBadge.tsx) --
  * an icon + live percentage that opens a small popup with a standard
  * vertical VolumeFader. This used to be a second rail (VideoOverlayAudioTrack,
  * stacked above this one) with its own separately-positioned drag handle
@@ -34,10 +34,9 @@
  * defines an overlay (timing, layout, framing, markers, AND volume)
  * instead of two.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useRef } from "react";
 import { ContextMenu, useContextMenu, type ContextMenuAction } from "./ContextMenu";
-import { VolumeFader } from "./VolumeFader";
+import { VolumeBadge } from "./VolumeBadge";
 import {
   SplitScreenOrientationIcon,
   SwapIcon,
@@ -45,9 +44,6 @@ import {
   MarkerFlagIcon,
   PictureInPictureIcon,
   FullScreenIcon,
-  SpeakerMutedIcon,
-  SpeakerMixedIcon,
-  SpeakerFullIcon,
 } from "@/components/icons/UIIcons";
 import {
   isExclusiveLayout,
@@ -85,96 +81,6 @@ export const LAYOUT_GRADIENT_TO_CLASSNAMES: Record<VideoOverlayLayout["type"], s
   "picture-in-picture": "to-violet-500",
   "split-screen": "to-teal-500",
 };
-
-/** The volume badge on a VideoOverlaySegment -- the icon and its live
- * percentage are always shown together (so the level reads at a glance,
- * same reasoning as VolumeFader's own module comment), and clicking it
- * opens a small popup with a standard vertical fader to adjust it. Replaces
- * the old separate VideoOverlayAudioTrack rail entirely -- this is now the
- * only place a video overlay's own volume is set.
- *
- * The popup is portaled to `document.body` and positioned in fixed
- * viewport coordinates (same reasoning as ContextMenu's own positioning) --
- * every segment sits inside FrameStrip's horizontally (and, per the CSS
- * overflow spec, therefore also vertically) clipped scroll container, so an
- * ordinary absolutely-positioned child would just get clipped away instead
- * of floating above the timeline. */
-function VolumeBadge({
-  audioBalance,
-  onChange,
-  onCommit,
-  colorClassName,
-}: {
-  audioBalance: number;
-  onChange: (balance: number) => void;
-  onCommit: (balance: number) => void;
-  colorClassName: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const popupRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
-
-  // Runs synchronously before paint, so the popup is never shown at a
-  // wrong/unclamped position even for one frame -- same pattern as
-  // ContextMenu's own positioning effect.
-  useLayoutEffect(() => {
-    if (!open) return;
-    const buttonRect = buttonRef.current?.getBoundingClientRect();
-    const popup = popupRef.current;
-    if (!buttonRect || !popup) return;
-    const margin = 4;
-    const left = Math.max(margin, Math.min(buttonRect.left, window.innerWidth - popup.offsetWidth - margin));
-    const top = Math.max(margin, buttonRect.top - popup.offsetHeight - margin);
-    setPosition({ top, left });
-  }, [open]);
-
-  // Closes on a click anywhere outside the button or the (portaled) popup
-  // -- same reasoning as ContextMenu's own outside-click listener.
-  useEffect(() => {
-    if (!open) return;
-    function handlePointerDown(e: PointerEvent) {
-      const target = e.target as Node;
-      if (buttonRef.current?.contains(target)) return;
-      if (popupRef.current?.contains(target)) return;
-      setOpen(false);
-    }
-    window.addEventListener("pointerdown", handlePointerDown);
-    return () => window.removeEventListener("pointerdown", handlePointerDown);
-  }, [open]);
-
-  const percent = Math.round(Math.min(Math.max(audioBalance, 0), 1) * 100);
-  const SpeakerIcon = percent <= 10 ? SpeakerMutedIcon : percent >= 90 ? SpeakerFullIcon : SpeakerMixedIcon;
-
-  return (
-    <>
-      <button
-        ref={buttonRef}
-        type="button"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={() => setOpen((prev) => !prev)}
-        title={`Volume -- ${percent}%, click to adjust`}
-        className="pointer-events-auto z-10 flex shrink-0 items-center gap-0.5 rounded-sm bg-black/25 px-0.5 py-0.5 text-white hover:bg-black/50"
-      >
-        <SpeakerIcon className="h-2.5 w-2.5" />
-        <span className="text-[8px] font-medium leading-none">{percent}%</span>
-      </button>
-      {open &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <div
-            ref={popupRef}
-            onPointerDown={(e) => e.stopPropagation()}
-            style={{ position: "fixed", top: position?.top ?? -9999, left: position?.left ?? -9999, zIndex: 60 }}
-            className="rounded-md border border-border bg-surface p-2 shadow-lg"
-          >
-            <VolumeFader value={audioBalance} onChange={onChange} onCommit={onCommit} colorClassName={colorClassName} orientation="vertical" />
-          </div>,
-          document.body
-        )}
-    </>
-  );
-}
 
 function VideoOverlaySegment({
   overlay,
@@ -388,7 +294,7 @@ function VideoOverlaySegment({
         <MarkerFlagIcon className="h-2.5 w-2.5" />
       </button>
       <VolumeBadge
-        audioBalance={overlay.audioBalance}
+        value={overlay.audioBalance}
         onChange={onChangeAudioBalance}
         onCommit={onCommitAudioBalance}
         colorClassName={LAYOUT_GRADIENT_TO_CLASSNAMES[overlay.layout.type]}
