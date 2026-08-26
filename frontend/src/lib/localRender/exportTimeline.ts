@@ -118,17 +118,33 @@ export interface LocalRenderResult {
  * inherently origin-clean for canvas reads regardless of crossOrigin at
  * all, sidestepping the whole cache-interaction question. The blob URL is
  * tracked by the caller and revoked once the export finishes. */
+const IMAGE_FETCH_RETRY_ATTEMPTS = 3;
+const IMAGE_FETCH_RETRY_DELAY_MS = 500;
+
 async function loadOverlayImage(url: string): Promise<{ image: HTMLImageElement; blobUrl: string }> {
-  let response: Response;
-  try {
-    response = await fetch(url, { mode: "cors" });
-  } catch (err) {
-    // A bare "Failed to fetch" here gives no clue which asset or why --
-    // most often an expired presigned URL (R2 omits CORS headers on its
-    // own error responses, so the browser reports this as a network
-    // failure rather than exposing the real HTTP status) or a genuine
-    // connectivity/CORS issue.
-    const reason = err instanceof Error ? err.message : String(err);
+  let response: Response | undefined;
+  let lastErr: unknown;
+  // A bare "Failed to fetch" is the browser's generic name for a network
+  // request that never got a response at all -- a genuinely expired
+  // presigned URL (deterministic, retrying the same URL can't fix it) looks
+  // IDENTICAL at this layer to a one-off Wi-Fi/DNS/R2-cold-path blip (not
+  // deterministic, a retry fixes it). A couple of quick retries costs
+  // nothing when it's really an expiry (still fails, same error surfaces),
+  // but resolves the transient case that used to abort the whole render.
+  for (let attempt = 1; attempt <= IMAGE_FETCH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      response = await fetch(url, { mode: "cors" });
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < IMAGE_FETCH_RETRY_ATTEMPTS) await new Promise((r) => setTimeout(r, IMAGE_FETCH_RETRY_DELAY_MS));
+    }
+  }
+  if (!response) {
+    // R2 omits CORS headers on its own error responses, so the browser
+    // reports even a real expired-signature/CORS-policy failure as this
+    // same opaque network error rather than exposing the true HTTP status.
+    const reason = lastErr instanceof Error ? lastErr.message : String(lastErr);
     throw new Error(`Network error fetching image asset -- likely an expired URL or R2 connectivity/CORS issue (${reason})`);
   }
   if (!response.ok) throw new Error(`Could not fetch overlay image (HTTP ${response.status})`);

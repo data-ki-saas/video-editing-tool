@@ -22,26 +22,45 @@
  *
  * `hide-scrollbar`, same as the other two synced strips -- see
  * globals.css's own comment.
+ *
+ * Click-to-seek works here exactly like FrameStrip's own click handler --
+ * this rail is part of the same shared timeline, so scrubbing shouldn't
+ * only work from the video frames above it. The red playhead itself still
+ * lives solely in FrameStrip (currentTimeSeconds is shared editor state),
+ * so a click here just moves that same line rather than drawing a second
+ * one of its own.
  */
+import { useRef } from "react";
 import { MicrophoneIcon } from "@/components/icons/UIIcons";
 
 export function MainAudioTrackStrip({
   videoDurationSeconds,
   pixelsPerSecond,
+  onSeek,
   scrollContainerRef,
   onScroll,
 }: {
   videoDurationSeconds: number;
   pixelsPerSecond: number;
+  onSeek: (seconds: number) => void;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
 }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+
   if (videoDurationSeconds <= 0) {
     return (
       <div className="flex h-full items-center justify-center bg-neutral-950 px-2 text-xs text-muted">
         No audio yet
       </div>
     );
+  }
+
+  function handleClick(e: React.MouseEvent<HTMLDivElement>) {
+    if (videoDurationSeconds <= 0 || !trackRef.current) return;
+    const rect = trackRef.current.getBoundingClientRect();
+    const fraction = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+    onSeek(fraction * videoDurationSeconds);
   }
 
   // One tick per whole second, including a trailing tick for a
@@ -55,8 +74,10 @@ export function MainAudioTrackStrip({
       className="hide-scrollbar h-full overflow-x-auto bg-neutral-950 px-2"
     >
       <div
-        title="This reel's own captured sound"
-        className="relative h-full rounded-sm bg-amber-500"
+        ref={trackRef}
+        onClick={handleClick}
+        title="This reel's own captured sound -- click to seek"
+        className="relative h-full cursor-pointer rounded-sm bg-amber-500"
         style={{ width: videoDurationSeconds * pixelsPerSecond }}
       >
         <MicrophoneIcon className="pointer-events-none absolute left-0.5 top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.9)]" />

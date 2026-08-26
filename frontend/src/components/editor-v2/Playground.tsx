@@ -327,6 +327,7 @@ export function Playground({
             <MainAudioTrackStrip
               videoDurationSeconds={videoDurationSeconds}
               pixelsPerSecond={PIXELS_PER_SECOND}
+              onSeek={onSeek}
               scrollContainerRef={bindRef(MAIN_AUDIO_STRIP_INDEX)}
               onScroll={bindOnScroll(MAIN_AUDIO_STRIP_INDEX)}
             />

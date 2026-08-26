@@ -29,6 +29,7 @@ import { findClosestTimestampIndex, snapToNearest } from "@/lib/video/video_math
 import type { TimelineMarker } from "@/lib/projects";
 
 const SNAP_THRESHOLD_PX = 8;
+const DRAG_START_THRESHOLD_PX = 4;
 const DEFAULT_MARKER_LABEL = "Marker";
 
 export function MarkerTrack({
@@ -69,18 +70,29 @@ export function MarkerTrack({
   }
 
   function startDrag(e: React.PointerEvent, index: number) {
-    // Only the primary (left) button drags -- a right-click also fires
-    // pointerdown, and preventDefault()/stopPropagation() here would starve
-    // the browser's native "contextmenu" event, silently breaking the
-    // right-click-to-delete menu below.
+    // Only the primary (left) button drags -- a right-click fires
+    // pointerdown too (button 2), excluded outright so it can't fight the
+    // browser's native "contextmenu" event the delete menu below relies on.
     if (e.button !== 0) return;
-    e.preventDefault();
     e.stopPropagation();
     const track = trackRef.current;
     if (!track || totalDurationSeconds <= 0) return;
     const trackRect = track.getBoundingClientRect();
     const snapThresholdSeconds = (SNAP_THRESHOLD_PX / trackRect.width) * totalDurationSeconds;
-    setDraggingIndex(index);
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    // A touch/pen "long press" for the OS/browser's OWN context menu also
+    // reports pointerdown with button 0 (touch has no separate right
+    // button) -- committing to a drag immediately, the way a real mouse
+    // safely can (its right-click is already excluded above), swallowed
+    // that long-press gesture before the browser ever recognized it: the
+    // marker just crept a few px from finger jitter during the hold,
+    // "Delete Marker" never got a chance to open. A mouse has no long-press
+    // path to protect, so it still starts dragging on the very first move
+    // tick (threshold 0); touch/pen wait for real movement past a small
+    // threshold first, so a stationary long-press never counts as a drag.
+    const thresholdPx = e.pointerType === "mouse" ? 0 : DRAG_START_THRESHOLD_PX;
+    let hasStartedDragging = false;
 
     function computeTime(clientX: number): number {
       const fraction = Math.min(Math.max((clientX - trackRect.left) / trackRect.width, 0), 1);
@@ -89,13 +101,22 @@ export function MarkerTrack({
     }
 
     function handleMove(moveEvent: PointerEvent) {
+      if (!hasStartedDragging) {
+        const distance = Math.hypot(moveEvent.clientX - startClientX, moveEvent.clientY - startClientY);
+        if (distance < thresholdPx) return;
+        hasStartedDragging = true;
+        setDraggingIndex(index);
+      }
+      moveEvent.preventDefault();
       onMove(index, computeTime(moveEvent.clientX));
     }
     function handleUp(upEvent: PointerEvent) {
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
-      onMove(index, computeTime(upEvent.clientX));
-      setDraggingIndex(null);
+      if (hasStartedDragging) {
+        onMove(index, computeTime(upEvent.clientX));
+        setDraggingIndex(null);
+      }
     }
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", handleUp);
