@@ -10,22 +10,24 @@
  * no render pipeline of its own yet, so that's still what a future "render
  * this reel" action would hook into.
  *
- * Three fixed horizontal bands per spec: 30% action area, 50% playground,
- * 20% feedback area. This component owns the cross-band state (the full
- * asset list, the video sequence, the frame-affecting edit history,
- * playback position, crop/zoom/flip/trim/overlay/text) and the thumbnail/
- * volume extraction pipeline; each band below is otherwise a plain,
- * mostly-stateless view. It does NOT contain transformation decision logic
- * itself -- see lib/video/transformations.ts for "given the current
- * selections and an action, what's the new state," which this component
- * just calls and pushes through useEditHistory.
+ * A fixed-height TopMenuBar (render actions left, settings/sign-out right)
+ * sits above three horizontal bands that split the remaining height
+ * 3:5 -- action area, playground -- plus a one-line feedback strip pinned
+ * to the bottom. This component owns the cross-band state (the full asset
+ * list, the video sequence, the frame-affecting edit history, playback
+ * position, crop/zoom/flip/trim/overlay/text) and the thumbnail/volume
+ * extraction pipeline; each band below is otherwise a plain, mostly-
+ * stateless view. It does NOT contain transformation decision logic itself
+ * -- see lib/video/transformations.ts for "given the current selections and
+ * an action, what's the new state," which this component just calls and
+ * pushes through useEditHistory.
  *
  * Template and background-track choices are plain persisted state, not
  * part of the edit history -- they don't change what the frames look like
- * (yet), and the change list (FeedbackArea) is meant to show only actions
- * that do. Everything frame-affecting (clip rectangle, zoom/pan, flip,
- * trim, image/text overlays, and which videos are in the sequence) goes
- * through useEditHistory.
+ * (yet), and the change list (ActionArea's action-list column) is meant to
+ * show only actions that do. Everything frame-affecting (clip rectangle,
+ * zoom/pan, flip, trim, image/text overlays, and which videos are in the
+ * sequence) goes through useEditHistory.
  *
  * The video "selection" is no longer a single asset: `selections.sequenceClips`
  * is an ordered list of clips concatenated into one continuous timeline --
@@ -112,6 +114,7 @@ import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { BACKGROUND_TRACK_OPTIONS } from "@/lib/backgroundTracks";
 import { DEFAULT_MARKER_LABEL } from "./MarkerTrack";
 import { ActionArea } from "./ActionArea";
+import { TopMenuBar } from "./TopMenuBar";
 import { Playground } from "./Playground";
 import { FeedbackArea } from "./FeedbackArea";
 import type { CanvasPlayerHandle } from "./CanvasPlayer";
@@ -1361,7 +1364,20 @@ export function ThreePaneEditor({
 
   return (
     <div className="flex h-full flex-col">
-      <section style={{ flexBasis: "30%" }} className="shrink-0 overflow-hidden border-b border-border">
+      <TopMenuBar
+        canRender={effectiveSequenceEntries.length > 0}
+        isRendering={isRendering}
+        renderStatus={renderStatus}
+        onRenderClick={handleRenderClick}
+        canLocalRender={effectiveSequenceEntries.length > 0}
+        isLocalRendering={isLocalRendering}
+        isLocalRenderSupported={isLocalRenderSupported}
+        localRenderUnsupportedReason={localRenderUnsupportedReason}
+        onLocalRenderClick={handleLocalRenderClick}
+        transcriptCaption={selections.transcriptCaption}
+      />
+
+      <section className="min-h-0 flex-[3] overflow-hidden border-b border-border">
         <ActionArea
           projectId={projectId}
           assets={assets}
@@ -1423,10 +1439,18 @@ export function ThreePaneEditor({
           onFrameDimensions={setFrameDimensions}
           playerRef={canvasPlayerRef}
           onPlayerTimeUpdate={setCurrentTimeSeconds}
+          selections={{
+            ...selections,
+            zoomEffects: displayedZoomEffects,
+            overlayImages: displayedOverlayImages,
+            textOverlays: displayedTextOverlays,
+            videoOverlays: displayedVideoOverlays,
+          }}
+          videoDurationSeconds={videoDurationSeconds}
         />
       </section>
 
-      <section style={{ flexBasis: "50%" }} className="shrink-0 overflow-hidden border-b border-border">
+      <section className="min-h-0 flex-[5] overflow-hidden border-b border-border">
         <Playground
           backgroundTracks={resolvedBackgroundTracks}
           videoDurationSeconds={videoDurationSeconds}
@@ -1500,33 +1524,18 @@ export function ThreePaneEditor({
         />
       </section>
 
-      <section style={{ flexBasis: "20%" }} className="shrink-0 overflow-y-auto">
+      <section className="shrink-0 overflow-hidden">
         <FeedbackArea
           assetsError={assetsError}
           analysisError={analysisError}
           saveError={saveError}
           isAnalyzing={isAnalyzing}
           isUploading={isUploading}
-          selections={{
-            ...selections,
-            zoomEffects: displayedZoomEffects,
-            overlayImages: displayedOverlayImages,
-            textOverlays: displayedTextOverlays,
-            videoOverlays: displayedVideoOverlays,
-          }}
-          videoDurationSeconds={videoDurationSeconds}
-          canRender={effectiveSequenceEntries.length > 0}
           isRendering={isRendering}
           renderStatus={renderStatus}
           renderUrl={renderUrl}
           renderError={renderError}
           isRenderStuck={isRenderStuck}
-          onRenderClick={handleRenderClick}
-          canLocalRender={effectiveSequenceEntries.length > 0}
-          isLocalRendering={isLocalRendering}
-          isLocalRenderSupported={isLocalRenderSupported}
-          localRenderUnsupportedReason={localRenderUnsupportedReason}
-          onLocalRenderClick={handleLocalRenderClick}
         />
       </section>
 

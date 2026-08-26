@@ -17,6 +17,14 @@
  * "Add" builds the sequence -- but still sets `selectedAsset` for the
  * gallery's own highlight border and for previewing an image asset
  * directly.
+ *
+ * The action list -- a live summary of every transformation currently
+ * ACTIVE on the clip (clip rectangle, each zoom/pan transition, every
+ * flip/mirror window, etc.) -- sits immediately left of the play area, so
+ * it reads alongside the video it describes. It's not a log of every click
+ * that got here; undo/redo (Ctrl+Z/Ctrl+Y, see ThreePaneEditor.tsx) still
+ * walks that click-by-click history underneath (lib/useEditHistory.ts) --
+ * this list just shows what it currently adds up to.
  */
 import { useState } from "react";
 import { ProjectList } from "./ProjectList";
@@ -32,8 +40,10 @@ import { VideoOverlayFramingDialog } from "./VideoOverlayFramingDialog";
 import { AssetMarkersDialog } from "./AssetMarkersDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
+import { TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS } from "@/lib/video/transcriptCaptionTemplates";
+import { computeFlipSegments } from "@/lib/video/video_math";
 import type { Asset } from "@/lib/api";
-import type { TimelineMarker } from "@/lib/projects";
+import type { EditSelectionsSnapshot, TimelineMarker } from "@/lib/projects";
 import type {
   CropRect,
   OverlayFraming,
@@ -48,6 +58,80 @@ import type {
 import type { TextTemplateId } from "@/lib/video/textTemplates";
 import type { TranscriptCaptionTemplateId } from "@/lib/video/transcriptCaptionTemplates";
 import type { RefObject } from "react";
+
+function formatTimeRange(startTimeSeconds: number, endTimeSeconds: number): string {
+  const format = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const wholeSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${wholeSeconds.toString().padStart(2, "0")}`;
+  };
+  return `${format(startTimeSeconds)}–${format(endTimeSeconds)}`;
+}
+
+function ActiveTransformationsList({
+  selections,
+  videoDurationSeconds,
+}: {
+  selections: EditSelectionsSnapshot;
+  videoDurationSeconds: number;
+}) {
+  const rows: string[] = [];
+
+  if (selections.clipRectId) {
+    const option = CLIP_RECT_OPTIONS.find((candidate) => candidate.id === selections.clipRectId);
+    rows.push(`Clip rectangle: ${option?.ratioLabel ?? selections.clipRectId}`);
+  }
+  for (const effect of selections.zoomEffects) {
+    rows.push(`Zoom/pan ${formatTimeRange(effect.startTimeSeconds, effect.endTimeSeconds)}`);
+  }
+  for (const segment of computeFlipSegments(selections.flipHorizontalToggles, videoDurationSeconds)) {
+    rows.push(`Flipped ${formatTimeRange(segment.startTimeSeconds, segment.endTimeSeconds)}`);
+  }
+  for (const segment of computeFlipSegments(selections.flipVerticalToggles, videoDurationSeconds)) {
+    rows.push(`Mirrored ${formatTimeRange(segment.startTimeSeconds, segment.endTimeSeconds)}`);
+  }
+  for (const range of selections.trimRanges) {
+    rows.push(`Trimmed ${formatTimeRange(range.startTimeSeconds, range.endTimeSeconds)}`);
+  }
+  for (const overlay of selections.overlayImages) {
+    rows.push(`Image overlay ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
+  }
+  for (const overlay of selections.textOverlays) {
+    rows.push(`Text "${overlay.text}" ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
+  }
+  for (const overlay of selections.videoOverlays) {
+    const layoutLabel =
+      overlay.layout.type === "full-screen"
+        ? "Full-Screen"
+        : overlay.layout.type === "picture-in-picture"
+          ? "Picture-in-Picture"
+          : "Split Screen";
+    rows.push(`Overlay (${layoutLabel}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
+  }
+  if (selections.sequenceClips.length > 1) {
+    rows.push(`Sequence: ${selections.sequenceClips.length} clips`);
+  }
+  if (selections.transcriptCaption) {
+    const option = TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS.find(
+      (candidate) => candidate.id === selections.transcriptCaption?.templateId
+    );
+    rows.push(`Auto-captions: ${option?.name ?? selections.transcriptCaption.templateId}`);
+  }
+
+  if (rows.length === 0) {
+    return <p className="text-xs text-muted">No transformations applied yet.</p>;
+  }
+
+  return (
+    <ul className="flex h-full flex-col gap-0.5 overflow-y-auto">
+      {rows.map((row, index) => (
+        <li key={index} className="truncate rounded-md px-2 py-0.5 text-xs text-foreground">
+          {row}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 // Fallback play-area ratio before any clip rectangle has been picked yet --
 // the widest one in the catalogue (see ClipRectIcon.tsx), derived from that
@@ -121,6 +205,8 @@ export function ActionArea({
   onFrameDimensions,
   playerRef,
   onPlayerTimeUpdate,
+  selections,
+  videoDurationSeconds,
 }: {
   projectId: string;
   assets: Asset[];
@@ -196,6 +282,8 @@ export function ActionArea({
   // playhead against it -- see CanvasPlayer.tsx's seekTo/onTimeUpdate.
   playerRef: RefObject<CanvasPlayerHandle | null>;
   onPlayerTimeUpdate: (seconds: number) => void;
+  selections: EditSelectionsSnapshot;
+  videoDurationSeconds: number;
 }) {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
@@ -247,6 +335,10 @@ export function ActionArea({
           onOpenImageTemplatesDialog={onOpenImageTemplatesDialog}
           imageCount={sequenceClips.filter((clip) => clip.kind === "image").length}
         />
+      </div>
+
+      <div className="w-64 shrink-0 overflow-hidden border-r border-border pr-4">
+        <ActiveTransformationsList selections={selections} videoDurationSeconds={videoDurationSeconds} />
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-end p-2">
