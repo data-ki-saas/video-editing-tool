@@ -49,9 +49,13 @@ import {
   SpeakerMixedIcon,
   SpeakerFullIcon,
 } from "@/components/icons/UIIcons";
-import { isExclusiveLayout, snapToNearest, type VideoOverlayClip, type VideoOverlayLayout } from "@/lib/video/video_math";
-
-const MIN_DURATION_SECONDS = 0.2;
+import {
+  isExclusiveLayout,
+  snapToNearest,
+  MIN_VIDEO_OVERLAY_DURATION_SECONDS as MIN_DURATION_SECONDS,
+  type VideoOverlayClip,
+  type VideoOverlayLayout,
+} from "@/lib/video/video_math";
 
 // Pixel distance (converted to seconds via the drag's own trackRect) within
 // which a drag magnetically snaps to a nearby time reference -- a
@@ -188,7 +192,7 @@ function VideoOverlaySegment({
   onToggleOrientation,
   onToggleSides,
   onOpenFraming,
-  onOpenAssetMarkers,
+  onOpenSourceStart,
   onDelete,
   onChangeAudioBalance,
   onCommitAudioBalance,
@@ -208,7 +212,7 @@ function VideoOverlaySegment({
   onToggleOrientation: () => void;
   onToggleSides: () => void;
   onOpenFraming: () => void;
-  onOpenAssetMarkers: () => void;
+  onOpenSourceStart: () => void;
   onDelete: () => void;
   onChangeAudioBalance: (balance: number) => void;
   onCommitAudioBalance: (balance: number) => void;
@@ -235,12 +239,19 @@ function VideoOverlaySegment({
         const next = Math.min(Math.max(snapped, prevBoundSeconds, 0), endTimeSeconds - MIN_DURATION_SECONDS);
         return [next, endTimeSeconds];
       }
-      // No cap at the source's own duration -- stretching the window past
-      // one play-through loops the source to fill it (see CanvasPlayer.tsx
-      // and compileCreatomateTimeline.ts), same convention this app's
-      // background-music tracks already use. Only bounded by a neighboring
-      // exclusive overlay and the sequence's own end.
-      const maxEnd = Math.min(nextBoundSeconds, videoDurationSeconds);
+      // Bounded by whichever is smallest: a neighboring exclusive overlay's
+      // start, the sequence's own end, or how much of the source is left to
+      // play from this overlay's own sourceStartSeconds (set via the flag
+      // icon's OverlaySourceStartDialog). A drag can no longer stretch past
+      // one play-through -- the modulo-based loop rendering in
+      // CanvasPlayer.tsx/exportTimeline.ts/compileCreatomateTimeline.ts now
+      // only matters as a graceful-degradation path for legacy timelines
+      // that already overran before this clamp existed.
+      const hasKnownSourceDuration = Number.isFinite(sourceDurationSeconds) && sourceDurationSeconds > 0;
+      const sourceCapEnd = hasKnownSourceDuration
+        ? startTimeSeconds + (sourceDurationSeconds - overlay.sourceStartSeconds)
+        : Infinity;
+      const maxEnd = Math.min(nextBoundSeconds, videoDurationSeconds, sourceCapEnd);
       const clamped = Math.max(Math.min(endTimeSeconds + dxSeconds, maxEnd), startTimeSeconds + MIN_DURATION_SECONDS);
       const snapped = snapToNearest(clamped, snapPointsSeconds, snapThresholdSeconds);
       const next = Math.max(Math.min(snapped, maxEnd), startTimeSeconds + MIN_DURATION_SECONDS);
@@ -370,8 +381,8 @@ function VideoOverlaySegment({
       <button
         type="button"
         onPointerDown={(e) => e.stopPropagation()}
-        onClick={onOpenAssetMarkers}
-        title="Markers -- name moments in this clip's own footage"
+        onClick={onOpenSourceStart}
+        title="Start point -- where this overlay's own footage begins playing"
         className="pointer-events-auto z-10 shrink-0 rounded-sm bg-black/25 p-0.5 text-white hover:bg-black/50"
       >
         <MarkerFlagIcon className="h-2.5 w-2.5" />
@@ -465,7 +476,7 @@ export function VideoOverlayTrack({
   onToggleOrientation,
   onToggleSides,
   onOpenFraming,
-  onOpenAssetMarkers,
+  onOpenSourceStart,
   onDelete,
   onChangeAudioBalance,
   onCommitAudioBalance,
@@ -483,7 +494,7 @@ export function VideoOverlayTrack({
   onToggleOrientation: (overlayIndex: number) => void;
   onToggleSides: (overlayIndex: number) => void;
   onOpenFraming: (overlayIndex: number) => void;
-  onOpenAssetMarkers: (assetId: string) => void;
+  onOpenSourceStart: (overlayIndex: number) => void;
   onDelete: (overlayIndex: number) => void;
   onChangeAudioBalance: (overlayIndex: number, balance: number) => void;
   onCommitAudioBalance: (overlayIndex: number, balance: number) => void;
@@ -515,7 +526,7 @@ export function VideoOverlayTrack({
       onToggleOrientation: () => onToggleOrientation(index),
       onToggleSides: () => onToggleSides(index),
       onOpenFraming: () => onOpenFraming(index),
-      onOpenAssetMarkers: () => onOpenAssetMarkers(overlay.assetId),
+      onOpenSourceStart: () => onOpenSourceStart(index),
       onDelete: () => onDelete(index),
       onChangeAudioBalance: (balance: number) => onChangeAudioBalance(index, balance),
       onCommitAudioBalance: (balance: number) => onCommitAudioBalance(index, balance),

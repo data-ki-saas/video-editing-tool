@@ -37,13 +37,13 @@ import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
 import { ImageTemplatesDialog } from "./ImageTemplatesDialog";
 import { ClipRectangleDialog } from "./ClipRectangleDialog";
 import { VideoOverlayFramingDialog } from "./VideoOverlayFramingDialog";
-import { AssetMarkersDialog } from "./AssetMarkersDialog";
+import { OverlaySourceStartDialog } from "./OverlaySourceStartDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS } from "@/lib/video/transcriptCaptionTemplates";
 import { computeFlipSegments } from "@/lib/video/video_math";
 import type { Asset } from "@/lib/api";
-import type { EditSelectionsSnapshot, TimelineMarker } from "@/lib/projects";
+import type { EditSelectionsSnapshot } from "@/lib/projects";
 import type {
   CropRect,
   OverlayFraming,
@@ -162,13 +162,12 @@ export function ActionArea({
   framingDialogOverlay,
   onSaveVideoOverlayFraming,
   onCloseVideoOverlayFramingDialog,
-  assetMarkersDialogAsset,
-  assetMarkersDialogMarkers,
-  onAddAssetMarker,
-  onMoveAssetMarker,
-  onRenameAssetMarker,
-  onDeleteAssetMarker,
-  onCloseAssetMarkersDialog,
+  sourceStartDialogOverlay,
+  sourceStartDialogAssetUrl,
+  sourceStartDialogAssetFilename,
+  sourceStartDialogSourceDurationSeconds,
+  onSaveOverlaySourceStart,
+  onCloseOverlaySourceStartDialog,
   selectedClipRectId,
   onSelectClipRect,
   onOpenTextDialog,
@@ -230,16 +229,15 @@ export function ActionArea({
     options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
   ) => void;
   onCloseVideoOverlayFramingDialog: () => void;
-  // The asset currently open in AssetMarkersDialog, if any -- null means
-  // closed. Resolved to the full Asset (not just an id) by ThreePaneEditor,
-  // same convention as framingDialogOverlay above.
-  assetMarkersDialogAsset: Asset | null;
-  assetMarkersDialogMarkers: TimelineMarker[];
-  onAddAssetMarker: (timeSeconds: number) => void;
-  onMoveAssetMarker: (index: number, timeSeconds: number) => void;
-  onRenameAssetMarker: (index: number, label: string) => void;
-  onDeleteAssetMarker: (index: number) => void;
-  onCloseAssetMarkersDialog: () => void;
+  // The overlay currently open in OverlaySourceStartDialog, if any -- null
+  // means closed. Resolved to the full overlay (not just an index) by
+  // ThreePaneEditor, same convention as framingDialogOverlay above.
+  sourceStartDialogOverlay: VideoOverlayClip | null;
+  sourceStartDialogAssetUrl: string;
+  sourceStartDialogAssetFilename: string;
+  sourceStartDialogSourceDurationSeconds: number;
+  onSaveOverlaySourceStart: (sourceStartSeconds: number) => void;
+  onCloseOverlaySourceStartDialog: () => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
   onOpenTextDialog: () => void;
@@ -462,16 +460,14 @@ export function ActionArea({
         />
       )}
 
-      {assetMarkersDialogAsset && (
-        <AssetMarkersDialog
-          assetUrl={assetUrlById[assetMarkersDialogAsset.id] ?? ""}
-          assetFilename={assetMarkersDialogAsset.filename}
-          markers={assetMarkersDialogMarkers}
-          onAdd={onAddAssetMarker}
-          onMove={onMoveAssetMarker}
-          onRename={onRenameAssetMarker}
-          onDelete={onDeleteAssetMarker}
-          onClose={onCloseAssetMarkersDialog}
+      {sourceStartDialogOverlay && (
+        <OverlaySourceStartDialog
+          overlay={sourceStartDialogOverlay}
+          assetUrl={sourceStartDialogAssetUrl}
+          assetFilename={sourceStartDialogAssetFilename}
+          sourceDurationSeconds={sourceStartDialogSourceDurationSeconds}
+          onSave={onSaveOverlaySourceStart}
+          onClose={onCloseOverlaySourceStartDialog}
         />
       )}
     </div>

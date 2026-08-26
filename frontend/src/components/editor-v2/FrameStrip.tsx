@@ -326,7 +326,7 @@ export function FrameStrip({
   onDeleteVideoOverlay,
   onChangeOverlayAudioBalance,
   onCommitOverlayAudioBalance,
-  onOpenAssetMarkers,
+  onOpenSourceStart,
   markers,
   onAddMarker,
   onMoveMarker,
@@ -403,7 +403,7 @@ export function FrameStrip({
   onDeleteVideoOverlay: (overlayIndex: number) => void;
   onChangeOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
   onCommitOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
-  onOpenAssetMarkers: (assetId: string) => void;
+  onOpenSourceStart: (overlayIndex: number) => void;
   markers: TimelineMarker[];
   onAddMarker: (timeSeconds: number) => void;
   onMoveMarker: (index: number, timeSeconds: number) => void;
@@ -642,7 +642,7 @@ export function FrameStrip({
           onToggleOrientation={onToggleSplitScreenOrientation}
           onToggleSides={onToggleSplitScreenSides}
           onOpenFraming={onOpenVideoOverlayFraming}
-          onOpenAssetMarkers={onOpenAssetMarkers}
+          onOpenSourceStart={onOpenSourceStart}
           onDelete={onDeleteVideoOverlay}
           onChangeAudioBalance={onChangeOverlayAudioBalance}
           onCommitAudioBalance={onCommitOverlayAudioBalance}

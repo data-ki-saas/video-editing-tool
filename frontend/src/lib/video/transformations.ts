@@ -32,6 +32,7 @@ import {
   DEFAULT_TRANSCRIPT_CAPTION_RECT,
   DEFAULT_OVERLAY_FRAMING,
   DEFAULT_SPLIT_SCREEN_RATIO,
+  MIN_VIDEO_OVERLAY_DURATION_SECONDS,
   type CropRect,
   type OverlayFraming,
   type OverlayImage,
@@ -809,6 +810,40 @@ export function applyChangeOverlayAudioBalance(
   const nextOverlays = [...selections.videoOverlays];
   nextOverlays[overlayIndex] = { ...overlay, audioBalance: Math.min(Math.max(audioBalance, 0), 1) };
   return { label: "Adjusted overlay audio mix", state: { ...selections, videoOverlays: nextOverlays } };
+}
+
+/** OverlaySourceStartDialog's "Save" -- sets which offset into the source
+ * footage this overlay starts playing from. Also shrinks endTimeSeconds if
+ * the new start point no longer leaves room for the overlay's current
+ * on-timeline duration, using the same MIN_VIDEO_OVERLAY_DURATION_SECONDS
+ * floor VideoOverlayTrack.tsx's own end-edge drag clamp relies on for a
+ * later drag to still find a valid range. `sourceDurationSeconds` is
+ * Infinity when not yet probed, in which case this only clamps
+ * sourceStartSeconds to >= 0 and leaves endTimeSeconds untouched. */
+export function applyChangeVideoOverlaySourceStart(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  sourceStartSeconds: number,
+  sourceDurationSeconds: number
+): TransformationResult {
+  const overlay = selections.videoOverlays[overlayIndex];
+  if (!overlay) return { label: "Set overlay start point", state: selections };
+  const hasKnownSourceDuration = Number.isFinite(sourceDurationSeconds) && sourceDurationSeconds > 0;
+  const clampedSourceStart = hasKnownSourceDuration
+    ? Math.min(Math.max(sourceStartSeconds, 0), Math.max(sourceDurationSeconds - MIN_VIDEO_OVERLAY_DURATION_SECONDS, 0))
+    : Math.max(sourceStartSeconds, 0);
+  const remainingSourceSeconds = hasKnownSourceDuration ? sourceDurationSeconds - clampedSourceStart : Infinity;
+  const currentDurationSeconds = overlay.endTimeSeconds - overlay.startTimeSeconds;
+  const nextDurationSeconds = Number.isFinite(remainingSourceSeconds)
+    ? Math.min(currentDurationSeconds, Math.max(remainingSourceSeconds, MIN_VIDEO_OVERLAY_DURATION_SECONDS))
+    : currentDurationSeconds;
+  const nextOverlays = [...selections.videoOverlays];
+  nextOverlays[overlayIndex] = {
+    ...overlay,
+    sourceStartSeconds: clampedSourceStart,
+    endTimeSeconds: overlay.startTimeSeconds + nextDurationSeconds,
+  };
+  return { label: "Set overlay start point", state: { ...selections, videoOverlays: nextOverlays } };
 }
 
 export function applyDeleteVideoOverlay(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {

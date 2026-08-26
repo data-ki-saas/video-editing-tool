@@ -510,14 +510,22 @@ export const DEFAULT_OVERLAY_FRAMING: OverlayFraming = { panX: 0.5, panY: 0.5, z
 // along, since that's exactly what the old, un-adjustable 50/50 split was.
 export const DEFAULT_SPLIT_SCREEN_RATIO = 0.5;
 
+// Shortest a video overlay is ever allowed to be, on-timeline OR
+// source-side -- shared by VideoOverlayTrack.tsx's edge-drag clamp and
+// transformations.ts's applyChangeVideoOverlaySourceStart, so the two can
+// never disagree about how much room a source-start move must leave for a
+// later end-edge drag to still find a valid range.
+export const MIN_VIDEO_OVERLAY_DURATION_SECONDS = 0.2;
+
 export interface VideoOverlayClip {
   assetId: string;
   startTimeSeconds: number;
   endTimeSeconds: number;
   // Offset INTO the source asset's own footage where playback starts --
-  // fixed at 0 for v1 (no source-scrubbing/slip-trim UI yet). Part of the
-  // schema now, not bolted on later, so a future slip-trim feature is a
-  // pure UI addition with no breaking type change.
+  // set via VideoOverlayTrack.tsx's flag icon (OverlaySourceStartDialog),
+  // which also hard-clamps how far the overlay's own end edge can be
+  // dragged to `sourceDurationSeconds - sourceStartSeconds` (one
+  // play-through from this in-point, no further).
   sourceStartSeconds: number;
   layout: VideoOverlayLayout;
   framing: OverlayFraming;

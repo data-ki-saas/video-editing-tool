@@ -53,8 +53,8 @@ import type {
 import type { TimelineMarker } from "@/lib/projects";
 
 // Fixed height for both audio rails -- same tier as every other rail in the
-// strip (TrimTrack, VideoOverlayTrack, ...), not resizable.
-const AUDIO_RAIL_HEIGHT_PX = 32;
+// strip (TrimTrack's h-4, VideoOverlayTrack's h-5, ...), not resizable.
+const AUDIO_RAIL_HEIGHT_PX = 16;
 // Fixed width for the VolumeFader pinned to each audio rail's own left
 // edge -- wide enough to be a comfortable drag target without eating much
 // of the strip's own horizontal space.
@@ -137,7 +137,7 @@ export function Playground({
   onMoveMarker,
   onRenameMarker,
   onDeleteMarker,
-  onOpenAssetMarkers,
+  onOpenSourceStart,
 }: {
   backgroundTracks: { name: string; url: string }[];
   videoDurationSeconds: number;
@@ -215,9 +215,9 @@ export function Playground({
   onMoveMarker: (index: number, timeSeconds: number) => void;
   onRenameMarker: (index: number, label: string) => void;
   onDeleteMarker: (index: number) => void;
-  // The flag icon on a VideoOverlayTrack segment -- opens AssetMarkersDialog
-  // for that overlay's own source asset.
-  onOpenAssetMarkers: (assetId: string) => void;
+  // The flag icon on a VideoOverlayTrack segment -- opens
+  // OverlaySourceStartDialog for that specific overlay placement.
+  onOpenSourceStart: (overlayIndex: number) => void;
 }) {
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(3);
 
@@ -296,7 +296,7 @@ export function Playground({
             onMoveMarker={onMoveMarker}
             onRenameMarker={onRenameMarker}
             onDeleteMarker={onDeleteMarker}
-            onOpenAssetMarkers={onOpenAssetMarkers}
+            onOpenSourceStart={onOpenSourceStart}
             pixelsPerSecond={PIXELS_PER_SECOND}
             scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}
             onScroll={bindOnScroll(FRAME_STRIP_INDEX)}

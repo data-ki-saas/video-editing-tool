@@ -14,10 +14,12 @@
  * `snapPointsSeconds` wired to the same magnetic snap points
  * VideoOverlayTrack's drag uses, so a marker can lock onto a clip
  * boundary/effect edge/another overlay's own edge instead of needing
- * pixel-perfect placement); AssetMarkersDialog mounts a second one at a
- * specific asset's own SOURCE-footage scale, no snap points needed there
- * (nothing meaningful to snap to inside a single source clip's own
- * timeline yet).
+ * pixel-perfect placement); OverlaySourceStartDialog mounts a second one
+ * at a specific asset's own SOURCE-footage scale, no snap points needed
+ * there (nothing meaningful to snap to inside a single source clip's own
+ * timeline yet) -- always fed exactly one marker there, representing that
+ * overlay placement's own VideoOverlayClip.sourceStartSeconds rather than
+ * a freeform planning point.
  */
 import { useRef } from "react";
 import { ContextMenu, useContextMenu } from "./ContextMenu";

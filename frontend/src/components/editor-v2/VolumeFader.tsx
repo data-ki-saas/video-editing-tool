@@ -94,7 +94,7 @@ export function VolumeFader({
     // left edge (see module comment), so the pair reads together without
     // needing to look at the handle's own position.
     return (
-      <div className="relative">
+      <div className="relative h-full">
         {track}
         <span className="pointer-events-none absolute left-3.5 top-1/2 z-10 -translate-y-1/2 text-[9px] font-medium leading-none text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.9)]">
           {percent}%

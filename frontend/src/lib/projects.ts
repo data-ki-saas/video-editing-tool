@@ -107,15 +107,17 @@ export interface EditHistoryEntrySnapshot {
   at: number;
 }
 
-/** A named point on a timeline -- purely a planning/organizational aid
- * ("transition to PIP here"), never affects what a frame looks like, so
- * (like `selectedBackgroundTrackId` below) it's a plain persisted Timeline
- * field, not part of EditSelectionsSnapshot/the undo-able change list.
- * `timeSeconds` is relative to whichever timeline this marker belongs to
- * -- see Timeline.markers (the main sequence's own OUTPUT-timeline
- * seconds) vs Timeline.assetMarkers (a specific asset's own SOURCE-footage
- * seconds, independent of any particular overlay placement of that asset
- * -- see MarkerTrack.tsx/AssetMarkersDialog.tsx).
+/** A named point on the main sequence's own OUTPUT timeline -- purely a
+ * planning/organizational aid ("transition to PIP here"), never affects
+ * what a frame looks like, so (like `selectedBackgroundTrackId` below)
+ * it's a plain persisted Timeline field, not part of
+ * EditSelectionsSnapshot/the undo-able change list. See Timeline.markers
+ * and MarkerTrack.tsx.
+ *
+ * A video overlay's own "start point" is NOT one of these -- it's
+ * `VideoOverlayClip.sourceStartSeconds` (video_math.ts), a real,
+ * undo-tracked field set via OverlaySourceStartDialog, even though that
+ * dialog's UI reuses MarkerTrack to edit it.
  */
 export interface TimelineMarker {
   timeSeconds: number;
@@ -153,13 +155,6 @@ export interface Timeline {
   // Named points on the main sequence's own OUTPUT timeline -- see
   // TimelineMarker's own doc comment above.
   markers?: TimelineMarker[];
-  // Named points into a SPECIFIC ASSET's own source footage (offset from
-  // that clip's own start, not any particular overlay placement's output
-  // position) -- keyed by assetId. An asset only ever belongs to this one
-  // project (see supabase/migrations' assets.project_id), so this doesn't
-  // need its own backend table -- storing it here, keyed by assetId, IS
-  // already project-scoped-per-asset with no extra plumbing.
-  assetMarkers?: Record<string, TimelineMarker[]>;
   // Flat 0..1 volume multipliers for the main sequence's own audio and the
   // background music track -- set from the volume button pinned to each
   // rail's own left edge (see VolumeFader.tsx). Plain persisted settings,

@@ -121,7 +121,7 @@ export function FramingIcon(props: IconProps) {
 }
 
 // A small flag on a pole -- opens a VideoOverlayTrack segment's own
-// AssetMarkersDialog, next to its FramingIcon button.
+// OverlaySourceStartDialog, next to its FramingIcon button.
 export function MarkerFlagIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
