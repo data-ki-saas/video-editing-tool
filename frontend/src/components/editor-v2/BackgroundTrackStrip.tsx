@@ -26,10 +26,11 @@
  * ScissorsIcon) tells it apart from MainAudioTrackStrip's own
  * MicrophoneIcon badge at a glance.
  *
- * NOT `hide-scrollbar` -- this is the bottom-most of the three synced
- * strips (see Playground.tsx), so its native scrollbar is left visible as
- * the one scrollbar for the whole Playground stack (see globals.css's own
- * comment).
+ * `hide-scrollbar`, same as the other two synced strips -- a native
+ * scrollbar here ate into this rail's own fixed AUDIO_RAIL_HEIGHT_PX
+ * height (Playground.tsx), squeezing it shorter than every other rail.
+ * All three stay horizontally scrollable via trackpad/wheel regardless;
+ * none of them need their own visible scrollbar chrome.
  */
 import { useEffect, useState } from "react";
 import { getAudioDuration } from "@/lib/video/audio";
@@ -130,7 +131,7 @@ export function BackgroundTrackStrip({
     <div
       ref={scrollContainerRef}
       onScroll={onScroll}
-      className="h-full overflow-x-auto bg-neutral-950 px-2"
+      className="hide-scrollbar h-full overflow-x-auto bg-neutral-950 px-2"
     >
       <div className="relative flex h-full gap-px" style={{ width: videoDurationSeconds * pixelsPerSecond }}>
         <MusicNoteIcon className="pointer-events-none absolute left-0.5 top-1/2 z-10 h-2.5 w-2.5 -translate-y-1/2 text-white drop-shadow-[0_0_1px_rgba(0,0,0,0.9)]" />
