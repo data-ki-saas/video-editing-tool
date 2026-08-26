@@ -55,10 +55,13 @@
  * ZoomEffectsTrack (every transition's own indicator), FlipTrack (one per
  * flip axis, when either has any toggles), OverlayTrack (one row per image
  * overlay), and TextOverlayTrack (one row per caption) render BELOW the
- * thumbnails; TrimTrack (the click-to-cut gray/red line) renders ABOVE
- * them instead, per its own spec. All of them live in the SAME scrollable
- * track as the thumbnails, so everything shares one scroll position and
- * one pixel-accurate timeline width with no manual measurement needed.
+ * thumbnails; MarkerTrack, CutawayTrack (the Cutaways rail -- one segment
+ * per image cutaway, see its own comment), and TrimTrack (the Cut and Trim
+ * rail's click-to-cut gray/red line) render ABOVE them instead, in that
+ * order top to bottom, per their own specs. All of them live in the SAME
+ * scrollable track as the thumbnails, so everything shares one scroll
+ * position and one pixel-accurate timeline width with no manual
+ * measurement needed.
  * Tiles inside a trimmed range are dimmed (see FrameTile's isTrimmed) --
  * the cut is real (CanvasPlayer's skipTrimmedRanges actually skips it
  * during playback), this is just showing where.
@@ -81,6 +84,7 @@ import { OverlayTrack } from "./OverlayTrack";
 import { TextOverlayTrack } from "./TextOverlayTrack";
 import { VideoOverlayTrack } from "./VideoOverlayTrack";
 import { MarkerTrack } from "./MarkerTrack";
+import { CutawayTrack, type CutawaySegment } from "./CutawayTrack";
 import type { TimelineMarker } from "@/lib/projects";
 import {
   computeEffectiveCropRect,
@@ -273,6 +277,7 @@ export function FrameStrip({
   clipBoundarySeconds,
   sequenceEntries,
   onResizeImageClip,
+  onEditCutaway,
   isLoading,
   durationSeconds,
   currentTimeSeconds,
@@ -346,6 +351,9 @@ export function FrameStrip({
   // the plain read-only divider it always was.
   sequenceEntries: SequenceEntry[];
   onResizeImageClip: (entryId: string, newDurationSeconds: number, clipStartSeconds: number) => void;
+  // The Cutaways rail's own click -- opens ImageTemplatesDialog pre-filled
+  // to edit that cutaway in place, rather than appending a fresh one.
+  onEditCutaway: (segment: CutawaySegment) => void;
   isLoading: boolean;
   durationSeconds: number;
   currentTimeSeconds: number;
@@ -565,6 +573,19 @@ export function FrameStrip({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, videoOverlays]);
 
+  // One segment per image cutaway, for the Cutaways rail (CutawayTrack) --
+  // start time comes from the same clipBoundarySeconds[index - 1] a
+  // preceding boundary already resolves to in handleBoundaryPointerUp
+  // above, so this rail's segments always line up with that clip's own
+  // boundary-drag handle.
+  const cutawaySegments = useMemo<CutawaySegment[]>(() => {
+    return sequenceEntries.flatMap((entry, index) => {
+      if (entry.kind !== "image") return [];
+      const startTimeSeconds = index === 0 ? 0 : clipBoundarySeconds[index - 1];
+      return [{ entryId: entry.id, assetId: entry.assetId, templateId: entry.templateId, startTimeSeconds, durationSeconds: entry.durationSeconds }];
+    });
+  }, [sequenceEntries, clipBoundarySeconds]);
+
   // The tile whose OWN timestamp is closest to the playhead -- NOT an
   // even-spacing index formula (see this file's module comment on why
   // that breaks for a concatenated sequence). Still only this one tile's
@@ -617,6 +638,12 @@ export function FrameStrip({
           onMove={onMoveMarker}
           onRename={onRenameMarker}
           onDelete={onDeleteMarker}
+        />
+
+        <CutawayTrack
+          segments={cutawaySegments}
+          videoDurationSeconds={durationSeconds}
+          onEdit={onEditCutaway}
         />
 
         <TrimTrack

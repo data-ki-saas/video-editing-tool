@@ -9,10 +9,10 @@
  * applies a choice the instant it's clicked rather than needing a save
  * step, so once something's selected this tab also grows a small preview
  * swatch of it at the bottom. The other three tabs pin their own
- * at-a-glance state to the same bottom spot: Text/Image show a count badge
- * once they have at least one item (CountBadge), Auto-Caption shows a
- * filled On/Off pill instead since it's a single whole-video setting, not a
- * count (AutoCaptionStatus).
+ * at-a-glance state to the same bottom spot: Text/Image Cutaway show a
+ * count badge once they have at least one item (CountBadge), Auto-Caption
+ * shows a filled On/Off pill instead since it's a single whole-video
+ * setting, not a count (AutoCaptionStatus).
  *
  * There is no separate "Transform" or "Arrange" menu (Zoom In/Out, Pan &
  * Tilt, Flip, Mirror, Delete, Trim, Drag) -- the clip rectangle is the
@@ -23,7 +23,10 @@
  * handleCropRectCommit -- the resulting transition only ever applies
  * within its own range on ZoomEffectsTrack below the frames, not past it),
  * Flip/Mirror toggle from CropRectOverlay's own edge handles, and Trim is
- * its own click-to-cut gray/red line above the frames (TrimTrack.tsx).
+ * its own click-to-cut gray/red line above the frames -- the Cut and Trim
+ * rail (TrimTrack.tsx). An Image Cutaway (this file's "Image Cutaway" tab)
+ * gets its own rail too, the Cutaways rail (CutawayTrack.tsx), stacked
+ * directly above the Cut and Trim rail.
  */
 import { CropToolIcon } from "@/components/icons/UIIcons";
 import { CLIP_RECT_OPTIONS, ClipRectIcon } from "./ClipRectIcon";
@@ -158,12 +161,12 @@ export function UserActions({
       <button
         type="button"
         onClick={onOpenImageTemplatesDialog}
-        title="Animate a photo"
+        title="Add an Image Cutaway -- animate a photo"
         className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
       >
         <ImageMotionIcon className="h-4 w-4" />
         <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-          Image
+          Image Cutaway
         </span>
         <CountBadge count={imageCount} />
       </button>

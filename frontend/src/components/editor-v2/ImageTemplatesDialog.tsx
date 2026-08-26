@@ -1,19 +1,29 @@
 "use client";
 
 /**
- * "Image" toolbar tool -- turns one of this project's photos into its own
- * full-screen clip in the base sequence, animated via a Ken Burns template
- * (lib/video/imageTemplates.ts). Three STACKED horizontal panels (not the
- * left/right split TranscriptCaptionDialog/TextOverlayDialog use), per
- * spec: pick the photo, pick the motion, tune the preview/duration, Add.
+ * "Image Cutaway" toolbar tool -- turns one of this project's photos into
+ * its own full-screen clip in the base sequence, animated via a Ken Burns
+ * template (lib/video/imageTemplates.ts). Three STACKED horizontal panels
+ * (not the left/right split TranscriptCaptionDialog/TextOverlayDialog
+ * use), per spec: pick the photo, pick the motion, tune the
+ * preview/duration, Add.
+ *
+ * Reopened in EDIT mode (via the `editing` prop) by clicking an existing
+ * segment on the Cutaways rail (CutawayTrack.tsx) -- same three panels,
+ * pre-populated from that cutaway's current photo/template/duration, with
+ * "Add to video" relabeled "Save changes". The caller (ThreePaneEditor)
+ * decides whether `onAdd` should append a new clip or edit the existing
+ * one in place; this dialog itself doesn't know the difference beyond the
+ * copy change.
  *
  * The preview here is intentionally a standalone canvas, not CanvasPlayer:
- * there's no real sequence position for this clip yet (it doesn't exist
+ * there's no real sequence position for a NEW clip yet (it doesn't exist
  * until "Add to video" is pressed), so it just loops the chosen template's
  * ZoomEffect over the chosen image directly, using the exact same
  * buildKenBurnsEffect + computeEffectiveCropRect the real clip will use
- * once added (transformations.ts's applyAddImageSequenceClip) -- what's
- * previewed here can't drift from what actually gets added.
+ * once added/saved (transformations.ts's applyAddImageSequenceClip /
+ * applyEditImageSequenceClip) -- what's previewed here can't drift from
+ * what actually gets committed.
  */
 import { useEffect, useRef, useState } from "react";
 import type { Asset } from "@/lib/api";
@@ -83,6 +93,7 @@ function TemplateIcon({ id, className }: { id: ImageTemplateId; className?: stri
 export function ImageTemplatesDialog({
   assets,
   baseCropRect,
+  editing,
   onAdd,
   onClose,
 }: {
@@ -92,13 +103,18 @@ export function ImageTemplatesDialog({
    * every video zoom/pan effect already does. Falls back to the full
    * frame when no clip rectangle has been picked yet. */
   baseCropRect?: CropRect | null;
+  /** Non-null when this dialog was reopened from the Cutaways rail to edit
+   * an existing cutaway rather than add a fresh one -- pre-populates the
+   * three panels from its current photo/template/duration and relabels
+   * the primary button. */
+  editing?: { assetId: string; templateId: ImageTemplateId; durationSeconds: number } | null;
   onAdd: (assetId: string, durationSeconds: number, templateId: ImageTemplateId) => void;
   onClose: () => void;
 }) {
   const imageAssets = assets.filter((asset) => asset.kind === "image");
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(imageAssets[0]?.id ?? null);
-  const [templateId, setTemplateId] = useState<ImageTemplateId>(IMAGE_TEMPLATE_OPTIONS[0].id);
-  const [durationSeconds, setDurationSeconds] = useState(DEFAULT_IMAGE_CLIP_DURATION_SECONDS);
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(editing?.assetId ?? imageAssets[0]?.id ?? null);
+  const [templateId, setTemplateId] = useState<ImageTemplateId>(editing?.templateId ?? IMAGE_TEMPLATE_OPTIONS[0].id);
+  const [durationSeconds, setDurationSeconds] = useState(editing?.durationSeconds ?? DEFAULT_IMAGE_CLIP_DURATION_SECONDS);
 
   const selectedAsset = imageAssets.find((asset) => asset.id === selectedAssetId) ?? null;
   const base = baseCropRect ?? FULL_FRAME_CROP_RECT;
@@ -195,7 +211,7 @@ export function ImageTemplatesDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Image Templates"
+      aria-label="Image Cutaway"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={onClose}
     >
@@ -204,7 +220,7 @@ export function ImageTemplatesDialog({
         className="flex h-[85vh] w-full max-w-3xl flex-col rounded-lg bg-surface p-4 shadow-lg"
       >
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Image Templates</h2>
+          <h2 className="text-sm font-semibold">{editing ? "Edit Image Cutaway" : "Image Cutaway"}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-foreground">
             ✕
           </button>
@@ -321,7 +337,7 @@ export function ImageTemplatesDialog({
               onClick={() => selectedAsset && onAdd(selectedAsset.id, durationSeconds, templateId)}
               className="flex-1 rounded-md bg-accent py-1.5 text-sm font-medium text-accent-foreground disabled:opacity-50"
             >
-              Add to video
+              {editing ? "Save changes" : "Add cutaway"}
             </button>
           </div>
         </div>

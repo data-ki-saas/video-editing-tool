@@ -444,6 +444,65 @@ export function applyResizeImageClip(
   };
 }
 
+/** Changes an existing image cutaway's photo/animation/duration in place --
+ * from ImageTemplatesDialog's "Save changes", reopened by clicking a
+ * segment on the Cutaways rail (CutawayTrack.tsx). Reuses
+ * applyResizeImageClip's own reflow logic for any duration change
+ * (shifting every later timed thing by the resulting delta), then always
+ * rebuilds the clip's own ZoomEffect from scratch via buildKenBurnsEffect
+ * rather than end-shifting the old one like applyResizeImageClip does --
+ * unlike a plain resize, the photo and/or template can change too, so the
+ * old effect's start/target rects can't just be reused. */
+export function applyEditImageSequenceClip(
+  selections: EditSelectionsSnapshot,
+  entryId: string,
+  assetId: string,
+  durationSeconds: number,
+  templateId: string,
+  clipStartSeconds: number
+): TransformationResult {
+  const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
+  const entry = selections.sequenceClips[entryIndex];
+  if (!entry || entry.kind !== "image") return { label: "Edited image cutaway", state: selections };
+
+  const clampedDuration = Math.min(
+    MAX_IMAGE_CLIP_DURATION_SECONDS,
+    Math.max(MIN_IMAGE_CLIP_DURATION_SECONDS, durationSeconds)
+  );
+  const delta = clampedDuration - entry.durationSeconds;
+
+  const shiftEffectRange = <T extends { startTimeSeconds: number; endTimeSeconds: number }>(item: T): T =>
+    item.startTimeSeconds >= clipStartSeconds + entry.durationSeconds
+      ? { ...item, startTimeSeconds: item.startTimeSeconds + delta, endTimeSeconds: item.endTimeSeconds + delta }
+      : item;
+
+  const nextEntries = [...selections.sequenceClips];
+  nextEntries[entryIndex] = { ...entry, assetId, durationSeconds: clampedDuration, templateId };
+
+  const base = selections.cropRect ?? FULL_FRAME_CROP_RECT;
+  const newZoomEffect = buildKenBurnsEffect(templateId, base, clipStartSeconds, clampedDuration);
+
+  const nextZoomEffects = selections.zoomEffects.map((effect) =>
+    effect.startTimeSeconds === clipStartSeconds && effect.endTimeSeconds === clipStartSeconds + entry.durationSeconds
+      ? newZoomEffect
+      : shiftEffectRange(effect)
+  );
+
+  return {
+    label: "Edited image cutaway",
+    state: {
+      ...selections,
+      sequenceClips: nextEntries,
+      zoomEffects: nextZoomEffects,
+      overlayImages: selections.overlayImages.map(shiftEffectRange),
+      textOverlays: selections.textOverlays.map(shiftEffectRange),
+      trimRanges: selections.trimRanges.map(shiftEffectRange),
+      flipHorizontalToggles: selections.flipHorizontalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
+      flipVerticalToggles: selections.flipVerticalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
+    },
+  };
+}
+
 // Default duration for a freshly-added text overlay. Unlike an image
 // overlay's "always the first frame," a caption is added at whatever
 // moment the playhead is on when the dialog opens -- captions are placed

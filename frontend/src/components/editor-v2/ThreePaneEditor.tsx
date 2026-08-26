@@ -79,6 +79,7 @@ import {
   applyDeleteOverlayImage,
   applyAddSequenceClip,
   applyAddImageSequenceClip,
+  applyEditImageSequenceClip,
   applyResizeImageClip,
   applyAddTextOverlay,
   applyEditTextOverlay,
@@ -117,6 +118,7 @@ import { DEFAULT_MARKER_LABEL } from "./MarkerTrack";
 import { ActionArea } from "./ActionArea";
 import { TopMenuBar } from "./TopMenuBar";
 import { Playground } from "./Playground";
+import type { CutawaySegment } from "./CutawayTrack";
 import { FeedbackArea } from "./FeedbackArea";
 import type { CanvasPlayerHandle } from "./CanvasPlayer";
 import { RenderComingSoonPopup } from "./RenderComingSoonPopup";
@@ -279,6 +281,10 @@ export function ThreePaneEditor({
   // video_math.ts's TranscriptCaption).
   const [isTranscriptDialogOpen, setIsTranscriptDialogOpen] = useState(false);
   const [isImageTemplatesDialogOpen, setIsImageTemplatesDialogOpen] = useState(false);
+  // Non-null while ImageTemplatesDialog is open in EDIT mode, reopened by
+  // clicking a segment on the Cutaways rail (CutawayTrack) rather than the
+  // "Image Cutaway" tab -- see handleEditCutaway/handleAddImageSequenceClip.
+  const [editingCutaway, setEditingCutaway] = useState<CutawaySegment | null>(null);
 
   // VideoOverlayFramingDialog's open/edit-target state -- opened from the
   // crosshair button on a VideoOverlayTrack segment, per-overlay index
@@ -1027,26 +1033,43 @@ export function ThreePaneEditor({
     setSourceStartDialogOverlayIndex(null);
   }
 
-  // "Image" button in UserActions -- opens ImageTemplatesDialog fresh.
+  // "Image Cutaway" button in UserActions -- opens ImageTemplatesDialog
+  // fresh, to add a new cutaway (editingCutaway is already null here,
+  // never set except by handleEditCutaway below).
   function handleOpenImageTemplatesDialog() {
     setIsImageTemplatesDialogOpen(true);
   }
 
   function handleCloseImageTemplatesDialog() {
     setIsImageTemplatesDialogOpen(false);
+    setEditingCutaway(null);
   }
 
-  // ImageTemplatesDialog's "Add to video" -- appends a new image clip,
-  // animated via the chosen Ken Burns template, to the end of the
-  // sequence. The clip and its auto-generated ZoomEffect land in ONE
-  // history entry (applyAddImageSequenceClip), so undo removes both
-  // together. `videoDurationSeconds` (already tracked from the extraction
-  // effect above) is the sequence's current total length, i.e. exactly
-  // where this new clip starts.
+  // The Cutaways rail's own click (CutawayTrack's onEdit) -- reopens
+  // ImageTemplatesDialog pre-filled with that cutaway's current
+  // photo/template/duration, so handleAddImageSequenceClip below edits it
+  // in place instead of appending a duplicate.
+  function handleEditCutaway(segment: CutawaySegment) {
+    setEditingCutaway(segment);
+    setIsImageTemplatesDialogOpen(true);
+  }
+
+  // ImageTemplatesDialog's "Add cutaway" / "Save changes" -- appends a new
+  // image clip (animated via the chosen Ken Burns template) to the end of
+  // the sequence, or, when editingCutaway is set, edits that existing
+  // cutaway's photo/template/duration in place instead. Either way the
+  // clip and its ZoomEffect land in ONE history entry
+  // (applyAddImageSequenceClip / applyEditImageSequenceClip), so undo
+  // reverts both together. `videoDurationSeconds` (already tracked from
+  // the extraction effect above) is the sequence's current total length,
+  // i.e. exactly where a freshly-added clip starts.
   function handleAddImageSequenceClip(assetId: string, durationSeconds: number, templateId: string) {
-    const { label, state } = applyAddImageSequenceClip(selections, assetId, durationSeconds, templateId, videoDurationSeconds);
+    const { label, state } = editingCutaway
+      ? applyEditImageSequenceClip(selections, editingCutaway.entryId, assetId, durationSeconds, templateId, editingCutaway.startTimeSeconds)
+      : applyAddImageSequenceClip(selections, assetId, durationSeconds, templateId, videoDurationSeconds);
     pushChange(label, state);
     setIsImageTemplatesDialogOpen(false);
+    setEditingCutaway(null);
   }
 
   // FrameStrip's post-add drag handle on an image clip's boundary --
@@ -1408,6 +1431,7 @@ export function ThreePaneEditor({
           onCloseTranscriptDialog={handleCloseTranscriptDialog}
           onOpenImageTemplatesDialog={handleOpenImageTemplatesDialog}
           isImageTemplatesDialogOpen={isImageTemplatesDialogOpen}
+          editingCutaway={editingCutaway}
           onAddImageSequenceClip={handleAddImageSequenceClip}
           onCloseImageTemplatesDialog={handleCloseImageTemplatesDialog}
           previewFrameUrl={previewFrameUrl}
@@ -1449,6 +1473,7 @@ export function ThreePaneEditor({
           clipBoundarySeconds={clipBoundarySeconds}
           sequenceEntries={effectiveSequenceEntries}
           onResizeImageClip={handleResizeImageClip}
+          onEditCutaway={handleEditCutaway}
           mainAudioVolume={mainAudioVolume}
           onChangeMainAudioVolume={setMainAudioVolume}
           backgroundVolume={backgroundVolume}

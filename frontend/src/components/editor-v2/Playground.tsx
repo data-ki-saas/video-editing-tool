@@ -2,8 +2,11 @@
 
 /**
  * The middle band of the three-pane editor, top to bottom: the video
- * sequence "unfolded" into a per-second thumbnail strip (sized to its own
- * natural content height -- tile height from FrameStrip's
+ * sequence "unfolded" into a per-second thumbnail strip -- itself preceded
+ * by its own stack of rails (MarkerTrack, the Cutaways rail, the Cut and
+ * Trim rail; see FrameStrip's own module comment for the full stacking
+ * order) -- sized to its own natural content height -- tile height from
+ * FrameStrip's
  * frameAspectRatio, not stretched/centered to fill whatever space is left,
  * which just produced blank padding when the video's aspect ratio didn't
  * happen to match the available height), the main sequence's own audio
@@ -39,6 +42,7 @@ import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip } from "./FrameStrip";
 import { MainAudioTrackStrip } from "./MainAudioTrackStrip";
 import { VolumeFader } from "./VolumeFader";
+import type { CutawaySegment } from "./CutawayTrack";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
 import type {
   CropRect,
@@ -76,6 +80,7 @@ export function Playground({
   clipBoundarySeconds,
   sequenceEntries,
   onResizeImageClip,
+  onEditCutaway,
   mainAudioVolume,
   onChangeMainAudioVolume,
   backgroundVolume,
@@ -150,6 +155,8 @@ export function Playground({
   // its own drag handle) vs. an ordinary video seam (a plain divider).
   sequenceEntries: SequenceEntry[];
   onResizeImageClip: (entryId: string, newDurationSeconds: number, clipStartSeconds: number) => void;
+  // The Cutaways rail's own click -- see FrameStrip's own prop comment.
+  onEditCutaway: (segment: CutawaySegment) => void;
   mainAudioVolume: number;
   onChangeMainAudioVolume: (level: number) => void;
   backgroundVolume: number;
@@ -238,6 +245,7 @@ export function Playground({
             clipBoundarySeconds={clipBoundarySeconds}
             sequenceEntries={sequenceEntries}
             onResizeImageClip={onResizeImageClip}
+            onEditCutaway={onEditCutaway}
             isLoading={isAnalyzing}
             durationSeconds={videoDurationSeconds}
             currentTimeSeconds={currentTimeSeconds}

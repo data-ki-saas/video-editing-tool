@@ -35,6 +35,7 @@ import { UserActions } from "./UserActions";
 import { TextOverlayDialog } from "./TextOverlayDialog";
 import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
 import { ImageTemplatesDialog } from "./ImageTemplatesDialog";
+import type { CutawaySegment } from "./CutawayTrack";
 import { ClipRectangleDialog } from "./ClipRectangleDialog";
 import { VideoOverlayFramingDialog } from "./VideoOverlayFramingDialog";
 import { OverlaySourceStartDialog } from "./OverlaySourceStartDialog";
@@ -57,6 +58,7 @@ import type {
 } from "@/lib/video/video_math";
 import type { TextTemplateId } from "@/lib/video/textTemplates";
 import type { TranscriptCaptionTemplateId } from "@/lib/video/transcriptCaptionTemplates";
+import type { ImageTemplateId } from "@/lib/video/imageTemplates";
 import type { RefObject } from "react";
 
 function formatTimeRange(startTimeSeconds: number, endTimeSeconds: number): string {
@@ -183,6 +185,7 @@ export function ActionArea({
   onCloseTranscriptDialog,
   onOpenImageTemplatesDialog,
   isImageTemplatesDialogOpen,
+  editingCutaway,
   onAddImageSequenceClip,
   onCloseImageTemplatesDialog,
   previewFrameUrl,
@@ -253,6 +256,9 @@ export function ActionArea({
   onCloseTranscriptDialog: () => void;
   onOpenImageTemplatesDialog: () => void;
   isImageTemplatesDialogOpen: boolean;
+  // Non-null when ImageTemplatesDialog was reopened from the Cutaways rail
+  // to edit an existing cutaway -- see that dialog's own `editing` prop.
+  editingCutaway: CutawaySegment | null;
   onAddImageSequenceClip: (assetId: string, durationSeconds: number, templateId: string) => void;
   onCloseImageTemplatesDialog: () => void;
   // The actual current frame (closest thumbnail to the playhead) and its
@@ -434,6 +440,13 @@ export function ActionArea({
         <ImageTemplatesDialog
           assets={assets}
           baseCropRect={baseCropRect}
+          editing={
+            editingCutaway && {
+              assetId: editingCutaway.assetId,
+              templateId: editingCutaway.templateId as ImageTemplateId,
+              durationSeconds: editingCutaway.durationSeconds,
+            }
+          }
           onAdd={onAddImageSequenceClip}
           onClose={onCloseImageTemplatesDialog}
         />
