@@ -102,7 +102,14 @@ export function ContextMenu({ state, onClose }: { state: ContextMenuState | null
         <button
           key={action.label}
           type="button"
-          onClick={() => {
+          onClick={(e) => {
+            // Stops here -- this menu isn't always portaled out to
+            // document.body (MarkerTrack renders it as a plain sibling div,
+            // inside the SAME container whose own onClick drops a new
+            // marker on empty-space clicks), so an unstopped click bubbles
+            // into that container right after this one runs and immediately
+            // undoes/masks whatever action.onSelect() just did.
+            e.stopPropagation();
             action.onSelect();
             onClose();
           }}
