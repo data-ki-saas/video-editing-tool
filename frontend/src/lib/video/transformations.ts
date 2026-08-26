@@ -503,6 +503,52 @@ export function applyEditImageSequenceClip(
   };
 }
 
+/** Removes an image cutaway entirely -- from CutawayTrack's own right-click
+ * menu, or ImageTemplatesDialog's "Remove Cutaway" (only shown in edit
+ * mode). Unlike a plain video clip (which can only ever be shortened via a
+ * trim range, never spliced out of `sequenceClips`), an image cutaway is
+ * its own standalone SequenceEntry, so it can be dropped from the array
+ * outright. Reuses applyEditImageSequenceClip's own reflow logic (shifting
+ * everything from this clip's end onward) with delta = -durationSeconds,
+ * since removing it closes the gap exactly the way shortening it to zero
+ * would. */
+export function applyDeleteImageSequenceClip(
+  selections: EditSelectionsSnapshot,
+  entryId: string,
+  clipStartSeconds: number
+): TransformationResult {
+  const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
+  const entry = selections.sequenceClips[entryIndex];
+  if (!entry || entry.kind !== "image") return { label: "Removed cutaway", state: selections };
+
+  const clipEndSeconds = clipStartSeconds + entry.durationSeconds;
+  const delta = -entry.durationSeconds;
+
+  const shiftEffectRange = <T extends { startTimeSeconds: number; endTimeSeconds: number }>(item: T): T =>
+    item.startTimeSeconds >= clipEndSeconds
+      ? { ...item, startTimeSeconds: item.startTimeSeconds + delta, endTimeSeconds: item.endTimeSeconds + delta }
+      : item;
+
+  const nextEntries = selections.sequenceClips.filter((_, index) => index !== entryIndex);
+  const nextZoomEffects = selections.zoomEffects
+    .filter((effect) => !(effect.startTimeSeconds === clipStartSeconds && effect.endTimeSeconds === clipEndSeconds))
+    .map(shiftEffectRange);
+
+  return {
+    label: "Removed cutaway",
+    state: {
+      ...selections,
+      sequenceClips: nextEntries,
+      zoomEffects: nextZoomEffects,
+      overlayImages: selections.overlayImages.map(shiftEffectRange),
+      textOverlays: selections.textOverlays.map(shiftEffectRange),
+      trimRanges: selections.trimRanges.map(shiftEffectRange),
+      flipHorizontalToggles: selections.flipHorizontalToggles.map((t) => (t >= clipEndSeconds ? t + delta : t)),
+      flipVerticalToggles: selections.flipVerticalToggles.map((t) => (t >= clipEndSeconds ? t + delta : t)),
+    },
+  };
+}
+
 // Default duration for a freshly-added text overlay. Unlike an image
 // overlay's "always the first frame," a caption is added at whatever
 // moment the playhead is on when the dialog opens -- captions are placed

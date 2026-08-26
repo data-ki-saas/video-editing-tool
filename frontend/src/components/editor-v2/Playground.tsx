@@ -81,6 +81,7 @@ export function Playground({
   sequenceEntries,
   onResizeImageClip,
   onEditCutaway,
+  onDeleteCutaway,
   mainAudioVolume,
   onChangeMainAudioVolume,
   backgroundVolume,
@@ -157,6 +158,7 @@ export function Playground({
   onResizeImageClip: (entryId: string, newDurationSeconds: number, clipStartSeconds: number) => void;
   // The Cutaways rail's own click -- see FrameStrip's own prop comment.
   onEditCutaway: (segment: CutawaySegment) => void;
+  onDeleteCutaway: (segment: CutawaySegment) => void;
   mainAudioVolume: number;
   onChangeMainAudioVolume: (level: number) => void;
   backgroundVolume: number;
@@ -246,6 +248,7 @@ export function Playground({
             sequenceEntries={sequenceEntries}
             onResizeImageClip={onResizeImageClip}
             onEditCutaway={onEditCutaway}
+            onDeleteCutaway={onDeleteCutaway}
             isLoading={isAnalyzing}
             durationSeconds={videoDurationSeconds}
             currentTimeSeconds={currentTimeSeconds}

@@ -80,6 +80,7 @@ import {
   applyAddSequenceClip,
   applyAddImageSequenceClip,
   applyEditImageSequenceClip,
+  applyDeleteImageSequenceClip,
   applyResizeImageClip,
   applyAddTextOverlay,
   applyEditTextOverlay,
@@ -976,6 +977,13 @@ export function ThreePaneEditor({
     setFramingDialogOverlayIndex(null);
   }
 
+  // VideoOverlayFramingDialog's "Remove Overlay" -- same delete path as the
+  // track's own right-click menu, just reachable from inside the dialog too.
+  function handleDeleteFramingDialogOverlay() {
+    if (framingDialogOverlayIndex === null) return;
+    handleDeleteVideoOverlay(framingDialogOverlayIndex);
+  }
+
   // VideoOverlayFramingDialog's "Save" -- one commit, no live/commit split
   // (see applyChangeOverlayFraming's own comment). `baseFraming`/`ratio`
   // are only ever passed for a Split-Screen overlay, whose popup shows both
@@ -1070,6 +1078,19 @@ export function ThreePaneEditor({
     pushChange(label, state);
     setIsImageTemplatesDialogOpen(false);
     setEditingCutaway(null);
+  }
+
+  // "Remove Cutaway" -- from CutawayTrack's own right-click menu, or
+  // ImageTemplatesDialog's delete button when reopened in edit mode.
+  // Splices the clip out of the sequence (applyDeleteImageSequenceClip),
+  // closing the dialog first if it was the one being edited.
+  function handleDeleteCutaway(segment: CutawaySegment) {
+    if (editingCutaway?.entryId === segment.entryId) {
+      setIsImageTemplatesDialogOpen(false);
+      setEditingCutaway(null);
+    }
+    const { label, state } = applyDeleteImageSequenceClip(selections, segment.entryId, segment.startTimeSeconds);
+    pushChange(label, state);
   }
 
   // FrameStrip's post-add drag handle on an image clip's boundary --
@@ -1410,6 +1431,7 @@ export function ThreePaneEditor({
           framingDialogOverlay={framingDialogOverlay}
           onSaveVideoOverlayFraming={handleSaveVideoOverlayFraming}
           onCloseVideoOverlayFramingDialog={handleCloseVideoOverlayFramingDialog}
+          onDeleteFramingDialogOverlay={handleDeleteFramingDialogOverlay}
           sourceStartDialogOverlay={sourceStartDialogOverlay}
           sourceStartDialogAssetUrl={sourceStartDialogAsset ? assetUrlById[sourceStartDialogAsset.id] ?? "" : ""}
           sourceStartDialogAssetFilename={sourceStartDialogAsset?.filename ?? ""}
@@ -1434,6 +1456,7 @@ export function ThreePaneEditor({
           editingCutaway={editingCutaway}
           onAddImageSequenceClip={handleAddImageSequenceClip}
           onCloseImageTemplatesDialog={handleCloseImageTemplatesDialog}
+          onDeleteCutaway={handleDeleteCutaway}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
           baseCropRect={selections.cropRect}
@@ -1474,6 +1497,7 @@ export function ThreePaneEditor({
           sequenceEntries={effectiveSequenceEntries}
           onResizeImageClip={handleResizeImageClip}
           onEditCutaway={handleEditCutaway}
+          onDeleteCutaway={handleDeleteCutaway}
           mainAudioVolume={mainAudioVolume}
           onChangeMainAudioVolume={setMainAudioVolume}
           backgroundVolume={backgroundVolume}

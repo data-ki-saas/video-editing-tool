@@ -119,7 +119,18 @@ export interface LocalRenderResult {
  * all, sidestepping the whole cache-interaction question. The blob URL is
  * tracked by the caller and revoked once the export finishes. */
 async function loadOverlayImage(url: string): Promise<{ image: HTMLImageElement; blobUrl: string }> {
-  const response = await fetch(url, { mode: "cors" });
+  let response: Response;
+  try {
+    response = await fetch(url, { mode: "cors" });
+  } catch (err) {
+    // A bare "Failed to fetch" here gives no clue which asset or why --
+    // most often an expired presigned URL (R2 omits CORS headers on its
+    // own error responses, so the browser reports this as a network
+    // failure rather than exposing the real HTTP status) or a genuine
+    // connectivity/CORS issue.
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`Network error fetching image asset -- likely an expired URL or R2 connectivity/CORS issue (${reason})`);
+  }
   if (!response.ok) throw new Error(`Could not fetch overlay image (HTTP ${response.status})`);
   const blobUrl = URL.createObjectURL(await response.blob());
 
@@ -352,9 +363,20 @@ export async function exportVideoLocally(
     for (const clip of sequenceClips) {
       if (clip.kind === "image") {
         if (imageClipElementsByAssetId.has(clip.assetId)) continue;
-        const { image, blobUrl } = await loadOverlayImage(clip.url);
-        imageClipElementsByAssetId.set(clip.assetId, image);
-        overlayBlobUrls.push(blobUrl);
+        // Unlike an overlay image (decorative, skippable -- see the
+        // overlayAssetIds loop below), a base sequence clip is not
+        // optional: if it can't be loaded there's a real gap in the
+        // output, so this stays fatal. It's still wrapped here (unlike
+        // before) so the thrown error identifies which asset failed
+        // instead of surfacing a bare, undiagnosable "Failed to fetch".
+        try {
+          const { image, blobUrl } = await loadOverlayImage(clip.url);
+          imageClipElementsByAssetId.set(clip.assetId, image);
+          overlayBlobUrls.push(blobUrl);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          throw new Error(`Could not load image clip (assetId ${clip.assetId}) for this render: ${reason}`);
+        }
         continue;
       }
       if (videoElementsByAssetId.has(clip.assetId)) continue;

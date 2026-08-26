@@ -357,6 +357,7 @@ export function VideoOverlayFramingDialog({
   outputAspectRatio,
   onSave,
   onClose,
+  onDelete,
 }: {
   overlay: VideoOverlayClip;
   // The base clip's own current frame (thumbnail closest to the playhead)
@@ -370,6 +371,7 @@ export function VideoOverlayFramingDialog({
     options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
   ) => void;
   onClose: () => void;
+  onDelete: () => void;
 }) {
   const isSplitScreen = overlay.layout.type === "split-screen";
   const isPictureInPicture = overlay.layout.type === "picture-in-picture";
@@ -600,9 +602,14 @@ export function VideoOverlayFramingDialog({
         </div>
 
         <div className="flex items-center justify-between gap-2 p-4 pt-0">
-          <button type="button" onClick={handleReset} className="text-xs text-muted hover:text-foreground hover:underline">
-            Reset
-          </button>
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={handleReset} className="text-xs text-muted hover:text-foreground hover:underline">
+              Reset
+            </button>
+            <button type="button" onClick={onDelete} className="text-xs text-red-600 hover:underline">
+              Remove Overlay
+            </button>
+          </div>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-background">
               Cancel

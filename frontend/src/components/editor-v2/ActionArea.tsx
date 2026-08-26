@@ -164,6 +164,7 @@ export function ActionArea({
   framingDialogOverlay,
   onSaveVideoOverlayFraming,
   onCloseVideoOverlayFramingDialog,
+  onDeleteFramingDialogOverlay,
   sourceStartDialogOverlay,
   sourceStartDialogAssetUrl,
   sourceStartDialogAssetFilename,
@@ -188,6 +189,7 @@ export function ActionArea({
   editingCutaway,
   onAddImageSequenceClip,
   onCloseImageTemplatesDialog,
+  onDeleteCutaway,
   previewFrameUrl,
   frameAspectRatio,
   baseCropRect,
@@ -232,6 +234,7 @@ export function ActionArea({
     options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
   ) => void;
   onCloseVideoOverlayFramingDialog: () => void;
+  onDeleteFramingDialogOverlay: () => void;
   // The overlay currently open in OverlaySourceStartDialog, if any -- null
   // means closed. Resolved to the full overlay (not just an index) by
   // ThreePaneEditor, same convention as framingDialogOverlay above.
@@ -261,6 +264,7 @@ export function ActionArea({
   editingCutaway: CutawaySegment | null;
   onAddImageSequenceClip: (assetId: string, durationSeconds: number, templateId: string) => void;
   onCloseImageTemplatesDialog: () => void;
+  onDeleteCutaway: (segment: CutawaySegment) => void;
   // The actual current frame (closest thumbnail to the playhead) and its
   // aspect ratio, for TextOverlayDialog/TranscriptCaptionDialog's live
   // preview -- see TextOverlayDialog's own comment on why positioning
@@ -449,6 +453,7 @@ export function ActionArea({
           }
           onAdd={onAddImageSequenceClip}
           onClose={onCloseImageTemplatesDialog}
+          onDelete={editingCutaway ? () => onDeleteCutaway(editingCutaway) : undefined}
         />
       )}
 
@@ -470,6 +475,7 @@ export function ActionArea({
           outputAspectRatio={frameAspectRatio}
           onSave={onSaveVideoOverlayFraming}
           onClose={onCloseVideoOverlayFramingDialog}
+          onDelete={onDeleteFramingDialogOverlay}
         />
       )}
 

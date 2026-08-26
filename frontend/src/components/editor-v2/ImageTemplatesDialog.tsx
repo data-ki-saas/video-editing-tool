@@ -96,6 +96,7 @@ export function ImageTemplatesDialog({
   editing,
   onAdd,
   onClose,
+  onDelete,
 }: {
   assets: Asset[];
   /** The project's current clip-rectangle framing, if any -- the preview
@@ -110,6 +111,9 @@ export function ImageTemplatesDialog({
   editing?: { assetId: string; templateId: ImageTemplateId; durationSeconds: number } | null;
   onAdd: (assetId: string, durationSeconds: number, templateId: ImageTemplateId) => void;
   onClose: () => void;
+  // Only ever passed (and only ever shown) in edit mode -- there's no
+  // existing cutaway to remove yet while adding a fresh one.
+  onDelete?: () => void;
 }) {
   const imageAssets = assets.filter((asset) => asset.kind === "image");
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(editing?.assetId ?? imageAssets[0]?.id ?? null);
@@ -323,22 +327,29 @@ export function ImageTemplatesDialog({
             <span className="w-10 shrink-0 text-right text-xs text-muted">{durationSeconds.toFixed(1)}s</span>
           </div>
 
-          <div className="mt-1 flex gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md border border-border py-1.5 px-3 text-sm font-medium text-foreground hover:bg-background"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={!selectedAsset}
-              onClick={() => selectedAsset && onAdd(selectedAsset.id, durationSeconds, templateId)}
-              className="flex-1 rounded-md bg-accent py-1.5 text-sm font-medium text-accent-foreground disabled:opacity-50"
-            >
-              {editing ? "Save changes" : "Add cutaway"}
-            </button>
+          <div className="mt-1 flex items-center gap-2">
+            {editing && onDelete && (
+              <button type="button" onClick={onDelete} className="text-xs text-red-600 hover:underline">
+                Remove Cutaway
+              </button>
+            )}
+            <div className="ml-auto flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md border border-border py-1.5 px-3 text-sm font-medium text-foreground hover:bg-background"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!selectedAsset}
+                onClick={() => selectedAsset && onAdd(selectedAsset.id, durationSeconds, templateId)}
+                className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
+              >
+                {editing ? "Save changes" : "Add cutaway"}
+              </button>
+            </div>
           </div>
         </div>
       </div>

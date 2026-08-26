@@ -8,12 +8,14 @@
  *
  * Read-only positioning -- a cutaway's timing still comes from FrameStrip's
  * own clip-boundary drag handle, same as every other clip seam, not from
- * this rail. This rail's only interaction is jumping back into
- * ImageTemplatesDialog to edit that cutaway's photo/animation/duration;
- * removing a cutaway from playback is still done the same way as removing
- * any other stretch of footage, via the Cut and Trim rail directly below.
+ * this rail. Left-click jumps back into ImageTemplatesDialog to edit that
+ * cutaway's photo/animation/duration; right-click offers "Remove Cutaway",
+ * which (unlike trimming footage out of view) actually splices the clip out
+ * of the sequence and closes the gap -- see transformations.ts's
+ * applyDeleteImageSequenceClip.
  */
 import { getImageTemplateOption } from "@/lib/video/imageTemplates";
+import { ContextMenu, useContextMenu } from "./ContextMenu";
 
 export interface CutawaySegment {
   entryId: string;
@@ -23,14 +25,52 @@ export interface CutawaySegment {
   durationSeconds: number;
 }
 
+function CutawaySegmentButton({
+  segment,
+  toPercent,
+  onEdit,
+  onDelete,
+}: {
+  segment: CutawaySegment;
+  toPercent: (seconds: number) => number;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onEdit();
+        }}
+        onContextMenu={(e) => openContextMenu(e, [{ label: "Remove Cutaway", danger: true, onSelect: onDelete }])}
+        title={`Edit this cutaway -- ${getImageTemplateOption(segment.templateId).name}; right-click to remove`}
+        className="absolute top-0 flex h-full items-center overflow-hidden rounded-sm border border-accent bg-accent/30 text-[9px] leading-none text-accent hover:bg-accent/50"
+        style={{
+          left: `${toPercent(segment.startTimeSeconds)}%`,
+          width: `${toPercent(segment.durationSeconds)}%`,
+        }}
+      >
+        <span className="pointer-events-none truncate px-1">Cutaway</span>
+      </button>
+      <ContextMenu state={contextMenuState} onClose={closeContextMenu} />
+    </>
+  );
+}
+
 export function CutawayTrack({
   segments,
   videoDurationSeconds,
   onEdit,
+  onDelete,
 }: {
   segments: CutawaySegment[];
   videoDurationSeconds: number;
   onEdit: (segment: CutawaySegment) => void;
+  onDelete: (segment: CutawaySegment) => void;
 }) {
   if (segments.length === 0) return null;
 
@@ -39,22 +79,13 @@ export function CutawayTrack({
   return (
     <div className="relative mb-1 h-4 w-full shrink-0">
       {segments.map((segment) => (
-        <button
+        <CutawaySegmentButton
           key={segment.entryId}
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit(segment);
-          }}
-          title={`Edit this cutaway -- ${getImageTemplateOption(segment.templateId).name}`}
-          className="absolute top-0 flex h-full items-center overflow-hidden rounded-sm border border-accent bg-accent/30 text-[9px] leading-none text-accent hover:bg-accent/50"
-          style={{
-            left: `${toPercent(segment.startTimeSeconds)}%`,
-            width: `${toPercent(segment.durationSeconds)}%`,
-          }}
-        >
-          <span className="pointer-events-none truncate px-1">Cutaway</span>
-        </button>
+          segment={segment}
+          toPercent={toPercent}
+          onEdit={() => onEdit(segment)}
+          onDelete={() => onDelete(segment)}
+        />
       ))}
     </div>
   );

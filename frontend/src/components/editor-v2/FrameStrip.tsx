@@ -278,6 +278,7 @@ export function FrameStrip({
   sequenceEntries,
   onResizeImageClip,
   onEditCutaway,
+  onDeleteCutaway,
   isLoading,
   durationSeconds,
   currentTimeSeconds,
@@ -354,6 +355,9 @@ export function FrameStrip({
   // The Cutaways rail's own click -- opens ImageTemplatesDialog pre-filled
   // to edit that cutaway in place, rather than appending a fresh one.
   onEditCutaway: (segment: CutawaySegment) => void;
+  // The Cutaways rail's own right-click "Remove Cutaway" -- splices the
+  // clip out of the sequence entirely (see applyDeleteImageSequenceClip).
+  onDeleteCutaway: (segment: CutawaySegment) => void;
   isLoading: boolean;
   durationSeconds: number;
   currentTimeSeconds: number;
@@ -644,6 +648,7 @@ export function FrameStrip({
           segments={cutawaySegments}
           videoDurationSeconds={durationSeconds}
           onEdit={onEditCutaway}
+          onDelete={onDeleteCutaway}
         />
 
         <TrimTrack
