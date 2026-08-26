@@ -151,6 +151,8 @@ export function OverlaySourceStartDialog({
                 <MarkerTrack
                   markers={[{ timeSeconds: draftSourceStartSeconds, label: START_MARKER_LABEL }]}
                   totalDurationSeconds={durationSeconds}
+                  frameThumbnails={thumbnails}
+                  frameThumbnailTimestampsSeconds={thumbnailTimestampsSeconds}
                   onAdd={handleSetSourceStart}
                   onMove={(_, timeSeconds) => handleSetSourceStart(timeSeconds)}
                   onRename={() => {}}

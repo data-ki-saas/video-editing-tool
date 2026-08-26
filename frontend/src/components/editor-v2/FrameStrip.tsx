@@ -648,6 +648,8 @@ export function FrameStrip({
           markers={markers}
           totalDurationSeconds={durationSeconds}
           snapPointsSeconds={videoOverlaySnapPointsSeconds}
+          frameThumbnails={thumbnails}
+          frameThumbnailTimestampsSeconds={thumbnailTimestampsSeconds}
           onAdd={onAddMarker}
           onMove={onMoveMarker}
           onRename={onRenameMarker}
@@ -726,6 +728,19 @@ export function FrameStrip({
           className="pointer-events-none absolute inset-y-0 w-0.5 bg-red-500"
           style={{ left: `${playheadPercent}%` }}
         />
+
+        {/* One grey guide line per marker, spanning every track in this
+            same scrollable column (same inset-y-0 trick the playhead line
+            above uses) -- lets a marker be used to align a cutaway/overlay/
+            zoom effect edge against it by eye, not just to plan a cut. */}
+        {markers.map((marker, index) => (
+          <div
+            key={index}
+            title={`Marker: ${marker.label} (${marker.timeSeconds.toFixed(1)}s)`}
+            className="pointer-events-none absolute inset-y-0 w-px bg-neutral-400/70"
+            style={{ left: `${durationSeconds > 0 ? (marker.timeSeconds / durationSeconds) * 100 : 0}%` }}
+          />
+        ))}
 
         {clipBoundarySeconds.map((boundarySeconds, index) => {
           const clipStartSeconds = index === 0 ? 0 : clipBoundarySeconds[index - 1];
