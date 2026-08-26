@@ -123,6 +123,7 @@ const FrameTile = memo(function FrameTile({
   videoThumbnailUrlById,
   videoOverlayStartThumbnailByKey,
   activeExclusiveOverlay,
+  isImageClip,
   onChange,
   onCommit,
   onFlipHorizontal,
@@ -165,6 +166,20 @@ const FrameTile = memo(function FrameTile({
   // timeline strip shows the same thing the live preview does instead of
   // silently continuing to show the base clip's own frame.
   activeExclusiveOverlay: VideoOverlayClip | null;
+  // True when this tile's timestamp falls inside an image (cutaway) clip
+  // rather than a video one -- its `src` is that cutaway's own photo, held
+  // unchanged for the whole clip (see ThreePaneEditor's extractSequence),
+  // NOT a video frame captured at this tile's own native resolution. A
+  // video frame's real aspect ratio always equals `frameAspectRatio` (both
+  // come from the same loaded clip), so object-cover never actually crops
+  // it -- box and image already agree. A cutaway photo's own aspect ratio
+  // is unrelated to frameAspectRatio (it comes from whichever VIDEO loaded
+  // first in the sequence), so forcing it into that box with object-cover
+  // crops an arbitrary, uncontrolled slice of it. object-contain instead
+  // (see the default-fill branch below) always shows the whole photo,
+  // undistorted, letterboxed to fit -- this only affects that one fill
+  // mode, not the crop-guide/overlay boxes drawn on top (out of scope here).
+  isImageClip: boolean;
   onChange?: (next: CropRect) => void;
   onCommit?: (next: CropRect) => void;
   onFlipHorizontal?: () => void;
@@ -242,7 +257,12 @@ const FrameTile = memo(function FrameTile({
         </>
       ) : (
         // eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image
-        <img src={src} alt={`Frame at ${index}s`} className="h-full w-full object-cover" style={flipStyle} />
+        <img
+          src={src}
+          alt={`Frame at ${index}s`}
+          className={`h-full w-full ${isImageClip ? "object-contain" : "object-cover"}`}
+          style={flipStyle}
+        />
       )}
       {cropRect && (
         <CropRectOverlay
@@ -517,6 +537,21 @@ export function FrameStrip({
     [flipVerticalToggles, durationSeconds]
   );
 
+  // Which sequence entry each tile's timestamp falls under, boiled down to
+  // just "is it an image clip" -- see FrameTile's own isImageClip prop
+  // comment for why that tile needs to know. clipBoundarySeconds[i] is the
+  // END of sequenceEntries[i] (see this file's own prop comment), so the
+  // first boundary a timestamp is still strictly before it names its clip;
+  // past every boundary means the last entry.
+  const tileIsImageClip = useMemo(() => {
+    return thumbnailTimestampsSeconds.map((timestamp) => {
+      const entryIndex = clipBoundarySeconds.findIndex((boundary) => timestamp < boundary);
+      const resolvedIndex = entryIndex === -1 ? sequenceEntries.length - 1 : entryIndex;
+      return sequenceEntries[resolvedIndex]?.kind === "image";
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, thumbnailTimestampsSeconds, clipBoundarySeconds, sequenceEntries]);
+
   const tileIsTrimmed = useMemo(() => {
     return thumbnailTimestampsSeconds.map((timestamp) => findTrimRangeIndexAt(trimRanges, timestamp) !== -1);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
@@ -733,6 +768,7 @@ export function FrameStrip({
               videoThumbnailUrlById={videoThumbnailUrlByAssetId}
               videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}
               activeExclusiveOverlay={tileActiveExclusiveOverlay[index]}
+              isImageClip={tileIsImageClip[index] ?? false}
               onChange={index === activeTileIndex ? onCropRectChange : undefined}
               onCommit={index === activeTileIndex ? onCropRectCommit : undefined}
               onFlipHorizontal={index === activeTileIndex ? onFlipHorizontal : undefined}

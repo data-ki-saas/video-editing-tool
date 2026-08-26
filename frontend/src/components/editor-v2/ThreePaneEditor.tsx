@@ -1434,6 +1434,21 @@ export function ThreePaneEditor({
       sequenceClips: gatheredSequenceClips,
       backgroundClips: gatheredBackgroundClips,
       assetUrlById: freshAssetUrlById,
+      // A single-asset re-resolve for exportTimeline.ts's own mid-render
+      // retry (see its loadOverlayImage) -- listAssets is the only lookup
+      // this API has (no getAsset(id)), so this just re-fetches the whole
+      // list again and picks the one asset out of it. Only ever called after
+      // an actual fetch failure, not per-frame, so the extra round trip is
+      // cheap relative to what it fixes (a URL that's gone stale between
+      // freshAssets above and whenever that specific image's turn came up).
+      refreshAssetUrl: async (assetId: string) => {
+        try {
+          const latest = await listAssets(projectId);
+          return latest.find((asset) => asset.id === assetId)?.url;
+        } catch {
+          return undefined;
+        }
+      },
       mainAudioVolume,
       backgroundVolume,
       outputWidth: width,
@@ -1450,8 +1465,20 @@ export function ThreePaneEditor({
     : Infinity;
 
   return (
-    <div className="flex h-full flex-col">
-      <TopMenuBar
+    // Outer h-full/overflow-x-auto + inner min-w -- the whole editor (top
+    // bar, Action Area, Playground, Feedback Area) scrolls horizontally as
+    // ONE unit once the window gets narrower than the fixed-width side
+    // panels in Action Area (ProjectList/AssetGallery/UserActions/
+    // ActiveTransformationsList) need, instead of each section clipping or
+    // squeezing its own contents independently (which is what let the video
+    // panel get squeezed into distortion on resize -- see CanvasPlayer's
+    // own object-contain fix). min-w below is that combined floor: the four
+    // fixed panels' own widths (160+224+480+256px) plus Action Area's row
+    // gap/padding, plus headroom so the video preview itself never has to
+    // shrink to nothing.
+    <div className="h-full overflow-x-auto">
+      <div className="flex h-full min-w-[1500px] flex-col">
+        <TopMenuBar
         canRender={effectiveSequenceEntries.length > 0}
         isRendering={isRendering}
         renderStatus={renderStatus}
@@ -1643,6 +1670,7 @@ export function ThreePaneEditor({
           onClose={() => setIsLocalRenderPopupOpen(false)}
         />
       )}
+      </div>
     </div>
   );
 }

@@ -81,6 +81,15 @@ export interface LocalRenderInput {
   backgroundClips: SequenceClipInfo[];
   /** assetId -> presigned R2 URL, for resolving overlay images (see ThreePaneEditor's own assetUrlById). */
   assetUrlById: Record<string, string>;
+  /** Re-resolves a single asset's presigned URL from the backend (a fresh
+   * listAssets(projectId) lookup, see ThreePaneEditor's own
+   * handleLocalRenderClick) -- loadOverlayImage below calls this between
+   * retry attempts so a URL that's actually gone stale (rather than just
+   * hit a one-off network blip) gets a real fix instead of being retried
+   * unchanged. Optional so this file has no hard dependency on the API
+   * client -- omitting it just falls back to the plain retry-same-URL
+   * behavior. */
+  refreshAssetUrl?: (assetId: string) => Promise<string | undefined>;
   // Flat 0..1 multipliers, same values CanvasPlayer's live preview mixes
   // with (see that file's own props doc) -- kept in sync here so a local
   // export never diverges from what the preview actually sounded like.
@@ -121,9 +130,13 @@ export interface LocalRenderResult {
 const IMAGE_FETCH_RETRY_ATTEMPTS = 3;
 const IMAGE_FETCH_RETRY_DELAY_MS = 500;
 
-async function loadOverlayImage(url: string): Promise<{ image: HTMLImageElement; blobUrl: string }> {
+async function loadOverlayImage(
+  url: string,
+  opts?: { assetId?: string; refreshUrl?: (assetId: string) => Promise<string | undefined> }
+): Promise<{ image: HTMLImageElement; blobUrl: string }> {
   let response: Response | undefined;
   let lastErr: unknown;
+  let currentUrl = url;
   // A bare "Failed to fetch" is the browser's generic name for a network
   // request that never got a response at all -- a genuinely expired
   // presigned URL (deterministic, retrying the same URL can't fix it) looks
@@ -133,11 +146,20 @@ async function loadOverlayImage(url: string): Promise<{ image: HTMLImageElement;
   // but resolves the transient case that used to abort the whole render.
   for (let attempt = 1; attempt <= IMAGE_FETCH_RETRY_ATTEMPTS; attempt++) {
     try {
-      response = await fetch(url, { mode: "cors" });
+      response = await fetch(currentUrl, { mode: "cors" });
       break;
     } catch (err) {
       lastErr = err;
-      if (attempt < IMAGE_FETCH_RETRY_ATTEMPTS) await new Promise((r) => setTimeout(r, IMAGE_FETCH_RETRY_DELAY_MS));
+      if (attempt < IMAGE_FETCH_RETRY_ATTEMPTS) {
+        // Re-resolves a FRESH presigned URL before the next attempt when
+        // possible -- fixes the genuinely-expired case outright, which
+        // retrying the exact same (already-dead) URL after a delay never
+        // could. Falls back to the old delay-and-retry-unchanged behavior
+        // when no assetId/refresher was supplied.
+        const refreshed = opts?.assetId && opts.refreshUrl ? await opts.refreshUrl(opts.assetId).catch(() => undefined) : undefined;
+        if (refreshed) currentUrl = refreshed;
+        else await new Promise((r) => setTimeout(r, IMAGE_FETCH_RETRY_DELAY_MS));
+      }
     }
   }
   if (!response) {
@@ -351,7 +373,8 @@ export async function exportVideoLocally(
   input: LocalRenderInput,
   onProgress?: (progress: LocalRenderProgress) => void
 ): Promise<LocalRenderResult> {
-  const { selections, sequenceClips, backgroundClips, assetUrlById, mainAudioVolume, backgroundVolume, outputWidth, outputHeight } = input;
+  const { selections, sequenceClips, backgroundClips, assetUrlById, refreshAssetUrl, mainAudioVolume, backgroundVolume, outputWidth, outputHeight } =
+    input;
   if (sequenceClips.length === 0) throw new Error("Nothing to render -- add a video to the sequence first.");
 
   const baseCropRect = selections.cropRect ?? FULL_FRAME_CROP_RECT;
@@ -386,7 +409,7 @@ export async function exportVideoLocally(
         // before) so the thrown error identifies which asset failed
         // instead of surfacing a bare, undiagnosable "Failed to fetch".
         try {
-          const { image, blobUrl } = await loadOverlayImage(clip.url);
+          const { image, blobUrl } = await loadOverlayImage(clip.url, { assetId: clip.assetId, refreshUrl: refreshAssetUrl });
           imageClipElementsByAssetId.set(clip.assetId, image);
           overlayBlobUrls.push(blobUrl);
         } catch (err) {
@@ -409,7 +432,7 @@ export async function exportVideoLocally(
         continue;
       }
       try {
-        const { image, blobUrl } = await loadOverlayImage(url);
+        const { image, blobUrl } = await loadOverlayImage(url, { assetId, refreshUrl: refreshAssetUrl });
         overlayImagesByAssetId.set(assetId, image);
         overlayBlobUrls.push(blobUrl);
       } catch (err) {

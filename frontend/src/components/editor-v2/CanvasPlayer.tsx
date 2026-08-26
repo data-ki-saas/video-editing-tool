@@ -1011,19 +1011,25 @@ export const CanvasPlayer = forwardRef<
 
   return (
     <div className="flex h-full items-center gap-2 p-2">
-      {/* This box IS the visible video panel -- sized purely from the
-          canvas's own intrinsic aspect ratio (h-full + w-auto below), not
-          a width imposed by this row. The controls column is a sibling
-          with its own separate width budget, not sharing this box's --
-          squeezing the video to make room for controls inside a
-          fixed-width parent was the actual bug that reads as "less
-          width." */}
-      <div className="relative flex h-full max-w-full items-center justify-center overflow-hidden rounded-md border border-border bg-black">
-        {/* No explicit sizing beyond h-full/max-w-full -- the canvas's own
-            width/height attributes (set in drawFrameAt to the fixed
-            reference-resolution crop size) already give it the right
-            intrinsic aspect ratio, the same way an <img> would. */}
-        <canvas ref={canvasRef} className="h-full max-h-full w-auto max-w-full" />
+      {/* This box IS the visible video panel -- flex-1/min-w-0 so it takes
+          whatever width this row has left rather than requesting its own
+          intrinsic width (the previous h-full+w-auto-on-the-canvas approach
+          sized this box from the canvas's own aspect ratio, which read fine
+          until the row got tight -- e.g. a narrower browser window -- at
+          which point the flexbox default (shrink:1) squeezed THIS box's
+          width independently of its h-full height, stretching/squashing the
+          frame inside it. object-contain on the canvas below is what
+          actually pins the aspect ratio now: whatever box this ends up
+          with, the canvas always letterboxes/pillarboxes inside it rather
+          than distorting -- so this can shrink freely and safely). */}
+      <div className="relative h-full min-w-0 flex-1 overflow-hidden rounded-md border border-border bg-black">
+        {/* absolute inset-0 + object-contain, not h-full/w-auto -- lets this
+            fill whatever box the wrapper above ends up with while the
+            canvas's own width/height attributes (set in drawFrameAt to the
+            fixed reference-resolution crop size) still drive the frame's
+            real aspect ratio via object-fit, immune to the wrapper being
+            squeezed on resize (see its comment). */}
+        <canvas ref={canvasRef} className="absolute inset-0 h-full w-full object-contain" />
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60">
             <ReelLoader stage={loadingStage} className="text-white" />
