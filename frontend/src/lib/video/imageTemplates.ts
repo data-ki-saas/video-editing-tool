@@ -46,6 +46,33 @@ export function getImageTemplateOption(templateId: string): ImageTemplateOption 
   return IMAGE_TEMPLATE_OPTIONS.find((option) => option.id === templateId) ?? IMAGE_TEMPLATE_OPTIONS[0];
 }
 
+// Which "axis" a template belongs to -- one pick per axis at a time
+// (zoom-in/zoom-out are alternatives to each other; so are pan-left/right;
+// so are pan-up/down), but any combination of DIFFERENT axes composes into
+// one combined motion (see kenBurnsRects below and ImageTemplatesDialog's
+// multi-select toggle logic).
+export type ImageTemplateAxis = "zoom" | "pan-h" | "pan-v";
+
+export const IMAGE_TEMPLATE_AXES: Record<ImageTemplateId, ImageTemplateAxis> = {
+  "zoom-in": "zoom",
+  "zoom-out": "zoom",
+  "pan-left": "pan-h",
+  "pan-right": "pan-h",
+  "pan-up": "pan-v",
+  "pan-down": "pan-v",
+};
+
+/** Resolves a persisted image SequenceEntry's template selection --
+ * `templateIds` when present (the current, possibly-multi-axis shape),
+ * falling back to the legacy single `templateId` string, and finally to the
+ * default template if neither is set (shouldn't happen for entries created
+ * through the dialog, which always requires >=1 axis selected). */
+export function normalizeImageTemplateIds(entry: { templateIds?: string[] | null; templateId?: string | null }): string[] {
+  if (entry.templateIds && entry.templateIds.length > 0) return entry.templateIds;
+  if (entry.templateId) return [entry.templateId];
+  return [DEFAULT_IMAGE_TEMPLATE_ID];
+}
+
 // How tight zoom-in/zoom-out get, as a fraction of the base rect's size.
 const ZOOM_SCALE = 0.72;
 // A milder zoom for the pan templates -- just enough slack to slide the
@@ -69,26 +96,59 @@ function alignedRect(
   return { x, y, width, height };
 }
 
+/** Same rect a plain centered scale would produce, but dispatches through
+ * scaleCropRectCentered for the true center/center case rather than
+ * alignedRect -- the two are mathematically equivalent but not bit-
+ * identical (different float operation order), and a zoom-only selection
+ * must match today's output exactly, not just visually. */
+function rectForAlign(
+  base: CropRect,
+  scale: number,
+  hAlign: "left" | "center" | "right",
+  vAlign: "top" | "center" | "bottom"
+): CropRect {
+  return hAlign === "center" && vAlign === "center" ? scaleCropRectCentered(base, scale) : alignedRect(base, scale, hAlign, vAlign);
+}
+
 /** The clip's starting rect and the rect it eases toward (held for the
- * degenerate second half -- see this file's module comment), for one
- * template. Unrecognized ids fall back to "zoom-in", same defensive
- * policy as getImageTemplateOption. */
-function kenBurnsRects(templateId: string, base: CropRect): { startRect: CropRect; targetRect: CropRect } {
-  switch (templateId as ImageTemplateId) {
-    case "zoom-out":
-      return { startRect: scaleCropRectCentered(base, ZOOM_SCALE), targetRect: base };
-    case "pan-left":
-      return { startRect: alignedRect(base, PAN_SCALE, "right", "center"), targetRect: alignedRect(base, PAN_SCALE, "left", "center") };
-    case "pan-right":
-      return { startRect: alignedRect(base, PAN_SCALE, "left", "center"), targetRect: alignedRect(base, PAN_SCALE, "right", "center") };
-    case "pan-up":
-      return { startRect: alignedRect(base, PAN_SCALE, "center", "bottom"), targetRect: alignedRect(base, PAN_SCALE, "center", "top") };
-    case "pan-down":
-      return { startRect: alignedRect(base, PAN_SCALE, "center", "top"), targetRect: alignedRect(base, PAN_SCALE, "center", "bottom") };
-    case "zoom-in":
-    default:
-      return { startRect: base, targetRect: scaleCropRectCentered(base, ZOOM_SCALE) };
+ * degenerate second half -- see this file's module comment), composed from
+ * however many of the (up to 3) axis picks are present in `templateIds` --
+ * one from the zoom axis, one from the horizontal-pan axis, one from the
+ * vertical-pan axis, any subset combining into one motion (e.g. "zoom-in" +
+ * "pan-right" zooms in while sliding toward the right side of the photo).
+ * A zoom pick (if any) wins the overall scale/direction; pan picks (if any)
+ * only set the alignment the zoomed/panned end leans toward. Reuses
+ * alignedRect/scaleCropRectCentered verbatim -- no new rect-math
+ * primitives. Falls back to "zoom-in" alone if `templateIds` is empty or
+ * entirely unrecognized (shouldn't happen -- the dialog always requires
+ * >=1 axis selected). */
+function kenBurnsRects(templateIds: string[], base: CropRect): { startRect: CropRect; targetRect: CropRect } {
+  const ids = new Set(templateIds);
+  const zoomIn = ids.has("zoom-in");
+  const zoomOut = ids.has("zoom-out") && !zoomIn;
+  const panLeft = ids.has("pan-left");
+  const panRight = ids.has("pan-right") && !panLeft;
+  const panUp = ids.has("pan-up");
+  const panDown = ids.has("pan-down") && !panUp;
+
+  const targetHAlign = panLeft ? "left" : panRight ? "right" : "center";
+  const startHAlign = panLeft ? "right" : panRight ? "left" : "center";
+  const targetVAlign = panUp ? "top" : panDown ? "bottom" : "center";
+  const startVAlign = panUp ? "bottom" : panDown ? "top" : "center";
+
+  if (zoomIn) {
+    return { startRect: base, targetRect: rectForAlign(base, ZOOM_SCALE, targetHAlign, targetVAlign) };
   }
+  if (zoomOut) {
+    return { startRect: rectForAlign(base, ZOOM_SCALE, targetHAlign, targetVAlign), targetRect: base };
+  }
+  if (panLeft || panRight || panUp || panDown) {
+    return {
+      startRect: rectForAlign(base, PAN_SCALE, startHAlign, startVAlign),
+      targetRect: rectForAlign(base, PAN_SCALE, targetHAlign, targetVAlign),
+    };
+  }
+  return kenBurnsRects(["zoom-in"], base);
 }
 
 /** Builds the ZoomEffect for an image clip spanning
@@ -96,15 +156,16 @@ function kenBurnsRects(templateId: string, base: CropRect): { startRect: CropRec
  * an image clip is first added (transformations.ts's
  * applyAddImageSequenceClip) and by ImageTemplatesDialog's own live
  * preview, so the popup's preview and the real committed effect can never
- * drift apart. */
+ * drift apart. `templateIds` is one id per axis (see IMAGE_TEMPLATE_AXES),
+ * composed by kenBurnsRects into a single motion. */
 export function buildKenBurnsEffect(
-  templateId: string,
+  templateIds: string[],
   base: CropRect,
   startTimeSeconds: number,
   durationSeconds: number
 ): ZoomEffect {
   const endTimeSeconds = startTimeSeconds + durationSeconds;
-  const { startRect, targetRect } = kenBurnsRects(templateId, base);
+  const { startRect, targetRect } = kenBurnsRects(templateIds, base);
   return {
     startTimeSeconds,
     epicenterTimeSeconds: endTimeSeconds,

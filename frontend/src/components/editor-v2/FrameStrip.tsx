@@ -85,6 +85,7 @@ import { TextOverlayTrack } from "./TextOverlayTrack";
 import { VideoOverlayTrack } from "./VideoOverlayTrack";
 import { MarkerTrack } from "./MarkerTrack";
 import { CutawayTrack, type CutawaySegment } from "./CutawayTrack";
+import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import type { TimelineMarker } from "@/lib/projects";
 import {
   computeEffectiveCropRect,
@@ -586,7 +587,16 @@ export function FrameStrip({
     return sequenceEntries.flatMap((entry, index) => {
       if (entry.kind !== "image") return [];
       const startTimeSeconds = index === 0 ? 0 : clipBoundarySeconds[index - 1];
-      return [{ entryId: entry.id, assetId: entry.assetId, templateId: entry.templateId, startTimeSeconds, durationSeconds: entry.durationSeconds }];
+      return [
+        {
+          entryId: entry.id,
+          assetId: entry.assetId,
+          templateIds: normalizeImageTemplateIds(entry),
+          cropRect: entry.cropRect ?? null,
+          startTimeSeconds,
+          durationSeconds: entry.durationSeconds,
+        },
+      ];
     });
   }, [sequenceEntries, clipBoundarySeconds]);
 

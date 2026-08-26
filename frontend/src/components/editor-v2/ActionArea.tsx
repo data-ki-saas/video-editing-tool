@@ -58,7 +58,6 @@ import type {
 } from "@/lib/video/video_math";
 import type { TextTemplateId } from "@/lib/video/textTemplates";
 import type { TranscriptCaptionTemplateId } from "@/lib/video/transcriptCaptionTemplates";
-import type { ImageTemplateId } from "@/lib/video/imageTemplates";
 import type { RefObject } from "react";
 
 function formatTimeRange(startTimeSeconds: number, endTimeSeconds: number): string {
@@ -262,7 +261,7 @@ export function ActionArea({
   // Non-null when ImageTemplatesDialog was reopened from the Cutaways rail
   // to edit an existing cutaway -- see that dialog's own `editing` prop.
   editingCutaway: CutawaySegment | null;
-  onAddImageSequenceClip: (assetId: string, durationSeconds: number, templateId: string) => void;
+  onAddImageSequenceClip: (assetId: string, durationSeconds: number, templateIds: string[], cropRect: CropRect) => void;
   onCloseImageTemplatesDialog: () => void;
   onDeleteCutaway: (segment: CutawaySegment) => void;
   // The actual current frame (closest thumbnail to the playhead) and its
@@ -349,7 +348,7 @@ export function ActionArea({
         <ActiveTransformationsList selections={selections} videoDurationSeconds={videoDurationSeconds} />
       </div>
 
-      <div className="flex min-w-0 flex-1 items-center justify-end p-2">
+      <div className="flex flex-1 items-center justify-end p-2">
         {sequenceClips.length > 0 ? (
           // CanvasPlayer sizes its own visible panel from the canvas's real
           // intrinsic aspect ratio (already correct -- see its own module
@@ -443,12 +442,13 @@ export function ActionArea({
       {isImageTemplatesDialogOpen && (
         <ImageTemplatesDialog
           assets={assets}
-          baseCropRect={baseCropRect}
+          clipRectAspectRatio={playAreaRatio}
           editing={
             editingCutaway && {
               assetId: editingCutaway.assetId,
-              templateId: editingCutaway.templateId as ImageTemplateId,
+              templateIds: editingCutaway.templateIds,
               durationSeconds: editingCutaway.durationSeconds,
+              cropRect: editingCutaway.cropRect,
             }
           }
           onAdd={onAddImageSequenceClip}

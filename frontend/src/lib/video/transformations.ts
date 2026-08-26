@@ -27,7 +27,6 @@ import {
   toggleFlipAt,
   mergeTrimRanges,
   isExclusiveLayout,
-  FULL_FRAME_CROP_RECT,
   DEFAULT_TEXT_OVERLAY_RECT,
   DEFAULT_TRANSCRIPT_CAPTION_RECT,
   DEFAULT_OVERLAY_FRAMING,
@@ -350,25 +349,28 @@ export const MIN_IMAGE_CLIP_DURATION_SECONDS = 1;
 export const MAX_IMAGE_CLIP_DURATION_SECONDS = 15;
 
 /** Appends an image asset to the concatenated sequence as its own
- * full-screen clip, animated via a Ken Burns template -- from
- * ImageTemplatesDialog's "Add to video". Unlike a video clip, this needs an
- * authored duration (images have none intrinsically) and generates its own
- * ZoomEffect from the chosen template (lib/video/imageTemplates.ts) up
- * front, both landing in ONE history entry -- "added...as a group," a
- * single undo step for the clip and its motion together. `startTimeSeconds`
- * is the sequence's current total duration (the caller already tracks this
- * as videoDurationSeconds), so the new clip lands after whatever's already
+ * full-screen clip, animated via one or more combined Ken Burns templates --
+ * from ImageTemplatesDialog's "Add to video". Unlike a video clip, this
+ * needs an authored duration (images have none intrinsically), a
+ * `cropRect` (the clip rectangle the user positioned specifically for THIS
+ * photo in the dialog -- fractions of the photo, not the project's
+ * video-frame `selections.cropRect`), and generates its own ZoomEffect from
+ * the chosen template(s) (lib/video/imageTemplates.ts) up front, both
+ * landing in ONE history entry -- "added...as a group," a single undo step
+ * for the clip and its motion together. `startTimeSeconds` is the
+ * sequence's current total duration (the caller already tracks this as
+ * videoDurationSeconds), so the new clip lands after whatever's already
  * there, same "always appends" policy as applyAddSequenceClip. */
 export function applyAddImageSequenceClip(
   selections: EditSelectionsSnapshot,
   assetId: string,
   durationSeconds: number,
-  templateId: string,
+  templateIds: string[],
+  cropRect: CropRect,
   startTimeSeconds: number
 ): TransformationResult {
-  const newEntry: SequenceEntry = { id: crypto.randomUUID(), kind: "image", assetId, durationSeconds, templateId };
-  const base = selections.cropRect ?? FULL_FRAME_CROP_RECT;
-  const newZoomEffect = buildKenBurnsEffect(templateId, base, startTimeSeconds, durationSeconds);
+  const newEntry: SequenceEntry = { id: crypto.randomUUID(), kind: "image", assetId, durationSeconds, templateIds, cropRect };
+  const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, startTimeSeconds, durationSeconds);
   return {
     label: "Added image clip",
     state: {
@@ -444,21 +446,26 @@ export function applyResizeImageClip(
   };
 }
 
-/** Changes an existing image cutaway's photo/animation/duration in place --
- * from ImageTemplatesDialog's "Save changes", reopened by clicking a
- * segment on the Cutaways rail (CutawayTrack.tsx). Reuses
+/** Changes an existing image cutaway's photo/animation/duration/crop in
+ * place -- from ImageTemplatesDialog's "Save changes", reopened by clicking
+ * a segment on the Cutaways rail (CutawayTrack.tsx). Reuses
  * applyResizeImageClip's own reflow logic for any duration change
  * (shifting every later timed thing by the resulting delta), then always
  * rebuilds the clip's own ZoomEffect from scratch via buildKenBurnsEffect
  * rather than end-shifting the old one like applyResizeImageClip does --
- * unlike a plain resize, the photo and/or template can change too, so the
- * old effect's start/target rects can't just be reused. */
+ * unlike a plain resize, the photo/template(s)/crop can all change too, so
+ * the old effect's start/target rects can't just be reused. Builds the
+ * replacement entry as an explicit object, not `{ ...entry, ... }` --
+ * `entry` may still carry a legacy `templateId` string from data persisted
+ * before multi-select existed, which must not linger alongside the fresh
+ * `templateIds` array. */
 export function applyEditImageSequenceClip(
   selections: EditSelectionsSnapshot,
   entryId: string,
   assetId: string,
   durationSeconds: number,
-  templateId: string,
+  templateIds: string[],
+  cropRect: CropRect,
   clipStartSeconds: number
 ): TransformationResult {
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
@@ -477,10 +484,9 @@ export function applyEditImageSequenceClip(
       : item;
 
   const nextEntries = [...selections.sequenceClips];
-  nextEntries[entryIndex] = { ...entry, assetId, durationSeconds: clampedDuration, templateId };
+  nextEntries[entryIndex] = { id: entry.id, kind: "image", assetId, durationSeconds: clampedDuration, templateIds, cropRect };
 
-  const base = selections.cropRect ?? FULL_FRAME_CROP_RECT;
-  const newZoomEffect = buildKenBurnsEffect(templateId, base, clipStartSeconds, clampedDuration);
+  const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, clipStartSeconds, clampedDuration);
 
   const nextZoomEffects = selections.zoomEffects.map((effect) =>
     effect.startTimeSeconds === clipStartSeconds && effect.endTimeSeconds === clipStartSeconds + entry.durationSeconds

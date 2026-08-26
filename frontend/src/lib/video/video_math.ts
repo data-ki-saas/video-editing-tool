@@ -801,19 +801,36 @@ export function buildSequenceClipInfos(
 /**
  * One entry in the base video sequence -- either a video asset (just an id;
  * duration is always re-probed from the file, never authored) or an image
- * asset animated via a Ken Burns template (lib/video/imageTemplates.ts),
- * which needs an authored `durationSeconds` (images have no intrinsic
- * duration) and a `templateId`. Every entry carries its own `id`, generated
- * once when it's added (see transformations.ts's applyAddSequenceClip/
- * applyAddImageSequenceClip) -- NOT the same as `assetId`, since the same
- * asset can appear more than once (two image clips from the same photo,
- * each with its own duration/template) and needs to be addressed
- * independently by everything downstream (thumbnail extraction, live
- * preview, the per-clip duration drag on FrameStrip).
+ * asset animated via one or more combined Ken Burns templates
+ * (lib/video/imageTemplates.ts), which needs an authored `durationSeconds`
+ * (images have no intrinsic duration), a `templateIds` list (one id per
+ * axis -- zoom/pan-h/pan-v -- composed into a single motion, see
+ * imageTemplates.ts's kenBurnsRects), and a `cropRect`: the clip rectangle
+ * positioned for THIS photo specifically (fractions of the photo's own
+ * naturalWidth/naturalHeight) -- NOT the project's overall video-frame clip
+ * rectangle, which has unrelated dimensions. Every entry carries its own
+ * `id`, generated once when it's added (see transformations.ts's
+ * applyAddSequenceClip/applyAddImageSequenceClip) -- NOT the same as
+ * `assetId`, since the same asset can appear more than once (two image clips
+ * from the same photo, each with its own duration/template/crop) and needs
+ * to be addressed independently by everything downstream (thumbnail
+ * extraction, live preview, the per-clip duration drag on FrameStrip).
  */
 export type SequenceEntry =
   | { id: string; kind: "video"; assetId: string }
-  | { id: string; kind: "image"; assetId: string; durationSeconds: number; templateId: string };
+  | {
+      id: string;
+      kind: "image";
+      assetId: string;
+      durationSeconds: number;
+      templateIds?: string[];
+      /** @deprecated superseded by templateIds -- kept only so cutaways
+       * persisted before multi-select existed still type-check. Never
+       * written by new code; read only via imageTemplates.ts's
+       * normalizeImageTemplateIds. */
+      templateId?: string;
+      cropRect?: CropRect;
+    };
 
 export function sequenceEntryAssetId(entry: SequenceEntry): string {
   return entry.assetId;

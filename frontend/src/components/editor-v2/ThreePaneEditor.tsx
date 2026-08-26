@@ -1063,18 +1063,28 @@ export function ThreePaneEditor({
   }
 
   // ImageTemplatesDialog's "Add cutaway" / "Save changes" -- appends a new
-  // image clip (animated via the chosen Ken Burns template) to the end of
-  // the sequence, or, when editingCutaway is set, edits that existing
-  // cutaway's photo/template/duration in place instead. Either way the
-  // clip and its ZoomEffect land in ONE history entry
-  // (applyAddImageSequenceClip / applyEditImageSequenceClip), so undo
-  // reverts both together. `videoDurationSeconds` (already tracked from
-  // the extraction effect above) is the sequence's current total length,
-  // i.e. exactly where a freshly-added clip starts.
-  function handleAddImageSequenceClip(assetId: string, durationSeconds: number, templateId: string) {
+  // image clip (animated via the chosen, possibly-combined Ken Burns
+  // template(s)) to the end of the sequence, or, when editingCutaway is
+  // set, edits that existing cutaway's photo/template(s)/duration/crop in
+  // place instead. Either way the clip and its ZoomEffect land in ONE
+  // history entry (applyAddImageSequenceClip / applyEditImageSequenceClip),
+  // so undo reverts both together. `videoDurationSeconds` (already tracked
+  // from the extraction effect above) is the sequence's current total
+  // length, i.e. exactly where a freshly-added clip starts. `cropRect` is
+  // the clip rectangle the dialog's own preview positioned for this
+  // specific photo, not the project's video-frame cropRect.
+  function handleAddImageSequenceClip(assetId: string, durationSeconds: number, templateIds: string[], cropRect: CropRect) {
     const { label, state } = editingCutaway
-      ? applyEditImageSequenceClip(selections, editingCutaway.entryId, assetId, durationSeconds, templateId, editingCutaway.startTimeSeconds)
-      : applyAddImageSequenceClip(selections, assetId, durationSeconds, templateId, videoDurationSeconds);
+      ? applyEditImageSequenceClip(
+          selections,
+          editingCutaway.entryId,
+          assetId,
+          durationSeconds,
+          templateIds,
+          cropRect,
+          editingCutaway.startTimeSeconds
+        )
+      : applyAddImageSequenceClip(selections, assetId, durationSeconds, templateIds, cropRect, videoDurationSeconds);
     pushChange(label, state);
     setIsImageTemplatesDialogOpen(false);
     setEditingCutaway(null);

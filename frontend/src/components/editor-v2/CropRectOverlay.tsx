@@ -132,58 +132,62 @@ export function CropRectOverlay({
               className="pointer-events-auto absolute -bottom-1.5 -right-1.5 z-10 h-3 w-3 cursor-nwse-resize rounded-full border border-white bg-accent"
             />
 
-            <button
-              type="button"
-              onClick={(e) => {
-                stopClickBubble(e);
-                onFlipVertical?.();
-              }}
-              title="Mirror (flip vertically)"
-              aria-label="Mirror (flip vertically)"
-              style={{ height: EDGE_THICKNESS_PX }}
-              className="pointer-events-auto absolute -top-px inset-x-0 flex items-center justify-center bg-yellow-400/90 text-black hover:bg-yellow-300"
-            >
-              <MirrorIcon className="h-2.5 w-2.5" />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                stopClickBubble(e);
-                onFlipVertical?.();
-              }}
-              title="Mirror (flip vertically)"
-              aria-label="Mirror (flip vertically)"
-              style={{ height: EDGE_THICKNESS_PX }}
-              className="pointer-events-auto absolute inset-x-0 -bottom-px flex items-center justify-center bg-purple-500/90 text-white hover:bg-purple-400"
-            >
-              <MirrorIcon className="h-2.5 w-2.5" />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                stopClickBubble(e);
-                onFlipHorizontal?.();
-              }}
-              title="Flip (flip horizontally)"
-              aria-label="Flip (flip horizontally)"
-              style={{ width: EDGE_THICKNESS_PX }}
-              className="pointer-events-auto absolute inset-y-0 -left-px flex items-center justify-center bg-red-500/90 text-white hover:bg-red-400"
-            >
-              <FlipIcon className="h-2.5 w-2.5" />
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                stopClickBubble(e);
-                onFlipHorizontal?.();
-              }}
-              title="Flip (flip horizontally)"
-              aria-label="Flip (flip horizontally)"
-              style={{ width: EDGE_THICKNESS_PX }}
-              className="pointer-events-auto absolute -right-px inset-y-0 flex items-center justify-center bg-green-500/90 text-white hover:bg-green-400"
-            >
-              <FlipIcon className="h-2.5 w-2.5" />
-            </button>
+            {(onFlipHorizontal || onFlipVertical) && (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    stopClickBubble(e);
+                    onFlipVertical?.();
+                  }}
+                  title="Mirror (flip vertically)"
+                  aria-label="Mirror (flip vertically)"
+                  style={{ height: EDGE_THICKNESS_PX }}
+                  className="pointer-events-auto absolute -top-px inset-x-0 flex items-center justify-center bg-yellow-400/90 text-black hover:bg-yellow-300"
+                >
+                  <MirrorIcon className="h-2.5 w-2.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    stopClickBubble(e);
+                    onFlipVertical?.();
+                  }}
+                  title="Mirror (flip vertically)"
+                  aria-label="Mirror (flip vertically)"
+                  style={{ height: EDGE_THICKNESS_PX }}
+                  className="pointer-events-auto absolute inset-x-0 -bottom-px flex items-center justify-center bg-purple-500/90 text-white hover:bg-purple-400"
+                >
+                  <MirrorIcon className="h-2.5 w-2.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    stopClickBubble(e);
+                    onFlipHorizontal?.();
+                  }}
+                  title="Flip (flip horizontally)"
+                  aria-label="Flip (flip horizontally)"
+                  style={{ width: EDGE_THICKNESS_PX }}
+                  className="pointer-events-auto absolute inset-y-0 -left-px flex items-center justify-center bg-red-500/90 text-white hover:bg-red-400"
+                >
+                  <FlipIcon className="h-2.5 w-2.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    stopClickBubble(e);
+                    onFlipHorizontal?.();
+                  }}
+                  title="Flip (flip horizontally)"
+                  aria-label="Flip (flip horizontally)"
+                  style={{ width: EDGE_THICKNESS_PX }}
+                  className="pointer-events-auto absolute -right-px inset-y-0 flex items-center justify-center bg-green-500/90 text-white hover:bg-green-400"
+                >
+                  <FlipIcon className="h-2.5 w-2.5" />
+                </button>
+              </>
+            )}
           </>
         )}
       </div>

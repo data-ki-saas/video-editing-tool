@@ -15,12 +15,17 @@
  * applyDeleteImageSequenceClip.
  */
 import { getImageTemplateOption } from "@/lib/video/imageTemplates";
+import type { CropRect } from "@/lib/video/video_math";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 
 export interface CutawaySegment {
   entryId: string;
   assetId: string;
-  templateId: string;
+  templateIds: string[];
+  // The clip rectangle positioned for this photo (fractions of the photo
+  // itself, see video_math.ts's SequenceEntry image variant) -- null only
+  // for cutaways persisted before this field existed.
+  cropRect: CropRect | null;
   startTimeSeconds: number;
   durationSeconds: number;
 }
@@ -47,7 +52,7 @@ function CutawaySegmentButton({
           onEdit();
         }}
         onContextMenu={(e) => openContextMenu(e, [{ label: "Remove Cutaway", danger: true, onSelect: onDelete }])}
-        title={`Edit this cutaway -- ${getImageTemplateOption(segment.templateId).name}; right-click to remove`}
+        title={`Edit this cutaway -- ${segment.templateIds.map((id) => getImageTemplateOption(id).name).join(" + ")}; right-click to remove`}
         className="absolute top-0 flex h-full items-center overflow-hidden rounded-sm border border-accent bg-accent/30 text-[9px] leading-none text-accent hover:bg-accent/50"
         style={{
           left: `${toPercent(segment.startTimeSeconds)}%`,
