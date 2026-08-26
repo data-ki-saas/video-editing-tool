@@ -124,6 +124,7 @@ export function Playground({
   onRequestEditTextOverlay,
   videoOverlays,
   videoThumbnailUrlByAssetId,
+  videoOverlayStartThumbnailByKey,
   overlaySourceDurationSeconds,
   onChangeVideoOverlayRect,
   onCommitVideoOverlayRect,
@@ -201,6 +202,12 @@ export function Playground({
   onRequestEditTextOverlay: (overlayIndex: number) => void;
   videoOverlays: VideoOverlayClip[];
   videoThumbnailUrlByAssetId: Record<string, string>;
+  // A still frame captured at each overlay placement's own sourceStartSeconds
+  // (flag icon) -- keyed by videoOverlayStartThumbnailKey(assetId,
+  // sourceStartSeconds), preferred over videoThumbnailUrlByAssetId above when
+  // present so the main track shows the overlay starting from its marked
+  // point. See ThreePaneEditor.tsx's own comment on the state this reads.
+  videoOverlayStartThumbnailByKey: Record<string, string>;
   overlaySourceDurationSeconds: Record<string, number>;
   onChangeVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
   onCommitVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
@@ -288,6 +295,7 @@ export function Playground({
             onRequestEditTextOverlay={onRequestEditTextOverlay}
             videoOverlays={videoOverlays}
             videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
+            videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}
             overlaySourceDurationSeconds={overlaySourceDurationSeconds}
             onChangeVideoOverlayRect={onChangeVideoOverlayRect}
             onCommitVideoOverlayRect={onCommitVideoOverlayRect}

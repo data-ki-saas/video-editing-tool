@@ -96,6 +96,7 @@ import {
   isExclusiveLayout,
   findClosestTimestampIndex,
   findTrimRangeIndexAt,
+  videoOverlayStartThumbnailKey,
   type CropRect,
   type OverlayImage,
   type SequenceEntry,
@@ -120,6 +121,7 @@ const FrameTile = memo(function FrameTile({
   textOverlays,
   videoOverlayPips,
   videoThumbnailUrlById,
+  videoOverlayStartThumbnailByKey,
   activeExclusiveOverlay,
   onChange,
   onCommit,
@@ -149,6 +151,12 @@ const FrameTile = memo(function FrameTile({
   // the two overlay kinds read as visually distinct when both are present.
   videoOverlayPips: { overlay: VideoOverlayClip; overlayIndex: number }[];
   videoThumbnailUrlById: Record<string, string>;
+  // A still frame captured at this overlay placement's own marked start
+  // point (flag icon), keyed by videoOverlayStartThumbnailKey -- preferred
+  // over videoThumbnailUrlById's generic per-asset frame below when present,
+  // so the main track actually shows the overlay starting from that point
+  // rather than always the same frame-0.1s thumbnail.
+  videoOverlayStartThumbnailByKey: Record<string, string>;
   // The Full-Screen or Split-Screen overlay active at this tile's instant,
   // if any (at most one, since those two layouts are mutually exclusive --
   // see video_math.ts's isExclusiveLayout) -- swaps in that overlay's own
@@ -174,6 +182,17 @@ const FrameTile = memo(function FrameTile({
 
   function rectStyle(rect: CropRect): React.CSSProperties {
     return { left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` };
+  }
+
+  // Prefers the frame captured at this placement's own marked start point
+  // (flag icon) over the generic per-asset thumbnail -- see this file's
+  // prop comment on videoOverlayStartThumbnailByKey.
+  function overlayThumbnailUrl(overlay: VideoOverlayClip): string {
+    return (
+      videoOverlayStartThumbnailByKey[videoOverlayStartThumbnailKey(overlay.assetId, overlay.sourceStartSeconds)] ??
+      videoThumbnailUrlById[overlay.assetId] ??
+      ""
+    );
   }
 
   const exclusiveOverlayRects =
@@ -206,7 +225,7 @@ const FrameTile = memo(function FrameTile({
         // flip transform, since CanvasPlayer never flips the overlay's own
         // footage, only the base clip's.
         // eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset
-        <img src={videoThumbnailUrlById[activeExclusiveOverlay.assetId] ?? ""} alt={`Frame at ${index}s`} className="h-full w-full object-cover" />
+        <img src={overlayThumbnailUrl(activeExclusiveOverlay)} alt={`Frame at ${index}s`} className="h-full w-full object-cover" />
       ) : exclusiveOverlayRects && activeExclusiveOverlay ? (
         // Split Screen: base clip in its own half (still flipped, still the
         // real per-second thumbnail), overlay's own thumbnail in the other
@@ -218,7 +237,7 @@ const FrameTile = memo(function FrameTile({
           </div>
           <div className="absolute overflow-hidden" style={rectStyle(exclusiveOverlayRects.overlayRect)}>
             {/* eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset */}
-            <img src={videoThumbnailUrlById[activeExclusiveOverlay.assetId] ?? ""} alt="" className="h-full w-full object-cover" />
+            <img src={overlayThumbnailUrl(activeExclusiveOverlay)} alt="" className="h-full w-full object-cover" />
           </div>
         </>
       ) : (
@@ -260,7 +279,7 @@ const FrameTile = memo(function FrameTile({
           <OverlayRectOverlay
             key={overlayIndex}
             rect={overlay.layout.rect}
-            imageUrl={videoThumbnailUrlById[overlay.assetId] ?? ""}
+            imageUrl={overlayThumbnailUrl(overlay)}
             borderColorClassName="border-violet-400"
             handleColorClassName="bg-violet-400"
             onChange={onVideoOverlayRectChange ? (next) => onVideoOverlayRectChange(overlayIndex, next) : undefined}
@@ -319,6 +338,7 @@ export function FrameStrip({
   onRequestEditTextOverlay,
   videoOverlays,
   videoThumbnailUrlByAssetId,
+  videoOverlayStartThumbnailByKey,
   overlaySourceDurationSeconds,
   onChangeVideoOverlayRect,
   onCommitVideoOverlayRect,
@@ -398,6 +418,8 @@ export function FrameStrip({
   onRequestEditTextOverlay: (overlayIndex: number) => void;
   videoOverlays: VideoOverlayClip[];
   videoThumbnailUrlByAssetId: Record<string, string>;
+  // See FrameTile's own prop comment -- passed straight through.
+  videoOverlayStartThumbnailByKey: Record<string, string>;
   overlaySourceDurationSeconds: Record<string, number>;
   onChangeVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
   onCommitVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
@@ -709,6 +731,7 @@ export function FrameStrip({
               textOverlays={tileTextOverlays[index]}
               videoOverlayPips={tileVideoOverlayPips[index]}
               videoThumbnailUrlById={videoThumbnailUrlByAssetId}
+              videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}
               activeExclusiveOverlay={tileActiveExclusiveOverlay[index]}
               onChange={index === activeTileIndex ? onCropRectChange : undefined}
               onCommit={index === activeTileIndex ? onCropRectCommit : undefined}

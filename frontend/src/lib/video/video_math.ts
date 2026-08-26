@@ -541,6 +541,17 @@ export interface VideoOverlayClip {
   audioBalance: number;
 }
 
+/** Cache key for a still frame captured at one overlay placement's own
+ * sourceStartSeconds -- shared between ThreePaneEditor.tsx (which populates
+ * the cache) and FrameStrip.tsx (which reads it) so the two never drift on
+ * how the key is built. Keyed by (assetId, sourceStartSeconds) rather than
+ * overlay index/identity, since that's the only thing that actually
+ * determines what the captured frame looks like -- two placements sharing
+ * both values share the same frame for free. */
+export function videoOverlayStartThumbnailKey(assetId: string, sourceStartSeconds: number): string {
+  return `${assetId}:${sourceStartSeconds}`;
+}
+
 /** The single EXCLUSIVE-layout overlay (Full-Screen or Split-Screen) active
  * at `timeSeconds`, if any -- at most one can ever be active, since those
  * two layouts are mutually exclusive with each other. */

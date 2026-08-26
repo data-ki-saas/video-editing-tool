@@ -55,6 +55,7 @@ import {
   DEFAULT_SPLIT_SCREEN_RATIO,
   DEFAULT_MAIN_AUDIO_VOLUME,
   DEFAULT_BACKGROUND_VOLUME,
+  videoOverlayStartThumbnailKey,
   type CropRect,
   type OverlayImage,
   type SequenceEntry,
@@ -270,6 +271,12 @@ export function ThreePaneEditor({
   // Full-Screen/Split-Screen overlay's window so it never asks to play
   // more of the source than exists (its in-point is fixed at 0 for v1).
   const [overlaySourceDurationSeconds, setOverlaySourceDurationSeconds] = useState<Record<string, number>>({});
+  // A still frame captured AT each overlay placement's own sourceStartSeconds
+  // (flag icon / OverlaySourceStartDialog), keyed by videoOverlayStartThumbnailKey
+  // -- lets FrameStrip's main track show what the overlay actually looks like
+  // from its marked start point, instead of the one generic per-asset
+  // thumbnail (always frame ~0.1s) videoThumbnailUrlByAssetId above provides.
+  const [videoOverlayStartThumbnailByKey, setVideoOverlayStartThumbnailByKey] = useState<Record<string, string>>({});
 
   // TextOverlayDialog's open/edit-target state -- null editingTextOverlayIndex
   // means "Add" (a fresh overlay); otherwise it's pre-filled for editing
@@ -547,6 +554,41 @@ export function ThreePaneEditor({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- assetUrlById is a fresh object every render; videoOverlayAssetIds (memoized) is what actually gates this
   }, [videoOverlayAssetIds]);
+
+  // Captures one still frame per (assetId, sourceStartSeconds) pair actually
+  // in use across the current overlays -- so FrameStrip's main track can show
+  // each overlay starting from the point its flag icon marked, not just a
+  // generic frame-0.1s thumbnail. Re-runs whenever a placement's own start
+  // point moves (Save in OverlaySourceStartDialog), same trigger as the
+  // sourceStartSeconds field itself.
+  const videoOverlayStartThumbnailKeys = useMemo(
+    () =>
+      Array.from(
+        new Set(selections.videoOverlays.map((overlay) => videoOverlayStartThumbnailKey(overlay.assetId, overlay.sourceStartSeconds)))
+      ),
+    [selections.videoOverlays]
+  );
+  useEffect(() => {
+    let cancelled = false;
+    for (const overlay of selections.videoOverlays) {
+      const key = videoOverlayStartThumbnailKey(overlay.assetId, overlay.sourceStartSeconds);
+      if (videoOverlayStartThumbnailByKey[key]) continue;
+      const url = assetUrlById[overlay.assetId];
+      if (!url) continue;
+      captureSingleFrame(url, Math.max(overlay.sourceStartSeconds, 0.1))
+        .then((frame) => {
+          if (!cancelled) setVideoOverlayStartThumbnailByKey((prev) => ({ ...prev, [key]: frame }));
+        })
+        .catch(() => {
+          // Leaves this placement on FrameStrip's generic per-asset
+          // thumbnail fallback -- not worth surfacing as a page-level error.
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selections.videoOverlays/assetUrlById are fresh objects every render; videoOverlayStartThumbnailKeys (memoized) is what actually gates this
+  }, [videoOverlayStartThumbnailKeys]);
 
   // The sequence to actually play: persisted sequenceClips, filtered to
   // entries whose asset still resolves (so a deleted asset silently drops
@@ -1550,6 +1592,7 @@ export function ThreePaneEditor({
           onRequestEditTextOverlay={handleRequestEditTextOverlay}
           videoOverlays={displayedVideoOverlays}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
+          videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}
           overlaySourceDurationSeconds={overlaySourceDurationSeconds}
           onChangeVideoOverlayRect={handleChangeVideoOverlayRect}
           onCommitVideoOverlayRect={handleCommitVideoOverlayRect}
