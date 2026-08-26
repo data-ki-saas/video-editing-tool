@@ -1010,7 +1010,13 @@ export const CanvasPlayer = forwardRef<
   }
 
   return (
-    <div className="flex h-full items-center gap-2 p-2">
+    // w-full/min-w-0 here, not just on the video box below -- this root sits
+    // in ActionArea's `justify-end` wrapper, which shrink-wraps its child by
+    // default. Without a definite width on THIS element, the video box's
+    // flex-1 (flex-basis 0%) has nothing to grow into once the canvas went
+    // absolute/out-of-flow (see below): the shrink-wrap collapses to just
+    // the controls column's width and the video panel disappears entirely.
+    <div className="flex h-full w-full min-w-0 items-center gap-2 p-2">
       {/* This box IS the visible video panel -- flex-1/min-w-0 so it takes
           whatever width this row has left rather than requesting its own
           intrinsic width (the previous h-full+w-auto-on-the-canvas approach
