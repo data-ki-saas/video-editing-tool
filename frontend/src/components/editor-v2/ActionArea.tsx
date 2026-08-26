@@ -126,7 +126,7 @@ function ActiveTransformationsList({
   return (
     <ul className="flex h-full flex-col gap-0.5 overflow-y-auto">
       {rows.map((row, index) => (
-        <li key={index} className="truncate rounded-md px-2 py-0.5 text-xs text-foreground">
+        <li key={index} className="shrink-0 truncate rounded-md px-2 py-0.5 text-xs text-foreground">
           {row}
         </li>
       ))}
