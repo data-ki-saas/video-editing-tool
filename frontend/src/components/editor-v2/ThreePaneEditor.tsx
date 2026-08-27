@@ -1564,6 +1564,14 @@ export function ThreePaneEditor({
   // `assets`/`assetUrlById` won't know about it until the next refresh --
   // without this, CanvasPlayer's live preview would show no narration audio
   // until *something else* happened to trigger a refetch.
+  //
+  // Deliberately merges in only the asset(s) missing from state, rather
+  // than calling refreshAssets() (which does a wholesale setAssets(data)).
+  // listAssets() re-signs every asset's URL on every call even when the
+  // underlying file hasn't changed (same fact handleLocalRenderClick's own
+  // comment above relies on), so a wholesale replace would change the URL
+  // string of the main video clip too -- flipping CanvasPlayer's clipsKey
+  // and reloading the live preview for an edit that never touched that clip.
   function handleSaveTtsOverlay(overlay: TtsOverlay) {
     const { label, state } =
       editingTtsOverlayIndex !== null
@@ -1572,7 +1580,18 @@ export function ThreePaneEditor({
     pushChange(label, state);
     setIsTtsDialogOpen(false);
     setEditingTtsOverlayIndex(null);
-    void refreshAssets();
+    void listAssets(projectId)
+      .then((data) => {
+        setAssets((prev) => {
+          const existingIds = new Set(prev.map((asset) => asset.id));
+          const newAssets = data.filter((asset) => !existingIds.has(asset.id));
+          return newAssets.length > 0 ? [...prev, ...newAssets] : prev;
+        });
+      })
+      .catch(() => {
+        // Best-effort -- same as refreshAssets() elsewhere, not worth
+        // surfacing a failed background refetch as a page-level error.
+      });
   }
 
   function handleDeleteTtsOverlay(overlayIndex: number) {

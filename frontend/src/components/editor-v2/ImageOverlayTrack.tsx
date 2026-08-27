@@ -213,7 +213,7 @@ function ImageOverlaySegment({
       </button>
       {overlay.colorFilterId && (
         <span
-          className="pointer-events-none z-10 shrink-0 truncate rounded-full bg-black/30 px-1 text-white"
+          className="pointer-events-none z-10 shrink-0 truncate rounded-full bg-black/30 px-1 text-[9px] font-normal leading-none text-white"
           title={getFilterPresetOption(overlay.colorFilterId).name}
         >
           {getFilterPresetOption(overlay.colorFilterId).name}

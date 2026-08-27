@@ -43,6 +43,7 @@ import { TextOverlayCanvas } from "./TextOverlayCanvas";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
 import { DEFAULT_TTS_OVERLAY_RECT, type CropRect, type TtsOverlay, type TtsWordTiming } from "@/lib/video/video_math";
 import { listTtsVoices, synthesizeTts, type TtsVoiceOption } from "@/lib/api";
+import { getAudioDuration } from "@/lib/video/audio";
 
 const PREVIEW_PROGRESS = 0.6;
 const DEFAULT_PREVIEW_TEXT = "Your narration here";
@@ -181,7 +182,16 @@ export function TtsOverlayDialog({
     setSynthesisError(null);
     try {
       const result = await synthesizeTts(projectId, trimmed, voice);
-      setSynthesis(result);
+      // The backend's own durationSeconds is a last-word-boundary-plus-padding
+      // ESTIMATE (see edge_provider.py's own comment -- it deliberately has
+      // no audio-decoding dependency), which can drift from the real mp3's
+      // length. TtsOverlayTrack's rail width is driven by this same number,
+      // so a drifted estimate reads as "the rail doesn't match how long the
+      // narration actually plays." Re-probing the real file client-side
+      // (same getAudioDuration() the background-track strip already uses)
+      // gets the actual length instead of trusting the estimate.
+      const realDurationSeconds = await getAudioDuration(result.url).catch(() => result.durationSeconds);
+      setSynthesis({ ...result, durationSeconds: realDurationSeconds });
       setSynthesizedText(trimmed);
     } catch (err) {
       setSynthesisError(err instanceof Error ? err.message : "Failed to generate speech");
