@@ -7,11 +7,19 @@
  * position as it advances (see ThreePaneEditor's currentTimeSeconds/onSeek
  * wiring, and CanvasPlayer's seekTo/onTimeUpdate).
  *
- * Each tile is a fixed `pixelsPerSecond` wide -- so this strip's total
- * width is exactly `thumbnails.length * pixelsPerSecond`, the same scale
- * Playground.tsx uses for MainAudioTrackStrip and BackgroundTrackStrip, so
- * all three line up and can share one scroll position (see
- * lib/useSyncedHorizontalScroll.ts) -- but its HEIGHT comes from
+ * Each tile is `pixelsPerSecond * (time until the NEXT tile's timestamp)`
+ * wide (see `tileWidthsPx` below), not a flat `pixelsPerSecond` -- so this
+ * strip's total width telescopes to exactly `durationSeconds *
+ * pixelsPerSecond`, the same scale Playground.tsx uses for
+ * MainAudioTrackStrip and BackgroundTrackStrip, so all three line up
+ * (including the red playhead) and can share one scroll position (see
+ * lib/useSyncedHorizontalScroll.ts). A flat per-tile width would instead sum
+ * to `thumbnails.length * pixelsPerSecond`, which overshoots `durationSeconds
+ * * pixelsPerSecond` by one extra fractional-sample tile per clip (see the
+ * next paragraph) -- harmless for the thumbnails themselves, but it drifted
+ * every %-based overlay (the playhead, MarkerTrack, ZoomEffectsTrack, ...)
+ * away from the audio rails' exact-pixel ticks, worse the more clips there
+ * were. Its HEIGHT comes from
  * `frameAspectRatio` (width / height), not from the row's own available
  * height: sizing the box itself to the video's real shape means the image
  * fills it exactly, with no letterboxing, which in turn means
@@ -522,6 +530,25 @@ export function FrameStrip({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, baseCropRect, zoomEffects]);
 
+  // Each tile spans from its own timestamp up to the NEXT tile's timestamp
+  // (or, for the very last tile, up to durationSeconds) -- see this file's
+  // module comment for why a flat pixelsPerSecond-per-tile width drifts the
+  // strip's total width away from durationSeconds * pixelsPerSecond. This
+  // telescopes: consecutive deltas sum to durationSeconds - timestamps[0]
+  // (== durationSeconds, since the first timestamp is always 0), so the
+  // track's emergent w-max width lands on exactly the same total the audio
+  // rails use. Each clip's own extra fractional final-sample timestamp
+  // (see thumbnailTimestampsSeconds's own doc) collapses to a near-zero-width
+  // sliver tile here rather than a full extra pixelsPerSecond-wide one.
+  const tileWidthsPx = useMemo(() => {
+    return thumbnailTimestampsSeconds.map((timestamp, index) => {
+      const nextTimestamp =
+        index < thumbnailTimestampsSeconds.length - 1 ? thumbnailTimestampsSeconds[index + 1] : durationSeconds;
+      return Math.max(0, nextTimestamp - timestamp) * pixelsPerSecond;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, thumbnailTimestampsSeconds, durationSeconds, pixelsPerSecond]);
+
   const tileFlips = useMemo(() => {
     return thumbnailTimestampsSeconds.map((timestamp) => ({
       flipHorizontal: computeEffectiveFlip(flipHorizontalToggles, timestamp),
@@ -765,7 +792,7 @@ export function FrameStrip({
               key={index}
               src={src}
               index={index}
-              widthPx={pixelsPerSecond}
+              widthPx={tileWidthsPx[index]}
               frameAspectRatio={frameAspectRatio}
               cropRect={tileCropRects[index]}
               flipHorizontal={tileFlips[index].flipHorizontal}

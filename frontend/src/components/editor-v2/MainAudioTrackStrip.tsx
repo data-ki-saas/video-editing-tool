@@ -16,8 +16,9 @@
  *
  * A one-second ruler (a horizontal line the full width of the rail, with a
  * tick crossing it every second at the same `pixelsPerSecond` scale the
- * other synced strips use) gives this rail a sense of elapsed time on its
- * own, without needing to line it up against FrameStrip's tiles to tell.
+ * other synced strips use, each tick labeled with its second number) gives
+ * this rail a sense of elapsed time on its own, without needing to line it
+ * up against FrameStrip's tiles to tell.
  *
  * `hide-scrollbar`, same as FrameStrip/BackgroundTrackStrip -- see
  * globals.css's own comment. Playground.tsx's own proxy scrollbar row, at
@@ -27,22 +28,36 @@
  *
  * Click-to-seek works here exactly like FrameStrip's own click handler --
  * this rail is part of the same shared timeline, so scrubbing shouldn't
- * only work from the video frames above it. The red playhead itself still
- * lives solely in FrameStrip (currentTimeSeconds is shared editor state),
- * so a click here just moves that same line rather than drawing a second
- * one of its own.
+ * only work from the video frames above it. FrameStrip owns the
+ * authoritative currentTimeSeconds/onSeek wiring (shared editor state), but
+ * this rail draws its OWN red playhead line (at the exact same
+ * `currentTimeSeconds * pixelsPerSecond` this file's own second-ticks use,
+ * not FrameStrip's %-based one) plus a floating time ticker above it, so the
+ * rail reads its own elapsed time without needing FrameStrip in view --
+ * FrameStrip's tile widths are now sized so the two strips' total widths
+ * (and therefore this same instant's pixel offset in each) agree exactly
+ * (see FrameStrip's own module comment).
  */
 import { useRef } from "react";
+
+function formatTicker(seconds: number): string {
+  const clamped = Math.max(0, seconds);
+  const mm = Math.floor(clamped / 60);
+  const ss = clamped % 60;
+  return `${mm}:${ss.toFixed(1).padStart(4, "0")}`;
+}
 
 export function MainAudioTrackStrip({
   videoDurationSeconds,
   pixelsPerSecond,
+  currentTimeSeconds,
   onSeek,
   scrollContainerRef,
   onScroll,
 }: {
   videoDurationSeconds: number;
   pixelsPerSecond: number;
+  currentTimeSeconds: number;
   onSeek: (seconds: number) => void;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
@@ -68,6 +83,11 @@ export function MainAudioTrackStrip({
   // non-whole-second duration's final partial second.
   const secondTicks = Array.from({ length: Math.floor(videoDurationSeconds) + 1 }, (_, second) => second);
 
+  // Raw pixel offset (not a %) so this lines up exactly with secondTicks'
+  // own `second * pixelsPerSecond` placement above, on this rail's own
+  // exact-width track -- see this file's module comment.
+  const playheadLeftPx = Math.min(Math.max(currentTimeSeconds, 0), videoDurationSeconds) * pixelsPerSecond;
+
   return (
     <div
       ref={scrollContainerRef}
@@ -85,10 +105,23 @@ export function MainAudioTrackStrip({
         {secondTicks.map((second) => (
           <div
             key={second}
-            className="pointer-events-none absolute top-1/2 h-2 w-px -translate-x-1/2 -translate-y-1/2 bg-black/40"
+            className="pointer-events-none absolute inset-y-0 -translate-x-1/2"
             style={{ left: second * pixelsPerSecond }}
-          />
+          >
+            <div className="absolute top-0 h-2 w-px bg-black/40" />
+            <div className="absolute bottom-0 whitespace-nowrap text-[8px] leading-none text-black/70">{second}</div>
+          </div>
         ))}
+        <div
+          className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-red-500"
+          style={{ left: playheadLeftPx }}
+        />
+        <div
+          className="pointer-events-none absolute bottom-full z-20 mb-1 -translate-x-1/2 whitespace-nowrap rounded-sm bg-black/80 px-1 text-[9px] leading-none text-white"
+          style={{ left: playheadLeftPx }}
+        >
+          {formatTicker(currentTimeSeconds)}
+        </div>
       </div>
     </div>
   );
