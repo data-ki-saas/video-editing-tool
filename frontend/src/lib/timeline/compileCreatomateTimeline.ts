@@ -286,7 +286,19 @@ function rectProperties(rect: CropRect) {
  * rect is a fraction of the OUTPUT frame (post-crop), matching
  * CanvasPlayer's own compositing order (drawn after the flip transform is
  * undone). One element per surviving output sub-range -- more than one if
- * a trim cuts through the middle of the overlay's authored window. */
+ * a trim cuts through the middle of the overlay's authored window. Sized to
+ * whatever computeOverlayRects says for its layout (full frame for
+ * Full-Screen, a Picture-in-Picture box, or a Split Screen half) -- same
+ * layout-aware positioning buildVideoOverlayElements already does for video
+ * overlays, since ImageOverlayClip shares the exact same VideoOverlayLayout
+ * union.
+ *
+ * KNOWN GAP: unlike buildVideoOverlayElements, this does NOT reproduce
+ * `overlay.framing` (pan/zoom/flip) or a Split-Screen half's own
+ * `baseFraming` -- `fit: "cover"` below always centers, same documented gap
+ * buildVideoOverlayElements already carries for its own framing.panX/panY,
+ * and for the same reason (this whole path isn't reachable from the UI yet
+ * regardless -- see ThreePaneEditor.tsx's handleRenderClick). */
 function buildOverlayImageElements(
   overlayImages: EditSelectionsSnapshot["overlayImages"],
   segments: RenderSegment[],
@@ -296,6 +308,7 @@ function buildOverlayImageElements(
   const elements: Image[] = [];
   for (const overlay of overlayImages) {
     const track = nextTrack();
+    const { overlayRect } = computeOverlayRects(overlay.layout);
     const outputRanges = mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlay.endTimeSeconds);
     for (const range of outputRanges) {
       const id = nextId("overlay");
@@ -306,10 +319,10 @@ function buildOverlayImageElements(
           track,
           time: range.outputStartSeconds,
           duration: range.outputEndSeconds - range.outputStartSeconds,
-          fit: "fill",
+          fit: "cover",
           xAnchor: "0%",
           yAnchor: "0%",
-          ...rectProperties(overlay.rect),
+          ...rectProperties(overlayRect),
           source: "",
         })
       );
@@ -439,12 +452,16 @@ function buildVideoOverlayElements(
  * Picture-in-Picture box doesn't touch the base's shape at all). Hard-cut,
  * epsilon-separated step keyframes, same convention as buildFlipWrapper's
  * own keyframes. Returns null (leave cropViewport static) when there are
- * no Split Screen windows, to avoid emitting pointless keyframes. */
+ * no Split Screen windows, to avoid emitting pointless keyframes. Takes a
+ * combined video+image overlay array (see this function's own call site) --
+ * generic over just the fields this needs, since a Split-Screen window
+ * reshapes the viewport the same way regardless of which clip type it
+ * came from. */
 function buildOverlayCropViewportRect(
-  videoOverlays: VideoOverlayClip[],
+  overlays: { layout: VideoOverlayClip["layout"]; startTimeSeconds: number; endTimeSeconds: number }[],
   segments: RenderSegment[]
 ): { x: Keyframe<string>[]; y: Keyframe<string>[]; width: Keyframe<string>[]; height: Keyframe<string>[] } | null {
-  const splitScreenOverlays = videoOverlays.filter((overlay) => overlay.layout.type === "split-screen");
+  const splitScreenOverlays = overlays.filter((overlay) => overlay.layout.type === "split-screen");
   if (splitScreenOverlays.length === 0) return null;
 
   const FULL = { x: "0%", y: "0%", width: "100%", height: "100%" };
@@ -726,7 +743,20 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     .map((overlay) => ({ ...overlay, endTimeSeconds: Math.min(overlay.endTimeSeconds, totalOriginalDurationSeconds) }))
     .filter((overlay) => overlay.startTimeSeconds < totalOriginalDurationSeconds);
 
-  const overlayCropViewportRect = buildOverlayCropViewportRect(clampedVideoOverlays, segments);
+  // Overlay/text-overlay ranges are re-clamped against the CURRENT total
+  // duration before mapping -- a since-shrunk sequence (a clip removed
+  // after the overlay was authored) could otherwise leave a stale range
+  // pointing past the end.
+  const clampedOverlayImages = selections.overlayImages
+    .map((overlay) => ({ ...overlay, endTimeSeconds: Math.min(overlay.endTimeSeconds, totalOriginalDurationSeconds) }))
+    .filter((overlay) => overlay.startTimeSeconds < totalOriginalDurationSeconds);
+
+  // Split-Screen windows from EITHER array reshape the shared cropViewport
+  // -- image wins ties, same convention as CanvasPlayer.tsx's compositing
+  // order (see that file's own comment), reproduced here by simply passing
+  // the image array SECOND so its windows sort after a same-instant video
+  // one and win the "last keyframe wins" evaluation Creatomate does.
+  const overlayCropViewportRect = buildOverlayCropViewportRect([...clampedVideoOverlays, ...clampedOverlayImages], segments);
   const cropViewport = new Composition({
     id: nextId("crop-viewport"),
     track: 1,
@@ -737,13 +767,6 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     elements: [flipWrapper],
   });
 
-  // Overlay/text-overlay ranges are re-clamped against the CURRENT total
-  // duration before mapping -- a since-shrunk sequence (a clip removed
-  // after the overlay was authored) could otherwise leave a stale range
-  // pointing past the end.
-  const clampedOverlayImages = selections.overlayImages
-    .map((overlay) => ({ ...overlay, endTimeSeconds: Math.min(overlay.endTimeSeconds, totalOriginalDurationSeconds) }))
-    .filter((overlay) => overlay.startTimeSeconds < totalOriginalDurationSeconds);
   const clampedTextOverlays = selections.textOverlays
     .map((overlay) => ({ ...overlay, endTimeSeconds: Math.min(overlay.endTimeSeconds, totalOriginalDurationSeconds) }))
     .filter((overlay) => overlay.startTimeSeconds < totalOriginalDurationSeconds);

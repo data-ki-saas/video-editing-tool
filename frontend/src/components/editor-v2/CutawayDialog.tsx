@@ -1,24 +1,31 @@
 "use client";
 
 /**
- * "Image Cutaway" toolbar tool -- turns one of this project's photos into
- * its own full-screen clip in the base sequence, animated via one or more
- * combined Ken Burns templates (lib/video/imageTemplates.ts). Three STACKED
- * horizontal panels (not the left/right split TranscriptCaptionDialog/
- * TextOverlayDialog use), per spec: pick the photo, pick the motion(s),
- * position the clip rectangle + tune the preview/duration, Add.
+ * "Cutaway" tab's dialog -- appends a clip to the BASE sequence, either a
+ * plain video (as-is, no animation options -- same operation "Append" used
+ * to be, before it was folded into this one action) or one of this
+ * project's photos turned into its own full-screen clip, animated via one
+ * or more combined Ken Burns templates (lib/video/imageTemplates.ts). A
+ * Video/Image segmented switch at the top picks which; Video collapses down
+ * to just an asset grid + one click (nothing to animate/crop/duration-tune),
+ * Image keeps the original three STACKED horizontal panels (not the
+ * left/right split TranscriptCaptionDialog/TextOverlayDialog use): pick the
+ * photo, pick the motion(s), position the clip rectangle + tune the
+ * preview/duration, Add.
  *
  * Reopened in EDIT mode (via the `editing` prop) by clicking an existing
- * segment on the Cutaways rail (CutawayTrack.tsx) -- same three panels,
- * pre-populated from that cutaway's current photo/template(s)/duration/
- * cropRect, with "Add to video" relabeled "Save changes". The caller
- * (ThreePaneEditor) decides whether `onAdd` should append a new clip or
- * edit the existing one in place; this dialog itself doesn't know the
- * difference beyond the copy change.
+ * IMAGE segment on the Cutaways rail (CutawayTrack.tsx) -- a video segment
+ * has nothing authored to edit in place, so it never reopens this dialog.
+ * Edit mode forces Image kind and hides the kind switch entirely (same
+ * three panels, pre-populated from that cutaway's current
+ * photo/template(s)/duration/cropRect, with "Add cutaway" relabeled "Save
+ * changes"). The caller (ThreePaneEditor) decides whether `onAddImage`
+ * should append a new clip or edit the existing one in place; this dialog
+ * itself doesn't know the difference beyond the copy change.
  *
  * The animated preview here is intentionally a standalone canvas, not
  * CanvasPlayer: there's no real sequence position for a NEW clip yet (it
- * doesn't exist until "Add to video" is pressed), so it just loops the
+ * doesn't exist until "Add cutaway" is pressed), so it just loops the
  * chosen template(s)' ZoomEffect over the chosen image directly, using the
  * exact same buildKenBurnsEffect + computeEffectiveCropRect the real clip
  * will use once added/saved (transformations.ts's
@@ -106,32 +113,55 @@ function TemplateIcon({ id, className }: { id: ImageTemplateId; className?: stri
   }
 }
 
-export function ImageTemplatesDialog({
+export function CutawayDialog({
   assets,
+  videoThumbnailUrlByAssetId,
   clipRectAspectRatio,
   editing,
-  onAdd,
+  preselectedAssetId,
+  onAddImage,
+  onAddVideo,
   onClose,
   onDelete,
 }: {
   assets: Asset[];
+  // AssetGallery's own extracted per-video representative still frame --
+  // a video asset's own `url` points at the video FILE, not an image, so
+  // this is what actually renders in the Video-kind grid below.
+  videoThumbnailUrlByAssetId: Record<string, string>;
   /** The project's selected clip-rectangle shape (width/height) -- e.g.
    * ActionArea's playAreaRatio -- the photo's own positioned crop
    * rectangle is locked to this ratio, same as the main clip rectangle. */
   clipRectAspectRatio: number;
   /** Non-null when this dialog was reopened from the Cutaways rail to edit
-   * an existing cutaway rather than add a fresh one -- pre-populates the
-   * panels from its current photo/template(s)/duration/cropRect and
-   * relabels the primary button. */
+   * an existing IMAGE cutaway rather than add a fresh one -- pre-populates
+   * the panels from its current photo/template(s)/duration/cropRect,
+   * relabels the primary button, forces Image kind, and hides the kind
+   * switch entirely (a video segment never reopens this dialog -- see
+   * CutawayTrack.tsx). */
   editing?: { assetId: string; templateIds: string[]; durationSeconds: number; cropRect: CropRect | null } | null;
-  onAdd: (assetId: string, durationSeconds: number, templateIds: string[], cropRect: CropRect) => void;
+  /** Non-null when opened via AssetGallery's right-click "Cutaway" on a
+   * specific IMAGE asset -- an ADD, not an edit, just pre-selects that
+   * photo instead of defaulting to the first one in the project. */
+  preselectedAssetId?: string | null;
+  onAddImage: (assetId: string, durationSeconds: number, templateIds: string[], cropRect: CropRect) => void;
+  onAddVideo: (assetId: string) => void;
   onClose: () => void;
   // Only ever passed (and only ever shown) in edit mode -- there's no
   // existing cutaway to remove yet while adding a fresh one.
   onDelete?: () => void;
 }) {
+  // Edit mode is image-only (see the `editing` prop's own comment) -- the
+  // kind switch below only ever renders, and only ever matters, in add mode.
+  const [kind, setKind] = useState<"video" | "image">("image");
+  const isEditing = Boolean(editing);
+
   const imageAssets = assets.filter((asset) => asset.kind === "image");
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(editing?.assetId ?? imageAssets[0]?.id ?? null);
+  const videoAssets = assets.filter((asset) => asset.kind === "video");
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(
+    editing?.assetId ?? preselectedAssetId ?? imageAssets[0]?.id ?? null
+  );
+  const [selectedVideoAssetId, setSelectedVideoAssetId] = useState<string | null>(videoAssets[0]?.id ?? null);
   const [templateIds, setTemplateIds] = useState<ImageTemplateId[]>(
     (editing?.templateIds as ImageTemplateId[] | undefined) ?? [IMAGE_TEMPLATE_OPTIONS[0].id]
   );
@@ -276,7 +306,7 @@ export function ImageTemplatesDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Image Cutaway"
+      aria-label="Cutaway"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={onClose}
     >
@@ -285,35 +315,108 @@ export function ImageTemplatesDialog({
         className="flex h-[85vh] w-full max-w-3xl flex-col rounded-lg bg-surface p-4 shadow-lg"
       >
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">{editing ? "Edit Image Cutaway" : "Image Cutaway"}</h2>
+          <h2 className="text-sm font-semibold">
+            {isEditing ? "Edit Cutaway" : "Cutaway"}
+          </h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-foreground">
             ✕
           </button>
         </div>
 
-        {/* Panel 1 (18%) -- photo picker. */}
-        <div style={{ flexBasis: "18%" }} className="mb-3 flex min-h-0 shrink-0 flex-col gap-1.5">
-          <p className="text-[11px] text-muted">Choose a photo</p>
-          <div className="flex flex-1 items-center gap-2 overflow-x-auto">
-            {imageAssets.length === 0 && <p className="text-xs text-muted">No photos in this project yet</p>}
-            {imageAssets.map((asset) => (
+        {!isEditing && (
+          <div className="mb-3 flex shrink-0 gap-1 self-start rounded-md border border-border p-0.5">
+            {(["image", "video"] as const).map((option) => (
               <button
-                key={asset.id}
+                key={option}
                 type="button"
-                title={asset.filename}
-                onClick={() => setSelectedAssetId(asset.id)}
+                onClick={() => setKind(option)}
                 className={
-                  "aspect-square h-full shrink-0 overflow-hidden rounded-md border-2 " +
-                  (selectedAssetId === asset.id ? "border-accent" : "border-transparent")
+                  "rounded-sm px-3 py-1 text-xs font-medium capitalize " +
+                  (kind === option ? "bg-accent text-accent-foreground" : "text-muted hover:text-foreground")
                 }
               >
-                {/* eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset */}
-                <img src={asset.url} alt={asset.filename} className="h-full w-full object-cover" />
+                {option}
               </button>
             ))}
           </div>
+        )}
+
+        {/* Panel 1 (18% for image, or the whole body for video) -- asset
+            picker for whichever kind is active. */}
+        <div
+          style={kind === "image" ? { flexBasis: "18%" } : undefined}
+          className={"mb-3 flex min-h-0 shrink-0 flex-col gap-1.5 " + (kind === "video" ? "flex-1" : "")}
+        >
+          <p className="text-[11px] text-muted">{kind === "image" ? "Choose a photo" : "Choose a video"}</p>
+          {kind === "image" ? (
+            <div className="flex flex-1 items-center gap-2 overflow-x-auto">
+              {imageAssets.length === 0 && <p className="text-xs text-muted">No photos in this project yet</p>}
+              {imageAssets.map((asset) => (
+                <button
+                  key={asset.id}
+                  type="button"
+                  title={asset.filename}
+                  onClick={() => setSelectedAssetId(asset.id)}
+                  className={
+                    "aspect-square h-full shrink-0 overflow-hidden rounded-md border-2 " +
+                    (selectedAssetId === asset.id ? "border-accent" : "border-transparent")
+                  }
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset */}
+                  <img src={asset.url} alt={asset.filename} className="h-full w-full object-cover" />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-1 flex-wrap content-start items-start gap-2 overflow-y-auto">
+              {videoAssets.length === 0 && <p className="text-xs text-muted">No videos in this project yet</p>}
+              {videoAssets.map((asset) => (
+                <button
+                  key={asset.id}
+                  type="button"
+                  title={asset.filename}
+                  onClick={() => setSelectedVideoAssetId(asset.id)}
+                  className={
+                    "aspect-square h-20 shrink-0 overflow-hidden rounded-md border-2 bg-neutral-800 " +
+                    (selectedVideoAssetId === asset.id ? "border-accent" : "border-transparent")
+                  }
+                >
+                  {videoThumbnailUrlByAssetId[asset.id] ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- a captured video-frame data URL, not a Next-optimizable static asset
+                    <img src={videoThumbnailUrlByAssetId[asset.id]} alt={asset.filename} className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-xs text-muted">▶</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
+        {kind === "video" && (
+          <div className="flex items-center gap-2">
+            <div className="ml-auto flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md border border-border py-1.5 px-3 text-sm font-medium text-foreground hover:bg-background"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!selectedVideoAssetId}
+                onClick={() => selectedVideoAssetId && onAddVideo(selectedVideoAssetId)}
+                className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
+              >
+                Add cutaway
+              </button>
+            </div>
+          </div>
+        )}
+
+        {kind === "image" && (
+        <>
         {/* Panel 2 (28%) -- Ken Burns template picker, multi-select: one
             pick per axis, freely combinable across axes. */}
         <div style={{ flexBasis: "28%" }} className="mb-3 flex min-h-0 shrink-0 flex-col gap-1.5">
@@ -447,14 +550,16 @@ export function ImageTemplatesDialog({
               <button
                 type="button"
                 disabled={!selectedAsset || !photoCropRect}
-                onClick={() => selectedAsset && photoCropRect && onAdd(selectedAsset.id, durationSeconds, templateIds, photoCropRect)}
+                onClick={() => selectedAsset && photoCropRect && onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect)}
                 className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
               >
-                {editing ? "Save changes" : "Add cutaway"}
+                {isEditing ? "Save changes" : "Add cutaway"}
               </button>
             </div>
           </div>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

@@ -60,13 +60,24 @@
  * thumbnail, only the active one (as it hands off between tiles) and the
  * separate playhead line element.
  *
- * ZoomEffectsTrack (every transition's own indicator), FlipTrack (one per
- * flip axis, when either has any toggles), OverlayTrack (one row per image
- * overlay), and TextOverlayTrack (one row per caption) render BELOW the
- * thumbnails; MarkerTrack, CutawayTrack (the Cutaways rail -- one segment
- * per image cutaway, see its own comment), and TrimTrack (the Cut and Trim
- * rail's click-to-cut gray/red line) render ABOVE them instead, in that
- * order top to bottom, per their own specs. All of them live in the SAME
+ * Rail stacking, top to bottom: MarkerTrack, CutawayTrack (the Cutaways
+ * rail -- one segment per base-sequence clip, video or image, see that
+ * file's own comment), and TrimTrack (the Cut and Trim rail's
+ * click-to-cut gray/red line) all render ABOVE the thumbnails -- they
+ * annotate/edit the BASE track itself, not a composited layer, so they sit
+ * outside the z-order stack entirely. Directly above the thumbnails sits
+ * the actual compositing z-order stack, TOP = FRONTMOST in the rendered
+ * video (matches CanvasPlayer.tsx/exportTimeline.ts's own draw order
+ * exactly -- see those files' own comments): TextOverlayTrack, then
+ * ImageOverlayTrack's Picture-in-Picture row(s), then VideoOverlayTrack's
+ * Picture-in-Picture row(s), then ImageOverlayTrack's exclusive
+ * (Full-Screen/Split-Screen) row, then VideoOverlayTrack's exclusive row,
+ * then the thumbnails themselves (the base plate). ZoomEffectsTrack (every
+ * transition's own indicator) and FlipTrack (one per flip axis, when either
+ * has any toggles) render BELOW the thumbnails -- they're attribute
+ * indicators of the base clip, not stacked layers, so they don't
+ * participate in the z-order convention either.
+ * All of them live in the SAME
  * scrollable track as the thumbnails, so everything shares one scroll
  * position and one pixel-accurate timeline width with no manual
  * measurement needed.
@@ -74,11 +85,11 @@
  * the cut is real (CanvasPlayer's skipTrimmedRanges actually skips it
  * during playback), this is just showing where.
  *
- * Each tile also shows every image/text overlay active at its own instant
- * (see video_math.ts's findActiveOverlays/findActiveTextOverlays) as its
- * own OverlayRectOverlay/TextOverlayCanvas, on TOP of the crop rectangle --
- * an overlay sits over the clip, not instead of it. Only the active
- * tile's overlays are draggable/resizable, same gating as the crop
+ * Each tile also shows every Picture-in-Picture image/video overlay active
+ * at its own instant, and the active Full-Screen/Split-Screen overlay (if
+ * any) swaps the tile's own content, exactly matching CanvasPlayer's own
+ * draw order -- an overlay sits over the clip, not instead of it. Only the
+ * active tile's overlays are draggable/resizable, same gating as the crop
  * rectangle.
  */
 import { memo, useMemo, useRef, useState } from "react";
@@ -88,9 +99,9 @@ import { TextOverlayCanvas } from "./TextOverlayCanvas";
 import { ZoomEffectsTrack } from "./ZoomEffectsTrack";
 import { FlipTrack } from "./FlipTrack";
 import { TrimTrack } from "./TrimTrack";
-import { OverlayTrack } from "./OverlayTrack";
 import { TextOverlayTrack } from "./TextOverlayTrack";
 import { VideoOverlayTrack } from "./VideoOverlayTrack";
+import { ImageOverlayTrack } from "./ImageOverlayTrack";
 import { MarkerTrack } from "./MarkerTrack";
 import { CutawayTrack, type CutawaySegment } from "./CutawayTrack";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
@@ -106,7 +117,7 @@ import {
   findTrimRangeIndexAt,
   videoOverlayStartThumbnailKey,
   type CropRect,
-  type OverlayImage,
+  type ImageOverlayClip,
   type SequenceEntry,
   type TextOverlay,
   type TrimRange,
@@ -124,22 +135,23 @@ const FrameTile = memo(function FrameTile({
   flipHorizontal,
   flipVertical,
   isTrimmed,
-  overlays,
   assetUrlById,
   textOverlays,
+  imageOverlayPips,
   videoOverlayPips,
   videoThumbnailUrlById,
   videoOverlayStartThumbnailByKey,
-  activeExclusiveOverlay,
+  activeExclusiveImageOverlay,
+  activeExclusiveVideoOverlay,
   isImageClip,
   onChange,
   onCommit,
   onFlipHorizontal,
   onFlipVertical,
-  onOverlayRectChange,
-  onOverlayRectCommit,
   onTextOverlayRectChange,
   onTextOverlayRectCommit,
+  onImageOverlayRectChange,
+  onImageOverlayRectCommit,
   onVideoOverlayRectChange,
   onVideoOverlayRectCommit,
 }: {
@@ -151,13 +163,19 @@ const FrameTile = memo(function FrameTile({
   flipHorizontal: boolean;
   flipVertical: boolean;
   isTrimmed: boolean;
-  overlays: { overlay: OverlayImage; overlayIndex: number }[];
   assetUrlById: Record<string, string>;
   textOverlays: { overlay: TextOverlay; overlayIndex: number; progress: number }[];
+  // Picture-in-Picture image overlays active at this tile's instant --
+  // rendered with the same OverlayRectOverlay component video overlays
+  // use, styled fuchsia (this file's own image-overlay PiP color, see
+  // ImageOverlayTrack.tsx) so the two overlay kinds read as visually
+  // distinct when both are present.
+  imageOverlayPips: { overlay: ImageOverlayClip; overlayIndex: number }[];
   // Picture-in-Picture video overlays active at this tile's instant --
   // rendered with the same OverlayRectOverlay component image overlays
-  // already use (move/resize drag), just styled violet instead of cyan so
-  // the two overlay kinds read as visually distinct when both are present.
+  // already use (move/resize drag), just styled violet instead of fuchsia
+  // so the two overlay kinds read as visually distinct when both are
+  // present.
   videoOverlayPips: { overlay: VideoOverlayClip; overlayIndex: number }[];
   videoThumbnailUrlById: Record<string, string>;
   // A still frame captured at this overlay placement's own marked start
@@ -166,14 +184,22 @@ const FrameTile = memo(function FrameTile({
   // so the main track actually shows the overlay starting from that point
   // rather than always the same frame-0.1s thumbnail.
   videoOverlayStartThumbnailByKey: Record<string, string>;
-  // The Full-Screen or Split-Screen overlay active at this tile's instant,
-  // if any (at most one, since those two layouts are mutually exclusive --
-  // see video_math.ts's isExclusiveLayout) -- swaps in that overlay's own
-  // thumbnail (Full-Screen) or splits the tile into the two halves
-  // CanvasPlayer's own drawFrameAt already renders (Split Screen), so the
-  // timeline strip shows the same thing the live preview does instead of
-  // silently continuing to show the base clip's own frame.
-  activeExclusiveOverlay: VideoOverlayClip | null;
+  // The Full-Screen or Split-Screen IMAGE overlay active at this tile's
+  // instant, if any -- takes priority over activeExclusiveVideoOverlay
+  // below when both are present (matches CanvasPlayer's own draw order:
+  // an active image-exclusive overlay is painted AFTER the video-exclusive
+  // layer, so it wins on overlap -- see that file's own comment).
+  activeExclusiveImageOverlay: ImageOverlayClip | null;
+  // The Full-Screen or Split-Screen VIDEO overlay active at this tile's
+  // instant, if any (at most one per array, since those two layouts are
+  // mutually exclusive with each other -- see video_math.ts's
+  // isExclusiveLayout) -- swaps in that overlay's own thumbnail
+  // (Full-Screen) or splits the tile into the two halves CanvasPlayer's own
+  // drawFrameAt already renders (Split Screen), so the timeline strip shows
+  // the same thing the live preview does instead of silently continuing to
+  // show the base clip's own frame. Only used when no image-exclusive
+  // overlay is active at the same instant.
+  activeExclusiveVideoOverlay: VideoOverlayClip | null;
   // True when this tile's timestamp falls inside an image (cutaway) clip
   // rather than a video one -- its `src` is that cutaway's own photo, held
   // unchanged for the whole clip (see ThreePaneEditor's extractSequence),
@@ -192,10 +218,10 @@ const FrameTile = memo(function FrameTile({
   onCommit?: (next: CropRect) => void;
   onFlipHorizontal?: () => void;
   onFlipVertical?: () => void;
-  onOverlayRectChange?: (overlayIndex: number, next: CropRect) => void;
-  onOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
   onTextOverlayRectChange?: (overlayIndex: number, next: CropRect) => void;
   onTextOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
+  onImageOverlayRectChange?: (overlayIndex: number, next: CropRect) => void;
+  onImageOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
   onVideoOverlayRectChange?: (overlayIndex: number, next: CropRect) => void;
   onVideoOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
 }) {
@@ -218,9 +244,13 @@ const FrameTile = memo(function FrameTile({
     );
   }
 
-  const exclusiveOverlayRects =
-    activeExclusiveOverlay && activeExclusiveOverlay.layout.type !== "picture-in-picture"
-      ? computeOverlayRects(activeExclusiveOverlay.layout)
+  const exclusiveImageOverlayRects =
+    activeExclusiveImageOverlay && activeExclusiveImageOverlay.layout.type !== "picture-in-picture"
+      ? computeOverlayRects(activeExclusiveImageOverlay.layout)
+      : null;
+  const exclusiveVideoOverlayRects =
+    !exclusiveImageOverlayRects && activeExclusiveVideoOverlay && activeExclusiveVideoOverlay.layout.type !== "picture-in-picture"
+      ? computeOverlayRects(activeExclusiveVideoOverlay.layout)
       : null;
 
   return (
@@ -242,25 +272,42 @@ const FrameTile = memo(function FrameTile({
       {/* Safe to fill the box exactly (object-cover would normally risk
           cropping) -- the box's own aspect-ratio already matches the
           image's, so there is nothing to crop. */}
-      {activeExclusiveOverlay?.layout.type === "full-screen" ? (
+      {activeExclusiveImageOverlay?.layout.type === "full-screen" ? (
+        // Full-Screen image overlay wins over any active video-exclusive
+        // overlay at the same instant (see this file's own comment) -- the
+        // photo itself fills the tile.
+        // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset
+        <img src={assetUrlById[activeExclusiveImageOverlay.assetId] ?? ""} alt={`Frame at ${index}s`} className="h-full w-full object-cover" />
+      ) : exclusiveImageOverlayRects && activeExclusiveImageOverlay ? (
+        <>
+          <div className="absolute overflow-hidden" style={rectStyle(exclusiveImageOverlayRects.baseRect!)}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image */}
+            <img src={src} alt={`Frame at ${index}s`} className="h-full w-full object-cover" style={flipStyle} />
+          </div>
+          <div className="absolute overflow-hidden" style={rectStyle(exclusiveImageOverlayRects.overlayRect)}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset */}
+            <img src={assetUrlById[activeExclusiveImageOverlay.assetId] ?? ""} alt="" className="h-full w-full object-cover" />
+          </div>
+        </>
+      ) : activeExclusiveVideoOverlay?.layout.type === "full-screen" ? (
         // Full-Screen: the overlay's own thumbnail fills the tile, same as
         // CanvasPlayer fully covering the base frame for this window -- no
         // flip transform, since CanvasPlayer never flips the overlay's own
         // footage, only the base clip's.
         // eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset
-        <img src={overlayThumbnailUrl(activeExclusiveOverlay)} alt={`Frame at ${index}s`} className="h-full w-full object-cover" />
-      ) : exclusiveOverlayRects && activeExclusiveOverlay ? (
+        <img src={overlayThumbnailUrl(activeExclusiveVideoOverlay)} alt={`Frame at ${index}s`} className="h-full w-full object-cover" />
+      ) : exclusiveVideoOverlayRects && activeExclusiveVideoOverlay ? (
         // Split Screen: base clip in its own half (still flipped, still the
         // real per-second thumbnail), overlay's own thumbnail in the other
         // half -- same division CanvasPlayer's drawFrameAt already renders.
         <>
-          <div className="absolute overflow-hidden" style={rectStyle(exclusiveOverlayRects.baseRect!)}>
+          <div className="absolute overflow-hidden" style={rectStyle(exclusiveVideoOverlayRects.baseRect!)}>
             {/* eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image */}
             <img src={src} alt={`Frame at ${index}s`} className="h-full w-full object-cover" style={flipStyle} />
           </div>
-          <div className="absolute overflow-hidden" style={rectStyle(exclusiveOverlayRects.overlayRect)}>
+          <div className="absolute overflow-hidden" style={rectStyle(exclusiveVideoOverlayRects.overlayRect)}>
             {/* eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset */}
-            <img src={overlayThumbnailUrl(activeExclusiveOverlay)} alt="" className="h-full w-full object-cover" />
+            <img src={overlayThumbnailUrl(activeExclusiveVideoOverlay)} alt="" className="h-full w-full object-cover" />
           </div>
         </>
       ) : (
@@ -281,15 +328,34 @@ const FrameTile = memo(function FrameTile({
           onFlipVertical={onFlipVertical}
         />
       )}
-      {overlays.map(({ overlay, overlayIndex }) => (
-        <OverlayRectOverlay
-          key={overlayIndex}
-          rect={overlay.rect}
-          imageUrl={assetUrlById[overlay.assetId] ?? ""}
-          onChange={onOverlayRectChange ? (next) => onOverlayRectChange(overlayIndex, next) : undefined}
-          onCommit={onOverlayRectCommit ? (next) => onOverlayRectCommit(overlayIndex, next) : undefined}
-        />
-      ))}
+      {videoOverlayPips.map(({ overlay, overlayIndex }) => {
+        if (overlay.layout.type !== "picture-in-picture") return null;
+        return (
+          <OverlayRectOverlay
+            key={`video-${overlayIndex}`}
+            rect={overlay.layout.rect}
+            imageUrl={overlayThumbnailUrl(overlay)}
+            borderColorClassName="border-violet-400"
+            handleColorClassName="bg-violet-400"
+            onChange={onVideoOverlayRectChange ? (next) => onVideoOverlayRectChange(overlayIndex, next) : undefined}
+            onCommit={onVideoOverlayRectCommit ? (next) => onVideoOverlayRectCommit(overlayIndex, next) : undefined}
+          />
+        );
+      })}
+      {imageOverlayPips.map(({ overlay, overlayIndex }) => {
+        if (overlay.layout.type !== "picture-in-picture") return null;
+        return (
+          <OverlayRectOverlay
+            key={`image-${overlayIndex}`}
+            rect={overlay.layout.rect}
+            imageUrl={assetUrlById[overlay.assetId] ?? ""}
+            borderColorClassName="border-fuchsia-400"
+            handleColorClassName="bg-fuchsia-400"
+            onChange={onImageOverlayRectChange ? (next) => onImageOverlayRectChange(overlayIndex, next) : undefined}
+            onCommit={onImageOverlayRectCommit ? (next) => onImageOverlayRectCommit(overlayIndex, next) : undefined}
+          />
+        );
+      })}
       {textOverlays.map(({ overlay, overlayIndex, progress }) => (
         <OverlayRectOverlay
           key={overlayIndex}
@@ -301,20 +367,6 @@ const FrameTile = memo(function FrameTile({
           }
         />
       ))}
-      {videoOverlayPips.map(({ overlay, overlayIndex }) => {
-        if (overlay.layout.type !== "picture-in-picture") return null;
-        return (
-          <OverlayRectOverlay
-            key={overlayIndex}
-            rect={overlay.layout.rect}
-            imageUrl={overlayThumbnailUrl(overlay)}
-            borderColorClassName="border-violet-400"
-            handleColorClassName="bg-violet-400"
-            onChange={onVideoOverlayRectChange ? (next) => onVideoOverlayRectChange(overlayIndex, next) : undefined}
-            onCommit={onVideoOverlayRectCommit ? (next) => onVideoOverlayRectCommit(overlayIndex, next) : undefined}
-          />
-        );
-      })}
     </div>
   );
 });
@@ -352,11 +404,17 @@ export function FrameStrip({
   onDeleteTrimRange,
   overlayImages,
   assetUrlById,
-  onChangeOverlayRect,
-  onCommitOverlayRect,
-  onChangeOverlayRange,
-  onCommitOverlayRange,
-  onDeleteOverlay,
+  onChangeImageOverlayRect,
+  onCommitImageOverlayRect,
+  onChangeImageOverlayRange,
+  onCommitImageOverlayRange,
+  onChangeImageOverlayPosition,
+  onCommitImageOverlayPosition,
+  onChangeImageOverlayLayout,
+  onToggleImageSplitScreenOrientation,
+  onToggleImageSplitScreenSides,
+  onOpenImageOverlayFraming,
+  onDeleteImageOverlay,
   textOverlays,
   onChangeTextOverlayRect,
   onCommitTextOverlayRect,
@@ -402,11 +460,12 @@ export function FrameStrip({
   // the plain read-only divider it always was.
   sequenceEntries: SequenceEntry[];
   onResizeImageClip: (entryId: string, newDurationSeconds: number, clipStartSeconds: number) => void;
-  // The Cutaways rail's own click -- opens ImageTemplatesDialog pre-filled
-  // to edit that cutaway in place, rather than appending a fresh one.
+  // The Cutaways rail's own click -- opens CutawayDialog pre-filled to
+  // edit that cutaway in place (image segments only), rather than
+  // appending a fresh one.
   onEditCutaway: (segment: CutawaySegment) => void;
   // The Cutaways rail's own right-click "Remove Cutaway" -- splices the
-  // clip out of the sequence entirely (see applyDeleteImageSequenceClip).
+  // clip out of the sequence entirely (see applyDeleteSequenceClip).
   onDeleteCutaway: (segment: CutawaySegment) => void;
   isLoading: boolean;
   durationSeconds: number;
@@ -431,13 +490,23 @@ export function FrameStrip({
   onTrimTrackClick: (timeSeconds: number) => void;
   onMoveTrimDot: (timeSeconds: number) => void;
   onDeleteTrimRange: (rangeIndex: number) => void;
-  overlayImages: OverlayImage[];
+  overlayImages: ImageOverlayClip[];
   assetUrlById: Record<string, string>;
-  onChangeOverlayRect: (overlayIndex: number, next: CropRect) => void;
-  onCommitOverlayRect: (overlayIndex: number, next: CropRect) => void;
-  onChangeOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
-  onCommitOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
-  onDeleteOverlay: (overlayIndex: number) => void;
+  onChangeImageOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onCommitImageOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onChangeImageOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCommitImageOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onChangeImageOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onCommitImageOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onChangeImageOverlayLayout: (
+    overlayIndex: number,
+    layoutType: VideoOverlayLayout["type"],
+    splitScreenOrientation?: "horizontal" | "vertical"
+  ) => void;
+  onToggleImageSplitScreenOrientation: (overlayIndex: number) => void;
+  onToggleImageSplitScreenSides: (overlayIndex: number) => void;
+  onOpenImageOverlayFraming: (overlayIndex: number) => void;
+  onDeleteImageOverlay: (overlayIndex: number) => void;
   textOverlays: TextOverlay[];
   onChangeTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
   onCommitTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
@@ -586,18 +655,6 @@ export function FrameStrip({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, trimRanges]);
 
-  // Keeps each overlay's original index into overlayImages (needed to
-  // dispatch onChangeOverlayRect/onCommitOverlayRect against the right
-  // entry) -- a plain .filter() on its own would lose that.
-  const tileOverlays = useMemo(() => {
-    return thumbnailTimestampsSeconds.map((timestamp) =>
-      overlayImages
-        .map((overlay, overlayIndex) => ({ overlay, overlayIndex }))
-        .filter(({ overlay }) => timestamp >= overlay.startTimeSeconds && timestamp < overlay.endTimeSeconds)
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
-  }, [thumbnails.length, thumbnailTimestampsSeconds, overlayImages]);
-
   const tileTextOverlays = useMemo(() => {
     return thumbnailTimestampsSeconds.map((timestamp) =>
       textOverlays
@@ -611,10 +668,24 @@ export function FrameStrip({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, textOverlays]);
 
-  // Same shape as tileOverlays above, but for the Picture-in-Picture-layout
-  // video overlays active at each tile's own instant -- the only layout
-  // with a rect to drag on the active tile (Full-Screen/Split-Screen have
-  // no on-canvas rect at all, per video_math.ts's VideoOverlayLayout).
+  // Same shape as tileTextOverlays above, but for the Picture-in-Picture-
+  // layout image overlays active at each tile's own instant -- the only
+  // layout with a rect to drag on the active tile (Full-Screen/Split-Screen
+  // have no on-canvas rect at all, per video_math.ts's VideoOverlayLayout,
+  // reused verbatim for ImageOverlayClip).
+  const tileImageOverlayPips = useMemo(() => {
+    return thumbnailTimestampsSeconds.map((timestamp) =>
+      overlayImages
+        .map((overlay, overlayIndex) => ({ overlay, overlayIndex }))
+        .filter(
+          ({ overlay }) =>
+            overlay.layout.type === "picture-in-picture" && timestamp >= overlay.startTimeSeconds && timestamp < overlay.endTimeSeconds
+        )
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, thumbnailTimestampsSeconds, overlayImages]);
+
+  // Same shape as tileImageOverlayPips above, but for video overlays.
   const tileVideoOverlayPips = useMemo(() => {
     return thumbnailTimestampsSeconds.map((timestamp) =>
       videoOverlays
@@ -628,12 +699,13 @@ export function FrameStrip({
   }, [thumbnails.length, thumbnailTimestampsSeconds, videoOverlays]);
 
   // Every meaningful time reference on this strip, combined into one list
-  // for VideoOverlayTrack's drag-to-snap (see its own comment and
-  // video_math.ts's snapToNearest) -- 0/full duration/the playhead, every
-  // clip seam, every zoom effect's own edges, every trim range's own edges,
-  // and every video overlay's own edges (including the one currently being
-  // dragged, which is harmless -- see VideoOverlayTrack.tsx's doc comment).
-  const videoOverlaySnapPointsSeconds = useMemo(() => {
+  // for VideoOverlayTrack/ImageOverlayTrack's drag-to-snap (see its own
+  // comment and video_math.ts's snapToNearest) -- 0/full duration/the
+  // playhead, every clip seam, every zoom effect's own edges, every trim
+  // range's own edges, and every video/image overlay's own edges (including
+  // the one currently being dragged, which is harmless -- see
+  // VideoOverlayTrack.tsx's doc comment).
+  const overlaySnapPointsSeconds = useMemo(() => {
     const points = [0, durationSeconds, currentTimeSeconds, ...clipBoundarySeconds];
     for (const effect of zoomEffects) {
       points.push(effect.startTimeSeconds, effect.epicenterTimeSeconds, effect.endTimeSeconds);
@@ -644,17 +716,31 @@ export function FrameStrip({
     for (const overlay of videoOverlays) {
       points.push(overlay.startTimeSeconds, overlay.endTimeSeconds);
     }
+    for (const overlay of overlayImages) {
+      points.push(overlay.startTimeSeconds, overlay.endTimeSeconds);
+    }
     return points;
-  }, [durationSeconds, currentTimeSeconds, clipBoundarySeconds, zoomEffects, trimRanges, videoOverlays]);
+  }, [durationSeconds, currentTimeSeconds, clipBoundarySeconds, zoomEffects, trimRanges, videoOverlays, overlayImages]);
 
   // The Full-Screen or Split-Screen overlay (if any) active at each tile's
-  // own instant -- at most one, since those two layouts are mutually
-  // exclusive with each other (isExclusiveLayout). Lets FrameTile swap in
-  // that overlay's own thumbnail / split the tile, matching what
-  // CanvasPlayer's drawFrameAt already renders for the same instant --
-  // without this, the timeline strip silently kept showing the base clip's
-  // own frame with no indication an overlay was active there at all.
-  const tileActiveExclusiveOverlay = useMemo(() => {
+  // own instant, per clip type -- at most one PER TYPE, since those two
+  // layouts are mutually exclusive with each other only WITHIN the same
+  // array (isExclusiveLayout). Lets FrameTile swap in that overlay's own
+  // thumbnail / split the tile, matching what CanvasPlayer's drawFrameAt
+  // already renders for the same instant -- without this, the timeline
+  // strip silently kept showing the base clip's own frame with no
+  // indication an overlay was active there at all.
+  const tileActiveExclusiveImageOverlay = useMemo(() => {
+    return thumbnailTimestampsSeconds.map(
+      (timestamp) =>
+        overlayImages.find(
+          (overlay) => isExclusiveLayout(overlay.layout) && timestamp >= overlay.startTimeSeconds && timestamp < overlay.endTimeSeconds
+        ) ?? null
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, thumbnailTimestampsSeconds, overlayImages]);
+
+  const tileActiveExclusiveVideoOverlay = useMemo(() => {
     return thumbnailTimestampsSeconds.map(
       (timestamp) =>
         videoOverlays.find(
@@ -664,27 +750,35 @@ export function FrameStrip({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, videoOverlays]);
 
-  // One segment per image cutaway, for the Cutaways rail (CutawayTrack) --
-  // start time comes from the same clipBoundarySeconds[index - 1] a
-  // preceding boundary already resolves to in handleBoundaryPointerUp
-  // above, so this rail's segments always line up with that clip's own
-  // boundary-drag handle.
+  // One segment per base-sequence clip (video or image), for the Cutaways
+  // rail (CutawayTrack) -- start/end time come from the same
+  // clipBoundarySeconds a preceding boundary already resolves to in
+  // handleBoundaryPointerUp above, so this rail's segments always line up
+  // with each clip's own boundary-drag handle, for either kind.
   const cutawaySegments = useMemo<CutawaySegment[]>(() => {
-    return sequenceEntries.flatMap((entry, index) => {
-      if (entry.kind !== "image") return [];
+    return sequenceEntries.map((entry, index) => {
       const startTimeSeconds = index === 0 ? 0 : clipBoundarySeconds[index - 1];
-      return [
-        {
+      const endTimeSeconds = index < clipBoundarySeconds.length ? clipBoundarySeconds[index] : durationSeconds;
+      if (entry.kind === "image") {
+        return {
+          kind: "image" as const,
           entryId: entry.id,
           assetId: entry.assetId,
           templateIds: normalizeImageTemplateIds(entry),
           cropRect: entry.cropRect ?? null,
           startTimeSeconds,
-          durationSeconds: entry.durationSeconds,
-        },
-      ];
+          durationSeconds: endTimeSeconds - startTimeSeconds,
+        };
+      }
+      return {
+        kind: "video" as const,
+        entryId: entry.id,
+        assetId: entry.assetId,
+        startTimeSeconds,
+        durationSeconds: endTimeSeconds - startTimeSeconds,
+      };
     });
-  }, [sequenceEntries, clipBoundarySeconds]);
+  }, [sequenceEntries, clipBoundarySeconds, durationSeconds]);
 
   // The tile whose OWN timestamp is closest to the playhead -- NOT an
   // even-spacing index formula (see this file's module comment on why
@@ -740,7 +834,7 @@ export function FrameStrip({
         <MarkerTrack
           markers={markers}
           totalDurationSeconds={durationSeconds}
-          snapPointsSeconds={videoOverlaySnapPointsSeconds}
+          snapPointsSeconds={overlaySnapPointsSeconds}
           frameThumbnails={thumbnails}
           frameThumbnailTimestampsSeconds={thumbnailTimestampsSeconds}
           onAdd={onAddMarker}
@@ -766,12 +860,83 @@ export function FrameStrip({
           onDeleteRange={onDeleteTrimRange}
         />
 
+        {/* Compositing z-order stack starts here -- TOP = FRONTMOST in the
+            rendered video (matches CanvasPlayer.tsx/exportTimeline.ts's own
+            draw order). See this file's own module comment for the full
+            rationale. */}
+        <p className="mb-0.5 text-[9px] uppercase tracking-wide text-muted/70">Overlays -- top renders in front</p>
+
+        <TextOverlayTrack
+          textOverlays={textOverlays}
+          videoDurationSeconds={durationSeconds}
+          onChangeRange={onChangeTextOverlayRange}
+          onCommitRange={onCommitTextOverlayRange}
+          onEdit={onRequestEditTextOverlay}
+          onDelete={onDeleteTextOverlay}
+        />
+
+        <ImageOverlayTrack
+          imageOverlays={overlayImages}
+          assetUrlById={assetUrlById}
+          videoDurationSeconds={durationSeconds}
+          snapPointsSeconds={overlaySnapPointsSeconds}
+          layoutGroup="picture-in-picture"
+          onChangeRange={onChangeImageOverlayRange}
+          onCommitRange={onCommitImageOverlayRange}
+          onChangePosition={onChangeImageOverlayPosition}
+          onCommitPosition={onCommitImageOverlayPosition}
+          onChangeLayout={onChangeImageOverlayLayout}
+          onToggleOrientation={onToggleImageSplitScreenOrientation}
+          onToggleSides={onToggleImageSplitScreenSides}
+          onOpenFraming={onOpenImageOverlayFraming}
+          onDelete={onDeleteImageOverlay}
+        />
+
         <VideoOverlayTrack
           videoOverlays={videoOverlays}
           assetThumbnailUrlById={videoThumbnailUrlByAssetId}
           overlaySourceDurationSeconds={overlaySourceDurationSeconds}
           videoDurationSeconds={durationSeconds}
-          snapPointsSeconds={videoOverlaySnapPointsSeconds}
+          snapPointsSeconds={overlaySnapPointsSeconds}
+          layoutGroup="picture-in-picture"
+          onChangeRange={onChangeVideoOverlayRange}
+          onCommitRange={onCommitVideoOverlayRange}
+          onChangePosition={onChangeVideoOverlayPosition}
+          onCommitPosition={onCommitVideoOverlayPosition}
+          onChangeLayout={onChangeVideoOverlayLayout}
+          onToggleOrientation={onToggleSplitScreenOrientation}
+          onToggleSides={onToggleSplitScreenSides}
+          onOpenFraming={onOpenVideoOverlayFraming}
+          onOpenSourceStart={onOpenSourceStart}
+          onDelete={onDeleteVideoOverlay}
+          onChangeAudioBalance={onChangeOverlayAudioBalance}
+          onCommitAudioBalance={onCommitOverlayAudioBalance}
+        />
+
+        <ImageOverlayTrack
+          imageOverlays={overlayImages}
+          assetUrlById={assetUrlById}
+          videoDurationSeconds={durationSeconds}
+          snapPointsSeconds={overlaySnapPointsSeconds}
+          layoutGroup="exclusive"
+          onChangeRange={onChangeImageOverlayRange}
+          onCommitRange={onCommitImageOverlayRange}
+          onChangePosition={onChangeImageOverlayPosition}
+          onCommitPosition={onCommitImageOverlayPosition}
+          onChangeLayout={onChangeImageOverlayLayout}
+          onToggleOrientation={onToggleImageSplitScreenOrientation}
+          onToggleSides={onToggleImageSplitScreenSides}
+          onOpenFraming={onOpenImageOverlayFraming}
+          onDelete={onDeleteImageOverlay}
+        />
+
+        <VideoOverlayTrack
+          videoOverlays={videoOverlays}
+          assetThumbnailUrlById={videoThumbnailUrlByAssetId}
+          overlaySourceDurationSeconds={overlaySourceDurationSeconds}
+          videoDurationSeconds={durationSeconds}
+          snapPointsSeconds={overlaySnapPointsSeconds}
+          layoutGroup="exclusive"
           onChangeRange={onChangeVideoOverlayRange}
           onCommitRange={onCommitVideoOverlayRange}
           onChangePosition={onChangeVideoOverlayPosition}
@@ -798,22 +963,23 @@ export function FrameStrip({
               flipHorizontal={tileFlips[index].flipHorizontal}
               flipVertical={tileFlips[index].flipVertical}
               isTrimmed={tileIsTrimmed[index]}
-              overlays={tileOverlays[index]}
               assetUrlById={assetUrlById}
               textOverlays={tileTextOverlays[index]}
+              imageOverlayPips={tileImageOverlayPips[index]}
               videoOverlayPips={tileVideoOverlayPips[index]}
               videoThumbnailUrlById={videoThumbnailUrlByAssetId}
               videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}
-              activeExclusiveOverlay={tileActiveExclusiveOverlay[index]}
+              activeExclusiveImageOverlay={tileActiveExclusiveImageOverlay[index]}
+              activeExclusiveVideoOverlay={tileActiveExclusiveVideoOverlay[index]}
               isImageClip={tileIsImageClip[index] ?? false}
               onChange={index === activeTileIndex ? onCropRectChange : undefined}
               onCommit={index === activeTileIndex ? onCropRectCommit : undefined}
               onFlipHorizontal={index === activeTileIndex ? onFlipHorizontal : undefined}
               onFlipVertical={index === activeTileIndex ? onFlipVertical : undefined}
-              onOverlayRectChange={index === activeTileIndex ? onChangeOverlayRect : undefined}
-              onOverlayRectCommit={index === activeTileIndex ? onCommitOverlayRect : undefined}
               onTextOverlayRectChange={index === activeTileIndex ? onChangeTextOverlayRect : undefined}
               onTextOverlayRectCommit={index === activeTileIndex ? onCommitTextOverlayRect : undefined}
+              onImageOverlayRectChange={index === activeTileIndex ? onChangeImageOverlayRect : undefined}
+              onImageOverlayRectCommit={index === activeTileIndex ? onCommitImageOverlayRect : undefined}
               onVideoOverlayRectChange={index === activeTileIndex ? onChangeVideoOverlayRect : undefined}
               onVideoOverlayRectCommit={index === activeTileIndex ? onCommitVideoOverlayRect : undefined}
             />
@@ -891,22 +1057,6 @@ export function FrameStrip({
           videoDurationSeconds={durationSeconds}
           colorClassName="bg-purple-500/50 border border-purple-500"
           title="Mirrored"
-        />
-        <OverlayTrack
-          overlayImages={overlayImages}
-          assetUrlById={assetUrlById}
-          videoDurationSeconds={durationSeconds}
-          onChangeRange={onChangeOverlayRange}
-          onCommitRange={onCommitOverlayRange}
-          onDelete={onDeleteOverlay}
-        />
-        <TextOverlayTrack
-          textOverlays={textOverlays}
-          videoDurationSeconds={durationSeconds}
-          onChangeRange={onChangeTextOverlayRange}
-          onCommitRange={onCommitTextOverlayRange}
-          onEdit={onRequestEditTextOverlay}
-          onDelete={onDeleteTextOverlay}
         />
       </div>
     </div>

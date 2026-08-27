@@ -2,7 +2,7 @@
 
 /**
  * Renders one overlay's position/size rectangle (fractions of the frame --
- * see lib/video/video_math.ts's OverlayImage/TextOverlay) on top of a
+ * see lib/video/video_math.ts's ImageOverlayClip/TextOverlay) on top of a
  * video frame or thumbnail, showing its actual content inside: an image
  * (pass `imageUrl`) or, for a text overlay, `renderInner` (a
  * TextOverlayCanvas -- see FrameStrip.tsx). Read-only unless onChange/

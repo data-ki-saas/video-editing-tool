@@ -1,91 +1,48 @@
 "use client";
 
 /**
- * One rail for every VideoOverlayClip (see lib/video/video_math.ts), split
- * into two internal packing strategies since the array holds two kinds of
- * clip at once:
- *  - EXCLUSIVE-layout clips (Full-Screen, Split Screen) share ONE row,
- *    sorted by time, neighbor-clamped -- same "mutually exclusive, packed
- *    row" structure as ZoomEffectsTrack.tsx, since these can never overlap.
- *  - Picture-in-Picture clips each get their OWN row -- same "one row per
- *    clip" structure as OverlayTrack.tsx, since these can legitimately
- *    overlap each other (and sit alongside/underneath the exclusive row).
+ * Image overlay's own rail -- exact structural twin of VideoOverlayTrack.tsx
+ * (see that file's own module comment for the full split-into-two-row-groups
+ * rationale), minus the two things only a VIDEO overlay has: a volume
+ * badge/audio-balance mix (images have no audio) and the flag-icon
+ * source-start button (a still image has no playback timeline to mark an
+ * in-point on). Everything else -- exclusive-vs-Picture-in-Picture packing,
+ * edge-drag (trim) + body-drag (move), the `layoutGroup` prop FrameStrip.tsx
+ * uses to interleave this with VideoOverlayTrack's own two row-groups into
+ * one z-order-accurate stack -- is identical.
  *
- * A clip switches between the two groups in place (via this component's own
- * right-click menu, isExclusiveLayout deciding which visual row it belongs
- * in) without losing its position, duration, or source asset -- the whole
- * point of unifying Full-Screen/Picture-in-Picture/Split Screen under one
- * VideoOverlayClip type with a switchable `layout` instead of three
- * separate always-placed-fresh types.
- *
- * Each segment supports both edge-drag (trim, existing pattern) AND
- * body-drag (move the whole block without changing duration -- a real gap
- * neither OverlayTrack nor ZoomEffectsTrack close today). The "grab middle
- * vs. grab edge" hit-test is pure DOM event order: the edge handles call
- * stopPropagation() before their own pointerdown handler runs, so a
- * pointerdown that reaches the segment's own root only happens when it
- * didn't land on an edge.
- *
- * Each segment also carries its own volume badge (see ./VolumeBadge.tsx) --
- * an icon + live percentage that opens a small popup with a standard
- * vertical VolumeFader. This used to be a second rail (VideoOverlayAudioTrack,
- * stacked above this one) with its own separately-positioned drag handle
- * per overlay; folding it into each segment here means one rail fully
- * defines an overlay (timing, layout, framing, markers, AND volume)
- * instead of two.
+ * Uses its OWN 3-hue palette (sky / fuchsia / lime) rather than video
+ * overlay's amber / violet / teal, so the two overlay kinds read as visually
+ * distinct families at a glance, on this rail and on the matching "Image
+ * Overlay" vertical tab (UserActions.tsx).
  */
 import { useRef } from "react";
 import { ContextMenu, useContextMenu, type ContextMenuAction } from "./ContextMenu";
-import { VolumeBadge } from "./VolumeBadge";
-import {
-  SplitScreenOrientationIcon,
-  SwapIcon,
-  FramingIcon,
-  MarkerFlagIcon,
-  PictureInPictureIcon,
-  FullScreenIcon,
-} from "@/components/icons/UIIcons";
+import { SplitScreenOrientationIcon, SwapIcon, FramingIcon, PictureInPictureIcon, FullScreenIcon } from "@/components/icons/UIIcons";
 import {
   isExclusiveLayout,
   snapToNearest,
   MIN_VIDEO_OVERLAY_DURATION_SECONDS as MIN_DURATION_SECONDS,
-  type VideoOverlayClip,
+  type ImageOverlayClip,
   type VideoOverlayLayout,
 } from "@/lib/video/video_math";
 
-// Pixel distance (converted to seconds via the drag's own trackRect) within
-// which a drag magnetically snaps to a nearby time reference -- a
-// reasonable magnetic-snap distance, not so large it fights normal
-// fine-grained dragging.
 const SNAP_THRESHOLD_PX = 8;
 
-// Matches each rail color used below -- also used to tint the matching
-// entry's label in the right-click menu (Switch to X), so the menu reads
-// as "which color am I about to turn this into" rather than plain text.
 const LAYOUT_COLOR_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
-  "full-screen": "border-amber-700 bg-amber-500",
-  "picture-in-picture": "border-violet-700 bg-violet-500",
-  "split-screen": "border-teal-700 bg-teal-500",
+  "full-screen": "border-sky-700 bg-sky-500",
+  "picture-in-picture": "border-fuchsia-700 bg-fuchsia-500",
+  "split-screen": "border-lime-700 bg-lime-600",
 };
 const LAYOUT_TEXT_COLOR_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
-  "full-screen": "text-amber-600",
-  "picture-in-picture": "text-violet-600",
-  "split-screen": "text-teal-600",
-};
-// Exported so VideoOverlayFramingDialog's own duplicate volume control can
-// share the exact same per-layout gradient color as this rail's own volume
-// popup below, instead of a second constant the two could silently drift
-// apart.
-export const LAYOUT_GRADIENT_TO_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
-  "full-screen": "to-amber-500",
-  "picture-in-picture": "to-violet-500",
-  "split-screen": "to-teal-500",
+  "full-screen": "text-sky-600",
+  "picture-in-picture": "text-fuchsia-600",
+  "split-screen": "text-lime-700",
 };
 
-function VideoOverlaySegment({
+function ImageOverlaySegment({
   overlay,
   thumbnailUrl,
-  sourceDurationSeconds,
   videoDurationSeconds,
   prevBoundSeconds,
   nextBoundSeconds,
@@ -98,14 +55,10 @@ function VideoOverlaySegment({
   onToggleOrientation,
   onToggleSides,
   onOpenFraming,
-  onOpenSourceStart,
   onDelete,
-  onChangeAudioBalance,
-  onCommitAudioBalance,
 }: {
-  overlay: VideoOverlayClip;
+  overlay: ImageOverlayClip;
   thumbnailUrl: string;
-  sourceDurationSeconds: number; // Infinity if not yet probed -- degrades to only the neighbor/sequence clamps until it resolves
   videoDurationSeconds: number;
   prevBoundSeconds: number; // 0 if this is the first exclusive clip (or always 0 for a PIP clip, which has no neighbor)
   nextBoundSeconds: number; // videoDurationSeconds if this is the last exclusive clip (or always videoDurationSeconds for a PIP clip)
@@ -118,10 +71,7 @@ function VideoOverlaySegment({
   onToggleOrientation: () => void;
   onToggleSides: () => void;
   onOpenFraming: () => void;
-  onOpenSourceStart: () => void;
   onDelete: () => void;
-  onChangeAudioBalance: (balance: number) => void;
-  onCommitAudioBalance: (balance: number) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
@@ -145,19 +95,7 @@ function VideoOverlaySegment({
         const next = Math.min(Math.max(snapped, prevBoundSeconds, 0), endTimeSeconds - MIN_DURATION_SECONDS);
         return [next, endTimeSeconds];
       }
-      // Bounded by whichever is smallest: a neighboring exclusive overlay's
-      // start, the sequence's own end, or how much of the source is left to
-      // play from this overlay's own sourceStartSeconds (set via the flag
-      // icon's OverlaySourceStartDialog). A drag can no longer stretch past
-      // one play-through -- the modulo-based loop rendering in
-      // CanvasPlayer.tsx/exportTimeline.ts/compileCreatomateTimeline.ts now
-      // only matters as a graceful-degradation path for legacy timelines
-      // that already overran before this clamp existed.
-      const hasKnownSourceDuration = Number.isFinite(sourceDurationSeconds) && sourceDurationSeconds > 0;
-      const sourceCapEnd = hasKnownSourceDuration
-        ? startTimeSeconds + (sourceDurationSeconds - overlay.sourceStartSeconds)
-        : Infinity;
-      const maxEnd = Math.min(nextBoundSeconds, videoDurationSeconds, sourceCapEnd);
+      const maxEnd = Math.min(nextBoundSeconds, videoDurationSeconds);
       const clamped = Math.max(Math.min(endTimeSeconds + dxSeconds, maxEnd), startTimeSeconds + MIN_DURATION_SECONDS);
       const snapped = snapToNearest(clamped, snapPointsSeconds, snapThresholdSeconds);
       const next = Math.max(Math.min(snapped, maxEnd), startTimeSeconds + MIN_DURATION_SECONDS);
@@ -210,23 +148,6 @@ function VideoOverlaySegment({
   const durationSeconds = overlay.endTimeSeconds - overlay.startTimeSeconds;
   const widthPercent = videoDurationSeconds > 0 ? (durationSeconds / videoDurationSeconds) * 100 : 0;
 
-  // The source's own real duration is known and shorter than the current
-  // window -- i.e. this overlay is stretched past one play-through and
-  // will loop. Shown as a visibly dimmed region for "this part is a
-  // repeat" (much harder to miss than a bare line), with a crisp tick at
-  // every repeat boundary inside it. Nothing rendered at all once the
-  // window fits within a single play-through, or before the source's own
-  // duration has been probed.
-  const hasKnownSourceDuration = Number.isFinite(sourceDurationSeconds) && sourceDurationSeconds > 0;
-  const repeatsWithinWindow = hasKnownSourceDuration && sourceDurationSeconds < durationSeconds;
-  const repeatRegionPercent = repeatsWithinWindow ? ((durationSeconds - sourceDurationSeconds) / durationSeconds) * 100 : 0;
-  const loopTickPercents: number[] = [];
-  if (repeatsWithinWindow) {
-    for (let boundary = sourceDurationSeconds; boundary < durationSeconds; boundary += sourceDurationSeconds) {
-      loopTickPercents.push((boundary / durationSeconds) * 100);
-    }
-  }
-
   const layoutMenuEntries: ContextMenuAction[] = [];
   if (overlay.layout.type !== "full-screen") {
     layoutMenuEntries.push({
@@ -242,10 +163,6 @@ function VideoOverlaySegment({
       onSelect: () => onChangeLayout("picture-in-picture"),
     });
   }
-  // A plain `layout.type === "split-screen"` boolean stored separately
-  // doesn't let TS narrow `layout.orientation` back through it later --
-  // capturing the orientation itself (null when not split-screen) sidesteps
-  // that instead of re-checking the discriminant inline every time.
   const currentSplitScreenOrientation = overlay.layout.type === "split-screen" ? overlay.layout.orientation : null;
   if (currentSplitScreenOrientation !== "horizontal") {
     layoutMenuEntries.push({
@@ -272,48 +189,18 @@ function VideoOverlaySegment({
       style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
     >
       {thumbnailUrl && (
-        // eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset
+        // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset
         <img src={thumbnailUrl} alt="" className="z-10 h-3 w-3 shrink-0 rounded-sm object-cover" />
       )}
       <button
         type="button"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={onOpenFraming}
-        title="Adjust framing -- recenter or flip this overlay's own footage"
+        title="Adjust framing -- recenter or flip this overlay's own photo"
         className="pointer-events-auto z-10 shrink-0 rounded-sm bg-black/25 p-0.5 text-white hover:bg-black/50"
       >
         <FramingIcon className="h-2.5 w-2.5" />
       </button>
-      <button
-        type="button"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={onOpenSourceStart}
-        title="Start point -- where this overlay's own footage begins playing"
-        className="pointer-events-auto z-10 shrink-0 rounded-sm bg-black/25 p-0.5 text-white hover:bg-black/50"
-      >
-        <MarkerFlagIcon className="h-2.5 w-2.5" />
-      </button>
-      <VolumeBadge
-        value={overlay.audioBalance}
-        onChange={onChangeAudioBalance}
-        onCommit={onCommitAudioBalance}
-        colorClassName={LAYOUT_GRADIENT_TO_CLASSNAMES[overlay.layout.type]}
-      />
-      {repeatsWithinWindow && (
-        <div
-          className="pointer-events-none absolute inset-y-0 right-0 bg-black/35"
-          style={{ width: `${repeatRegionPercent}%` }}
-          title={`Repeats every ${sourceDurationSeconds.toFixed(1)}s`}
-        />
-      )}
-      {loopTickPercents.map((percent, tickIndex) => (
-        <div
-          key={tickIndex}
-          title="Repeats here"
-          className="pointer-events-none absolute inset-y-0 w-[2px] bg-white"
-          style={{ left: `${percent}%`, boxShadow: "0 0 0 1px rgba(0,0,0,0.55)" }}
-        />
-      ))}
       <div
         onPointerDown={(e) => startEdgeDrag(e, "start")}
         className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-black/20"
@@ -368,10 +255,9 @@ function VideoOverlaySegment({
   );
 }
 
-export function VideoOverlayTrack({
-  videoOverlays,
-  assetThumbnailUrlById,
-  overlaySourceDurationSeconds,
+export function ImageOverlayTrack({
+  imageOverlays,
+  assetUrlById,
   videoDurationSeconds,
   snapPointsSeconds,
   layoutGroup,
@@ -383,26 +269,14 @@ export function VideoOverlayTrack({
   onToggleOrientation,
   onToggleSides,
   onOpenFraming,
-  onOpenSourceStart,
   onDelete,
-  onChangeAudioBalance,
-  onCommitAudioBalance,
 }: {
-  videoOverlays: VideoOverlayClip[];
-  assetThumbnailUrlById: Record<string, string>;
-  overlaySourceDurationSeconds: Record<string, number>;
+  imageOverlays: ImageOverlayClip[];
+  assetUrlById: Record<string, string>;
   videoDurationSeconds: number;
   snapPointsSeconds: number[];
-  // Which of the two row-groups below to render -- "picture-in-picture" or
-  // "exclusive" (Full-Screen/Split-Screen) -- or both (undefined), stacked
-  // Picture-in-Picture first, per this component's own z-order convention
-  // (a PiP box floats OVER an exclusive layout, see video_math.ts's
-  // VideoOverlayLayout doc comment). FrameStrip.tsx renders each group as
-  // its own separate track invocation instead, interleaved with
-  // ImageOverlayTrack's matching groups, so the rail stack's top-to-bottom
-  // order can exactly mirror CanvasPlayer's actual compositing order (see
-  // that file's own module comment) -- something a single monolithic
-  // component covering both clip types at once couldn't express.
+  // See VideoOverlayTrack.tsx's own doc comment on this prop -- identical
+  // contract, just for the image-overlay array.
   layoutGroup?: "exclusive" | "picture-in-picture";
   onChangeRange: (overlayIndex: number, start: number, end: number) => void;
   onCommitRange: (overlayIndex: number, start: number, end: number) => void;
@@ -412,25 +286,21 @@ export function VideoOverlayTrack({
   onToggleOrientation: (overlayIndex: number) => void;
   onToggleSides: (overlayIndex: number) => void;
   onOpenFraming: (overlayIndex: number) => void;
-  onOpenSourceStart: (overlayIndex: number) => void;
   onDelete: (overlayIndex: number) => void;
-  onChangeAudioBalance: (overlayIndex: number, balance: number) => void;
-  onCommitAudioBalance: (overlayIndex: number, balance: number) => void;
 }) {
-  if (videoOverlays.length === 0) return null;
+  if (imageOverlays.length === 0) return null;
 
-  const indexed = videoOverlays.map((overlay, index) => ({ overlay, index }));
+  const indexed = imageOverlays.map((overlay, index) => ({ overlay, index }));
   const exclusiveSorted = indexed
     .filter(({ overlay }) => isExclusiveLayout(overlay.layout))
     .sort((a, b) => a.overlay.startTimeSeconds - b.overlay.startTimeSeconds);
   const pipEntries = indexed.filter(({ overlay }) => overlay.layout.type === "picture-in-picture");
 
   function segmentProps(index: number, prevBoundSeconds: number, nextBoundSeconds: number) {
-    const overlay = videoOverlays[index];
+    const overlay = imageOverlays[index];
     return {
       overlay,
-      thumbnailUrl: assetThumbnailUrlById[overlay.assetId] ?? "",
-      sourceDurationSeconds: overlaySourceDurationSeconds[overlay.assetId] ?? Infinity,
+      thumbnailUrl: assetUrlById[overlay.assetId] ?? "",
       videoDurationSeconds,
       prevBoundSeconds,
       nextBoundSeconds,
@@ -444,10 +314,7 @@ export function VideoOverlayTrack({
       onToggleOrientation: () => onToggleOrientation(index),
       onToggleSides: () => onToggleSides(index),
       onOpenFraming: () => onOpenFraming(index),
-      onOpenSourceStart: () => onOpenSourceStart(index),
       onDelete: () => onDelete(index),
-      onChangeAudioBalance: (balance: number) => onChangeAudioBalance(index, balance),
-      onCommitAudioBalance: (balance: number) => onCommitAudioBalance(index, balance),
     };
   }
 
@@ -456,13 +323,13 @@ export function VideoOverlayTrack({
       {layoutGroup !== "exclusive" &&
         pipEntries.map(({ index }) => (
           <div key={index} className="relative h-5 w-full shrink-0">
-            <VideoOverlaySegment {...segmentProps(index, 0, videoDurationSeconds)} />
+            <ImageOverlaySegment {...segmentProps(index, 0, videoDurationSeconds)} />
           </div>
         ))}
       {layoutGroup !== "picture-in-picture" && exclusiveSorted.length > 0 && (
         <div className="relative h-5 w-full shrink-0">
           {exclusiveSorted.map(({ index }, pos) => (
-            <VideoOverlaySegment
+            <ImageOverlaySegment
               key={index}
               {...segmentProps(
                 index,

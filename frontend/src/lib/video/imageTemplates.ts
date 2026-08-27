@@ -1,6 +1,6 @@
 /**
  * Ken Burns-style animation presets for an image clip in the base sequence
- * (the "Image Templates" toolbar tool -- see ImageTemplatesDialog.tsx).
+ * (the "Image Templates" toolbar tool -- see CutawayDialog.tsx).
  * Unlike lib/video/textTemplates.ts / transcriptCaptionTemplates.ts, this
  * catalog doesn't need its own style-rendering or Creatomate-property
  * mapping: a Ken Burns move IS just a ZoomEffect (video_math.ts), the exact
@@ -49,7 +49,7 @@ export function getImageTemplateOption(templateId: string): ImageTemplateOption 
 // Which "axis" a template belongs to -- one pick per axis at a time
 // (zoom-in/zoom-out are alternatives to each other; so are pan-left/right;
 // so are pan-up/down), but any combination of DIFFERENT axes composes into
-// one combined motion (see kenBurnsRects below and ImageTemplatesDialog's
+// one combined motion (see kenBurnsRects below and CutawayDialog's
 // multi-select toggle logic).
 export type ImageTemplateAxis = "zoom" | "pan-h" | "pan-v";
 
@@ -154,7 +154,7 @@ function kenBurnsRects(templateIds: string[], base: CropRect): { startRect: Crop
 /** Builds the ZoomEffect for an image clip spanning
  * [startTimeSeconds, startTimeSeconds + durationSeconds) -- used both when
  * an image clip is first added (transformations.ts's
- * applyAddImageSequenceClip) and by ImageTemplatesDialog's own live
+ * applyAddImageSequenceClip) and by CutawayDialog's own live
  * preview, so the popup's preview and the real committed effect can never
  * drift apart. `templateIds` is one id per axis (see IMAGE_TEMPLATE_AXES),
  * composed by kenBurnsRects into a single motion. */

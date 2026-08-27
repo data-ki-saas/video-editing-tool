@@ -71,7 +71,6 @@ import {
   computeEffectiveCropRect,
   computeEffectiveFlip,
   skipTrimmedRanges,
-  findActiveOverlays,
   findActiveTextOverlays,
   findActiveExclusiveOverlay,
   findActivePictureInPictureOverlays,
@@ -86,7 +85,7 @@ import {
   resolveSequencePosition,
   FULL_FRAME_CROP_RECT,
   type CropRect,
-  type OverlayImage,
+  type ImageOverlayClip,
   type SequenceClipInfo,
   type SequenceEntry,
   type TextOverlay,
@@ -140,11 +139,13 @@ export const CanvasPlayer = forwardRef<
     // dimmed tiles promise is gone.
     trimRanges: TrimRange[];
     // Image assets composited on top of the base frame for their own time
-    // range (see video_math.ts's OverlayImage) -- `assetUrlById` resolves
-    // each overlay's assetId to the actual R2 URL to load and draw, kept
-    // separate from OverlayImage itself since that's persisted state and
-    // has no business holding a URL that expires.
-    overlayImages: OverlayImage[];
+    // range, with the SAME switchable Full-Screen/Picture-in-Picture/Split
+    // Screen layout as videoOverlays below (see video_math.ts's
+    // ImageOverlayClip) -- `assetUrlById` resolves each overlay's assetId to
+    // the actual R2 URL to load and draw, kept separate from ImageOverlayClip
+    // itself since that's persisted state and has no business holding a URL
+    // that expires.
+    overlayImages: ImageOverlayClip[];
     // Text captions composited on top of the base frame, rendered via a
     // named template (see lib/video/textTemplates.ts) -- drawn after image
     // overlays, so text always sits above them.
@@ -353,9 +354,20 @@ export const CanvasPlayer = forwardRef<
     const flipHorizontal = computeEffectiveFlip(flipHorizontalToggles, elapsedSeconds);
     const flipVertical = computeEffectiveFlip(flipVerticalToggles, elapsedSeconds);
 
-    const activeExclusiveOverlay = findActiveExclusiveOverlay(videoOverlays, elapsedSeconds);
-    const { baseRect, overlayRect } = activeExclusiveOverlay
-      ? computeOverlayRects(activeExclusiveOverlay.layout)
+    // Two independent exclusive-overlay arrays (video vs. image) can each
+    // have at most one active member, but the two CAN legitimately overlap
+    // in time with each other (an edge case, not actively prevented -- see
+    // this file's own module comment). When both are active at once, the
+    // IMAGE one wins -- it's drawn (further below) after the video one,
+    // same "graphics read as on top of video" convention the whole overlay
+    // z-order follows (FrameStrip.tsx's own module comment has the full
+    // rationale and the complete stack, top to bottom: text, image PiP,
+    // video PiP, image exclusive, video exclusive, base).
+    const activeExclusiveImageOverlay = findActiveExclusiveOverlay(overlayImages, elapsedSeconds);
+    const activeExclusiveVideoOverlay = findActiveExclusiveOverlay(videoOverlays, elapsedSeconds);
+    const winningExclusiveLayout = (activeExclusiveImageOverlay ?? activeExclusiveVideoOverlay)?.layout ?? null;
+    const { baseRect, overlayRect } = winningExclusiveLayout
+      ? computeOverlayRects(winningExclusiveLayout)
       : { baseRect: FULL_FRAME_CROP_RECT, overlayRect: null };
 
     // Flip/mirror via the canvas transform, not by touching sx/sy/sWidth/
@@ -366,7 +378,7 @@ export const CanvasPlayer = forwardRef<
     ctx.save();
     ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
     ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
-    if (baseRect && activeExclusiveOverlay?.layout.type === "split-screen") {
+    if (baseRect && winningExclusiveLayout?.type === "split-screen") {
       // A Split-Screen half's own box generally has a DIFFERENT aspect
       // ratio than `crop` (the base clip's own chosen output ratio) --
       // drawing the already-cropped [sx,sy,sWidth,sHeight] region straight
@@ -385,7 +397,7 @@ export const CanvasPlayer = forwardRef<
       // inside a still-open session) can hand back a split-screen layout
       // with this field simply absent, so defaulting it here (rather than
       // trusting the type) avoids a hard crash on load.
-      const { panX, panY, zoom: baseZoom, flipHorizontal: baseFlipH, flipVertical: baseFlipV } = activeExclusiveOverlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING;
+      const { panX, panY, zoom: baseZoom, flipHorizontal: baseFlipH, flipVertical: baseFlipV } = winningExclusiveLayout.baseFraming ?? DEFAULT_OVERLAY_FRAMING;
       const { sx: bsx, sy: bsy, sWidth: bsw, sHeight: bsh } = computeCoverFitSourceRect(sWidth, sHeight, baseDestWidth, baseDestHeight, panX, panY, baseZoom);
       // Composes with the global flip transform already active on this
       // context (the outer ctx.translate/scale above) -- each mirrors
@@ -407,14 +419,31 @@ export const CanvasPlayer = forwardRef<
     ctx.restore();
 
     // Composited AFTER the flip transform is undone (ctx.restore() above)
-    // -- a video overlay is independent of the base clip's flip state, not
-    // something that should mirror along with it. Full-Screen fills the
-    // whole canvas (covering the skipped/undrawn base above); Split Screen
-    // fills its own half.
-    if (activeExclusiveOverlay && overlayRect) {
-      const frames = videoOverlayFramesByAssetIdRef.current[activeExclusiveOverlay.assetId];
+    // -- an overlay (image or video) is independent of the base clip's flip
+    // state, not something that should mirror along with it. Full-Screen
+    // fills the whole canvas (covering the skipped/undrawn base above);
+    // Split Screen fills its own half. Image wins over video when both are
+    // active (see this function's own comment above on winningExclusiveLayout).
+    if (activeExclusiveImageOverlay && overlayRect) {
+      const overlayImage = overlayImagesRef.current[activeExclusiveImageOverlay.assetId];
+      if (overlayImage) {
+        const destX = overlayRect.x * canvas.width;
+        const destY = overlayRect.y * canvas.height;
+        const destWidth = overlayRect.width * canvas.width;
+        const destHeight = overlayRect.height * canvas.height;
+        const { sx: osx, sy: osy, sWidth: osw, sHeight: osh } = computeCoverFitSourceRect(
+          overlayImage.width, overlayImage.height, destWidth, destHeight,
+          activeExclusiveImageOverlay.framing.panX, activeExclusiveImageOverlay.framing.panY, activeExclusiveImageOverlay.framing.zoom
+        );
+        drawImageFlipped(
+          ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+          activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
+        );
+      }
+    } else if (activeExclusiveVideoOverlay && overlayRect) {
+      const frames = videoOverlayFramesByAssetIdRef.current[activeExclusiveVideoOverlay.assetId];
       if (frames) {
-        const localOffsetSeconds = activeExclusiveOverlay.sourceStartSeconds + (elapsedSeconds - activeExclusiveOverlay.startTimeSeconds);
+        const localOffsetSeconds = activeExclusiveVideoOverlay.sourceStartSeconds + (elapsedSeconds - activeExclusiveVideoOverlay.startTimeSeconds);
         // Loops back to the start once the window runs past one
         // play-through of the source (see VideoOverlayTrack.tsx's own
         // edge-drag comment) -- frameIndexAtTime alone would just clamp to
@@ -423,7 +452,7 @@ export const CanvasPlayer = forwardRef<
         // own probed estimate) so video looping never drifts from audio
         // looping over repeated play-throughs -- see
         // getCanonicalOverlayDurationSeconds.
-        const canonicalDurationSeconds = getCanonicalOverlayDurationSeconds(activeExclusiveOverlay.assetId) ?? frames.durationSeconds;
+        const canonicalDurationSeconds = getCanonicalOverlayDurationSeconds(activeExclusiveVideoOverlay.assetId) ?? frames.durationSeconds;
         const loopedOffsetSeconds = canonicalDurationSeconds > 0 ? localOffsetSeconds % canonicalDurationSeconds : localOffsetSeconds;
         const overlayFrameIndex = frameIndexAtTime(loopedOffsetSeconds, frames.frameRate, frames.images.length);
         const overlayImage = frames.images[overlayFrameIndex];
@@ -433,16 +462,16 @@ export const CanvasPlayer = forwardRef<
         const destHeight = overlayRect.height * canvas.height;
         const { sx: osx, sy: osy, sWidth: osw, sHeight: osh } = computeCoverFitSourceRect(
           overlayImage.width, overlayImage.height, destWidth, destHeight,
-          activeExclusiveOverlay.framing.panX, activeExclusiveOverlay.framing.panY, activeExclusiveOverlay.framing.zoom
+          activeExclusiveVideoOverlay.framing.panX, activeExclusiveVideoOverlay.framing.panY, activeExclusiveVideoOverlay.framing.zoom
         );
         drawImageFlipped(
           ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
-          activeExclusiveOverlay.framing.flipHorizontal, activeExclusiveOverlay.framing.flipVertical
+          activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
         );
       }
     }
 
-    // Picture-in-Picture overlays float on top of whatever's showing
+    // Picture-in-Picture VIDEO overlays float on top of whatever's showing
     // (the base clip, or an active Full-Screen/Split-Screen overlay above)
     // -- unlike the exclusive layouts, any number can be active at once.
     for (const pip of findActivePictureInPictureOverlays(videoOverlays, elapsedSeconds)) {
@@ -467,22 +496,24 @@ export const CanvasPlayer = forwardRef<
       drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
     }
 
-    // Composited AFTER the flip transform is undone (ctx.restore() above)
-    // -- an overlay image is independent of the base clip's flip state,
-    // not something that should mirror along with it.
-    for (const overlay of findActiveOverlays(overlayImages, elapsedSeconds)) {
-      const overlayImage = overlayImagesRef.current[overlay.assetId];
+    // Picture-in-Picture IMAGE overlays draw AFTER video PiP overlays, so
+    // an image PiP wins visually if it happens to overlap a video PiP box
+    // -- same "image wins" convention as the exclusive layer above.
+    for (const pip of findActivePictureInPictureOverlays(overlayImages, elapsedSeconds)) {
+      if (pip.layout.type !== "picture-in-picture") continue; // narrows the type for pip.layout.rect below
+      const overlayImage = overlayImagesRef.current[pip.assetId];
       if (!overlayImage) continue;
-      ctx.drawImage(
-        overlayImage,
-        overlay.rect.x * canvas.width,
-        overlay.rect.y * canvas.height,
-        overlay.rect.width * canvas.width,
-        overlay.rect.height * canvas.height
+      const destX = pip.layout.rect.x * canvas.width;
+      const destY = pip.layout.rect.y * canvas.height;
+      const destWidth = pip.layout.rect.width * canvas.width;
+      const destHeight = pip.layout.rect.height * canvas.height;
+      const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
+        overlayImage.width, overlayImage.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
       );
+      drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
     }
 
-    // Text overlays draw last, always on top of image overlays.
+    // Text overlays draw last, always on top of every overlay above.
     for (const overlay of findActiveTextOverlays(textOverlays, elapsedSeconds)) {
       const renderer = getTextTemplateRenderer(overlay.templateId);
       if (!renderer) continue;

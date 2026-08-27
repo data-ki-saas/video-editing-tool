@@ -7,15 +7,20 @@
  * is visually distinct enough on its own, but grouping by kind up front
  * makes each column scannable rather than needing to spot the odd tile out
  * of a mixed strip). "+ Asset" opens UploadDialog instead of a permanent drop target
- * taking up space; right-click offers Delete, plus an action whose meaning
- * depends on kind: for an image, "Add" places it as an overlay on the
- * timeline (ThreePaneEditor's handleAddOverlay); for a video, "Append"
- * appends it to the concatenated video sequence (handleAddToSequence --
- * the first Append is what starts rendering frames at all, every later one
- * plays right after whatever's already there), and "Overlay" places it on
- * its own rail with a switchable Full-Screen/Picture-in-Picture/Split
- * Screen layout (handleAddVideoOverlay -- see VideoOverlayTrack.tsx); for
- * music, "Add" appends it to the background-music sequence
+ * taking up space; right-click offers Delete, plus two actions for video and
+ * image assets, symmetric across both kinds -- "Cutaway" and "Overlay":
+ *  - Video "Cutaway" appends it to the concatenated video sequence as-is
+ *    (handleAddToSequence -- the first one is what starts rendering frames
+ *    at all, every later one plays right after whatever's already there).
+ *  - Image "Cutaway" opens CutawayDialog pre-selected to this photo, to pick
+ *    its Ken Burns motion(s)/crop/duration before it's appended
+ *    (onOpenCutawayDialogForAsset) -- unlike video, a photo needs that setup
+ *    before it can become part of the base sequence.
+ *  - "Overlay" (either kind) places it on its own rail at the current
+ *    playhead with a switchable Full-Screen/Picture-in-Picture/Split Screen
+ *    layout (handleAddVideoOverlay / handleAddImageOverlay -- see
+ *    VideoOverlayTrack.tsx/ImageOverlayTrack.tsx).
+ * For music, "Add" appends it to the background-music sequence
  * (handleAddToBackgroundSequence -- multiple appended tracks concatenate,
  * then loop as a whole across the video's duration). A small "+" badge
  * marks a tile as currently in use (referenced by an overlay, in the video
@@ -69,10 +74,11 @@ export function AssetGallery({
   onAddAsset,
   onBrowseStock,
   onDeleted,
-  onAddOverlay,
+  onAddImageOverlay,
   onAddToSequence,
   onAddVideoOverlay,
   onAddToBackgroundSequence,
+  onOpenCutawayDialogForAsset,
   usedAssetIds,
   videoThumbnailUrlByAssetId,
 }: {
@@ -86,10 +92,11 @@ export function AssetGallery({
   onAddAsset: () => void;
   onBrowseStock: () => void;
   onDeleted: (assetId: string) => void;
-  onAddOverlay: (asset: Asset) => void;
+  onAddImageOverlay: (asset: Asset) => void;
   onAddToSequence: (asset: Asset) => void;
   onAddVideoOverlay: (asset: Asset) => void;
   onAddToBackgroundSequence: (asset: Asset) => void;
+  onOpenCutawayDialogForAsset: (asset: Asset) => void;
   usedAssetIds: Set<string>;
   // assetId -> a single representative still frame, one per video asset --
   // lifted up to ThreePaneEditor (rather than generated locally here, as
@@ -208,10 +215,13 @@ export function AssetGallery({
                 ]
               : []),
             ...(asset.kind === "image"
-              ? [{ label: "Add", onSelect: () => onAddOverlay(asset) }]
+              ? [
+                  { label: "Cutaway", onSelect: () => onOpenCutawayDialogForAsset(asset) },
+                  { label: "Overlay", onSelect: () => onAddImageOverlay(asset) },
+                ]
               : asset.kind === "video"
                 ? [
-                    { label: "Append", onSelect: () => onAddToSequence(asset) },
+                    { label: "Cutaway", onSelect: () => onAddToSequence(asset) },
                     { label: "Overlay", onSelect: () => onAddVideoOverlay(asset) },
                   ]
                 : asset.kind === "audio"

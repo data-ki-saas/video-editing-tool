@@ -68,7 +68,7 @@ import type { CutawaySegment } from "./CutawayTrack";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
 import type {
   CropRect,
-  OverlayImage,
+  ImageOverlayClip,
   SequenceEntry,
   TextOverlay,
   TrimRange,
@@ -133,11 +133,17 @@ export function Playground({
   onDeleteTrimRange,
   overlayImages,
   assetUrlById,
-  onChangeOverlayRect,
-  onCommitOverlayRect,
-  onChangeOverlayRange,
-  onCommitOverlayRange,
-  onDeleteOverlay,
+  onChangeImageOverlayRect,
+  onCommitImageOverlayRect,
+  onChangeImageOverlayRange,
+  onCommitImageOverlayRange,
+  onChangeImageOverlayPosition,
+  onCommitImageOverlayPosition,
+  onChangeImageOverlayLayout,
+  onToggleImageSplitScreenOrientation,
+  onToggleImageSplitScreenSides,
+  onOpenImageOverlayFraming,
+  onDeleteImageOverlay,
   textOverlays,
   onChangeTextOverlayRect,
   onCommitTextOverlayRect,
@@ -210,13 +216,23 @@ export function Playground({
   onTrimTrackClick: (timeSeconds: number) => void;
   onMoveTrimDot: (timeSeconds: number) => void;
   onDeleteTrimRange: (rangeIndex: number) => void;
-  overlayImages: OverlayImage[];
+  overlayImages: ImageOverlayClip[];
   assetUrlById: Record<string, string>;
-  onChangeOverlayRect: (overlayIndex: number, next: CropRect) => void;
-  onCommitOverlayRect: (overlayIndex: number, next: CropRect) => void;
-  onChangeOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
-  onCommitOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
-  onDeleteOverlay: (overlayIndex: number) => void;
+  onChangeImageOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onCommitImageOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onChangeImageOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCommitImageOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onChangeImageOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onCommitImageOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onChangeImageOverlayLayout: (
+    overlayIndex: number,
+    layoutType: VideoOverlayLayout["type"],
+    splitScreenOrientation?: "horizontal" | "vertical"
+  ) => void;
+  onToggleImageSplitScreenOrientation: (overlayIndex: number) => void;
+  onToggleImageSplitScreenSides: (overlayIndex: number) => void;
+  onOpenImageOverlayFraming: (overlayIndex: number) => void;
+  onDeleteImageOverlay: (overlayIndex: number) => void;
   textOverlays: TextOverlay[];
   onChangeTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
   onCommitTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
@@ -306,11 +322,17 @@ export function Playground({
             onDeleteTrimRange={onDeleteTrimRange}
             overlayImages={overlayImages}
             assetUrlById={assetUrlById}
-            onChangeOverlayRect={onChangeOverlayRect}
-            onCommitOverlayRect={onCommitOverlayRect}
-            onChangeOverlayRange={onChangeOverlayRange}
-            onCommitOverlayRange={onCommitOverlayRange}
-            onDeleteOverlay={onDeleteOverlay}
+            onChangeImageOverlayRect={onChangeImageOverlayRect}
+            onCommitImageOverlayRect={onCommitImageOverlayRect}
+            onChangeImageOverlayRange={onChangeImageOverlayRange}
+            onCommitImageOverlayRange={onCommitImageOverlayRange}
+            onChangeImageOverlayPosition={onChangeImageOverlayPosition}
+            onCommitImageOverlayPosition={onCommitImageOverlayPosition}
+            onChangeImageOverlayLayout={onChangeImageOverlayLayout}
+            onToggleImageSplitScreenOrientation={onToggleImageSplitScreenOrientation}
+            onToggleImageSplitScreenSides={onToggleImageSplitScreenSides}
+            onOpenImageOverlayFraming={onOpenImageOverlayFraming}
+            onDeleteImageOverlay={onDeleteImageOverlay}
             textOverlays={textOverlays}
             onChangeTextOverlayRect={onChangeTextOverlayRect}
             onCommitTextOverlayRect={onCommitTextOverlayRect}

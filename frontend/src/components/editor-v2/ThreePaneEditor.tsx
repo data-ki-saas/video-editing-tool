@@ -57,7 +57,7 @@ import {
   DEFAULT_BACKGROUND_VOLUME,
   videoOverlayStartThumbnailKey,
   type CropRect,
-  type OverlayImage,
+  type ImageOverlayClip,
   type SequenceEntry,
   type TextOverlay,
   type OverlayFraming,
@@ -74,14 +74,19 @@ import {
   applyFlipToggle,
   applyTrimTrackClick,
   applyDeleteTrimRange,
-  applyAddOverlayImage,
-  applyOverlayRectCommit,
-  applyOverlayRangeChange,
-  applyDeleteOverlayImage,
+  applyAddImageOverlay,
+  applyChangeImageOverlayLayout,
+  applyToggleImageSplitScreenOrientation,
+  applyToggleImageSplitScreenSides,
+  applyImageOverlayRectChange,
+  applyImageOverlayRangeChange,
+  applyImageOverlayPositionChange,
+  applyChangeImageOverlayFraming,
+  applyDeleteImageOverlay,
   applyAddSequenceClip,
   applyAddImageSequenceClip,
   applyEditImageSequenceClip,
-  applyDeleteImageSequenceClip,
+  applyDeleteSequenceClip,
   applyResizeImageClip,
   applyAddTextOverlay,
   applyEditTextOverlay,
@@ -226,12 +231,17 @@ export function ThreePaneEditor({
   const [liveOverlayRectEdit, setLiveOverlayRectEdit] = useState<{ index: number; rect: CropRect } | null>(null);
 
   // Live time range of one image overlay while actively dragging its
-  // OverlayTrack segment edges, before it's committed -- same split again.
+  // ImageOverlayTrack segment edges, before it's committed -- same split
+  // again.
   const [liveOverlayRangeEdit, setLiveOverlayRangeEdit] = useState<{
     index: number;
     startTimeSeconds: number;
     endTimeSeconds: number;
   } | null>(null);
+  // Live position of one image overlay while dragging the MIDDLE of its
+  // ImageOverlayTrack segment (move without changing duration) -- image
+  // overlay's own equivalent of liveVideoOverlayPositionEdit below.
+  const [liveOverlayPositionEdit, setLiveOverlayPositionEdit] = useState<{ index: number; startTimeSeconds: number } | null>(null);
 
   // Same live-edit split again, for text overlays' rect/range dragging.
   const [liveTextOverlayRectEdit, setLiveTextOverlayRectEdit] = useState<{ index: number; rect: CropRect } | null>(null);
@@ -288,17 +298,33 @@ export function ThreePaneEditor({
   // there's only ever one transcript caption config (see
   // video_math.ts's TranscriptCaption).
   const [isTranscriptDialogOpen, setIsTranscriptDialogOpen] = useState(false);
-  const [isImageTemplatesDialogOpen, setIsImageTemplatesDialogOpen] = useState(false);
-  // Non-null while ImageTemplatesDialog is open in EDIT mode, reopened by
-  // clicking a segment on the Cutaways rail (CutawayTrack) rather than the
-  // "Image Cutaway" tab -- see handleEditCutaway/handleAddImageSequenceClip.
+  const [isCutawayDialogOpen, setIsCutawayDialogOpen] = useState(false);
+  // Non-null while CutawayDialog is open in EDIT mode (image cutaways only
+  // -- a video cutaway has nothing to edit in place), reopened by clicking
+  // a segment on the Cutaways rail (CutawayTrack) rather than the "Cutaway"
+  // tab -- see handleEditCutaway/handleAddImageSequenceClip.
   const [editingCutaway, setEditingCutaway] = useState<CutawaySegment | null>(null);
+  // Non-null when CutawayDialog was opened via AssetGallery's right-click
+  // "Cutaway" on a specific IMAGE asset -- an ADD, not an edit (editingCutaway
+  // above stays null), just pre-selects that photo in the dialog's own
+  // picker instead of defaulting to the first one.
+  const [cutawayDialogPreselectedAssetId, setCutawayDialogPreselectedAssetId] = useState<string | null>(null);
 
   // VideoOverlayFramingDialog's open/edit-target state -- opened from the
   // crosshair button on a VideoOverlayTrack segment, per-overlay index
   // (null means closed, not "add new" -- there's always an existing
   // overlay to fine-tune, unlike the text dialog's add-vs-edit duality).
   const [framingDialogOverlayIndex, setFramingDialogOverlayIndex] = useState<number | null>(null);
+  // ImageOverlayFramingDialog's own equivalent -- a separate index since an
+  // image overlay and a video overlay are independent arrays/rails (see
+  // video_math.ts's ImageOverlayClip doc comment).
+  const [imageFramingDialogOverlayIndex, setImageFramingDialogOverlayIndex] = useState<number | null>(null);
+  // "Video Overlay"/"Image Overlay" tabs' own small asset-picker dialogs --
+  // see VideoOverlayPickerDialog.tsx/ImageOverlayPickerDialog.tsx. Picking a
+  // tile adds that asset instantly (same as AssetGallery's right-click
+  // "Overlay") and closes the picker itself.
+  const [isVideoOverlayPickerOpen, setIsVideoOverlayPickerOpen] = useState(false);
+  const [isImageOverlayPickerOpen, setIsImageOverlayPickerOpen] = useState(false);
 
   // Named points on the main sequence's own timeline (MarkerTrack.tsx) --
   // cosmetic/not undo-tracked, same tier as selectedBackgroundTrackId (see
@@ -433,6 +459,44 @@ export function ThreePaneEditor({
     [rawSelections]
   );
 
+  // A project's `overlayImages` entry may still be in the OLD shape (just a
+  // fixed `rect`, no `layout`/`framing` -- see video_math.ts's now-deprecated
+  // OverlayImage) if it was saved before images grew the same switchable
+  // layout system videoOverlays already had. Upgrades each one into an
+  // ImageOverlayClip at load time: a legacy `rect` becomes a
+  // Picture-in-Picture layout wrapping that exact rect (renders pixel-
+  // identical to what it already showed), a new-shape entry gets the same
+  // framing/baseFraming/ratio backfill merge videoOverlays above already
+  // does. Memoized on rawSelections for the same reason as videoOverlays
+  // above -- see that block's own comment.
+  const overlayImages: ImageOverlayClip[] = useMemo(
+    () =>
+      (rawSelections.overlayImages ?? []).map((overlay): ImageOverlayClip => {
+        const legacy = overlay as unknown as { rect?: CropRect; layout?: VideoOverlayLayout };
+        if (!legacy.layout && legacy.rect) {
+          return {
+            assetId: overlay.assetId,
+            startTimeSeconds: overlay.startTimeSeconds,
+            endTimeSeconds: overlay.endTimeSeconds,
+            layout: { type: "picture-in-picture", rect: legacy.rect },
+            framing: DEFAULT_OVERLAY_FRAMING,
+          };
+        }
+        const framing = { ...DEFAULT_OVERLAY_FRAMING, ...overlay.framing };
+        if (overlay.layout.type !== "split-screen") return { ...overlay, framing };
+        return {
+          ...overlay,
+          framing,
+          layout: {
+            ...overlay.layout,
+            baseFraming: { ...DEFAULT_OVERLAY_FRAMING, ...overlay.layout.baseFraming },
+            ratio: overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO,
+          },
+        };
+      }),
+    [rawSelections]
+  );
+
   const selections: EditSelectionsSnapshot = {
     clipRectId: rawSelections.clipRectId ?? null,
     cropRect: rawSelections.cropRect ?? null,
@@ -440,7 +504,7 @@ export function ThreePaneEditor({
     flipHorizontalToggles: rawSelections.flipHorizontalToggles ?? [],
     flipVerticalToggles: rawSelections.flipVerticalToggles ?? [],
     trimRanges: rawSelections.trimRanges ?? [],
-    overlayImages: rawSelections.overlayImages ?? [],
+    overlayImages,
     textOverlays: rawSelections.textOverlays ?? [],
     sequenceClips,
     videoOverlays,
@@ -905,29 +969,36 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
-  // Right-click "Add" on an image asset in AssetGallery -- places it as an
-  // overlay starting at the first frame (time 0), per spec.
-  function handleAddOverlay(asset: Asset) {
-    const { label, state } = applyAddOverlayImage(selections, asset.id, videoDurationSeconds);
+  // Right-click "Overlay" on an image asset in AssetGallery, or a tile
+  // picked from ImageOverlayPickerDialog (the "Image Overlay" tab) --
+  // places it on its own rail at the current playhead, defaulting to a
+  // Picture-in-Picture layout the user can switch afterward, exact parity
+  // with handleAddVideoOverlay below (see video_math.ts's ImageOverlayClip).
+  function handleAddImageOverlay(asset: Asset) {
+    const { label, state } = applyAddImageOverlay(selections, asset.id, currentTimeSeconds, videoDurationSeconds);
     pushChange(label, state);
+    setIsImageOverlayPickerOpen(false);
   }
 
-  // Right-click "Add" on a video asset in AssetGallery -- appends it to
-  // the concatenated sequence. The first Add is what starts rendering
+  // Right-click "Cutaway" on a video asset in AssetGallery -- appends it to
+  // the concatenated sequence. The first one is what starts rendering
   // frames at all; every later one plays right after whatever's already
-  // there.
+  // there. Also what CutawayDialog's video-kind "Add cutaway" calls.
   function handleAddToSequence(asset: Asset) {
     const { label, state } = applyAddSequenceClip(selections, asset.id);
     pushChange(label, state);
+    setIsCutawayDialogOpen(false);
+    setCutawayDialogPreselectedAssetId(null);
   }
 
-  // Right-click "Overlay" on a video asset in AssetGallery -- places it on
-  // its own rail at the current playhead, defaulting to a Full-Screen
-  // layout the user can switch afterward (see VideoOverlayTrack.tsx). Needs
-  // the source asset's own probed duration to size/clamp the default window
-  // against -- reuses the cache built by the probing effect above, or
-  // probes it fresh (and caches it) if this is the first time this asset's
-  // been used this way.
+  // Right-click "Overlay" on a video asset in AssetGallery, or a tile
+  // picked from VideoOverlayPickerDialog (the "Video Overlay" tab) --
+  // places it on its own rail at the current playhead, defaulting to a
+  // Full-Screen layout the user can switch afterward (see
+  // VideoOverlayTrack.tsx). Needs the source asset's own probed duration to
+  // size/clamp the default window against -- reuses the cache built by the
+  // probing effect above, or probes it fresh (and caches it) if this is the
+  // first time this asset's been used this way.
   async function handleAddVideoOverlay(asset: Asset) {
     let sourceDurationSeconds = overlaySourceDurationSeconds[asset.id];
     if (sourceDurationSeconds === undefined) {
@@ -940,6 +1011,7 @@ export function ThreePaneEditor({
     }
     const { label, state } = applyAddVideoOverlay(selections, asset.id, sourceDurationSeconds, currentTimeSeconds, videoDurationSeconds);
     pushChange(label, state);
+    setIsVideoOverlayPickerOpen(false);
   }
 
   // VideoOverlayTrack's right-click "Switch to..." entries -- an instant
@@ -967,8 +1039,9 @@ export function ThreePaneEditor({
 
   // A Picture-in-Picture overlay's box, dragged via the reused
   // OverlayRectOverlay handles on FrameStrip's active tile -- same
-  // live-edit/commit split as handleChangeOverlayRect/handleCommitOverlayRect
-  // below, for the pre-existing image-overlay feature.
+  // live-edit/commit split as handleChangeImageOverlayRect/
+  // handleCommitImageOverlayRect below, for the equivalent image-overlay
+  // feature.
   function handleChangeVideoOverlayRect(overlayIndex: number, next: CropRect) {
     setLiveVideoOverlayRectEdit({ index: overlayIndex, rect: next });
   }
@@ -1053,6 +1126,83 @@ export function ThreePaneEditor({
     setFramingDialogOverlayIndex(null);
   }
 
+  // ImageOverlayTrack's right-click "Switch to..." entries -- image-overlay
+  // mirror of handleChangeVideoOverlayLayout above.
+  function handleChangeImageOverlayLayout(
+    overlayIndex: number,
+    layoutType: VideoOverlayLayout["type"],
+    splitScreenOrientation?: "horizontal" | "vertical"
+  ) {
+    const { label, state } = applyChangeImageOverlayLayout(selections, overlayIndex, layoutType, splitScreenOrientation);
+    pushChange(label, state);
+  }
+
+  function handleToggleImageSplitScreenOrientation(overlayIndex: number) {
+    const { label, state } = applyToggleImageSplitScreenOrientation(selections, overlayIndex);
+    pushChange(label, state);
+  }
+
+  function handleToggleImageSplitScreenSides(overlayIndex: number) {
+    const { label, state } = applyToggleImageSplitScreenSides(selections, overlayIndex);
+    pushChange(label, state);
+  }
+
+  // ImageOverlayTrack's edge-drag (trim) and body-drag (move) gestures --
+  // mirror of the video-overlay pair above.
+  function handleChangeImageOverlayRange(overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
+    setLiveOverlayRangeEdit({ index: overlayIndex, startTimeSeconds, endTimeSeconds });
+  }
+
+  function handleCommitImageOverlayRange(overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
+    setLiveOverlayRangeEdit(null);
+    const { label, state } = applyImageOverlayRangeChange(selections, overlayIndex, startTimeSeconds, endTimeSeconds);
+    pushChange(label, state);
+  }
+
+  function handleChangeImageOverlayPosition(overlayIndex: number, startTimeSeconds: number) {
+    setLiveOverlayPositionEdit({ index: overlayIndex, startTimeSeconds });
+  }
+
+  function handleCommitImageOverlayPosition(overlayIndex: number, startTimeSeconds: number) {
+    setLiveOverlayPositionEdit(null);
+    const { label, state } = applyImageOverlayPositionChange(selections, overlayIndex, startTimeSeconds);
+    pushChange(label, state);
+  }
+
+  function handleDeleteImageOverlay(overlayIndex: number) {
+    setLiveOverlayRectEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    setLiveOverlayRangeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    setLiveOverlayPositionEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    if (imageFramingDialogOverlayIndex === overlayIndex) setImageFramingDialogOverlayIndex(null);
+    const { label, state } = applyDeleteImageOverlay(selections, overlayIndex);
+    pushChange(label, state);
+  }
+
+  // ImageOverlayTrack's crosshair button -- opens ImageOverlayFramingDialog
+  // for that overlay, mirror of handleOpenVideoOverlayFraming above.
+  function handleOpenImageOverlayFraming(overlayIndex: number) {
+    setImageFramingDialogOverlayIndex(overlayIndex);
+  }
+
+  function handleCloseImageOverlayFramingDialog() {
+    setImageFramingDialogOverlayIndex(null);
+  }
+
+  function handleDeleteImageFramingDialogOverlay() {
+    if (imageFramingDialogOverlayIndex === null) return;
+    handleDeleteImageOverlay(imageFramingDialogOverlayIndex);
+  }
+
+  function handleSaveImageOverlayFraming(
+    framing: OverlayFraming,
+    options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect }
+  ) {
+    if (imageFramingDialogOverlayIndex === null) return;
+    const { label, state } = applyChangeImageOverlayFraming(selections, imageFramingDialogOverlayIndex, framing, options);
+    pushChange(label, state);
+    setImageFramingDialogOverlayIndex(null);
+  }
+
   // MarkerTrack's click-to-place/drag/rename/delete on the main sequence's
   // own timeline -- cosmetic (see this file's own `markers` state comment),
   // so these just update plain state and let the debounced-save effect
@@ -1099,29 +1249,40 @@ export function ThreePaneEditor({
     setSourceStartDialogOverlayIndex(null);
   }
 
-  // "Image Cutaway" button in UserActions -- opens ImageTemplatesDialog
-  // fresh, to add a new cutaway (editingCutaway is already null here,
-  // never set except by handleEditCutaway below).
-  function handleOpenImageTemplatesDialog() {
-    setIsImageTemplatesDialogOpen(true);
+  // "Cutaway" button in UserActions -- opens CutawayDialog fresh, to add a
+  // new cutaway (editingCutaway is already null here, never set except by
+  // handleEditCutaway below).
+  function handleOpenCutawayDialog() {
+    setIsCutawayDialogOpen(true);
   }
 
-  function handleCloseImageTemplatesDialog() {
-    setIsImageTemplatesDialogOpen(false);
+  function handleCloseCutawayDialog() {
+    setIsCutawayDialogOpen(false);
     setEditingCutaway(null);
+    setCutawayDialogPreselectedAssetId(null);
   }
 
-  // The Cutaways rail's own click (CutawayTrack's onEdit) -- reopens
-  // ImageTemplatesDialog pre-filled with that cutaway's current
-  // photo/template/duration, so handleAddImageSequenceClip below edits it
-  // in place instead of appending a duplicate.
+  // AssetGallery's right-click "Cutaway" on an IMAGE asset -- opens
+  // CutawayDialog fresh (add mode), with that photo pre-selected instead of
+  // defaulting to the first one in the project.
+  function handleOpenCutawayDialogForAsset(asset: Asset) {
+    setCutawayDialogPreselectedAssetId(asset.id);
+    setIsCutawayDialogOpen(true);
+  }
+
+  // The Cutaways rail's own click (CutawayTrack's onEdit) -- image segments
+  // only (see CutawayTrack.tsx). Reopens CutawayDialog pre-filled with that
+  // cutaway's current photo/template/duration, so
+  // handleAddImageSequenceClip below edits it in place instead of appending
+  // a duplicate.
   function handleEditCutaway(segment: CutawaySegment) {
+    if (segment.kind !== "image") return;
     setEditingCutaway(segment);
-    setIsImageTemplatesDialogOpen(true);
+    setIsCutawayDialogOpen(true);
   }
 
-  // ImageTemplatesDialog's "Add cutaway" / "Save changes" -- appends a new
-  // image clip (animated via the chosen, possibly-combined Ken Burns
+  // CutawayDialog's image-kind "Add cutaway" / "Save changes" -- appends a
+  // new image clip (animated via the chosen, possibly-combined Ken Burns
   // template(s)) to the end of the sequence, or, when editingCutaway is
   // set, edits that existing cutaway's photo/template(s)/duration/crop in
   // place instead. Either way the clip and its ZoomEffect land in ONE
@@ -1132,32 +1293,38 @@ export function ThreePaneEditor({
   // the clip rectangle the dialog's own preview positioned for this
   // specific photo, not the project's video-frame cropRect.
   function handleAddImageSequenceClip(assetId: string, durationSeconds: number, templateIds: string[], cropRect: CropRect) {
-    const { label, state } = editingCutaway
-      ? applyEditImageSequenceClip(
-          selections,
-          editingCutaway.entryId,
-          assetId,
-          durationSeconds,
-          templateIds,
-          cropRect,
-          editingCutaway.startTimeSeconds
-        )
-      : applyAddImageSequenceClip(selections, assetId, durationSeconds, templateIds, cropRect, videoDurationSeconds);
+    const { label, state } =
+      editingCutaway && editingCutaway.kind === "image"
+        ? applyEditImageSequenceClip(
+            selections,
+            editingCutaway.entryId,
+            assetId,
+            durationSeconds,
+            templateIds,
+            cropRect,
+            editingCutaway.startTimeSeconds
+          )
+        : applyAddImageSequenceClip(selections, assetId, durationSeconds, templateIds, cropRect, videoDurationSeconds);
     pushChange(label, state);
-    setIsImageTemplatesDialogOpen(false);
+    setIsCutawayDialogOpen(false);
     setEditingCutaway(null);
+    setCutawayDialogPreselectedAssetId(null);
   }
 
-  // "Remove Cutaway" -- from CutawayTrack's own right-click menu, or
-  // ImageTemplatesDialog's delete button when reopened in edit mode.
-  // Splices the clip out of the sequence (applyDeleteImageSequenceClip),
-  // closing the dialog first if it was the one being edited.
+  // "Remove Cutaway" -- from CutawayTrack's own right-click menu (every
+  // clip in the sequence now, video or image), or CutawayDialog's delete
+  // button when reopened in edit mode (image only). Splices the clip out of
+  // the sequence (applyDeleteSequenceClip), closing the dialog first if it
+  // was the one being edited. `durationSeconds` comes off the segment
+  // itself -- CutawayTrack's own builder (FrameStrip.tsx) derives it from
+  // real clip-boundary positions for both kinds, not just an image entry's
+  // authored field.
   function handleDeleteCutaway(segment: CutawaySegment) {
     if (editingCutaway?.entryId === segment.entryId) {
-      setIsImageTemplatesDialogOpen(false);
+      setIsCutawayDialogOpen(false);
       setEditingCutaway(null);
     }
-    const { label, state } = applyDeleteImageSequenceClip(selections, segment.entryId, segment.startTimeSeconds);
+    const { label, state } = applyDeleteSequenceClip(selections, segment.entryId, segment.durationSeconds, segment.startTimeSeconds);
     pushChange(label, state);
   }
 
@@ -1182,30 +1349,16 @@ export function ThreePaneEditor({
     setSelectedBackgroundTrackId("none");
   }
 
-  function handleChangeOverlayRect(overlayIndex: number, next: CropRect) {
+  // Image overlay's own Picture-in-Picture box, dragged via the reused
+  // OverlayRectOverlay handles on FrameStrip's active tile -- mirror of
+  // handleChangeVideoOverlayRect/handleCommitVideoOverlayRect above.
+  function handleChangeImageOverlayRect(overlayIndex: number, next: CropRect) {
     setLiveOverlayRectEdit({ index: overlayIndex, rect: next });
   }
 
-  function handleCommitOverlayRect(overlayIndex: number, next: CropRect) {
+  function handleCommitImageOverlayRect(overlayIndex: number, next: CropRect) {
     setLiveOverlayRectEdit(null);
-    const { label, state } = applyOverlayRectCommit(selections, overlayIndex, next);
-    pushChange(label, state);
-  }
-
-  function handleChangeOverlayRange(overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
-    setLiveOverlayRangeEdit({ index: overlayIndex, startTimeSeconds, endTimeSeconds });
-  }
-
-  function handleCommitOverlayRange(overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
-    setLiveOverlayRangeEdit(null);
-    const { label, state } = applyOverlayRangeChange(selections, overlayIndex, startTimeSeconds, endTimeSeconds);
-    pushChange(label, state);
-  }
-
-  function handleDeleteOverlay(overlayIndex: number) {
-    setLiveOverlayRectEdit((prev) => (prev?.index === overlayIndex ? null : prev));
-    setLiveOverlayRangeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
-    const { label, state } = applyDeleteOverlayImage(selections, overlayIndex);
+    const { label, state } = applyImageOverlayRectChange(selections, overlayIndex, next);
     pushChange(label, state);
   }
 
@@ -1314,16 +1467,25 @@ export function ThreePaneEditor({
   const previewFrameIndex = findClosestTimestampIndex(thumbnailTimestampsSeconds, currentTimeSeconds);
   const previewFrameUrl = previewFrameIndex >= 0 ? thumbnails[previewFrameIndex] : null;
 
-  // Splices any in-progress rect/range drag into the persisted array at
-  // its own index, same pattern as displayedZoomEffects above.
-  const displayedOverlayImages: OverlayImage[] = selections.overlayImages.map((overlay, index) => {
-    if (liveOverlayRectEdit?.index === index) return { ...overlay, rect: liveOverlayRectEdit.rect };
+  // Splices any in-progress rect/range/position drag into the persisted
+  // array at its own index, same pattern as displayedVideoOverlays below --
+  // a rect edit only ever applies to a Picture-in-Picture layout (the only
+  // one with a rect), checked defensively even though the UI never offers
+  // one for any other layout.
+  const displayedOverlayImages: ImageOverlayClip[] = selections.overlayImages.map((overlay, index) => {
     if (liveOverlayRangeEdit?.index === index) {
       return {
         ...overlay,
         startTimeSeconds: liveOverlayRangeEdit.startTimeSeconds,
         endTimeSeconds: liveOverlayRangeEdit.endTimeSeconds,
       };
+    }
+    if (liveOverlayPositionEdit?.index === index) {
+      const duration = overlay.endTimeSeconds - overlay.startTimeSeconds;
+      return { ...overlay, startTimeSeconds: liveOverlayPositionEdit.startTimeSeconds, endTimeSeconds: liveOverlayPositionEdit.startTimeSeconds + duration };
+    }
+    if (liveOverlayRectEdit?.index === index && overlay.layout.type === "picture-in-picture") {
+      return { ...overlay, layout: { ...overlay.layout, rect: liveOverlayRectEdit.rect } };
     }
     return overlay;
   });
@@ -1422,7 +1584,16 @@ export function ThreePaneEditor({
     // export. Mirrors the cloud render's own "resolve fresh URLs right
     // before the actual operation" approach (api/render/route.ts's
     // resolveAssetSources), just done client-side instead of server-side.
-    const freshAssets = await refreshAssets();
+    //
+    // Deliberately calls listAssets directly instead of refreshAssets() --
+    // refreshAssets() also does setAssets(data), and a presigned URL gets a
+    // new signature on every fetch even when the underlying file hasn't
+    // changed. Routing that through setAssets while a render is in flight
+    // would replace assetUrlById's values, which flips CanvasPlayer's
+    // clipsKey (CanvasPlayer.tsx) and made the live preview reload itself
+    // mid-export. This fetch is only for the exporter's own use, so it must
+    // stay out of the state the preview reads from.
+    const freshAssets = await listAssets(projectId);
     const freshAssetUrlById = Object.fromEntries(freshAssets.map((asset) => [asset.id, asset.url]));
     const freshSequenceClips = effectiveSequenceEntries.map((entry) => ({ ...entry, url: freshAssetUrlById[entry.assetId] }));
     const freshBackgroundAssetTracks = backgroundSequenceAssetIds
@@ -1473,6 +1644,8 @@ export function ThreePaneEditor({
   }
 
   const framingDialogOverlay = framingDialogOverlayIndex !== null ? displayedVideoOverlays[framingDialogOverlayIndex] ?? null : null;
+  const imageFramingDialogOverlay =
+    imageFramingDialogOverlayIndex !== null ? displayedOverlayImages[imageFramingDialogOverlayIndex] ?? null : null;
   const sourceStartDialogOverlay =
     sourceStartDialogOverlayIndex !== null ? displayedVideoOverlays[sourceStartDialogOverlayIndex] ?? null : null;
   const sourceStartDialogAsset = sourceStartDialogOverlay ? assets.find((a) => a.id === sourceStartDialogOverlay.assetId) ?? null : null;
@@ -1517,16 +1690,21 @@ export function ThreePaneEditor({
           onUploaded={handleUploaded}
           onUploadingChange={setIsUploading}
           onAssetDeleted={handleAssetDeleted}
-          onAddOverlay={handleAddOverlay}
+          onAddImageOverlay={handleAddImageOverlay}
           onAddToSequence={handleAddToSequence}
           onAddVideoOverlay={handleAddVideoOverlay}
           onAddToBackgroundSequence={handleAddToBackgroundSequence}
+          onOpenCutawayDialogForAsset={handleOpenCutawayDialogForAsset}
           usedAssetIds={usedAssetIds}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
           framingDialogOverlay={framingDialogOverlay}
           onSaveVideoOverlayFraming={handleSaveVideoOverlayFraming}
           onCloseVideoOverlayFramingDialog={handleCloseVideoOverlayFramingDialog}
           onDeleteFramingDialogOverlay={handleDeleteFramingDialogOverlay}
+          imageFramingDialogOverlay={imageFramingDialogOverlay}
+          onSaveImageOverlayFraming={handleSaveImageOverlayFraming}
+          onCloseImageOverlayFramingDialog={handleCloseImageOverlayFramingDialog}
+          onDeleteImageFramingDialogOverlay={handleDeleteImageFramingDialogOverlay}
           sourceStartDialogOverlay={sourceStartDialogOverlay}
           sourceStartDialogAssetUrl={sourceStartDialogAsset ? assetUrlById[sourceStartDialogAsset.id] ?? "" : ""}
           sourceStartDialogAssetFilename={sourceStartDialogAsset?.filename ?? ""}
@@ -1546,12 +1724,20 @@ export function ThreePaneEditor({
           onSaveTranscriptCaption={handleSaveTranscriptCaption}
           onDisableTranscriptCaption={handleDisableTranscriptCaption}
           onCloseTranscriptDialog={handleCloseTranscriptDialog}
-          onOpenImageTemplatesDialog={handleOpenImageTemplatesDialog}
-          isImageTemplatesDialogOpen={isImageTemplatesDialogOpen}
+          onOpenCutawayDialog={handleOpenCutawayDialog}
+          isCutawayDialogOpen={isCutawayDialogOpen}
           editingCutaway={editingCutaway}
+          cutawayDialogPreselectedAssetId={cutawayDialogPreselectedAssetId}
           onAddImageSequenceClip={handleAddImageSequenceClip}
-          onCloseImageTemplatesDialog={handleCloseImageTemplatesDialog}
+          onAddVideoSequenceClip={handleAddToSequence}
+          onCloseCutawayDialog={handleCloseCutawayDialog}
           onDeleteCutaway={handleDeleteCutaway}
+          isVideoOverlayPickerOpen={isVideoOverlayPickerOpen}
+          onOpenVideoOverlayPicker={() => setIsVideoOverlayPickerOpen(true)}
+          onCloseVideoOverlayPicker={() => setIsVideoOverlayPickerOpen(false)}
+          isImageOverlayPickerOpen={isImageOverlayPickerOpen}
+          onOpenImageOverlayPicker={() => setIsImageOverlayPickerOpen(true)}
+          onCloseImageOverlayPicker={() => setIsImageOverlayPickerOpen(false)}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
           baseCropRect={selections.cropRect}
@@ -1621,11 +1807,17 @@ export function ThreePaneEditor({
           onDeleteTrimRange={handleDeleteTrimRange}
           overlayImages={displayedOverlayImages}
           assetUrlById={assetUrlById}
-          onChangeOverlayRect={handleChangeOverlayRect}
-          onCommitOverlayRect={handleCommitOverlayRect}
-          onChangeOverlayRange={handleChangeOverlayRange}
-          onCommitOverlayRange={handleCommitOverlayRange}
-          onDeleteOverlay={handleDeleteOverlay}
+          onChangeImageOverlayRect={handleChangeImageOverlayRect}
+          onCommitImageOverlayRect={handleCommitImageOverlayRect}
+          onChangeImageOverlayRange={handleChangeImageOverlayRange}
+          onCommitImageOverlayRange={handleCommitImageOverlayRange}
+          onChangeImageOverlayPosition={handleChangeImageOverlayPosition}
+          onCommitImageOverlayPosition={handleCommitImageOverlayPosition}
+          onChangeImageOverlayLayout={handleChangeImageOverlayLayout}
+          onToggleImageSplitScreenOrientation={handleToggleImageSplitScreenOrientation}
+          onToggleImageSplitScreenSides={handleToggleImageSplitScreenSides}
+          onOpenImageOverlayFraming={handleOpenImageOverlayFraming}
+          onDeleteImageOverlay={handleDeleteImageOverlay}
           textOverlays={displayedTextOverlays}
           onChangeTextOverlayRect={handleChangeTextOverlayRect}
           onCommitTextOverlayRect={handleCommitTextOverlayRect}

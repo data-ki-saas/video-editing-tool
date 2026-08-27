@@ -34,10 +34,13 @@ import { StockMediaDialog } from "./StockMediaDialog";
 import { UserActions } from "./UserActions";
 import { TextOverlayDialog } from "./TextOverlayDialog";
 import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
-import { ImageTemplatesDialog } from "./ImageTemplatesDialog";
+import { CutawayDialog } from "./CutawayDialog";
 import type { CutawaySegment } from "./CutawayTrack";
 import { ClipRectangleDialog } from "./ClipRectangleDialog";
 import { VideoOverlayFramingDialog } from "./VideoOverlayFramingDialog";
+import { ImageOverlayFramingDialog } from "./ImageOverlayFramingDialog";
+import { VideoOverlayPickerDialog } from "./VideoOverlayPickerDialog";
+import { ImageOverlayPickerDialog } from "./ImageOverlayPickerDialog";
 import { OverlaySourceStartDialog } from "./OverlaySourceStartDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
@@ -47,8 +50,8 @@ import type { Asset } from "@/lib/api";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
 import type {
   CropRect,
+  ImageOverlayClip,
   OverlayFraming,
-  OverlayImage,
   SequenceEntry,
   TextOverlay,
   TranscriptCaption,
@@ -94,20 +97,16 @@ function ActiveTransformationsList({
   for (const range of selections.trimRanges) {
     rows.push(`Trimmed ${formatTimeRange(range.startTimeSeconds, range.endTimeSeconds)}`);
   }
+  const layoutLabel = (layout: { type: string }) =>
+    layout.type === "full-screen" ? "Full-Screen" : layout.type === "picture-in-picture" ? "Picture-in-Picture" : "Split Screen";
   for (const overlay of selections.overlayImages) {
-    rows.push(`Image overlay ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
+    rows.push(`Image overlay (${layoutLabel(overlay.layout)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
   }
   for (const overlay of selections.textOverlays) {
     rows.push(`Text "${overlay.text}" ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
   }
   for (const overlay of selections.videoOverlays) {
-    const layoutLabel =
-      overlay.layout.type === "full-screen"
-        ? "Full-Screen"
-        : overlay.layout.type === "picture-in-picture"
-          ? "Picture-in-Picture"
-          : "Split Screen";
-    rows.push(`Overlay (${layoutLabel}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
+    rows.push(`Video overlay (${layoutLabel(overlay.layout)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
   }
   if (selections.sequenceClips.length > 1) {
     rows.push(`Sequence: ${selections.sequenceClips.length} clips`);
@@ -154,16 +153,21 @@ export function ActionArea({
   onUploaded,
   onUploadingChange,
   onAssetDeleted,
-  onAddOverlay,
+  onAddImageOverlay,
   onAddToSequence,
   onAddVideoOverlay,
   onAddToBackgroundSequence,
+  onOpenCutawayDialogForAsset,
   usedAssetIds,
   videoThumbnailUrlByAssetId,
   framingDialogOverlay,
   onSaveVideoOverlayFraming,
   onCloseVideoOverlayFramingDialog,
   onDeleteFramingDialogOverlay,
+  imageFramingDialogOverlay,
+  onSaveImageOverlayFraming,
+  onCloseImageOverlayFramingDialog,
+  onDeleteImageFramingDialogOverlay,
   sourceStartDialogOverlay,
   sourceStartDialogAssetUrl,
   sourceStartDialogAssetFilename,
@@ -183,12 +187,20 @@ export function ActionArea({
   onSaveTranscriptCaption,
   onDisableTranscriptCaption,
   onCloseTranscriptDialog,
-  onOpenImageTemplatesDialog,
-  isImageTemplatesDialogOpen,
+  onOpenCutawayDialog,
+  isCutawayDialogOpen,
   editingCutaway,
+  cutawayDialogPreselectedAssetId,
   onAddImageSequenceClip,
-  onCloseImageTemplatesDialog,
+  onAddVideoSequenceClip,
+  onCloseCutawayDialog,
   onDeleteCutaway,
+  isVideoOverlayPickerOpen,
+  onOpenVideoOverlayPicker,
+  onCloseVideoOverlayPicker,
+  isImageOverlayPickerOpen,
+  onOpenImageOverlayPicker,
+  onCloseImageOverlayPicker,
   previewFrameUrl,
   frameAspectRatio,
   baseCropRect,
@@ -219,10 +231,11 @@ export function ActionArea({
   onUploaded: (asset: Asset) => void;
   onUploadingChange?: (isUploading: boolean) => void;
   onAssetDeleted: (assetId: string) => void;
-  onAddOverlay: (asset: Asset) => void;
+  onAddImageOverlay: (asset: Asset) => void;
   onAddToSequence: (asset: Asset) => void;
   onAddVideoOverlay: (asset: Asset) => void;
   onAddToBackgroundSequence: (asset: Asset) => void;
+  onOpenCutawayDialogForAsset: (asset: Asset) => void;
   usedAssetIds: Set<string>;
   videoThumbnailUrlByAssetId: Record<string, string>;
   // The overlay currently open in VideoOverlayFramingDialog, if any --
@@ -234,6 +247,11 @@ export function ActionArea({
   ) => void;
   onCloseVideoOverlayFramingDialog: () => void;
   onDeleteFramingDialogOverlay: () => void;
+  // ImageOverlayFramingDialog's own equivalent of the four props above.
+  imageFramingDialogOverlay: ImageOverlayClip | null;
+  onSaveImageOverlayFraming: (framing: OverlayFraming, options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect }) => void;
+  onCloseImageOverlayFramingDialog: () => void;
+  onDeleteImageFramingDialogOverlay: () => void;
   // The overlay currently open in OverlaySourceStartDialog, if any -- null
   // means closed. Resolved to the full overlay (not just an index) by
   // ThreePaneEditor, same convention as framingDialogOverlay above.
@@ -256,14 +274,25 @@ export function ActionArea({
   onSaveTranscriptCaption: (templateId: TranscriptCaptionTemplateId, rect: CropRect) => void;
   onDisableTranscriptCaption: () => void;
   onCloseTranscriptDialog: () => void;
-  onOpenImageTemplatesDialog: () => void;
-  isImageTemplatesDialogOpen: boolean;
-  // Non-null when ImageTemplatesDialog was reopened from the Cutaways rail
-  // to edit an existing cutaway -- see that dialog's own `editing` prop.
+  onOpenCutawayDialog: () => void;
+  isCutawayDialogOpen: boolean;
+  // Non-null when CutawayDialog was reopened from the Cutaways rail to edit
+  // an existing IMAGE cutaway -- see that dialog's own `editing` prop.
   editingCutaway: CutawaySegment | null;
+  // Non-null when CutawayDialog was opened via AssetGallery's right-click
+  // "Cutaway" on a specific IMAGE asset -- see that dialog's own
+  // `preselectedAssetId` prop.
+  cutawayDialogPreselectedAssetId: string | null;
   onAddImageSequenceClip: (assetId: string, durationSeconds: number, templateIds: string[], cropRect: CropRect) => void;
-  onCloseImageTemplatesDialog: () => void;
+  onAddVideoSequenceClip: (asset: Asset) => void;
+  onCloseCutawayDialog: () => void;
   onDeleteCutaway: (segment: CutawaySegment) => void;
+  isVideoOverlayPickerOpen: boolean;
+  onOpenVideoOverlayPicker: () => void;
+  onCloseVideoOverlayPicker: () => void;
+  isImageOverlayPickerOpen: boolean;
+  onOpenImageOverlayPicker: () => void;
+  onCloseImageOverlayPicker: () => void;
   // The actual current frame (closest thumbnail to the playhead) and its
   // aspect ratio, for TextOverlayDialog/TranscriptCaptionDialog's live
   // preview -- see TextOverlayDialog's own comment on why positioning
@@ -276,7 +305,7 @@ export function ActionArea({
   flipHorizontalToggles: number[];
   flipVerticalToggles: number[];
   trimRanges: TrimRange[];
-  overlayImages: OverlayImage[];
+  overlayImages: ImageOverlayClip[];
   textOverlays: TextOverlay[];
   sequenceClips: (SequenceEntry & { url: string })[];
   videoOverlays: VideoOverlayClip[];
@@ -322,10 +351,11 @@ export function ActionArea({
           onAddAsset={() => setIsUploadDialogOpen(true)}
           onBrowseStock={() => setIsStockDialogOpen(true)}
           onDeleted={onAssetDeleted}
-          onAddOverlay={onAddOverlay}
+          onAddImageOverlay={onAddImageOverlay}
           onAddToSequence={onAddToSequence}
           onAddVideoOverlay={onAddVideoOverlay}
           onAddToBackgroundSequence={onAddToBackgroundSequence}
+          onOpenCutawayDialogForAsset={onOpenCutawayDialogForAsset}
           usedAssetIds={usedAssetIds}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
         />
@@ -335,12 +365,16 @@ export function ActionArea({
         <UserActions
           selectedClipRectId={selectedClipRectId}
           onOpenClipRectDialog={() => setIsClipRectDialogOpen(true)}
+          onOpenCutawayDialog={onOpenCutawayDialog}
+          cutawayCount={sequenceClips.length}
+          onOpenVideoOverlayPicker={onOpenVideoOverlayPicker}
+          videoOverlayCount={videoOverlays.length}
+          onOpenImageOverlayPicker={onOpenImageOverlayPicker}
+          imageOverlayCount={overlayImages.length}
           onOpenTextDialog={onOpenTextDialog}
           textOverlayCount={textOverlays.length}
           onOpenTranscriptDialog={onOpenTranscriptDialog}
           autoCaptionEnabled={transcriptCaption !== null}
-          onOpenImageTemplatesDialog={onOpenImageTemplatesDialog}
-          imageCount={sequenceClips.filter((clip) => clip.kind === "image").length}
         />
       </div>
 
@@ -439,20 +473,28 @@ export function ActionArea({
         />
       )}
 
-      {isImageTemplatesDialogOpen && (
-        <ImageTemplatesDialog
+      {isCutawayDialogOpen && (
+        <CutawayDialog
           assets={assets}
+          videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
           clipRectAspectRatio={playAreaRatio}
           editing={
-            editingCutaway && {
-              assetId: editingCutaway.assetId,
-              templateIds: editingCutaway.templateIds,
-              durationSeconds: editingCutaway.durationSeconds,
-              cropRect: editingCutaway.cropRect,
-            }
+            editingCutaway?.kind === "image"
+              ? {
+                  assetId: editingCutaway.assetId,
+                  templateIds: editingCutaway.templateIds,
+                  durationSeconds: editingCutaway.durationSeconds,
+                  cropRect: editingCutaway.cropRect,
+                }
+              : null
           }
-          onAdd={onAddImageSequenceClip}
-          onClose={onCloseImageTemplatesDialog}
+          preselectedAssetId={cutawayDialogPreselectedAssetId}
+          onAddImage={onAddImageSequenceClip}
+          onAddVideo={(assetId) => {
+            const asset = assets.find((a) => a.id === assetId);
+            if (asset) onAddVideoSequenceClip(asset);
+          }}
+          onClose={onCloseCutawayDialog}
           onDelete={editingCutaway ? () => onDeleteCutaway(editingCutaway) : undefined}
         />
       )}
@@ -467,6 +509,19 @@ export function ActionArea({
         />
       )}
 
+      {isVideoOverlayPickerOpen && (
+        <VideoOverlayPickerDialog
+          assets={assets}
+          videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
+          onPick={onAddVideoOverlay}
+          onClose={onCloseVideoOverlayPicker}
+        />
+      )}
+
+      {isImageOverlayPickerOpen && (
+        <ImageOverlayPickerDialog assets={assets} onPick={onAddImageOverlay} onClose={onCloseImageOverlayPicker} />
+      )}
+
       {framingDialogOverlay && (
         <VideoOverlayFramingDialog
           overlay={framingDialogOverlay}
@@ -476,6 +531,18 @@ export function ActionArea({
           onSave={onSaveVideoOverlayFraming}
           onClose={onCloseVideoOverlayFramingDialog}
           onDelete={onDeleteFramingDialogOverlay}
+        />
+      )}
+
+      {imageFramingDialogOverlay && (
+        <ImageOverlayFramingDialog
+          overlay={imageFramingDialogOverlay}
+          baseFrameUrl={previewFrameUrl ?? ""}
+          overlayFrameUrl={assetUrlById[imageFramingDialogOverlay.assetId] ?? ""}
+          outputAspectRatio={frameAspectRatio}
+          onSave={onSaveImageOverlayFraming}
+          onClose={onCloseImageOverlayFramingDialog}
+          onDelete={onDeleteImageFramingDialogOverlay}
         />
       )}
 

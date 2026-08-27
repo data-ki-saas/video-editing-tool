@@ -2,7 +2,7 @@ import { deleteProject as deleteProjectViaBackend, resetProject as resetProjectV
 import { createClient } from "@/lib/supabase/client";
 import type {
   CropRect,
-  OverlayImage,
+  ImageOverlayClip,
   SequenceEntry,
   TextOverlay,
   TranscriptCaption,
@@ -66,11 +66,12 @@ export interface EditSelectionsSnapshot {
   // gesture and CanvasPlayer's skipTrimmedRanges, which actually skips
   // over them during playback rather than just marking them.
   trimRanges: TrimRange[];
-  // Image assets composited on top of the base video -- see
-  // video_math.ts's OverlayImage. Independent of trimRanges/zoomEffects/
-  // flip; multiple can coexist, even at overlapping times (e.g. two
-  // different images shown together).
-  overlayImages: OverlayImage[];
+  // Image assets composited on top of the base video, with the same
+  // switchable Full-Screen/Picture-in-Picture/Split-Screen layout system as
+  // videoOverlays below -- see video_math.ts's ImageOverlayClip. Independent
+  // of trimRanges/zoomEffects/flip; multiple can coexist, even at
+  // overlapping times (e.g. two different images shown together).
+  overlayImages: ImageOverlayClip[];
   // Text captions composited on top of the base video, rendered via a
   // named template (see lib/video/textTemplates.ts) -- same
   // positioned-rect-plus-time-range shape as overlayImages, but the

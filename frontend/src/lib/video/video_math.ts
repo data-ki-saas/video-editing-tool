@@ -403,12 +403,14 @@ export function skipTrimmedRanges(trimRanges: TrimRange[], timeSeconds: number):
 }
 
 /**
- * An image asset composited on top of the base video for a time range --
- * a picture-in-picture layer, not a crop/zoom/flip of the base clip
- * itself. `rect` is the SAME fractional {x,y,width,height} shape as
- * CropRect (position/size as fractions of the frame) -- it's generic
- * rectangle geometry, just describing where the overlay sits rather than
- * what to crop.
+ * @deprecated superseded by ImageOverlayClip (below), which gives images
+ * the same switchable Full-Screen/Picture-in-Picture/Split-Screen layout
+ * video overlays already have, instead of always being a fixed
+ * picture-in-picture-shaped rect. Kept only so a project's persisted
+ * history entries from before that change still type-check -- see
+ * ThreePaneEditor.tsx's own migration `useMemo` (next to its videoOverlays
+ * one) for how a legacy entry here is upgraded into an ImageOverlayClip at
+ * load time. Never written by new code.
  */
 export interface OverlayImage {
   assetId: string;
@@ -541,6 +543,29 @@ export interface VideoOverlayClip {
   audioBalance: number;
 }
 
+/**
+ * An image asset placed on its own rail for a time window, with the SAME
+ * switchable layout system as VideoOverlayClip above (Full-Screen /
+ * Picture-in-Picture / Split Screen, via the shared VideoOverlayLayout
+ * union) -- deliberate parity: an image overlay behaves exactly like a
+ * video overlay except it has no source footage of its own to play (no
+ * `sourceStartSeconds`) and no audio to mix (no `audioBalance`). Everything
+ * that reasons about "which layout is active/exclusive at this instant"
+ * (isExclusiveLayout, findActiveExclusiveOverlay,
+ * findActivePictureInPictureOverlays below) is shared, generic code -- both
+ * clip types satisfy the same minimal shape. Replaces the old OverlayImage
+ * (always a fixed picture-in-picture rect) -- see ThreePaneEditor.tsx's
+ * migration useMemo for how a legacy OverlayImage becomes one of these at
+ * load time (a picture-in-picture layout wrapping its old `rect`).
+ */
+export interface ImageOverlayClip {
+  assetId: string;
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  layout: VideoOverlayLayout;
+  framing: OverlayFraming;
+}
+
 /** Cache key for a still frame captured at one overlay placement's own
  * sourceStartSeconds -- shared between ThreePaneEditor.tsx (which populates
  * the cache) and FrameStrip.tsx (which reads it) so the two never drift on
@@ -552,16 +577,29 @@ export function videoOverlayStartThumbnailKey(assetId: string, sourceStartSecond
   return `${assetId}:${sourceStartSeconds}`;
 }
 
+// The minimal shape findActiveExclusiveOverlay/findActivePictureInPictureOverlays
+// need -- generic over VideoOverlayClip AND ImageOverlayClip (both satisfy
+// this exactly), so one implementation serves both CanvasPlayer's video-
+// overlay and image-overlay compositing passes without duplicating the
+// lookup logic.
+interface LayoutTimedClip {
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  layout: VideoOverlayLayout;
+}
+
 /** The single EXCLUSIVE-layout overlay (Full-Screen or Split-Screen) active
- * at `timeSeconds`, if any -- at most one can ever be active, since those
- * two layouts are mutually exclusive with each other. */
-export function findActiveExclusiveOverlay(clips: VideoOverlayClip[], timeSeconds: number): VideoOverlayClip | null {
+ * at `timeSeconds`, if any -- at most one can ever be active PER ARRAY,
+ * since those two layouts are mutually exclusive with each other WITHIN the
+ * same clip type (video-exclusive and image-exclusive are independent --
+ * see CanvasPlayer.tsx's own comment on which wins when both overlap). */
+export function findActiveExclusiveOverlay<T extends LayoutTimedClip>(clips: T[], timeSeconds: number): T | null {
   return clips.find((c) => isExclusiveLayout(c.layout) && timeSeconds >= c.startTimeSeconds && timeSeconds < c.endTimeSeconds) ?? null;
 }
 
 /** Every Picture-in-Picture overlay active at `timeSeconds` -- unlike the
  * exclusive layouts, more than one CAN be visible at once. */
-export function findActivePictureInPictureOverlays(clips: VideoOverlayClip[], timeSeconds: number): VideoOverlayClip[] {
+export function findActivePictureInPictureOverlays<T extends LayoutTimedClip>(clips: T[], timeSeconds: number): T[] {
   return clips.filter((c) => c.layout.type === "picture-in-picture" && timeSeconds >= c.startTimeSeconds && timeSeconds < c.endTimeSeconds);
 }
 

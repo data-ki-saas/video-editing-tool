@@ -33,8 +33,8 @@ import {
   DEFAULT_SPLIT_SCREEN_RATIO,
   MIN_VIDEO_OVERLAY_DURATION_SECONDS,
   type CropRect,
+  type ImageOverlayClip,
   type OverlayFraming,
-  type OverlayImage,
   type SequenceEntry,
   type TextOverlay,
   type VideoOverlayClip,
@@ -259,48 +259,119 @@ export function applyDeleteTrimRange(selections: EditSelectionsSnapshot, rangeIn
   };
 }
 
-// Default window/placement for a freshly-added image overlay -- "drop it
-// on the first frame" -- a modest, clearly-adjustable centered box, both
-// tweaked afterward via OverlayRectOverlay's own handles and its segment
-// on OverlayTrack.
+// Default window/placement for a freshly-added image overlay -- a modest,
+// clearly-adjustable centered box (unlike a video overlay's default
+// bottom-right DEFAULT_PIP_RECT below, chosen to match the position this
+// feature already used before it grew a switchable layout, so existing
+// muscle memory/screenshots don't shift).
 const DEFAULT_OVERLAY_DURATION_SECONDS = 3;
 const DEFAULT_OVERLAY_RECT: CropRect = { x: 0.3, y: 0.3, width: 0.4, height: 0.4 };
 
-/** Adds a new image overlay starting at the first frame (time 0), from
- * AssetGallery's right-click "Add" action on an image asset. */
-export function applyAddOverlayImage(
+/** Adds a new image overlay at the current playhead, defaulting to
+ * Picture-in-Picture at DEFAULT_OVERLAY_RECT -- from AssetGallery's
+ * right-click "Overlay" action on an image asset, or the Image Overlay
+ * tab's picker dialog. Mirrors applyAddVideoOverlay's shape (playhead-
+ * anchored, switchable afterward) but skips its exclusive-window collision
+ * check entirely: a fresh image overlay always starts as
+ * Picture-in-Picture, which never collides with anything. */
+export function applyAddImageOverlay(
   selections: EditSelectionsSnapshot,
   assetId: string,
+  currentTimeSeconds: number,
   videoDurationSeconds: number
 ): TransformationResult {
+  const startTimeSeconds = currentTimeSeconds;
   const endTimeSeconds = Math.min(
-    DEFAULT_OVERLAY_DURATION_SECONDS,
-    videoDurationSeconds > 0 ? videoDurationSeconds : DEFAULT_OVERLAY_DURATION_SECONDS
+    startTimeSeconds + DEFAULT_OVERLAY_DURATION_SECONDS,
+    videoDurationSeconds > startTimeSeconds ? videoDurationSeconds : startTimeSeconds + DEFAULT_OVERLAY_DURATION_SECONDS
   );
-  const newOverlay: OverlayImage = { assetId, startTimeSeconds: 0, endTimeSeconds, rect: DEFAULT_OVERLAY_RECT };
+  if (endTimeSeconds <= startTimeSeconds) return { label: "Added image overlay", state: selections };
+  const newOverlay: ImageOverlayClip = {
+    assetId,
+    startTimeSeconds,
+    endTimeSeconds,
+    layout: { type: "picture-in-picture", rect: DEFAULT_OVERLAY_RECT },
+    framing: DEFAULT_OVERLAY_FRAMING,
+  };
   return {
     label: "Added image overlay",
     state: { ...selections, overlayImages: [...selections.overlayImages, newOverlay] },
   };
 }
 
-/** Moving/resizing an overlay's rect via its own drag handles on the
- * active tile (see OverlayRectOverlay.tsx). */
-export function applyOverlayRectCommit(
+/** Switches a placed image overlay's layout in place -- same three choices
+ * and same exclusive-collision check (against every OTHER image overlay
+ * only -- video overlays are a separate array/rail, see this file's own
+ * z-order notes in CanvasPlayer.tsx) as applyChangeVideoOverlayLayout. */
+export function applyChangeImageOverlayLayout(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
-  nextRect: CropRect
+  layoutType: VideoOverlayLayout["type"],
+  splitScreenOrientation: "horizontal" | "vertical" = "horizontal"
 ): TransformationResult {
   const overlay = selections.overlayImages[overlayIndex];
-  if (!overlay) return { label: "Moved overlay", state: selections };
+  if (!overlay) return { label: "Changed overlay layout", state: selections };
+  const layout: VideoOverlayLayout =
+    layoutType === "full-screen"
+      ? { type: "full-screen" }
+      : layoutType === "picture-in-picture"
+        ? { type: "picture-in-picture", rect: DEFAULT_OVERLAY_RECT }
+        : { type: "split-screen", orientation: splitScreenOrientation, partnerFirst: false, baseFraming: DEFAULT_OVERLAY_FRAMING, ratio: DEFAULT_SPLIT_SCREEN_RATIO };
+  if (
+    isExclusiveLayout(layout) &&
+    overlapsExclusiveWindow(selections.overlayImages, overlay.startTimeSeconds, overlay.endTimeSeconds, overlayIndex)
+  ) {
+    return { label: "Changed overlay layout", state: selections }; // no room -- no-op
+  }
   const nextOverlays = [...selections.overlayImages];
-  nextOverlays[overlayIndex] = { ...overlay, rect: nextRect };
+  nextOverlays[overlayIndex] = { ...overlay, layout };
+  return { label: "Changed overlay layout", state: { ...selections, overlayImages: nextOverlays } };
+}
+
+/** Toggles an image Split Screen overlay between side-by-side and
+ * top-and-bottom -- mirrors applyToggleSplitScreenOrientation. */
+export function applyToggleImageSplitScreenOrientation(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  if (!overlay || overlay.layout.type !== "split-screen") return { label: "Changed split screen orientation", state: selections };
+  const nextOverlays = [...selections.overlayImages];
+  nextOverlays[overlayIndex] = {
+    ...overlay,
+    layout: { ...overlay.layout, orientation: overlay.layout.orientation === "horizontal" ? "vertical" : "horizontal" },
+  };
+  return { label: "Changed split screen orientation", state: { ...selections, overlayImages: nextOverlays } };
+}
+
+/** Swaps which half an image Split Screen overlay's photo occupies --
+ * mirrors applyToggleSplitScreenSides. */
+export function applyToggleImageSplitScreenSides(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  if (!overlay || overlay.layout.type !== "split-screen") return { label: "Swapped split screen sides", state: selections };
+  const nextOverlays = [...selections.overlayImages];
+  nextOverlays[overlayIndex] = { ...overlay, layout: { ...overlay.layout, partnerFirst: !overlay.layout.partnerFirst } };
+  return { label: "Swapped split screen sides", state: { ...selections, overlayImages: nextOverlays } };
+}
+
+/** Moving/resizing an image overlay's rect -- via the reused
+ * OverlayRectOverlay drag handles on FrameStrip's active tile for a
+ * Picture-in-Picture layout, same as applyVideoOverlayRectChange; a no-op
+ * for any other layout (nothing else has a rect to move). */
+export function applyImageOverlayRectChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  rect: CropRect
+): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  if (!overlay || overlay.layout.type !== "picture-in-picture") return { label: "Moved overlay", state: selections };
+  const nextOverlays = [...selections.overlayImages];
+  nextOverlays[overlayIndex] = { ...overlay, layout: { ...overlay.layout, rect } };
   return { label: "Moved overlay", state: { ...selections, overlayImages: nextOverlays } };
 }
 
-/** Dragging an overlay's segment edges on OverlayTrack -- "how many
- * frames the image is visible for." */
-export function applyOverlayRangeChange(
+/** Dragging an image overlay's segment edges on ImageOverlayTrack -- trims
+ * its visible window. Clamping happens in the track's own drag math (same
+ * convention as applyVideoOverlayRangeChange); this just commits the
+ * result. */
+export function applyImageOverlayRangeChange(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   startTimeSeconds: number,
@@ -313,9 +384,51 @@ export function applyOverlayRangeChange(
   return { label: "Adjusted overlay range", state: { ...selections, overlayImages: nextOverlays } };
 }
 
-/** Removes one image overlay outright -- from the "Remove overlay"
- * context menu on OverlayTrack's segment. */
-export function applyDeleteOverlayImage(
+/** Dragging the MIDDLE of an image overlay's segment on ImageOverlayTrack --
+ * slides the whole block along the timeline, duration fixed -- mirrors
+ * applyVideoOverlayPositionChange. */
+export function applyImageOverlayPositionChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  startTimeSeconds: number
+): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  if (!overlay) return { label: "Moved overlay", state: selections };
+  const durationSeconds = overlay.endTimeSeconds - overlay.startTimeSeconds;
+  const nextOverlays = [...selections.overlayImages];
+  nextOverlays[overlayIndex] = { ...overlay, startTimeSeconds, endTimeSeconds: startTimeSeconds + durationSeconds };
+  return { label: "Moved overlay", state: { ...selections, overlayImages: nextOverlays } };
+}
+
+/** Saves everything ImageOverlayFramingDialog lets you fine-tune -- same
+ * shape as applyChangeOverlayFraming, minus `audioBalance` (images have no
+ * audio to mix). */
+export function applyChangeImageOverlayFraming(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  framing: OverlayFraming,
+  options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect }
+): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  if (!overlay) return { label: "Adjusted overlay framing", state: selections };
+  const nextLayout: VideoOverlayLayout =
+    overlay.layout.type === "split-screen"
+      ? {
+          ...overlay.layout,
+          baseFraming: options?.baseFraming ?? overlay.layout.baseFraming,
+          ratio: options?.ratio ?? overlay.layout.ratio,
+        }
+      : overlay.layout.type === "picture-in-picture"
+        ? { ...overlay.layout, rect: options?.rect ?? overlay.layout.rect }
+        : overlay.layout;
+  const nextOverlays = [...selections.overlayImages];
+  nextOverlays[overlayIndex] = { ...overlay, framing, layout: nextLayout };
+  return { label: "Adjusted overlay framing", state: { ...selections, overlayImages: nextOverlays } };
+}
+
+/** Removes one image overlay outright -- from ImageOverlayTrack's "Remove
+ * overlay" context menu entry, or its framing dialog's "Remove Overlay". */
+export function applyDeleteImageOverlay(
   selections: EditSelectionsSnapshot,
   overlayIndex: number
 ): TransformationResult {
@@ -342,7 +455,7 @@ export function applyAddSequenceClip(selections: EditSelectionsSnapshot, assetId
 // A freshly-added image clip defaults to this long -- long enough to read
 // as a deliberate beat in the reel, short enough that a creator adding
 // several photos in a row doesn't end up with a sluggish sequence. Also the
-// floor/ceiling for ImageTemplatesDialog's duration stretch handle and
+// floor/ceiling for CutawayDialog's duration stretch handle and
 // FrameStrip's post-add resize handle (see applyResizeImageClip below).
 export const DEFAULT_IMAGE_CLIP_DURATION_SECONDS = 4;
 export const MIN_IMAGE_CLIP_DURATION_SECONDS = 1;
@@ -350,7 +463,7 @@ export const MAX_IMAGE_CLIP_DURATION_SECONDS = 15;
 
 /** Appends an image asset to the concatenated sequence as its own
  * full-screen clip, animated via one or more combined Ken Burns templates --
- * from ImageTemplatesDialog's "Add to video". Unlike a video clip, this
+ * from CutawayDialog's "Add to video". Unlike a video clip, this
  * needs an authored duration (images have none intrinsically), a
  * `cropRect` (the clip rectangle the user positioned specifically for THIS
  * photo in the dialog -- fractions of the photo, not the project's
@@ -383,7 +496,7 @@ export function applyAddImageSequenceClip(
 
 /** Resizing an image clip's duration from its own drag handle on
  * FrameStrip's clip-boundary marker (post-add, on the main timeline --
- * distinct from ImageTemplatesDialog's own duration stretch/+/- control,
+ * distinct from CutawayDialog's own duration stretch/+/- control,
  * which only sets the duration a clip is FIRST added with). Rescales the
  * clip's own Ken Burns ZoomEffect to still span exactly its new duration
  * (same start, epicenter/end pushed to the new end) and shifts every
@@ -447,7 +560,7 @@ export function applyResizeImageClip(
 }
 
 /** Changes an existing image cutaway's photo/animation/duration/crop in
- * place -- from ImageTemplatesDialog's "Save changes", reopened by clicking
+ * place -- from CutawayDialog's "Save changes", reopened by clicking
  * a segment on the Cutaways rail (CutawayTrack.tsx). Reuses
  * applyResizeImageClip's own reflow logic for any duration change
  * (shifting every later timed thing by the resulting delta), then always
@@ -509,26 +622,28 @@ export function applyEditImageSequenceClip(
   };
 }
 
-/** Removes an image cutaway entirely -- from CutawayTrack's own right-click
- * menu, or ImageTemplatesDialog's "Remove Cutaway" (only shown in edit
- * mode). Unlike a plain video clip (which can only ever be shortened via a
- * trim range, never spliced out of `sequenceClips`), an image cutaway is
- * its own standalone SequenceEntry, so it can be dropped from the array
- * outright. Reuses applyEditImageSequenceClip's own reflow logic (shifting
- * everything from this clip's end onward) with delta = -durationSeconds,
- * since removing it closes the gap exactly the way shortening it to zero
- * would. */
-export function applyDeleteImageSequenceClip(
+/** Removes any base-sequence clip entirely -- video or image -- from
+ * CutawayTrack's own right-click menu (every clip in the sequence gets a
+ * segment there now, not just image cutaways -- see that file's own
+ * comment), or CutawayDialog's "Remove Cutaway" (image only, edit mode).
+ * `durationSeconds` is passed by the caller rather than read off the entry,
+ * since a video entry never stores its own duration (only ever probed from
+ * the file, unlike an image entry's authored `durationSeconds`) -- see
+ * applyResizeImageClip's own doc comment for why the caller is better
+ * positioned to know it. Reuses the same reflow-by-delta logic every other
+ * sequence-editing transformation here does: everything timed from this
+ * clip's end onward shifts back by its duration, closing the gap. */
+export function applyDeleteSequenceClip(
   selections: EditSelectionsSnapshot,
   entryId: string,
+  durationSeconds: number,
   clipStartSeconds: number
 ): TransformationResult {
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
-  const entry = selections.sequenceClips[entryIndex];
-  if (!entry || entry.kind !== "image") return { label: "Removed cutaway", state: selections };
+  if (entryIndex === -1) return { label: "Removed cutaway", state: selections };
 
-  const clipEndSeconds = clipStartSeconds + entry.durationSeconds;
-  const delta = -entry.durationSeconds;
+  const clipEndSeconds = clipStartSeconds + durationSeconds;
+  const delta = -durationSeconds;
 
   const shiftEffectRange = <T extends { startTimeSeconds: number; endTimeSeconds: number }>(item: T): T =>
     item.startTimeSeconds >= clipEndSeconds
@@ -700,7 +815,7 @@ export const DEFAULT_VIDEO_OVERLAY_DURATION_SECONDS = 3;
 export const DEFAULT_PIP_RECT: CropRect = { x: 0.64, y: 0.62, width: 0.32, height: 0.32 };
 
 function overlapsExclusiveWindow(
-  clips: VideoOverlayClip[],
+  clips: { layout: VideoOverlayLayout; startTimeSeconds: number; endTimeSeconds: number }[],
   startTimeSeconds: number,
   endTimeSeconds: number,
   excludeIndex?: number
