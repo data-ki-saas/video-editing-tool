@@ -1516,6 +1516,44 @@ export function ThreePaneEditor({
   const previewFrameIndex = findClosestTimestampIndex(thumbnailTimestampsSeconds, currentTimeSeconds);
   const previewFrameUrl = previewFrameIndex >= 0 ? thumbnails[previewFrameIndex] : null;
 
+  // FilterPresetDialog's own preview frame, per target -- unlike
+  // previewFrameUrl above (always the base track's frame at the CURRENT
+  // PLAYHEAD, wherever that happens to be), each of these shows a frame
+  // that actually belongs to the clip/image the dialog is about to filter:
+  // an image cutaway/overlay's own photo (constant for its whole duration,
+  // so the playhead's position relative to it is irrelevant), a video
+  // cutaway's own frame at ITS OWN midpoint (it may be nowhere near the
+  // current playhead), or a video overlay's own thumbnail (its marked
+  // start-point frame if set, else its generic per-asset frame) -- the same
+  // source CanvasPlayer's live filter preview draws for that same clip.
+  // Without this, hovering a swatch while editing e.g. a cutaway elsewhere
+  // on the timeline previewed the filter against whatever frame the
+  // playhead was sitting on instead of the cutaway's own footage.
+  const filterDialogCutawayPreviewFrameUrl = filterDialogCutaway
+    ? filterDialogCutaway.kind === "image"
+      ? (assetUrlById[filterDialogCutaway.assetId] ?? null)
+      : (() => {
+          const midpoint = filterDialogCutaway.startTimeSeconds + filterDialogCutaway.durationSeconds / 2;
+          const index = findClosestTimestampIndex(thumbnailTimestampsSeconds, midpoint);
+          return index >= 0 ? thumbnails[index] : null;
+        })()
+    : null;
+
+  const filterDialogImageOverlayPreviewFrameUrl =
+    filterDialogImageOverlayIndex !== null
+      ? (assetUrlById[selections.overlayImages[filterDialogImageOverlayIndex]?.assetId ?? ""] ?? null)
+      : null;
+
+  const filterDialogVideoOverlayTarget =
+    filterDialogVideoOverlayIndex !== null ? (selections.videoOverlays[filterDialogVideoOverlayIndex] ?? null) : null;
+  const filterDialogVideoOverlayPreviewFrameUrl = filterDialogVideoOverlayTarget
+    ? (videoOverlayStartThumbnailByKey[
+        videoOverlayStartThumbnailKey(filterDialogVideoOverlayTarget.assetId, filterDialogVideoOverlayTarget.sourceStartSeconds)
+      ] ??
+      videoThumbnailUrlByAssetId[filterDialogVideoOverlayTarget.assetId] ??
+      null)
+    : null;
+
   // Splices any in-progress rect/range/position drag into the persisted
   // array at its own index, same pattern as displayedVideoOverlays below --
   // a rect edit only ever applies to a Picture-in-Picture layout (the only
@@ -1765,6 +1803,9 @@ export function ThreePaneEditor({
           filterDialogCutaway={filterDialogCutaway}
           filterDialogVideoOverlayIndex={filterDialogVideoOverlayIndex}
           filterDialogImageOverlayIndex={filterDialogImageOverlayIndex}
+          filterDialogCutawayPreviewFrameUrl={filterDialogCutawayPreviewFrameUrl}
+          filterDialogVideoOverlayPreviewFrameUrl={filterDialogVideoOverlayPreviewFrameUrl}
+          filterDialogImageOverlayPreviewFrameUrl={filterDialogImageOverlayPreviewFrameUrl}
           onSelectCutawayFilter={handleSelectCutawayFilter}
           onSelectVideoOverlayFilter={handleSelectVideoOverlayFilter}
           onSelectImageOverlayFilter={handleSelectImageOverlayFilter}

@@ -24,6 +24,7 @@ const MIN_SIZE_FRACTION = 0.05;
 export function OverlayRectOverlay({
   rect,
   imageUrl,
+  cssFilter,
   renderInner,
   onChange,
   onCommit,
@@ -32,6 +33,11 @@ export function OverlayRectOverlay({
 }: {
   rect: CropRect;
   imageUrl?: string;
+  /** CSS `filter` string for this overlay's own color filter (see
+   * filterPresets.ts) -- same cssFilter CanvasPlayer applies via ctx.filter,
+   * so this PiP thumbnail matches the live preview. Ignored when
+   * renderInner is given (text overlays have no filter of their own). */
+  cssFilter?: string;
   /** Replaces the default `<img>` content -- used for text overlays,
    * which have no imageUrl at all. */
   renderInner?: ReactNode;
@@ -114,7 +120,7 @@ export function OverlayRectOverlay({
       >
         {renderInner ?? (
           // eslint-disable-next-line @next/next/no-img-element -- a presigned R2 asset URL, not a Next-optimizable static asset
-          <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+          <img src={imageUrl} alt="" className="h-full w-full object-cover" style={{ filter: cssFilter }} />
         )}
 
         {isInteractive && (

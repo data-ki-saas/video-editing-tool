@@ -278,7 +278,12 @@ function VideoOverlaySegment({
     >
       {thumbnailUrl && (
         // eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset
-        <img src={thumbnailUrl} alt="" className="z-10 h-3 w-3 shrink-0 rounded-sm object-cover" />
+        <img
+          src={thumbnailUrl}
+          alt=""
+          className="z-10 h-3 w-3 shrink-0 rounded-sm object-cover"
+          style={{ filter: getFilterPresetOption(overlay.colorFilterId ?? null).cssFilter }}
+        />
       )}
       <button
         type="button"

@@ -105,6 +105,7 @@ import { ImageOverlayTrack } from "./ImageOverlayTrack";
 import { MarkerTrack } from "./MarkerTrack";
 import { CutawayTrack, type CutawaySegment } from "./CutawayTrack";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
+import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import type { TimelineMarker } from "@/lib/projects";
 import {
   computeEffectiveCropRect,
@@ -144,6 +145,7 @@ const FrameTile = memo(function FrameTile({
   activeExclusiveImageOverlay,
   activeExclusiveVideoOverlay,
   isImageClip,
+  colorFilterId,
   onChange,
   onCommit,
   onFlipHorizontal,
@@ -214,6 +216,12 @@ const FrameTile = memo(function FrameTile({
   // undistorted, letterboxed to fit -- this only affects that one fill
   // mode, not the crop-guide/overlay boxes drawn on top (out of scope here).
   isImageClip: boolean;
+  // This tile's own base-clip color filter (from the sequence entry it
+  // falls under -- see tileColorFilterId below) -- applied via CSS `filter`
+  // to every base-clip <img> below, the same cssFilter CanvasPlayer already
+  // applies via ctx.filter, so the track's frames match the live preview
+  // instead of always showing the unfiltered source image.
+  colorFilterId: FilterPresetId | null;
   onChange?: (next: CropRect) => void;
   onCommit?: (next: CropRect) => void;
   onFlipHorizontal?: () => void;
@@ -228,6 +236,13 @@ const FrameTile = memo(function FrameTile({
   const scaleX = flipHorizontal ? -1 : 1;
   const scaleY = flipVertical ? -1 : 1;
   const flipStyle = scaleX !== 1 || scaleY !== 1 ? { transform: `scale(${scaleX}, ${scaleY})` } : undefined;
+
+  // Same cssFilter CanvasPlayer applies via ctx.filter -- see
+  // filterPresets.ts's module comment for why these must never drift.
+  const baseCssFilter = getFilterPresetOption(colorFilterId).cssFilter;
+  const baseImgStyle = { ...flipStyle, filter: baseCssFilter };
+  const imageOverlayCssFilter = getFilterPresetOption(activeExclusiveImageOverlay?.colorFilterId ?? null).cssFilter;
+  const videoOverlayCssFilter = getFilterPresetOption(activeExclusiveVideoOverlay?.colorFilterId ?? null).cssFilter;
 
   function rectStyle(rect: CropRect): React.CSSProperties {
     return { left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` };
@@ -277,16 +292,26 @@ const FrameTile = memo(function FrameTile({
         // overlay at the same instant (see this file's own comment) -- the
         // photo itself fills the tile.
         // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset
-        <img src={assetUrlById[activeExclusiveImageOverlay.assetId] ?? ""} alt={`Frame at ${index}s`} className="h-full w-full object-cover" />
+        <img
+          src={assetUrlById[activeExclusiveImageOverlay.assetId] ?? ""}
+          alt={`Frame at ${index}s`}
+          className="h-full w-full object-cover"
+          style={{ filter: imageOverlayCssFilter }}
+        />
       ) : exclusiveImageOverlayRects && activeExclusiveImageOverlay ? (
         <>
           <div className="absolute overflow-hidden" style={rectStyle(exclusiveImageOverlayRects.baseRect!)}>
             {/* eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image */}
-            <img src={src} alt={`Frame at ${index}s`} className="h-full w-full object-cover" style={flipStyle} />
+            <img src={src} alt={`Frame at ${index}s`} className="h-full w-full object-cover" style={baseImgStyle} />
           </div>
           <div className="absolute overflow-hidden" style={rectStyle(exclusiveImageOverlayRects.overlayRect)}>
             {/* eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset */}
-            <img src={assetUrlById[activeExclusiveImageOverlay.assetId] ?? ""} alt="" className="h-full w-full object-cover" />
+            <img
+              src={assetUrlById[activeExclusiveImageOverlay.assetId] ?? ""}
+              alt=""
+              className="h-full w-full object-cover"
+              style={{ filter: imageOverlayCssFilter }}
+            />
           </div>
         </>
       ) : activeExclusiveVideoOverlay?.layout.type === "full-screen" ? (
@@ -295,7 +320,12 @@ const FrameTile = memo(function FrameTile({
         // flip transform, since CanvasPlayer never flips the overlay's own
         // footage, only the base clip's.
         // eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset
-        <img src={overlayThumbnailUrl(activeExclusiveVideoOverlay)} alt={`Frame at ${index}s`} className="h-full w-full object-cover" />
+        <img
+          src={overlayThumbnailUrl(activeExclusiveVideoOverlay)}
+          alt={`Frame at ${index}s`}
+          className="h-full w-full object-cover"
+          style={{ filter: videoOverlayCssFilter }}
+        />
       ) : exclusiveVideoOverlayRects && activeExclusiveVideoOverlay ? (
         // Split Screen: base clip in its own half (still flipped, still the
         // real per-second thumbnail), overlay's own thumbnail in the other
@@ -303,11 +333,16 @@ const FrameTile = memo(function FrameTile({
         <>
           <div className="absolute overflow-hidden" style={rectStyle(exclusiveVideoOverlayRects.baseRect!)}>
             {/* eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image */}
-            <img src={src} alt={`Frame at ${index}s`} className="h-full w-full object-cover" style={flipStyle} />
+            <img src={src} alt={`Frame at ${index}s`} className="h-full w-full object-cover" style={baseImgStyle} />
           </div>
           <div className="absolute overflow-hidden" style={rectStyle(exclusiveVideoOverlayRects.overlayRect)}>
             {/* eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset */}
-            <img src={overlayThumbnailUrl(activeExclusiveVideoOverlay)} alt="" className="h-full w-full object-cover" />
+            <img
+              src={overlayThumbnailUrl(activeExclusiveVideoOverlay)}
+              alt=""
+              className="h-full w-full object-cover"
+              style={{ filter: videoOverlayCssFilter }}
+            />
           </div>
         </>
       ) : (
@@ -316,7 +351,7 @@ const FrameTile = memo(function FrameTile({
           src={src}
           alt={`Frame at ${index}s`}
           className={`h-full w-full ${isImageClip ? "object-contain" : "object-cover"}`}
-          style={flipStyle}
+          style={baseImgStyle}
         />
       )}
       {cropRect && (
@@ -335,6 +370,7 @@ const FrameTile = memo(function FrameTile({
             key={`video-${overlayIndex}`}
             rect={overlay.layout.rect}
             imageUrl={overlayThumbnailUrl(overlay)}
+            cssFilter={getFilterPresetOption(overlay.colorFilterId ?? null).cssFilter}
             borderColorClassName="border-violet-400"
             handleColorClassName="bg-violet-400"
             onChange={onVideoOverlayRectChange ? (next) => onVideoOverlayRectChange(overlayIndex, next) : undefined}
@@ -349,6 +385,7 @@ const FrameTile = memo(function FrameTile({
             key={`image-${overlayIndex}`}
             rect={overlay.layout.rect}
             imageUrl={assetUrlById[overlay.assetId] ?? ""}
+            cssFilter={getFilterPresetOption(overlay.colorFilterId ?? null).cssFilter}
             borderColorClassName="border-fuchsia-400"
             handleColorClassName="bg-fuchsia-400"
             onChange={onImageOverlayRectChange ? (next) => onImageOverlayRectChange(overlayIndex, next) : undefined}
@@ -658,6 +695,19 @@ export function FrameStrip({
       const entryIndex = clipBoundarySeconds.findIndex((boundary) => timestamp < boundary);
       const resolvedIndex = entryIndex === -1 ? sequenceEntries.length - 1 : entryIndex;
       return sequenceEntries[resolvedIndex]?.kind === "image";
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, thumbnailTimestampsSeconds, clipBoundarySeconds, sequenceEntries]);
+
+  // Same resolution as tileIsImageClip above, but for the resolved clip's
+  // own colorFilterId -- lets each tile paint with the same cssFilter
+  // CanvasPlayer applies to its own frame at that instant (see FrameTile's
+  // colorFilterId prop comment).
+  const tileColorFilterId = useMemo(() => {
+    return thumbnailTimestampsSeconds.map((timestamp) => {
+      const entryIndex = clipBoundarySeconds.findIndex((boundary) => timestamp < boundary);
+      const resolvedIndex = entryIndex === -1 ? sequenceEntries.length - 1 : entryIndex;
+      return sequenceEntries[resolvedIndex]?.colorFilterId ?? null;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, clipBoundarySeconds, sequenceEntries]);
@@ -991,6 +1041,7 @@ export function FrameStrip({
               activeExclusiveImageOverlay={tileActiveExclusiveImageOverlay[index]}
               activeExclusiveVideoOverlay={tileActiveExclusiveVideoOverlay[index]}
               isImageClip={tileIsImageClip[index] ?? false}
+              colorFilterId={tileColorFilterId[index] ?? null}
               onChange={index === activeTileIndex ? onCropRectChange : undefined}
               onCommit={index === activeTileIndex ? onCropRectCommit : undefined}
               onFlipHorizontal={index === activeTileIndex ? onFlipHorizontal : undefined}

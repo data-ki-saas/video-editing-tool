@@ -190,6 +190,9 @@ export function ActionArea({
   filterDialogCutaway,
   filterDialogVideoOverlayIndex,
   filterDialogImageOverlayIndex,
+  filterDialogCutawayPreviewFrameUrl,
+  filterDialogVideoOverlayPreviewFrameUrl,
+  filterDialogImageOverlayPreviewFrameUrl,
   onSelectCutawayFilter,
   onSelectVideoOverlayFilter,
   onSelectImageOverlayFilter,
@@ -288,6 +291,13 @@ export function ActionArea({
   filterDialogCutaway: CutawaySegment | null;
   filterDialogVideoOverlayIndex: number | null;
   filterDialogImageOverlayIndex: number | null;
+  // A frame from the actual clip/image each dialog is scoped to (its own
+  // photo, its own midpoint frame, or its own overlay thumbnail) -- see
+  // ThreePaneEditor's own comment on why this differs from previewFrameUrl
+  // below (always the base track's frame at the current playhead).
+  filterDialogCutawayPreviewFrameUrl: string | null;
+  filterDialogVideoOverlayPreviewFrameUrl: string | null;
+  filterDialogImageOverlayPreviewFrameUrl: string | null;
   onSelectCutawayFilter: (id: FilterPresetId) => void;
   onSelectVideoOverlayFilter: (id: FilterPresetId) => void;
   onSelectImageOverlayFilter: (id: FilterPresetId) => void;
@@ -556,7 +566,7 @@ export function ActionArea({
           selectedFilterId={filterDialogCutawayEntry.colorFilterId ?? null}
           onSelect={onSelectCutawayFilter}
           onClose={onCloseFilterDialog}
-          previewFrameUrl={previewFrameUrl}
+          previewFrameUrl={filterDialogCutawayPreviewFrameUrl ?? previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
           scopeLabel="this cutaway"
         />
@@ -567,7 +577,7 @@ export function ActionArea({
           selectedFilterId={filterDialogVideoOverlay.colorFilterId ?? null}
           onSelect={onSelectVideoOverlayFilter}
           onClose={onCloseFilterDialog}
-          previewFrameUrl={previewFrameUrl}
+          previewFrameUrl={filterDialogVideoOverlayPreviewFrameUrl ?? previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
           scopeLabel="this overlay"
         />
@@ -578,7 +588,7 @@ export function ActionArea({
           selectedFilterId={filterDialogImageOverlay.colorFilterId ?? null}
           onSelect={onSelectImageOverlayFilter}
           onClose={onCloseFilterDialog}
-          previewFrameUrl={previewFrameUrl}
+          previewFrameUrl={filterDialogImageOverlayPreviewFrameUrl ?? previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
           scopeLabel="this overlay"
         />
