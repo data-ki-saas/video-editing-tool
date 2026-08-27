@@ -188,7 +188,7 @@ export function ZoomEffectsTrack({
   if (zoomEffects.length === 0) return null;
 
   return (
-    <div className="relative h-3 w-full shrink-0">
+    <div className="relative my-1 h-3 w-full shrink-0">
       {zoomEffects.map((zoomEffect, index) => (
         <ZoomEffectSegment
           key={index}
