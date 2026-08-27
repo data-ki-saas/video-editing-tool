@@ -379,6 +379,7 @@ export function FrameStrip({
   onMoveMarker,
   onRenameMarker,
   onDeleteMarker,
+  onTogglePinMarker,
   pixelsPerSecond,
   scrollContainerRef,
   onScroll,
@@ -464,6 +465,7 @@ export function FrameStrip({
   onMoveMarker: (index: number, timeSeconds: number) => void;
   onRenameMarker: (index: number, label: string) => void;
   onDeleteMarker: (index: number) => void;
+  onTogglePinMarker: (index: number) => void;
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
@@ -718,6 +720,7 @@ export function FrameStrip({
           onMove={onMoveMarker}
           onRename={onRenameMarker}
           onDelete={onDeleteMarker}
+          onTogglePin={onTogglePinMarker}
         />
 
         <CutawayTrack

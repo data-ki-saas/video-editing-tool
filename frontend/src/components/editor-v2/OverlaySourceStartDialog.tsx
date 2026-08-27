@@ -157,6 +157,7 @@ export function OverlaySourceStartDialog({
                   onMove={(_, timeSeconds) => handleSetSourceStart(timeSeconds)}
                   onRename={() => {}}
                   onDelete={() => setDraftSourceStartSeconds(0)}
+                  onTogglePin={() => {}}
                 />
               </div>
             </div>

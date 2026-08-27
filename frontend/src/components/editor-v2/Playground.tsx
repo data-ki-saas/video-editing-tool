@@ -167,6 +167,7 @@ export function Playground({
   onMoveMarker,
   onRenameMarker,
   onDeleteMarker,
+  onTogglePinMarker,
   onOpenSourceStart,
 }: {
   backgroundTracks: { name: string; url: string }[];
@@ -254,6 +255,7 @@ export function Playground({
   onMoveMarker: (index: number, timeSeconds: number) => void;
   onRenameMarker: (index: number, label: string) => void;
   onDeleteMarker: (index: number) => void;
+  onTogglePinMarker: (index: number) => void;
   // The flag icon on a VideoOverlayTrack segment -- opens
   // OverlaySourceStartDialog for that specific overlay placement.
   onOpenSourceStart: (overlayIndex: number) => void;
@@ -338,6 +340,7 @@ export function Playground({
             onMoveMarker={onMoveMarker}
             onRenameMarker={onRenameMarker}
             onDeleteMarker={onDeleteMarker}
+            onTogglePinMarker={onTogglePinMarker}
             onOpenSourceStart={onOpenSourceStart}
             pixelsPerSecond={PIXELS_PER_SECOND}
             scrollContainerRef={bindRef(FRAME_STRIP_INDEX)}

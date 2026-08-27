@@ -5,7 +5,11 @@
  * one (renamed inline immediately, reusing InlineEditableText exactly the
  * way ProjectList renames a reel), drag an existing one to reposition it
  * (a popup shows the frame it's about to pin to, when `frameThumbnails` is
- * supplied), right-click for "Delete Marker". Purely a planning/organizational aid ("cut to
+ * supplied), right-click for "Pin"/"Unpin" or "Delete Marker" -- a pinned
+ * marker (TimelineMarker.pinned) renders red instead of amber and can't be
+ * dragged at all (startDrag below bails out immediately), so a planning
+ * point the user has settled on can't be bumped by an accidental drag.
+ * Purely a planning/organizational aid ("cut to
  * PIP here") -- never affects a frame's own content, matching this app's
  * "cosmetic, not undo-tracked" convention for that kind of state (see
  * projects.ts's TimelineMarker doc comment).
@@ -42,6 +46,7 @@ export function MarkerTrack({
   onMove,
   onRename,
   onDelete,
+  onTogglePin,
 }: {
   markers: TimelineMarker[];
   totalDurationSeconds: number;
@@ -57,6 +62,7 @@ export function MarkerTrack({
   onMove: (index: number, timeSeconds: number) => void;
   onRename: (index: number, label: string) => void;
   onDelete: (index: number) => void;
+  onTogglePin: (index: number) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
@@ -74,6 +80,7 @@ export function MarkerTrack({
     // pointerdown too (button 2), excluded outright so it can't fight the
     // browser's native "contextmenu" event the delete menu below relies on.
     if (e.button !== 0) return;
+    if (markers[index]?.pinned) return;
     e.stopPropagation();
     const track = trackRef.current;
     if (!track || totalDurationSeconds <= 0) return;
@@ -134,7 +141,7 @@ export function MarkerTrack({
     <div
       ref={trackRef}
       onClick={handleClick}
-      title="Click to drop a marker; drag one to move it, right-click to delete"
+      title="Click to drop a marker; drag one to move it, right-click to pin or delete"
       className="relative h-5 w-full shrink-0 cursor-pointer rounded-sm bg-neutral-800"
     >
       {markers.map((marker, index) => (
@@ -144,13 +151,17 @@ export function MarkerTrack({
           onClick={(e) => e.stopPropagation()}
           onContextMenu={(e) => {
             e.stopPropagation();
-            openContextMenu(e, [{ label: "Delete Marker", danger: true, onSelect: () => onDelete(index) }]);
+            openContextMenu(e, [
+              { label: marker.pinned ? "Unpin" : "Pin", onSelect: () => onTogglePin(index) },
+              { label: "Delete Marker", danger: true, onSelect: () => onDelete(index) },
+            ]);
           }}
-          className="absolute top-0 flex h-full -translate-x-1/2 cursor-ew-resize items-center gap-1"
+          title={marker.pinned ? "Pinned -- right-click to unpin" : undefined}
+          className={`absolute top-0 flex h-full -translate-x-1/2 items-center gap-1 ${marker.pinned ? "cursor-default" : "cursor-ew-resize"}`}
           style={{ left: `${toPercent(marker.timeSeconds)}%` }}
         >
-          <span className="h-2 w-2 shrink-0 rounded-full border border-amber-900 bg-amber-400" />
-          <span className="whitespace-nowrap rounded-sm bg-black/70 px-1 text-[10px] leading-none text-amber-300">
+          <span className={`h-2 w-2 shrink-0 rounded-full border ${marker.pinned ? "border-red-900 bg-red-500" : "border-amber-900 bg-amber-400"}`} />
+          <span className={`whitespace-nowrap rounded-sm bg-black/70 px-1 text-[10px] leading-none ${marker.pinned ? "text-red-400" : "text-amber-300"}`}>
             {marker.timeSeconds.toFixed(1)}s
           </span>
           <InlineEditableText

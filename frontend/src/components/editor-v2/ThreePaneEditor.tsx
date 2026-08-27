@@ -399,6 +399,40 @@ export function ThreePaneEditor({
     return legacySequenceAssetIds.map((assetId) => ({ id: crypto.randomUUID(), kind: "video" as const, assetId }));
   }, [rawSelections]);
 
+  // `framing` (every layout), `baseFraming`/`ratio` (split-screen only), and
+  // individual OverlayFraming fields added later (e.g. `zoom`) were all
+  // added after some projects already had a video overlay -- or an
+  // OverlayFraming object -- persisted without them. Backfilling here (once,
+  // at load, via a deep default-merge so an EXISTING framing object still
+  // heals a newer missing field like `zoom` rather than only covering "the
+  // whole object is absent") heals old data at the source instead of
+  // leaving every reader (CanvasPlayer, exportTimeline, computeOverlayRects,
+  // VideoOverlayFramingDialog) to guess a default.
+  //
+  // Memoized on rawSelections itself, same as sequenceClips above and for
+  // the same reason: VideoOverlayFramingDialog re-syncs its own draft state
+  // (ratio/framing/pipRect) whenever the `overlay` object it's passed
+  // changes identity, so recomputing this array on every render (e.g. every
+  // currentTimeSeconds tick during playback) was wiping an in-progress
+  // divider/zoom/pan drag before the user ever got to click Save.
+  const videoOverlays: VideoOverlayClip[] = useMemo(
+    () =>
+      (rawSelections.videoOverlays ?? []).map((overlay) => {
+        const framing = { ...DEFAULT_OVERLAY_FRAMING, ...overlay.framing };
+        if (overlay.layout.type !== "split-screen") return { ...overlay, framing };
+        return {
+          ...overlay,
+          framing,
+          layout: {
+            ...overlay.layout,
+            baseFraming: { ...DEFAULT_OVERLAY_FRAMING, ...overlay.layout.baseFraming },
+            ratio: overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO,
+          },
+        };
+      }),
+    [rawSelections]
+  );
+
   const selections: EditSelectionsSnapshot = {
     clipRectId: rawSelections.clipRectId ?? null,
     cropRect: rawSelections.cropRect ?? null,
@@ -409,28 +443,7 @@ export function ThreePaneEditor({
     overlayImages: rawSelections.overlayImages ?? [],
     textOverlays: rawSelections.textOverlays ?? [],
     sequenceClips,
-    // `framing` (every layout), `baseFraming`/`ratio` (split-screen only),
-    // and individual OverlayFraming fields added later (e.g. `zoom`) were
-    // all added after some projects already had a video overlay -- or an
-    // OverlayFraming object -- persisted without them. Backfilling here
-    // (once, at load, via a deep default-merge so an EXISTING framing
-    // object still heals a newer missing field like `zoom` rather than
-    // only covering "the whole object is absent") heals old data at the
-    // source instead of leaving every reader (CanvasPlayer, exportTimeline,
-    // computeOverlayRects, VideoOverlayFramingDialog) to guess a default.
-    videoOverlays: (rawSelections.videoOverlays ?? []).map((overlay) => {
-      const framing = { ...DEFAULT_OVERLAY_FRAMING, ...overlay.framing };
-      if (overlay.layout.type !== "split-screen") return { ...overlay, framing };
-      return {
-        ...overlay,
-        framing,
-        layout: {
-          ...overlay.layout,
-          baseFraming: { ...DEFAULT_OVERLAY_FRAMING, ...overlay.layout.baseFraming },
-          ratio: overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO,
-        },
-      };
-    }),
+    videoOverlays,
     transcriptCaption: rawSelections.transcriptCaption ?? null,
   };
 
@@ -1056,6 +1069,9 @@ export function ThreePaneEditor({
   function handleDeleteMarker(index: number) {
     setMarkers((prev) => prev.filter((_, i) => i !== index));
   }
+  function handleTogglePinMarker(index: number) {
+    setMarkers((prev) => prev.map((marker, i) => (i === index ? { ...marker, pinned: !marker.pinned } : marker)));
+  }
 
   // The flag icon on a VideoOverlayTrack segment -- opens
   // OverlaySourceStartDialog for that specific overlay placement, by index
@@ -1639,6 +1655,7 @@ export function ThreePaneEditor({
           onMoveMarker={handleMoveMarker}
           onRenameMarker={handleRenameMarker}
           onDeleteMarker={handleDeleteMarker}
+          onTogglePinMarker={handleTogglePinMarker}
           onOpenSourceStart={handleOpenOverlaySourceStart}
         />
       </section>

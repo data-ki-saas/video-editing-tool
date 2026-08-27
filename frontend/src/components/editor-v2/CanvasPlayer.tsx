@@ -17,9 +17,12 @@
  * it extracts each clip's own capped, device/duration-adapted frame set
  * (lib/video/video_math.ts's pickPreviewFrameRate, lib/video/video.ts's
  * extractPreviewFrames) and decodes each clip's audio track
- * (lib/video/audio.ts's decodeAudioBuffer) SEQUENTIALLY (bounds peak
- * memory -- decoding fully loads a whole file into memory with no
- * streaming), then concatenates the decoded buffers into ONE continuous
+ * (lib/video/audio.ts's decodeAudioBuffer) PIPELINED up to
+ * CLIP_LOAD_CONCURRENCY clips at once (2, not the whole sequence at once --
+ * full parallelism would multiply peak memory by clip count, since decoding
+ * fully loads a whole file into memory with no streaming; 2 overlaps one
+ * clip's network/decode latency with the next while still bounding memory to
+ * roughly "2 clips' worth"), then concatenates the decoded buffers into ONE continuous
  * AudioBuffer (audio.ts's concatenateAudioBuffers) so playback is still
  * driven by a single AudioContext clock + one AudioBufferSourceNode, never
  * touching any original video file again once loaded. A clip that fails to
@@ -193,8 +196,12 @@ export const CanvasPlayer = forwardRef<
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Per-clip decoded preview frames + frame rate, indexed the same as
   // loadedClipsRef below (NOT necessarily the same as the `clips` prop --
-  // a clip that failed to load is excluded from all three in lockstep).
-  const clipImagesRef = useRef<HTMLImageElement[][]>([]);
+  // a clip that failed to load is excluded from all three in lockstep). A
+  // "video" clip's frames are ImageBitmaps straight from extractPreviewFrames
+  // (see video.ts); an "image" clip holds a single real HTMLImageElement
+  // loaded from its own URL -- both support the .width/.height/drawImage
+  // this file needs, so they're used interchangeably below.
+  const clipImagesRef = useRef<(HTMLImageElement | ImageBitmap)[][]>([]);
   const frameRatesRef = useRef<number[]>([]);
   // Which clips actually loaded, with cumulative start times -- what
   // resolveSequencePosition resolves elapsedSeconds against, and what
@@ -215,7 +222,7 @@ export const CanvasPlayer = forwardRef<
   // pipeline the main sequence's own clips use below, not a live seeked
   // <video> or a single static image, since a video overlay must actually
   // play back over its window.
-  const videoOverlayFramesByAssetIdRef = useRef<Record<string, { images: HTMLImageElement[]; frameRate: number; durationSeconds: number }>>({});
+  const videoOverlayFramesByAssetIdRef = useRef<Record<string, { images: ImageBitmap[]; frameRate: number; durationSeconds: number }>>({});
   // Decoded audio for every video overlay source asset that at least one
   // overlay actually wants audio from (audioBalance > 0) -- keyed by
   // assetId, same sharing convention as videoOverlayFramesByAssetIdRef.
@@ -331,10 +338,10 @@ export const CanvasPlayer = forwardRef<
     // have different native resolutions). Destination (canvas) size: the
     // fixed reference resolution, so different clips scale into the same
     // pixel dimensions rather than resizing the canvas at each cut.
-    const sx = crop.x * image.naturalWidth;
-    const sy = crop.y * image.naturalHeight;
-    const sWidth = crop.width * image.naturalWidth;
-    const sHeight = crop.height * image.naturalHeight;
+    const sx = crop.x * image.width;
+    const sy = crop.y * image.height;
+    const sWidth = crop.width * image.width;
+    const sHeight = crop.height * image.height;
 
     const targetWidth = Math.max(1, Math.round(crop.width * referenceFrameSizeRef.current.width));
     const targetHeight = Math.max(1, Math.round(crop.height * referenceFrameSizeRef.current.height));
@@ -425,7 +432,7 @@ export const CanvasPlayer = forwardRef<
         const destWidth = overlayRect.width * canvas.width;
         const destHeight = overlayRect.height * canvas.height;
         const { sx: osx, sy: osy, sWidth: osw, sHeight: osh } = computeCoverFitSourceRect(
-          overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight,
+          overlayImage.width, overlayImage.height, destWidth, destHeight,
           activeExclusiveOverlay.framing.panX, activeExclusiveOverlay.framing.panY, activeExclusiveOverlay.framing.zoom
         );
         drawImageFlipped(
@@ -455,7 +462,7 @@ export const CanvasPlayer = forwardRef<
       const destWidth = pip.layout.rect.width * canvas.width;
       const destHeight = pip.layout.rect.height * canvas.height;
       const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
-        pipImage.naturalWidth, pipImage.naturalHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
+        pipImage.width, pipImage.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
       );
       drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
     }
@@ -727,17 +734,31 @@ export const CanvasPlayer = forwardRef<
       if (clips.length === 0) return;
       const audioContext = ensureAudioContext();
 
-      const loadedImages: HTMLImageElement[][] = [];
-      const loadedFrameRates: number[] = [];
-      const loadedAudioBuffers: AudioBuffer[] = [];
-      const loadedClipMeta: { assetId: string; url: string; durationSeconds: number; kind: "video" | "image" }[] = [];
-      let failureCount = 0;
-      let lastFailureMessage = "";
+      type LoadedClipMeta = { assetId: string; url: string; durationSeconds: number; kind: "video" | "image" };
+      type ClipLoadResult =
+        | { ok: true; images: (HTMLImageElement | ImageBitmap)[]; frameRate: number; audioBuffer: AudioBuffer; meta: LoadedClipMeta }
+        | { ok: false; message: string };
 
-      for (const clip of clips) {
+      // Fraction (0..1) each clip has progressed -- driven by
+      // extractPreviewFrames's own onProgress for video clips, jumping
+      // straight to 1 on completion for image clips (near-instant, no
+      // meaningful intermediate state). Clips load PIPELINED, up to
+      // CLIP_LOAD_CONCURRENCY at once, rather than one Promise.all over
+      // every clip -- full parallelism would multiply peak memory by clip
+      // count (decoding pulls a whole file into memory with no streaming,
+      // see this file's module comment); capping at 2 bounds that to
+      // roughly "2 clips' worth" while still overlapping one clip's
+      // network/decode latency with the next instead of paying it once per
+      // clip in series.
+      const clipProgress: number[] = new Array(clips.length).fill(0);
+      function reportProgress() {
         if (cancelled) return;
-        setLoadingStage(clips.length > 1 ? `Loading clip ${loadedClipMeta.length + failureCount + 1} of ${clips.length}…` : "Loading frames & audio…");
+        const overall = clipProgress.reduce((sum, fraction) => sum + fraction, 0) / clips.length;
+        setLoadingStage(`${clips.length > 1 ? "Loading video" : "Loading frames & audio"} — ${Math.round(overall * 100)}%`);
+      }
 
+      async function loadClipAt(index: number): Promise<ClipLoadResult> {
+        const clip = clips[index];
         try {
           if (clip.kind === "image") {
             // An image clip is "a video with exactly one frame, held for
@@ -748,32 +769,70 @@ export const CanvasPlayer = forwardRef<
             const duration = clip.durationSeconds;
             const image = await loadImage(clip.url);
             const silentAudioBuffer = audioContext.createBuffer(1, Math.max(1, Math.round(duration * audioContext.sampleRate)), audioContext.sampleRate);
-
-            loadedImages.push([image]);
-            loadedFrameRates.push(1);
-            loadedAudioBuffers.push(silentAudioBuffer);
-            loadedClipMeta.push({ assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "image" });
-            continue;
+            clipProgress[index] = 1;
+            reportProgress();
+            return {
+              ok: true,
+              images: [image],
+              frameRate: 1,
+              audioBuffer: silentAudioBuffer,
+              meta: { assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "image" },
+            };
           }
 
           const duration = await getVideoDuration(clip.url);
           const frameRate = pickPreviewFrameRate(duration, navigator.hardwareConcurrency || 4);
           const [images, audioBuffer] = await Promise.all([
-            extractPreviewFrames(clip.url, frameRate).then((frames) => Promise.all(frames.map(loadImage))),
+            extractPreviewFrames(clip.url, frameRate, (framesSoFar, totalFrames) => {
+              clipProgress[index] = totalFrames > 0 ? framesSoFar / totalFrames : 1;
+              reportProgress();
+            }),
             decodeAudioBuffer(clip.url),
           ]);
-          if (cancelled) return;
-
-          loadedImages.push(images);
-          loadedFrameRates.push(frameRate);
-          loadedAudioBuffers.push(audioBuffer);
-          loadedClipMeta.push({ assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "video" });
+          clipProgress[index] = 1;
+          reportProgress();
+          return {
+            ok: true,
+            images,
+            frameRate,
+            audioBuffer,
+            meta: { assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "video" },
+          };
         } catch (err) {
-          failureCount += 1;
-          lastFailureMessage = err instanceof Error ? err.message : "Failed to load this clip";
+          return { ok: false, message: err instanceof Error ? err.message : "Failed to load this clip" };
         }
       }
+
+      const results: ClipLoadResult[] = new Array(clips.length);
+      const CLIP_LOAD_CONCURRENCY = 2;
+      let nextIndex = 0;
+      async function worker() {
+        while (!cancelled) {
+          const index = nextIndex++;
+          if (index >= clips.length) return;
+          results[index] = await loadClipAt(index);
+        }
+      }
+      await Promise.all(Array.from({ length: Math.min(CLIP_LOAD_CONCURRENCY, clips.length) }, () => worker()));
       if (cancelled) return;
+
+      const loadedImages: (HTMLImageElement | ImageBitmap)[][] = [];
+      const loadedFrameRates: number[] = [];
+      const loadedAudioBuffers: AudioBuffer[] = [];
+      const loadedClipMeta: LoadedClipMeta[] = [];
+      let failureCount = 0;
+      let lastFailureMessage = "";
+      for (const result of results) {
+        if (result.ok) {
+          loadedImages.push(result.images);
+          loadedFrameRates.push(result.frameRate);
+          loadedAudioBuffers.push(result.audioBuffer);
+          loadedClipMeta.push(result.meta);
+        } else {
+          failureCount += 1;
+          lastFailureMessage = result.message;
+        }
+      }
 
       if (loadedClipMeta.length === 0) {
         throw new Error(lastFailureMessage || "Failed to load this video for playback");
@@ -787,8 +846,8 @@ export const CanvasPlayer = forwardRef<
 
       const firstImage = loadedImages[0]?.[0];
       if (firstImage) {
-        referenceFrameSizeRef.current = { width: firstImage.naturalWidth, height: firstImage.naturalHeight };
-        onFrameDimensions?.({ width: firstImage.naturalWidth, height: firstImage.naturalHeight });
+        referenceFrameSizeRef.current = { width: firstImage.width, height: firstImage.height };
+        onFrameDimensions?.({ width: firstImage.width, height: firstImage.height });
       }
 
       if (failureCount > 0) {
@@ -899,7 +958,7 @@ export const CanvasPlayer = forwardRef<
         try {
           const duration = await getVideoDuration(url);
           const frameRate = pickPreviewFrameRate(duration, navigator.hardwareConcurrency || 4);
-          const images = await extractPreviewFrames(url, frameRate).then((frames) => Promise.all(frames.map(loadImage)));
+          const images = await extractPreviewFrames(url, frameRate);
           if (cancelled) return;
           videoOverlayFramesByAssetIdRef.current[assetId] = { images, frameRate, durationSeconds: duration };
           if (isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);

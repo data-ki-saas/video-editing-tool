@@ -194,15 +194,54 @@ export function extractThumbnails(
   return extractFramesAtInterval(url, intervalSeconds, THUMBNAIL_WIDTH_PX, onProgress);
 }
 
+/** Seeks `video` to `timeSeconds` and grabs the resulting frame straight into
+ * a resized ImageBitmap -- no canvas draw, no toDataURL JPEG encode, no
+ * re-decoding a data URI back into an <img> afterwards (that's what
+ * captureFrameAt above does, since it needs a displayable string for
+ * FrameStrip's <img> tags). extractPreviewFrames below only ever feeds these
+ * into ctx.drawImage on CanvasPlayer's own canvas, which accepts an
+ * ImageBitmap directly, so skipping that whole encode/decode round trip is
+ * free correctness-wise and meaningfully cuts per-frame extraction time. */
+function captureFrameBitmapAt(video: HTMLVideoElement, timeSeconds: number, widthPx: number, heightPx: number): Promise<ImageBitmap> {
+  return new Promise((resolve, reject) => {
+    function onSeeked() {
+      video.removeEventListener("seeked", onSeeked);
+      createImageBitmap(video, { resizeWidth: widthPx, resizeHeight: heightPx, resizeQuality: "medium" })
+        .then(resolve)
+        .catch((err) => reject(err instanceof Error ? err : new Error(String(err))));
+    }
+    video.addEventListener("seeked", onSeeked);
+    video.currentTime = timeSeconds;
+  });
+}
+
 /**
  * Extracts frames at `frameRate` (see video_math.ts's pickPreviewFrameRate
  * for how CanvasPlayer picks this) across the full duration of the video at
  * `url`, at a size suited to actual playback rather than a small thumbnail.
+ * Returns ImageBitmaps rather than the data-URL strings extractThumbnails
+ * produces -- see captureFrameBitmapAt above for why. `onProgress` reports
+ * (framesExtractedSoFar, totalFrameCount) after each frame so a caller can
+ * show a percentage while a long clip is still extracting.
  */
-export function extractPreviewFrames(
+export async function extractPreviewFrames(
   url: string,
   frameRate: number,
-  onProgress?: (framesSoFar: string[]) => void
-): Promise<string[]> {
-  return extractFramesAtInterval(url, 1 / frameRate, PREVIEW_FRAME_WIDTH_PX, onProgress);
+  onProgress?: (framesExtractedSoFar: number, totalFrameCount: number) => void
+): Promise<ImageBitmap[]> {
+  const video = await loadVideoElement(url);
+  try {
+    const timestamps = generateSampleTimestamps(video.duration, 1 / frameRate);
+    const heightPx = Math.round(PREVIEW_FRAME_WIDTH_PX * (video.videoHeight / video.videoWidth || 9 / 16));
+
+    const bitmaps: ImageBitmap[] = [];
+    for (const timestamp of timestamps) {
+      bitmaps.push(await captureFrameBitmapAt(video, timestamp, PREVIEW_FRAME_WIDTH_PX, heightPx));
+      onProgress?.(bitmaps.length, timestamps.length);
+    }
+    return bitmaps;
+  } finally {
+    video.removeAttribute("src");
+    video.load();
+  }
 }

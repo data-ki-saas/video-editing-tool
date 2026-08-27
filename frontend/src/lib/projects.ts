@@ -122,6 +122,13 @@ export interface EditHistoryEntrySnapshot {
 export interface TimelineMarker {
   timeSeconds: number;
   label: string;
+  // Right-click "Pin"/"Unpin" on MarkerTrack's dot -- a pinned marker can't
+  // be dragged and renders red instead of amber, so a planning point the
+  // user has settled on can't be bumped by an accidental drag. Absent/false
+  // means unpinned (every marker saved before this existed reads as
+  // unpinned), same optional-field-defaults-to-off convention as the rest
+  // of this interface.
+  pinned?: boolean;
 }
 
 
