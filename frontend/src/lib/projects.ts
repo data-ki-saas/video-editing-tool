@@ -10,7 +10,6 @@ import type {
   VideoOverlayClip,
   ZoomEffect,
 } from "@/lib/video/video_math";
-import type { FilterPresetId } from "@/lib/video/filterPresets";
 
 export interface TemplateElement {
   id: string;
@@ -63,11 +62,6 @@ export interface EditSelectionsSnapshot {
   // video_math.ts's toggleFlipAt/computeEffectiveFlip).
   flipHorizontalToggles: number[];
   flipVerticalToggles: number[];
-  // A whole-clip color filter preset (see lib/video/filterPresets.ts's
-  // FILTER_PRESET_OPTIONS) -- applies uniformly to every video AND image
-  // segment in the sequence, same "one setting, not time-ranged" tier as
-  // cropRect above. Null means unfiltered ("Original").
-  colorFilterId: FilterPresetId | null;
   // Cut-out stretches of the clip -- see TrimTrack.tsx's click-to-place
   // gesture and CanvasPlayer's skipTrimmedRanges, which actually skips
   // over them during playback rather than just marking them.

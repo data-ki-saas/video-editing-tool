@@ -67,7 +67,7 @@ import {
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer } from "@/lib/video/textTemplates";
-import { getFilterPresetOption } from "@/lib/video/filterPresets";
+import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
 
 const OUTPUT_FPS = 30;
@@ -378,7 +378,11 @@ export async function exportVideoLocally(
   if (sequenceClips.length === 0) throw new Error("Nothing to render -- add a video to the sequence first.");
 
   const baseCropRect = selections.cropRect ?? FULL_FRAME_CROP_RECT;
-  const filterCssString = getFilterPresetOption(selections.colorFilterId).cssFilter;
+  // Per-cutaway/per-overlay filter lookup, same "each clip carries its own
+  // colorFilterId" model as compileCreatomateTimeline.ts's identical map --
+  // see that file's own comment on cutawayFilterByEntryId.
+  const cutawayFilterByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.colorFilterId ?? null]));
+  const cssFilterFor = (colorFilterId: FilterPresetId | null | undefined) => getFilterPresetOption(colorFilterId ?? null).cssFilter;
   const segments = buildRenderSegments(sequenceClips, selections.trimRanges);
   const totalDurationSeconds = segments.reduce((sum, segment) => sum + segment.durationSeconds, 0);
   const totalFrames = Math.max(1, Math.round(totalDurationSeconds * OUTPUT_FPS));
@@ -535,7 +539,7 @@ export async function exportVideoLocally(
         const flipVertical = computeEffectiveFlip(selections.flipVerticalToggles, sourceTimeSeconds);
 
         ctx.save();
-        ctx.filter = filterCssString;
+        ctx.filter = cssFilterFor(segment.entryId ? cutawayFilterByEntryId.get(segment.entryId) : null);
         ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
         ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
         if (baseRect && winningExclusiveLayout?.type === "split-screen") {
@@ -582,10 +586,12 @@ export async function exportVideoLocally(
             overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight,
             activeExclusiveImageOverlay.framing.panX, activeExclusiveImageOverlay.framing.panY, activeExclusiveImageOverlay.framing.zoom
           );
+          ctx.filter = cssFilterFor(activeExclusiveImageOverlay.colorFilterId);
           drawImageFlipped(
             ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
             activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
           );
+          ctx.filter = "none";
         }
       } else if (activeExclusiveVideoOverlay && overlayRect) {
         const overlayVideo = videoOverlayElementsByAssetId.get(activeExclusiveVideoOverlay.assetId);
@@ -605,10 +611,12 @@ export async function exportVideoLocally(
             overlayVideo.videoWidth, overlayVideo.videoHeight, destWidth, destHeight,
             activeExclusiveVideoOverlay.framing.panX, activeExclusiveVideoOverlay.framing.panY, activeExclusiveVideoOverlay.framing.zoom
           );
+          ctx.filter = cssFilterFor(activeExclusiveVideoOverlay.colorFilterId);
           drawImageFlipped(
             ctx, overlayVideo, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
             activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
           );
+          ctx.filter = "none";
         }
       }
 
@@ -629,7 +637,9 @@ export async function exportVideoLocally(
         const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
           overlayVideo.videoWidth, overlayVideo.videoHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
         );
+        ctx.filter = cssFilterFor(pip.colorFilterId);
         drawImageFlipped(ctx, overlayVideo, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+        ctx.filter = "none";
       }
 
       // Picture-in-Picture IMAGE overlays draw AFTER video PiP overlays, so
@@ -646,7 +656,9 @@ export async function exportVideoLocally(
         const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
           overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
         );
+        ctx.filter = cssFilterFor(pip.colorFilterId);
         drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+        ctx.filter = "none";
       }
 
       for (const overlay of findActiveTextOverlays(selections.textOverlays, sourceTimeSeconds)) {

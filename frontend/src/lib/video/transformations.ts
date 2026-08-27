@@ -42,7 +42,7 @@ import {
   type ZoomEffect,
 } from "./video_math";
 import { buildKenBurnsEffect } from "./imageTemplates";
-import type { FilterPresetId } from "./filterPresets";
+import { getFilterPresetOption, type FilterPresetId } from "./filterPresets";
 
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
@@ -161,15 +161,52 @@ export function applyFlipToggle(
   };
 }
 
-/** Picking a color filter preset (or "none") from FilterPresetDialog --
- * a flat, whole-clip setting like clipRectId, so it just overwrites
- * colorFilterId directly with no other state to reconcile. */
-export function applySelectFilterPreset(
+/** Picking a color filter preset (or "none") for one specific cutaway
+ * (base-sequence clip, video or image) from FilterPresetDialog -- id-based,
+ * same selections.sequenceClips.findIndex(...) lookup as
+ * applyEditImageSequenceClip/applyDeleteSequenceClip, since the same asset
+ * can appear more than once (each placement needs its own filter). */
+export function applySelectCutawayFilterPreset(
   selections: EditSelectionsSnapshot,
+  entryId: string,
   filterId: FilterPresetId
 ): TransformationResult {
-  const label = filterId === "none" ? "Filter: Original" : `Filter: ${filterId}`;
-  return { label, state: { ...selections, colorFilterId: filterId === "none" ? null : filterId } };
+  const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
+  const entry = selections.sequenceClips[entryIndex];
+  const label = `Cutaway filter: ${getFilterPresetOption(filterId === "none" ? null : filterId).name}`;
+  if (!entry) return { label, state: selections };
+  const nextEntries = [...selections.sequenceClips];
+  nextEntries[entryIndex] = { ...entry, colorFilterId: filterId === "none" ? null : filterId };
+  return { label, state: { ...selections, sequenceClips: nextEntries } };
+}
+
+/** Same as applySelectCutawayFilterPreset, for one placed image overlay --
+ * index-based, same shape as applyChangeImageOverlayLayout. */
+export function applySelectImageOverlayFilterPreset(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  filterId: FilterPresetId
+): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  const label = `Overlay filter: ${getFilterPresetOption(filterId === "none" ? null : filterId).name}`;
+  if (!overlay) return { label, state: selections };
+  const nextOverlays = [...selections.overlayImages];
+  nextOverlays[overlayIndex] = { ...overlay, colorFilterId: filterId === "none" ? null : filterId };
+  return { label, state: { ...selections, overlayImages: nextOverlays } };
+}
+
+/** Same as applySelectImageOverlayFilterPreset, for one placed video overlay. */
+export function applySelectVideoOverlayFilterPreset(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  filterId: FilterPresetId
+): TransformationResult {
+  const overlay = selections.videoOverlays[overlayIndex];
+  const label = `Overlay filter: ${getFilterPresetOption(filterId === "none" ? null : filterId).name}`;
+  if (!overlay) return { label, state: selections };
+  const nextOverlays = [...selections.videoOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, colorFilterId: filterId === "none" ? null : filterId };
+  return { label, state: { ...selections, videoOverlays: nextOverlays } };
 }
 
 /** Prolonging/shortening one transition by dragging its
@@ -609,7 +646,15 @@ export function applyEditImageSequenceClip(
       : item;
 
   const nextEntries = [...selections.sequenceClips];
-  nextEntries[entryIndex] = { id: entry.id, kind: "image", assetId, durationSeconds: clampedDuration, templateIds, cropRect };
+  nextEntries[entryIndex] = {
+    id: entry.id,
+    kind: "image",
+    assetId,
+    durationSeconds: clampedDuration,
+    templateIds,
+    cropRect,
+    colorFilterId: entry.colorFilterId,
+  };
 
   const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, clipStartSeconds, clampedDuration);
 

@@ -94,7 +94,7 @@ import {
   type ZoomEffect,
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer } from "@/lib/video/textTemplates";
-import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
+import { getFilterPresetOption } from "@/lib/video/filterPresets";
 import { ReelLoader } from "@/components/ReelLoader";
 import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
 
@@ -126,12 +126,6 @@ export const CanvasPlayer = forwardRef<
     // active tile live, before it's committed. Never applied during
     // playback (dragging and playing at once isn't a real scenario).
     liveCropRectOverride?: CropRect | null;
-    // Whole-clip color filter preset (see lib/video/filterPresets.ts) --
-    // approximated live via a CSS `filter` string set on the canvas 2D
-    // context right before the base frame is drawn (see drawFrameAt),
-    // restored automatically by ctx.restore() same as the flip transform.
-    // Null means unfiltered ("Original").
-    colorFilterId: FilterPresetId | null;
     // "Flip" (horizontal) / "Mirror" (vertical) -- sorted toggle
     // timestamps, not a uniform whole-clip boolean, toggled from
     // CropRectOverlay's edge handles on FrameStrip's active tile (the
@@ -186,7 +180,6 @@ export const CanvasPlayer = forwardRef<
     baseCropRect,
     zoomEffects,
     liveCropRectOverride = null,
-    colorFilterId,
     flipHorizontalToggles,
     flipVerticalToggles,
     trimRanges,
@@ -203,6 +196,11 @@ export const CanvasPlayer = forwardRef<
   ref
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // Each clip's own filter, keyed by SequenceEntry.id -- looked up by id
+  // (via loadedClipsRef's own `.id`, see its comment below) rather than by
+  // position, since a clip that failed to load shifts every later index out
+  // of alignment with the `clips` prop.
+  const clipFilterById = new Map(clips.map((clip) => [clip.id, clip.colorFilterId ?? null]));
   // Per-clip decoded preview frames + frame rate, indexed the same as
   // loadedClipsRef below (NOT necessarily the same as the `clips` prop --
   // a clip that failed to load is excluded from all three in lockstep). A
@@ -383,8 +381,9 @@ export const CanvasPlayer = forwardRef<
     // same source region onto a horizontally/vertically reversed
     // destination, restored via ctx.restore() so it never leaks into the
     // next draw (this canvas is reused every frame).
+    const currentEntryId = loadedClipsRef.current[position.clipIndex]?.id;
     ctx.save();
-    ctx.filter = getFilterPresetOption(colorFilterId).cssFilter;
+    ctx.filter = getFilterPresetOption(currentEntryId ? (clipFilterById.get(currentEntryId) ?? null) : null).cssFilter;
     ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
     ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
     if (baseRect && winningExclusiveLayout?.type === "split-screen") {
@@ -444,10 +443,12 @@ export const CanvasPlayer = forwardRef<
           overlayImage.width, overlayImage.height, destWidth, destHeight,
           activeExclusiveImageOverlay.framing.panX, activeExclusiveImageOverlay.framing.panY, activeExclusiveImageOverlay.framing.zoom
         );
+        ctx.filter = getFilterPresetOption(activeExclusiveImageOverlay.colorFilterId ?? null).cssFilter;
         drawImageFlipped(
           ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
           activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
         );
+        ctx.filter = "none";
       }
     } else if (activeExclusiveVideoOverlay && overlayRect) {
       const frames = videoOverlayFramesByAssetIdRef.current[activeExclusiveVideoOverlay.assetId];
@@ -473,10 +474,12 @@ export const CanvasPlayer = forwardRef<
           overlayImage.width, overlayImage.height, destWidth, destHeight,
           activeExclusiveVideoOverlay.framing.panX, activeExclusiveVideoOverlay.framing.panY, activeExclusiveVideoOverlay.framing.zoom
         );
+        ctx.filter = getFilterPresetOption(activeExclusiveVideoOverlay.colorFilterId ?? null).cssFilter;
         drawImageFlipped(
           ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
           activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
         );
+        ctx.filter = "none";
       }
     }
 
@@ -502,7 +505,9 @@ export const CanvasPlayer = forwardRef<
       const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
         pipImage.width, pipImage.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
       );
+      ctx.filter = getFilterPresetOption(pip.colorFilterId ?? null).cssFilter;
       drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+      ctx.filter = "none";
     }
 
     // Picture-in-Picture IMAGE overlays draw AFTER video PiP overlays, so
@@ -519,7 +524,9 @@ export const CanvasPlayer = forwardRef<
       const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
         overlayImage.width, overlayImage.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
       );
+      ctx.filter = getFilterPresetOption(pip.colorFilterId ?? null).cssFilter;
       drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+      ctx.filter = "none";
     }
 
     // Text overlays draw last, always on top of every overlay above.
@@ -774,7 +781,7 @@ export const CanvasPlayer = forwardRef<
       if (clips.length === 0) return;
       const audioContext = ensureAudioContext();
 
-      type LoadedClipMeta = { assetId: string; url: string; durationSeconds: number; kind: "video" | "image" };
+      type LoadedClipMeta = { id: string; assetId: string; url: string; durationSeconds: number; kind: "video" | "image" };
       type ClipLoadResult =
         | { ok: true; images: (HTMLImageElement | ImageBitmap)[]; frameRate: number; audioBuffer: AudioBuffer; meta: LoadedClipMeta }
         | { ok: false; message: string };
@@ -816,7 +823,7 @@ export const CanvasPlayer = forwardRef<
               images: [image],
               frameRate: 1,
               audioBuffer: silentAudioBuffer,
-              meta: { assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "image" },
+              meta: { id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "image" },
             };
           }
 
@@ -836,7 +843,7 @@ export const CanvasPlayer = forwardRef<
             images,
             frameRate,
             audioBuffer,
-            meta: { assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "video" },
+            meta: { id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "video" },
           };
         } catch (err) {
           return { ok: false, message: err instanceof Error ? err.message : "Failed to load this clip" };

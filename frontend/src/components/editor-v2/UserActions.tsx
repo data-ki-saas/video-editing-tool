@@ -17,8 +17,11 @@
  * Grouped into three clusters, left to right, each with its own micro
  * uppercase label (same convention AssetGallery.tsx's own section headers
  * use) so the tab bar reads as organized roles rather than one flat row:
- *  - BASE: Clip, Filter, Cutaway -- what the base sequence itself is made of.
- *    Plain/untinted icons.
+ *  - BASE: Clip, Cutaway -- what the base sequence itself is made of. Plain/
+ *    untinted icons. Color filters are no longer a whole-clip setting here --
+ *    each cutaway (Cutaways rail, CutawayTrack.tsx) and each overlay
+ *    (ImageOverlayTrack.tsx/VideoOverlayTrack.tsx) gets its own, via that
+ *    clip's own right-click "Filter".
  *  - OVERLAYS: Video Overlay, Image Overlay, Text -- what composites ON TOP
  *    of the base. Video Overlay's icon is tinted amber (matching its rail's
  *    dominant Full-Screen color, VideoOverlayTrack.tsx), Image Overlay's is
@@ -45,34 +48,6 @@
  */
 import { CropToolIcon } from "@/components/icons/UIIcons";
 import { CLIP_RECT_OPTIONS, ClipRectIcon } from "./ClipRectIcon";
-import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
-
-// A half-filled circle -- the universal "color filter/adjustment" glyph,
-// distinct from CropToolIcon's crop-corners shape.
-function FilterGlyphIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <circle cx="12" cy="12" r="8" />
-      <path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-// Bottom-pinned name pill, same spot/shape as Clip's own ClipRectIcon swatch
-// -- shown only once a non-"Original" filter is active, mirroring
-// CountBadge's own "nothing when there's nothing to show" convention.
-function FilterStatus({ filterId }: { filterId: FilterPresetId | null }) {
-  if (!filterId) return null;
-  const option = getFilterPresetOption(filterId);
-  return (
-    <span
-      className="mt-auto max-w-full truncate rounded-full bg-accent/20 px-1.5 py-0.5 text-[9px] font-medium leading-none text-foreground"
-      title={option.name}
-    >
-      {option.name}
-    </span>
-  );
-}
 
 function TextGlyphIcon({ className }: { className?: string }) {
   return (
@@ -176,8 +151,6 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
 export function UserActions({
   selectedClipRectId,
   onOpenClipRectDialog,
-  selectedFilterId,
-  onOpenFilterDialog,
   onOpenCutawayDialog,
   cutawayCount,
   onOpenVideoOverlayPicker,
@@ -191,8 +164,6 @@ export function UserActions({
 }: {
   selectedClipRectId: string | null;
   onOpenClipRectDialog: () => void;
-  selectedFilterId: FilterPresetId | null;
-  onOpenFilterDialog: () => void;
   onOpenCutawayDialog: () => void;
   cutawayCount: number;
   onOpenVideoOverlayPicker: () => void;
@@ -225,18 +196,6 @@ export function UserActions({
               <ClipRectIcon option={selectedClipRectOption} size={16} />
             </span>
           )}
-        </button>
-        <button
-          type="button"
-          onClick={onOpenFilterDialog}
-          title="Color filter"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
-        >
-          <FilterGlyphIcon className="h-4 w-4" />
-          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-            Filter
-          </span>
-          <FilterStatus filterId={selectedFilterId} />
         </button>
         <button
           type="button"

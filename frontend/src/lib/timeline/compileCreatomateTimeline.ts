@@ -58,7 +58,7 @@ import {
 } from "@/lib/video/video_math";
 import { getTextTemplateFontFraction } from "@/lib/video/textTemplates";
 import { getTranscriptCaptionConfig } from "@/lib/video/transcriptCaptionTemplates";
-import { getCreatomateFilterProperties } from "@/lib/video/filterPresets";
+import { getCreatomateFilterProperties, type FilterPresetId } from "@/lib/video/filterPresets";
 
 export interface CompileTimelineInput {
   selections: EditSelectionsSnapshot;
@@ -188,11 +188,13 @@ function buildMediaSegments(
   zoomEffects: ZoomEffect[],
   appMeta: Record<string, AppMetaEntry>,
   mainVolumePercent: string,
-  colorFilterId: EditSelectionsSnapshot["colorFilterId"]
+  cutawayFilterByEntryId: Map<string, FilterPresetId | null>
 ): (Video | Image)[] {
-  const filter = getCreatomateFilterProperties(colorFilterId);
   return segments.map((segment) => {
     const crop = buildCropProperties(segment, baseCropRect, zoomEffects);
+    const filter = getCreatomateFilterProperties(
+      segment.entryId ? (cutawayFilterByEntryId.get(segment.entryId) ?? null) : null
+    );
 
     if (segment.kind === "image") {
       const id = nextId("clip");
@@ -315,6 +317,7 @@ function buildOverlayImageElements(
     const track = nextTrack();
     const { overlayRect } = computeOverlayRects(overlay.layout);
     const outputRanges = mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlay.endTimeSeconds);
+    const filter = getCreatomateFilterProperties(overlay.colorFilterId ?? null);
     for (const range of outputRanges) {
       const id = nextId("overlay");
       appMeta[id] = { role: "image-overlay", assetId: overlay.assetId };
@@ -328,6 +331,7 @@ function buildOverlayImageElements(
           xAnchor: "0%",
           yAnchor: "0%",
           ...rectProperties(overlayRect),
+          ...filter,
           source: "",
         })
       );
@@ -395,6 +399,7 @@ function buildVideoOverlayElements(
     // for the whole frame, just centered on this element's own box instead).
     const needsFlipWrapper = overlay.framing.flipHorizontal || overlay.framing.flipVertical;
     const outputRanges = mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlay.endTimeSeconds);
+    const filter = getCreatomateFilterProperties(overlay.colorFilterId ?? null);
     for (const range of outputRanges) {
       const id = nextId("overlay");
       appMeta[id] = { role: "video-overlay", assetId: overlay.assetId };
@@ -417,6 +422,7 @@ function buildVideoOverlayElements(
         ...(needsFlipWrapper
           ? { x: "0%", y: "0%", width: "100%", height: "100%", xAnchor: "0%", yAnchor: "0%" }
           : { ...rectProperties(overlayRect), xAnchor: "0%", yAnchor: "0%" }),
+        ...filter,
         source: "",
       });
 
@@ -724,13 +730,14 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const segments = buildRenderSegments(sequenceClips, selections.trimRanges);
   const totalOutputDurationSeconds = segments.reduce((sum, s) => sum + s.durationSeconds, 0);
 
+  const cutawayFilterByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.colorFilterId ?? null]));
   const mediaSegments = buildMediaSegments(
     segments,
     selections.cropRect,
     selections.zoomEffects,
     appMeta,
     toVolumePercent(mainAudioVolume),
-    selections.colorFilterId
+    cutawayFilterByEntryId
   );
   const videoSegmentPairs = segments
     .map((segment, index) => ({ segment, element: mediaSegments[index] }))

@@ -8,6 +8,7 @@
  * anywhere (main thread, a future Worker, tests) without dragging in DOM
  * dependencies.
  */
+import type { FilterPresetId } from "./filterPresets";
 
 /**
  * Timestamps (seconds) to sample a clip of the given duration at a fixed
@@ -523,6 +524,10 @@ export interface VideoOverlayClip {
   assetId: string;
   startTimeSeconds: number;
   endTimeSeconds: number;
+  // This overlay's own color filter, independent of every other cutaway/
+  // overlay's choice -- see lib/video/filterPresets.ts's FILTER_PRESET_OPTIONS.
+  // Null/undefined means unfiltered ("Original").
+  colorFilterId?: FilterPresetId | null;
   // Offset INTO the source asset's own footage where playback starts --
   // set via VideoOverlayTrack.tsx's flag icon (OverlaySourceStartDialog),
   // which also hard-clamps how far the overlay's own end edge can be
@@ -564,6 +569,8 @@ export interface ImageOverlayClip {
   endTimeSeconds: number;
   layout: VideoOverlayLayout;
   framing: OverlayFraming;
+  // Same per-clip color filter as VideoOverlayClip.colorFilterId above.
+  colorFilterId?: FilterPresetId | null;
 }
 
 /** Cache key for a still frame captured at one overlay placement's own
@@ -829,6 +836,14 @@ export function findClosestTimestampIndex(timestamps: number[], targetSeconds: n
  * always present on the built info.
  */
 export interface SequenceClipInfo {
+  // The originating SequenceEntry.id, when this info was built from real
+  // sequence clips (gatherRenderClips.ts/gatherLocalRenderClips.ts) --
+  // absent for background-music tracks (BackgroundTrackStrip.tsx) and
+  // CanvasPlayer's own live-preview loader, neither of which has (or needs)
+  // a per-entry filter to look up. Carried onto RenderSegment.entryId by
+  // buildRenderSegments below so the compiler can resolve each rendered
+  // segment back to the cutaway it came from.
+  id?: string;
   assetId: string;
   url: string;
   durationSeconds: number;
@@ -837,7 +852,7 @@ export interface SequenceClipInfo {
 }
 
 export function buildSequenceClipInfos(
-  clips: { assetId: string; url: string; durationSeconds: number; kind?: "video" | "image" }[]
+  clips: { id?: string; assetId: string; url: string; durationSeconds: number; kind?: "video" | "image" }[]
 ): SequenceClipInfo[] {
   let cursor = 0;
   return clips.map((clip) => {
@@ -866,7 +881,7 @@ export function buildSequenceClipInfos(
  * extraction, live preview, the per-clip duration drag on FrameStrip).
  */
 export type SequenceEntry =
-  | { id: string; kind: "video"; assetId: string }
+  | { id: string; kind: "video"; assetId: string; colorFilterId?: FilterPresetId | null }
   | {
       id: string;
       kind: "image";
@@ -879,6 +894,9 @@ export type SequenceEntry =
        * normalizeImageTemplateIds. */
       templateId?: string;
       cropRect?: CropRect;
+      // Same per-clip color filter as the "video" variant above -- see
+      // VideoOverlayClip.colorFilterId's doc comment.
+      colorFilterId?: FilterPresetId | null;
     };
 
 export function sequenceEntryAssetId(entry: SequenceEntry): string {
@@ -939,6 +957,11 @@ export function resolveSequencePosition(
  */
 export interface RenderSegment {
   assetId: string;
+  /** The originating SequenceClipInfo.id (in turn SequenceEntry.id) --
+   * absent when built from clips with no entry id (background music).
+   * Lets the compiler look up this segment's own colorFilterId even after
+   * a trim has split one cutaway into several segments. */
+  entryId?: string;
   /** Which kind of clip this segment came from -- determines whether the
    * compiler emits a Creatomate Video (with trimStart/trimDuration) or an
    * Image (no source trim, since a still image has no timeline of its own)
@@ -1009,6 +1032,7 @@ export function buildRenderSegments(clips: SequenceClipInfo[], trimRanges: TrimR
 
       segments.push({
         assetId: clip.assetId,
+        entryId: clip.id,
         kind: clip.kind,
         sourceStartSeconds: subStart,
         clipLocalStartSeconds: subStart - clip.startTimeSeconds,

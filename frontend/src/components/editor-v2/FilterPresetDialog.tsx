@@ -1,14 +1,17 @@
 "use client";
 
 /**
- * Popup for picking the reel's color filter -- opened from UserActions'
- * vertical "Filter" tab, same one-click-applies-and-closes convention as
- * ClipRectangleDialog (its own module comment has the full rationale).
- * Hovering/focusing a swatch previews it against the real current frame on
- * the left via a plain CSS `filter` style on the same <img>, the identical
- * approximation CanvasPlayer's live preview applies via `ctx.filter` (see
- * lib/video/filterPresets.ts's own module comment for why this is an
- * approximation of Creatomate's real colorFilter/colorFilterValue/
+ * Popup for picking ONE cutaway or overlay's own color filter -- opened from
+ * that clip's own right-click "Filter" on CutawayTrack.tsx/
+ * ImageOverlayTrack.tsx/VideoOverlayTrack.tsx (see ActionArea.tsx's
+ * filterDialogCutawayEntry/filterDialogVideoOverlay/filterDialogImageOverlay
+ * for which target is currently open), same one-click-applies-and-closes
+ * convention as ClipRectangleDialog (its own module comment has the full
+ * rationale). Hovering/focusing a swatch previews it against the real
+ * current frame on the left via a plain CSS `filter` style on the same
+ * <img>, the identical approximation CanvasPlayer's live preview applies via
+ * `ctx.filter` (see lib/video/filterPresets.ts's own module comment for why
+ * this is an approximation of Creatomate's real colorFilter/colorFilterValue/
  * colorOverlay combination, not a literal render of it).
  */
 import { useState } from "react";
@@ -20,12 +23,17 @@ export function FilterPresetDialog({
   onClose,
   previewFrameUrl,
   frameAspectRatio,
+  scopeLabel,
 }: {
   selectedFilterId: FilterPresetId | null;
   onSelect: (id: FilterPresetId) => void;
   onClose: () => void;
   previewFrameUrl: string | null;
   frameAspectRatio: number | null;
+  /** e.g. "this cutaway" / "this overlay" -- each cutaway/overlay has its
+   * own independent filter now, so the subtitle names which one this
+   * dialog's choice will apply to. */
+  scopeLabel: string;
 }) {
   const [previewId, setPreviewId] = useState<FilterPresetId>(selectedFilterId ?? "none");
   const previewOption = FILTER_PRESET_OPTIONS.find((option) => option.id === previewId) ?? FILTER_PRESET_OPTIONS[0];
@@ -54,7 +62,7 @@ export function FilterPresetDialog({
           </button>
         </div>
         <p className="mb-3 text-xs text-muted">
-          Applies to every video and image clip in the reel -- hover a swatch to preview it first.
+          Applies to {scopeLabel} -- hover a swatch to preview it first.
         </p>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 sm:flex-row">

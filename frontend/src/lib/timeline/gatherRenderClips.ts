@@ -22,17 +22,17 @@ import { buildSequenceClipInfos, type SequenceClipInfo, type SequenceEntry } fro
 export async function gatherSequenceClipInfos(
   clips: (SequenceEntry & { url: string })[]
 ): Promise<SequenceClipInfo[]> {
-  const clipMeta: { assetId: string; url: string; durationSeconds: number; kind: "video" | "image" }[] = [];
+  const clipMeta: { id: string; assetId: string; url: string; durationSeconds: number; kind: "video" | "image" }[] = [];
   for (const clip of clips) {
     if (clip.kind === "image") {
       // No file to probe -- an image clip's duration is authored (see
       // lib/video/imageTemplates.ts), not read from anywhere.
-      clipMeta.push({ assetId: clip.assetId, url: clip.url, durationSeconds: clip.durationSeconds, kind: "image" });
+      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: clip.durationSeconds, kind: "image" });
       continue;
     }
     try {
       const durationSeconds = await getVideoDuration(clip.url);
-      clipMeta.push({ assetId: clip.assetId, url: clip.url, durationSeconds, kind: "video" });
+      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds, kind: "video" });
     } catch {
       // Skipped -- same "one bad clip shouldn't block the rest" policy as
       // CanvasPlayer's own sequence loading.

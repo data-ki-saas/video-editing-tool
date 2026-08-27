@@ -87,8 +87,8 @@ function ActiveTransformationsList({
     const option = CLIP_RECT_OPTIONS.find((candidate) => candidate.id === selections.clipRectId);
     rows.push(`Clip rectangle: ${option?.ratioLabel ?? selections.clipRectId}`);
   }
-  if (selections.colorFilterId) {
-    rows.push(`Filter: ${getFilterPresetOption(selections.colorFilterId).name}`);
+  for (const entry of selections.sequenceClips) {
+    if (entry.colorFilterId) rows.push(`Cutaway filter: ${getFilterPresetOption(entry.colorFilterId).name}`);
   }
   for (const effect of selections.zoomEffects) {
     rows.push(`Zoom/pan ${formatTimeRange(effect.startTimeSeconds, effect.endTimeSeconds)}`);
@@ -104,14 +104,20 @@ function ActiveTransformationsList({
   }
   const layoutLabel = (layout: { type: string }) =>
     layout.type === "full-screen" ? "Full-Screen" : layout.type === "picture-in-picture" ? "Picture-in-Picture" : "Split Screen";
+  const filterSuffix = (colorFilterId: EditSelectionsSnapshot["sequenceClips"][number]["colorFilterId"]) =>
+    colorFilterId ? `, ${getFilterPresetOption(colorFilterId).name} filter` : "";
   for (const overlay of selections.overlayImages) {
-    rows.push(`Image overlay (${layoutLabel(overlay.layout)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
+    rows.push(
+      `Image overlay (${layoutLabel(overlay.layout)}${filterSuffix(overlay.colorFilterId)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`
+    );
   }
   for (const overlay of selections.textOverlays) {
     rows.push(`Text "${overlay.text}" ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
   }
   for (const overlay of selections.videoOverlays) {
-    rows.push(`Video overlay (${layoutLabel(overlay.layout)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
+    rows.push(
+      `Video overlay (${layoutLabel(overlay.layout)}${filterSuffix(overlay.colorFilterId)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`
+    );
   }
   if (selections.sequenceClips.length > 1) {
     rows.push(`Sequence: ${selections.sequenceClips.length} clips`);
@@ -181,8 +187,13 @@ export function ActionArea({
   onCloseOverlaySourceStartDialog,
   selectedClipRectId,
   onSelectClipRect,
-  selectedFilterId,
-  onSelectFilter,
+  filterDialogCutaway,
+  filterDialogVideoOverlayIndex,
+  filterDialogImageOverlayIndex,
+  onSelectCutawayFilter,
+  onSelectVideoOverlayFilter,
+  onSelectImageOverlayFilter,
+  onCloseFilterDialog,
   onOpenTextDialog,
   isTextDialogOpen,
   editingTextOverlay,
@@ -270,8 +281,17 @@ export function ActionArea({
   onCloseOverlaySourceStartDialog: () => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
-  selectedFilterId: FilterPresetId | null;
-  onSelectFilter: (id: FilterPresetId) => void;
+  // At most one of these three is non-null at a time -- which cutaway/
+  // overlay's own FilterPresetDialog is currently open, set by that clip's
+  // own right-click "Filter" (see CutawayTrack.tsx/ImageOverlayTrack.tsx/
+  // VideoOverlayTrack.tsx's onOpenFilter).
+  filterDialogCutaway: CutawaySegment | null;
+  filterDialogVideoOverlayIndex: number | null;
+  filterDialogImageOverlayIndex: number | null;
+  onSelectCutawayFilter: (id: FilterPresetId) => void;
+  onSelectVideoOverlayFilter: (id: FilterPresetId) => void;
+  onSelectImageOverlayFilter: (id: FilterPresetId) => void;
+  onCloseFilterDialog: () => void;
   onOpenTextDialog: () => void;
   isTextDialogOpen: boolean;
   editingTextOverlay: TextOverlay | null;
@@ -337,11 +357,21 @@ export function ActionArea({
   // handler) and closes itself in the same click, so nothing outside this
   // component ever needs to know whether it's open.
   const [isClipRectDialogOpen, setIsClipRectDialogOpen] = useState(false);
-  // Same self-contained convention as isClipRectDialogOpen above -- picking
-  // a filter applies it (via onSelectFilter) and closes itself in one click.
-  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
 
   const sequenceKey = sequenceClips.map((clip) => `${clip.id}:${clip.kind === "image" ? clip.durationSeconds : ""}`).join(",");
+
+  // Resolves each filter-dialog target down to the actual clip object it
+  // refers to, same "look it up from the target id/index right before
+  // rendering" convention as framingDialogOverlay/imageFramingDialogOverlay
+  // (ThreePaneEditor.tsx) -- null whenever that target isn't the one
+  // currently open (at most one of the three ever is).
+  const filterDialogCutawayEntry = filterDialogCutaway
+    ? (sequenceClips.find((entry) => entry.id === filterDialogCutaway.entryId) ?? null)
+    : null;
+  const filterDialogVideoOverlay =
+    filterDialogVideoOverlayIndex !== null ? (videoOverlays[filterDialogVideoOverlayIndex] ?? null) : null;
+  const filterDialogImageOverlay =
+    filterDialogImageOverlayIndex !== null ? (overlayImages[filterDialogImageOverlayIndex] ?? null) : null;
 
   const selectedClipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selectedClipRectId);
   const playAreaRatio = selectedClipRectOption
@@ -377,8 +407,6 @@ export function ActionArea({
         <UserActions
           selectedClipRectId={selectedClipRectId}
           onOpenClipRectDialog={() => setIsClipRectDialogOpen(true)}
-          selectedFilterId={selectedFilterId}
-          onOpenFilterDialog={() => setIsFilterDialogOpen(true)}
           onOpenCutawayDialog={onOpenCutawayDialog}
           cutawayCount={sequenceClips.length}
           onOpenVideoOverlayPicker={onOpenVideoOverlayPicker}
@@ -410,7 +438,6 @@ export function ActionArea({
             baseCropRect={baseCropRect}
             zoomEffects={zoomEffects}
             liveCropRectOverride={liveCropRectOverride}
-            colorFilterId={selectedFilterId}
             flipHorizontalToggles={flipHorizontalToggles}
             flipVerticalToggles={flipVerticalToggles}
             trimRanges={trimRanges}
@@ -524,13 +551,36 @@ export function ActionArea({
         />
       )}
 
-      {isFilterDialogOpen && (
+      {filterDialogCutawayEntry && (
         <FilterPresetDialog
-          selectedFilterId={selectedFilterId}
-          onSelect={onSelectFilter}
-          onClose={() => setIsFilterDialogOpen(false)}
+          selectedFilterId={filterDialogCutawayEntry.colorFilterId ?? null}
+          onSelect={onSelectCutawayFilter}
+          onClose={onCloseFilterDialog}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
+          scopeLabel="this cutaway"
+        />
+      )}
+
+      {filterDialogVideoOverlay && (
+        <FilterPresetDialog
+          selectedFilterId={filterDialogVideoOverlay.colorFilterId ?? null}
+          onSelect={onSelectVideoOverlayFilter}
+          onClose={onCloseFilterDialog}
+          previewFrameUrl={previewFrameUrl}
+          frameAspectRatio={frameAspectRatio}
+          scopeLabel="this overlay"
+        />
+      )}
+
+      {filterDialogImageOverlay && (
+        <FilterPresetDialog
+          selectedFilterId={filterDialogImageOverlay.colorFilterId ?? null}
+          onSelect={onSelectImageOverlayFilter}
+          onClose={onCloseFilterDialog}
+          previewFrameUrl={previewFrameUrl}
+          frameAspectRatio={frameAspectRatio}
+          scopeLabel="this overlay"
         />
       )}
 

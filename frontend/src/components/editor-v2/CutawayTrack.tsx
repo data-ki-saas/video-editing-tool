@@ -21,6 +21,7 @@
  */
 import type { CropRect } from "@/lib/video/video_math";
 import { getImageTemplateOption } from "@/lib/video/imageTemplates";
+import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 
 export type CutawaySegment =
@@ -35,6 +36,7 @@ export type CutawaySegment =
       cropRect: CropRect | null;
       startTimeSeconds: number;
       durationSeconds: number;
+      colorFilterId: FilterPresetId | null;
     }
   | {
       kind: "video";
@@ -42,6 +44,7 @@ export type CutawaySegment =
       assetId: string;
       startTimeSeconds: number;
       durationSeconds: number;
+      colorFilterId: FilterPresetId | null;
     };
 
 function CutawaySegmentButton({
@@ -49,14 +52,17 @@ function CutawaySegmentButton({
   toPercent,
   onEdit,
   onDelete,
+  onOpenFilter,
 }: {
   segment: CutawaySegment;
   toPercent: (seconds: number) => number;
   onEdit: () => void;
   onDelete: () => void;
+  onOpenFilter: () => void;
 }) {
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
   const isImage = segment.kind === "image";
+  const filterOption = segment.colorFilterId ? getFilterPresetOption(segment.colorFilterId) : null;
 
   return (
     <>
@@ -70,11 +76,16 @@ function CutawaySegmentButton({
               }
             : undefined
         }
-        onContextMenu={(e) => openContextMenu(e, [{ label: "Remove Cutaway", danger: true, onSelect: onDelete }])}
+        onContextMenu={(e) =>
+          openContextMenu(e, [
+            { label: "Filter…", onSelect: onOpenFilter },
+            { label: "Remove Cutaway", danger: true, onSelect: onDelete },
+          ])
+        }
         title={
           segment.kind === "image"
-            ? `Edit this cutaway -- ${segment.templateIds.map((id) => getImageTemplateOption(id).name).join(" + ")}; right-click to remove`
-            : "Video cutaway -- right-click to remove"
+            ? `Edit this cutaway -- ${segment.templateIds.map((id) => getImageTemplateOption(id).name).join(" + ")}; right-click for more`
+            : "Video cutaway -- right-click for more"
         }
         className={
           "absolute top-0 flex h-full items-center gap-1 overflow-hidden rounded-sm border text-[9px] leading-none " +
@@ -89,6 +100,11 @@ function CutawaySegmentButton({
       >
         <span className="pointer-events-none shrink-0 pl-1">{isImage ? "🖼" : "▶"}</span>
         <span className="pointer-events-none truncate pr-1">Cutaway</span>
+        {filterOption && (
+          <span className="pointer-events-none shrink-0 truncate rounded-full bg-black/30 px-1 pr-1" title={filterOption.name}>
+            {filterOption.name}
+          </span>
+        )}
       </button>
       <ContextMenu state={contextMenuState} onClose={closeContextMenu} />
     </>
@@ -100,11 +116,13 @@ export function CutawayTrack({
   videoDurationSeconds,
   onEdit,
   onDelete,
+  onOpenFilter,
 }: {
   segments: CutawaySegment[];
   videoDurationSeconds: number;
   onEdit: (segment: CutawaySegment) => void;
   onDelete: (segment: CutawaySegment) => void;
+  onOpenFilter: (segment: CutawaySegment) => void;
 }) {
   if (segments.length === 0) return null;
 
@@ -119,6 +137,7 @@ export function CutawayTrack({
           toPercent={toPercent}
           onEdit={() => onEdit(segment)}
           onDelete={() => onDelete(segment)}
+          onOpenFilter={() => onOpenFilter(segment)}
         />
       ))}
     </div>

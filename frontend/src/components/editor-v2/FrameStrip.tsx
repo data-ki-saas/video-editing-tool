@@ -379,6 +379,7 @@ export function FrameStrip({
   onResizeImageClip,
   onEditCutaway,
   onDeleteCutaway,
+  onOpenCutawayFilter,
   isLoading,
   durationSeconds,
   currentTimeSeconds,
@@ -414,6 +415,7 @@ export function FrameStrip({
   onToggleImageSplitScreenOrientation,
   onToggleImageSplitScreenSides,
   onOpenImageOverlayFraming,
+  onOpenImageOverlayFilter,
   onDeleteImageOverlay,
   textOverlays,
   onChangeTextOverlayRect,
@@ -436,6 +438,7 @@ export function FrameStrip({
   onToggleSplitScreenOrientation,
   onToggleSplitScreenSides,
   onOpenVideoOverlayFraming,
+  onOpenVideoOverlayFilter,
   onDeleteVideoOverlay,
   onChangeOverlayAudioBalance,
   onCommitOverlayAudioBalance,
@@ -467,6 +470,9 @@ export function FrameStrip({
   // The Cutaways rail's own right-click "Remove Cutaway" -- splices the
   // clip out of the sequence entirely (see applyDeleteSequenceClip).
   onDeleteCutaway: (segment: CutawaySegment) => void;
+  // The Cutaways rail's own right-click "Filter" -- opens FilterPresetDialog
+  // scoped to just this cutaway (see applySelectCutawayFilterPreset).
+  onOpenCutawayFilter: (segment: CutawaySegment) => void;
   isLoading: boolean;
   durationSeconds: number;
   currentTimeSeconds: number;
@@ -506,6 +512,9 @@ export function FrameStrip({
   onToggleImageSplitScreenOrientation: (overlayIndex: number) => void;
   onToggleImageSplitScreenSides: (overlayIndex: number) => void;
   onOpenImageOverlayFraming: (overlayIndex: number) => void;
+  // This overlay's own right-click "Filter" -- opens FilterPresetDialog
+  // scoped to just this overlay (see applySelectImageOverlayFilterPreset).
+  onOpenImageOverlayFilter: (overlayIndex: number) => void;
   onDeleteImageOverlay: (overlayIndex: number) => void;
   textOverlays: TextOverlay[];
   onChangeTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
@@ -533,6 +542,9 @@ export function FrameStrip({
   onToggleSplitScreenOrientation: (overlayIndex: number) => void;
   onToggleSplitScreenSides: (overlayIndex: number) => void;
   onOpenVideoOverlayFraming: (overlayIndex: number) => void;
+  // Same as onOpenImageOverlayFilter, for a video overlay (see
+  // applySelectVideoOverlayFilterPreset).
+  onOpenVideoOverlayFilter: (overlayIndex: number) => void;
   onDeleteVideoOverlay: (overlayIndex: number) => void;
   onChangeOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
   onCommitOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
@@ -768,6 +780,7 @@ export function FrameStrip({
           cropRect: entry.cropRect ?? null,
           startTimeSeconds,
           durationSeconds: endTimeSeconds - startTimeSeconds,
+          colorFilterId: entry.colorFilterId ?? null,
         };
       }
       return {
@@ -776,6 +789,7 @@ export function FrameStrip({
         assetId: entry.assetId,
         startTimeSeconds,
         durationSeconds: endTimeSeconds - startTimeSeconds,
+        colorFilterId: entry.colorFilterId ?? null,
       };
     });
   }, [sequenceEntries, clipBoundarySeconds, durationSeconds]);
@@ -849,6 +863,7 @@ export function FrameStrip({
           videoDurationSeconds={durationSeconds}
           onEdit={onEditCutaway}
           onDelete={onDeleteCutaway}
+          onOpenFilter={onOpenCutawayFilter}
         />
 
         <TrimTrack
@@ -889,6 +904,7 @@ export function FrameStrip({
           onToggleOrientation={onToggleImageSplitScreenOrientation}
           onToggleSides={onToggleImageSplitScreenSides}
           onOpenFraming={onOpenImageOverlayFraming}
+          onOpenFilter={onOpenImageOverlayFilter}
           onDelete={onDeleteImageOverlay}
         />
 
@@ -907,6 +923,7 @@ export function FrameStrip({
           onToggleOrientation={onToggleSplitScreenOrientation}
           onToggleSides={onToggleSplitScreenSides}
           onOpenFraming={onOpenVideoOverlayFraming}
+          onOpenFilter={onOpenVideoOverlayFilter}
           onOpenSourceStart={onOpenSourceStart}
           onDelete={onDeleteVideoOverlay}
           onChangeAudioBalance={onChangeOverlayAudioBalance}
@@ -927,6 +944,7 @@ export function FrameStrip({
           onToggleOrientation={onToggleImageSplitScreenOrientation}
           onToggleSides={onToggleImageSplitScreenSides}
           onOpenFraming={onOpenImageOverlayFraming}
+          onOpenFilter={onOpenImageOverlayFilter}
           onDelete={onDeleteImageOverlay}
         />
 
@@ -945,6 +963,7 @@ export function FrameStrip({
           onToggleOrientation={onToggleSplitScreenOrientation}
           onToggleSides={onToggleSplitScreenSides}
           onOpenFraming={onOpenVideoOverlayFraming}
+          onOpenFilter={onOpenVideoOverlayFilter}
           onOpenSourceStart={onOpenSourceStart}
           onDelete={onDeleteVideoOverlay}
           onChangeAudioBalance={onChangeOverlayAudioBalance}

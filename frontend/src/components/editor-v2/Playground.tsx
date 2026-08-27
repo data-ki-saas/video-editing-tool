@@ -105,6 +105,7 @@ export function Playground({
   onResizeImageClip,
   onEditCutaway,
   onDeleteCutaway,
+  onOpenCutawayFilter,
   mainAudioVolume,
   onChangeMainAudioVolume,
   backgroundVolume,
@@ -143,6 +144,7 @@ export function Playground({
   onToggleImageSplitScreenOrientation,
   onToggleImageSplitScreenSides,
   onOpenImageOverlayFraming,
+  onOpenImageOverlayFilter,
   onDeleteImageOverlay,
   textOverlays,
   onChangeTextOverlayRect,
@@ -165,6 +167,7 @@ export function Playground({
   onToggleSplitScreenOrientation,
   onToggleSplitScreenSides,
   onOpenVideoOverlayFraming,
+  onOpenVideoOverlayFilter,
   onDeleteVideoOverlay,
   onChangeOverlayAudioBalance,
   onCommitOverlayAudioBalance,
@@ -190,6 +193,7 @@ export function Playground({
   // The Cutaways rail's own click -- see FrameStrip's own prop comment.
   onEditCutaway: (segment: CutawaySegment) => void;
   onDeleteCutaway: (segment: CutawaySegment) => void;
+  onOpenCutawayFilter: (segment: CutawaySegment) => void;
   mainAudioVolume: number;
   onChangeMainAudioVolume: (level: number) => void;
   backgroundVolume: number;
@@ -232,6 +236,7 @@ export function Playground({
   onToggleImageSplitScreenOrientation: (overlayIndex: number) => void;
   onToggleImageSplitScreenSides: (overlayIndex: number) => void;
   onOpenImageOverlayFraming: (overlayIndex: number) => void;
+  onOpenImageOverlayFilter: (overlayIndex: number) => void;
   onDeleteImageOverlay: (overlayIndex: number) => void;
   textOverlays: TextOverlay[];
   onChangeTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
@@ -263,6 +268,7 @@ export function Playground({
   onToggleSplitScreenOrientation: (overlayIndex: number) => void;
   onToggleSplitScreenSides: (overlayIndex: number) => void;
   onOpenVideoOverlayFraming: (overlayIndex: number) => void;
+  onOpenVideoOverlayFilter: (overlayIndex: number) => void;
   onDeleteVideoOverlay: (overlayIndex: number) => void;
   onChangeOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
   onCommitOverlayAudioBalance: (overlayIndex: number, balance: number) => void;
@@ -296,6 +302,7 @@ export function Playground({
             sequenceEntries={sequenceEntries}
             onResizeImageClip={onResizeImageClip}
             onEditCutaway={onEditCutaway}
+            onOpenCutawayFilter={onOpenCutawayFilter}
             onDeleteCutaway={onDeleteCutaway}
             isLoading={isAnalyzing}
             durationSeconds={videoDurationSeconds}
@@ -332,6 +339,7 @@ export function Playground({
             onToggleImageSplitScreenOrientation={onToggleImageSplitScreenOrientation}
             onToggleImageSplitScreenSides={onToggleImageSplitScreenSides}
             onOpenImageOverlayFraming={onOpenImageOverlayFraming}
+            onOpenImageOverlayFilter={onOpenImageOverlayFilter}
             onDeleteImageOverlay={onDeleteImageOverlay}
             textOverlays={textOverlays}
             onChangeTextOverlayRect={onChangeTextOverlayRect}
@@ -354,6 +362,7 @@ export function Playground({
             onToggleSplitScreenOrientation={onToggleSplitScreenOrientation}
             onToggleSplitScreenSides={onToggleSplitScreenSides}
             onOpenVideoOverlayFraming={onOpenVideoOverlayFraming}
+            onOpenVideoOverlayFilter={onOpenVideoOverlayFilter}
             onDeleteVideoOverlay={onDeleteVideoOverlay}
             onChangeOverlayAudioBalance={onChangeOverlayAudioBalance}
             onCommitOverlayAudioBalance={onCommitOverlayAudioBalance}

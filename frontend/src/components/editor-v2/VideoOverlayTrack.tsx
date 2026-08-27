@@ -52,6 +52,7 @@ import {
   type VideoOverlayClip,
   type VideoOverlayLayout,
 } from "@/lib/video/video_math";
+import { getFilterPresetOption } from "@/lib/video/filterPresets";
 
 // Pixel distance (converted to seconds via the drag's own trackRect) within
 // which a drag magnetically snaps to a nearby time reference -- a
@@ -98,6 +99,7 @@ function VideoOverlaySegment({
   onToggleOrientation,
   onToggleSides,
   onOpenFraming,
+  onOpenFilter,
   onOpenSourceStart,
   onDelete,
   onChangeAudioBalance,
@@ -118,6 +120,7 @@ function VideoOverlaySegment({
   onToggleOrientation: () => void;
   onToggleSides: () => void;
   onOpenFraming: () => void;
+  onOpenFilter: () => void;
   onOpenSourceStart: () => void;
   onDelete: () => void;
   onChangeAudioBalance: (balance: number) => void;
@@ -266,7 +269,9 @@ function VideoOverlaySegment({
     <div
       ref={rootRef}
       onPointerDown={startBodyDrag}
-      onContextMenu={(e) => openContextMenu(e, [...layoutMenuEntries, { label: "Remove overlay", danger: true, onSelect: onDelete }])}
+      onContextMenu={(e) =>
+        openContextMenu(e, [...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }])
+      }
       title="Drag the middle to move, an edge to trim; right-click to change layout or remove"
       className={`absolute top-0 flex h-5 cursor-grab items-center gap-1 overflow-hidden rounded-sm border px-1 ${LAYOUT_COLOR_CLASSNAMES[overlay.layout.type]}`}
       style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
@@ -293,6 +298,14 @@ function VideoOverlaySegment({
       >
         <MarkerFlagIcon className="h-2.5 w-2.5" />
       </button>
+      {overlay.colorFilterId && (
+        <span
+          className="pointer-events-none z-10 shrink-0 truncate rounded-full bg-black/30 px-1 text-white"
+          title={getFilterPresetOption(overlay.colorFilterId).name}
+        >
+          {getFilterPresetOption(overlay.colorFilterId).name}
+        </span>
+      )}
       <VolumeBadge
         value={overlay.audioBalance}
         onChange={onChangeAudioBalance}
@@ -383,6 +396,7 @@ export function VideoOverlayTrack({
   onToggleOrientation,
   onToggleSides,
   onOpenFraming,
+  onOpenFilter,
   onOpenSourceStart,
   onDelete,
   onChangeAudioBalance,
@@ -412,6 +426,7 @@ export function VideoOverlayTrack({
   onToggleOrientation: (overlayIndex: number) => void;
   onToggleSides: (overlayIndex: number) => void;
   onOpenFraming: (overlayIndex: number) => void;
+  onOpenFilter: (overlayIndex: number) => void;
   onOpenSourceStart: (overlayIndex: number) => void;
   onDelete: (overlayIndex: number) => void;
   onChangeAudioBalance: (overlayIndex: number, balance: number) => void;
@@ -444,6 +459,7 @@ export function VideoOverlayTrack({
       onToggleOrientation: () => onToggleOrientation(index),
       onToggleSides: () => onToggleSides(index),
       onOpenFraming: () => onOpenFraming(index),
+      onOpenFilter: () => onOpenFilter(index),
       onOpenSourceStart: () => onOpenSourceStart(index),
       onDelete: () => onDelete(index),
       onChangeAudioBalance: (balance: number) => onChangeAudioBalance(index, balance),

@@ -26,6 +26,7 @@ import {
   type ImageOverlayClip,
   type VideoOverlayLayout,
 } from "@/lib/video/video_math";
+import { getFilterPresetOption } from "@/lib/video/filterPresets";
 
 const SNAP_THRESHOLD_PX = 8;
 
@@ -55,6 +56,7 @@ function ImageOverlaySegment({
   onToggleOrientation,
   onToggleSides,
   onOpenFraming,
+  onOpenFilter,
   onDelete,
 }: {
   overlay: ImageOverlayClip;
@@ -71,6 +73,7 @@ function ImageOverlaySegment({
   onToggleOrientation: () => void;
   onToggleSides: () => void;
   onOpenFraming: () => void;
+  onOpenFilter: () => void;
   onDelete: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -183,7 +186,9 @@ function ImageOverlaySegment({
     <div
       ref={rootRef}
       onPointerDown={startBodyDrag}
-      onContextMenu={(e) => openContextMenu(e, [...layoutMenuEntries, { label: "Remove overlay", danger: true, onSelect: onDelete }])}
+      onContextMenu={(e) =>
+        openContextMenu(e, [...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }])
+      }
       title="Drag the middle to move, an edge to trim; right-click to change layout or remove"
       className={`absolute top-0 flex h-5 cursor-grab items-center gap-1 overflow-hidden rounded-sm border px-1 ${LAYOUT_COLOR_CLASSNAMES[overlay.layout.type]}`}
       style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
@@ -201,6 +206,14 @@ function ImageOverlaySegment({
       >
         <FramingIcon className="h-2.5 w-2.5" />
       </button>
+      {overlay.colorFilterId && (
+        <span
+          className="pointer-events-none z-10 shrink-0 truncate rounded-full bg-black/30 px-1 text-white"
+          title={getFilterPresetOption(overlay.colorFilterId).name}
+        >
+          {getFilterPresetOption(overlay.colorFilterId).name}
+        </span>
+      )}
       <div
         onPointerDown={(e) => startEdgeDrag(e, "start")}
         className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-black/20"
@@ -269,6 +282,7 @@ export function ImageOverlayTrack({
   onToggleOrientation,
   onToggleSides,
   onOpenFraming,
+  onOpenFilter,
   onDelete,
 }: {
   imageOverlays: ImageOverlayClip[];
@@ -286,6 +300,7 @@ export function ImageOverlayTrack({
   onToggleOrientation: (overlayIndex: number) => void;
   onToggleSides: (overlayIndex: number) => void;
   onOpenFraming: (overlayIndex: number) => void;
+  onOpenFilter: (overlayIndex: number) => void;
   onDelete: (overlayIndex: number) => void;
 }) {
   if (imageOverlays.length === 0) return null;
@@ -314,6 +329,7 @@ export function ImageOverlayTrack({
       onToggleOrientation: () => onToggleOrientation(index),
       onToggleSides: () => onToggleSides(index),
       onOpenFraming: () => onOpenFraming(index),
+      onOpenFilter: () => onOpenFilter(index),
       onDelete: () => onDelete(index),
     };
   }

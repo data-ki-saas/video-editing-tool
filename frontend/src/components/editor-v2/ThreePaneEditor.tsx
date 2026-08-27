@@ -107,7 +107,9 @@ import {
   applyChangeOverlayAudioBalance,
   applyDeleteVideoOverlay,
   applyChangeVideoOverlaySourceStart,
-  applySelectFilterPreset,
+  applySelectCutawayFilterPreset,
+  applySelectImageOverlayFilterPreset,
+  applySelectVideoOverlayFilterPreset,
 } from "@/lib/video/transformations";
 import type { FilterPresetId } from "@/lib/video/filterPresets";
 import {
@@ -142,7 +144,6 @@ const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
   zoomEffects: [],
   flipHorizontalToggles: [],
   flipVerticalToggles: [],
-  colorFilterId: null,
   trimRanges: [],
   overlayImages: [],
   textOverlays: [],
@@ -312,6 +313,17 @@ export function ThreePaneEditor({
   // above stays null), just pre-selects that photo in the dialog's own
   // picker instead of defaulting to the first one.
   const [cutawayDialogPreselectedAssetId, setCutawayDialogPreselectedAssetId] = useState<string | null>(null);
+
+  // FilterPresetDialog's open/edit-target state -- three separate targets
+  // (same "one state var per dialog target type" convention as
+  // editingCutaway/framingDialogOverlayIndex/imageFramingDialogOverlayIndex
+  // below) since a cutaway, a video overlay, and an image overlay each has
+  // its own independent colorFilterId now (see video_math.ts's
+  // SequenceEntry/VideoOverlayClip/ImageOverlayClip). At most one is
+  // non-null at a time -- opened from that clip's own right-click "Filter".
+  const [filterDialogCutaway, setFilterDialogCutaway] = useState<CutawaySegment | null>(null);
+  const [filterDialogVideoOverlayIndex, setFilterDialogVideoOverlayIndex] = useState<number | null>(null);
+  const [filterDialogImageOverlayIndex, setFilterDialogImageOverlayIndex] = useState<number | null>(null);
 
   // VideoOverlayFramingDialog's open/edit-target state -- opened from the
   // crosshair button on a VideoOverlayTrack segment, per-overlay index
@@ -506,7 +518,6 @@ export function ThreePaneEditor({
     zoomEffects: rawSelections.zoomEffects ?? [],
     flipHorizontalToggles: rawSelections.flipHorizontalToggles ?? [],
     flipVerticalToggles: rawSelections.flipVerticalToggles ?? [],
-    colorFilterId: rawSelections.colorFilterId ?? null,
     trimRanges: rawSelections.trimRanges ?? [],
     overlayImages,
     textOverlays: rawSelections.textOverlays ?? [],
@@ -912,8 +923,37 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
-  function handleSelectFilter(id: FilterPresetId) {
-    const { label, state } = applySelectFilterPreset(selections, id);
+  // Opens FilterPresetDialog scoped to one cutaway/overlay -- mirrors
+  // handleEditCutaway/handleOpenImageOverlayFraming/
+  // handleOpenVideoOverlayFraming's own "set this dialog target, the others
+  // stay null" convention.
+  function handleOpenCutawayFilter(segment: CutawaySegment) {
+    setFilterDialogCutaway(segment);
+  }
+
+  function handleOpenImageOverlayFilter(overlayIndex: number) {
+    setFilterDialogImageOverlayIndex(overlayIndex);
+  }
+
+  function handleOpenVideoOverlayFilter(overlayIndex: number) {
+    setFilterDialogVideoOverlayIndex(overlayIndex);
+  }
+
+  function handleSelectCutawayFilter(id: FilterPresetId) {
+    if (!filterDialogCutaway) return;
+    const { label, state } = applySelectCutawayFilterPreset(selections, filterDialogCutaway.entryId, id);
+    pushChange(label, state);
+  }
+
+  function handleSelectImageOverlayFilter(id: FilterPresetId) {
+    if (filterDialogImageOverlayIndex === null) return;
+    const { label, state } = applySelectImageOverlayFilterPreset(selections, filterDialogImageOverlayIndex, id);
+    pushChange(label, state);
+  }
+
+  function handleSelectVideoOverlayFilter(id: FilterPresetId) {
+    if (filterDialogVideoOverlayIndex === null) return;
+    const { label, state } = applySelectVideoOverlayFilterPreset(selections, filterDialogVideoOverlayIndex, id);
     pushChange(label, state);
   }
 
@@ -1722,8 +1762,17 @@ export function ThreePaneEditor({
           onCloseOverlaySourceStartDialog={handleCloseOverlaySourceStartDialog}
           selectedClipRectId={selections.clipRectId}
           onSelectClipRect={handleSelectClipRect}
-          selectedFilterId={selections.colorFilterId}
-          onSelectFilter={handleSelectFilter}
+          filterDialogCutaway={filterDialogCutaway}
+          filterDialogVideoOverlayIndex={filterDialogVideoOverlayIndex}
+          filterDialogImageOverlayIndex={filterDialogImageOverlayIndex}
+          onSelectCutawayFilter={handleSelectCutawayFilter}
+          onSelectVideoOverlayFilter={handleSelectVideoOverlayFilter}
+          onSelectImageOverlayFilter={handleSelectImageOverlayFilter}
+          onCloseFilterDialog={() => {
+            setFilterDialogCutaway(null);
+            setFilterDialogVideoOverlayIndex(null);
+            setFilterDialogImageOverlayIndex(null);
+          }}
           onOpenTextDialog={handleOpenTextDialog}
           isTextDialogOpen={isTextDialogOpen}
           editingTextOverlay={editingTextOverlayIndex !== null ? displayedTextOverlays[editingTextOverlayIndex] : null}
@@ -1790,6 +1839,7 @@ export function ThreePaneEditor({
           onResizeImageClip={handleResizeImageClip}
           onEditCutaway={handleEditCutaway}
           onDeleteCutaway={handleDeleteCutaway}
+          onOpenCutawayFilter={handleOpenCutawayFilter}
           mainAudioVolume={mainAudioVolume}
           onChangeMainAudioVolume={setMainAudioVolume}
           backgroundVolume={backgroundVolume}
@@ -1828,6 +1878,7 @@ export function ThreePaneEditor({
           onToggleImageSplitScreenOrientation={handleToggleImageSplitScreenOrientation}
           onToggleImageSplitScreenSides={handleToggleImageSplitScreenSides}
           onOpenImageOverlayFraming={handleOpenImageOverlayFraming}
+          onOpenImageOverlayFilter={handleOpenImageOverlayFilter}
           onDeleteImageOverlay={handleDeleteImageOverlay}
           textOverlays={displayedTextOverlays}
           onChangeTextOverlayRect={handleChangeTextOverlayRect}
@@ -1850,6 +1901,7 @@ export function ThreePaneEditor({
           onToggleSplitScreenOrientation={handleToggleSplitScreenOrientation}
           onToggleSplitScreenSides={handleToggleSplitScreenSides}
           onOpenVideoOverlayFraming={handleOpenVideoOverlayFraming}
+          onOpenVideoOverlayFilter={handleOpenVideoOverlayFilter}
           onDeleteVideoOverlay={handleDeleteVideoOverlay}
           onChangeOverlayAudioBalance={handleChangeOverlayAudioBalance}
           onCommitOverlayAudioBalance={handleCommitOverlayAudioBalance}
