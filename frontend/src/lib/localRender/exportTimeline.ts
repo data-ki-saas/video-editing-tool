@@ -52,6 +52,9 @@ import {
   computeEffectiveFlip,
   computeProgress,
   findActiveTextOverlays,
+  findActiveTtsOverlays,
+  findActiveWordIndex,
+  ttsOverlayEndTimeSeconds,
   findActiveExclusiveOverlay,
   findActivePictureInPictureOverlays,
   computeOverlayRects,
@@ -64,9 +67,10 @@ import {
   FULL_FRAME_CROP_RECT,
   type RenderSegment,
   type SequenceClipInfo,
+  type TtsOverlay,
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
-import { getTextTemplateRenderer } from "@/lib/video/textTemplates";
+import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
 
@@ -237,6 +241,7 @@ async function buildMixedAudioBuffer(
   sequenceClips: SequenceClipInfo[],
   backgroundClips: SequenceClipInfo[],
   videoOverlays: VideoOverlayClip[],
+  ttsOverlays: TtsOverlay[],
   assetUrlById: Record<string, string>,
   sourceTotalDurationSeconds: number,
   totalDurationSeconds: number,
@@ -342,6 +347,55 @@ async function buildMixedAudioBuffer(
       overlayGainNode.gain.linearRampToValueAtTime(0, startTimeSeconds + windowDurationSeconds);
       overlaySource.connect(overlayGainNode).connect(offlineContext.destination);
       overlaySource.start(startTimeSeconds, elapsedIntoWindowSeconds % overlayBuffer.duration, windowDurationSeconds);
+    }
+  }
+
+  // One AudioBufferSourceNode per (TTS overlay, output-time chunk) --
+  // mirrors CanvasPlayer's own narration scheduling (fade in/out at each
+  // window's own edges, single play, never looped -- narration has a real
+  // beginning and end, unlike background music or a looping overlay). An
+  // overlay whose window is split by a trim gets one source per surviving
+  // chunk, same as the video-overlay audio block above. No ducking against
+  // the main track/background music here either -- same known, deliberate
+  // follow-up CanvasPlayer.tsx's own comment notes.
+  const ttsAssetIds = Array.from(new Set(ttsOverlays.map((overlay) => overlay.assetId)));
+  const ttsAudioByAssetId = new Map<string, AudioBuffer>();
+  for (const assetId of ttsAssetIds) {
+    const url = assetUrlById[assetId];
+    if (!url) continue;
+    try {
+      ttsAudioByAssetId.set(assetId, await decodeAudioBuffer(url));
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      warnings.push(`A TTS narration overlay's audio (assetId ${assetId}) couldn't be decoded for this render: ${reason}`);
+    }
+  }
+
+  for (const overlay of ttsOverlays) {
+    const ttsBuffer = ttsAudioByAssetId.get(overlay.assetId);
+    if (!ttsBuffer || ttsBuffer.duration <= 0) continue;
+    const overlayEndSeconds = ttsOverlayEndTimeSeconds(overlay);
+    const targetGain = Math.min(Math.max(overlay.volume, 0), 1);
+
+    for (const outputRange of mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlayEndSeconds)) {
+      const windowDurationSeconds = outputRange.outputEndSeconds - outputRange.outputStartSeconds;
+      if (windowDurationSeconds <= 0) continue;
+      const startTimeSeconds = outputRange.outputStartSeconds;
+      const elapsedIntoWindowSeconds = outputRange.sourceOverlapStartSeconds - overlay.startTimeSeconds;
+      const fadeOutStartSeconds = Math.max(
+        startTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS,
+        startTimeSeconds + windowDurationSeconds - AUDIO_TRANSITION_RAMP_SECONDS
+      );
+
+      const ttsSource = offlineContext.createBufferSource();
+      ttsSource.buffer = ttsBuffer;
+      const ttsGainNode = offlineContext.createGain();
+      ttsGainNode.gain.setValueAtTime(0, startTimeSeconds);
+      ttsGainNode.gain.linearRampToValueAtTime(targetGain, startTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS);
+      ttsGainNode.gain.setValueAtTime(targetGain, fadeOutStartSeconds);
+      ttsGainNode.gain.linearRampToValueAtTime(0, startTimeSeconds + windowDurationSeconds);
+      ttsSource.connect(ttsGainNode).connect(offlineContext.destination);
+      ttsSource.start(startTimeSeconds, elapsedIntoWindowSeconds, windowDurationSeconds);
     }
   }
 
@@ -677,6 +731,35 @@ export async function exportVideoLocally(
         });
       }
 
+      // TTS narration overlays -- same two displayModes CanvasPlayer's live
+      // preview draws (see that file's own comment): "background" reuses the
+      // exact same template renderer as a plain TextOverlay above, "karaoke"
+      // uses the shared drawKaraokeCaption (textTemplates.ts), driven by the
+      // synthesis engine's own exact per-word timings (findActiveWordIndex),
+      // not ASR -- this is why it's safe to burn in here identically to the
+      // live preview, unlike auto-captions (transcriptCaption), which stay
+      // Creatomate-only (see this file's own module comment).
+      for (const overlay of findActiveTtsOverlays(selections.ttsOverlays, sourceTimeSeconds)) {
+        const rectPx = {
+          x: overlay.rect.x * canvas.width,
+          y: overlay.rect.y * canvas.height,
+          width: overlay.rect.width * canvas.width,
+          height: overlay.rect.height * canvas.height,
+        };
+        if (overlay.displayMode === "karaoke") {
+          drawKaraokeCaption(ctx, rectPx, overlay.wordTimings, findActiveWordIndex(overlay, sourceTimeSeconds), overlay.templateId);
+          continue;
+        }
+        const renderer = getTextTemplateRenderer(overlay.templateId);
+        if (!renderer) continue;
+        renderer({
+          ctx,
+          text: overlay.text,
+          rectPx,
+          progress: computeProgress(overlay.startTimeSeconds, ttsOverlayEndTimeSeconds(overlay), sourceTimeSeconds),
+        });
+      }
+
       // CanvasSource.add resolves once Mediabunny/the encoder is ready for
       // more -- awaiting it is the backpressure mechanism, no manual
       // encodeQueueSize polling needed.
@@ -690,6 +773,7 @@ export async function exportVideoLocally(
         sequenceClips,
         backgroundClips,
         selections.videoOverlays,
+        selections.ttsOverlays,
         assetUrlById,
         totalSequenceDuration(sequenceClips),
         totalDurationSeconds,

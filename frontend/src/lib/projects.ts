@@ -7,6 +7,7 @@ import type {
   TextOverlay,
   TranscriptCaption,
   TrimRange,
+  TtsOverlay,
   VideoOverlayClip,
   ZoomEffect,
 } from "@/lib/video/video_math";
@@ -77,6 +78,12 @@ export interface EditSelectionsSnapshot {
   // positioned-rect-plus-time-range shape as overlayImages, but the
   // content is authored text rather than an uploaded asset.
   textOverlays: TextOverlay[];
+  // TTS-generated narration, each with its own generated audio asset and
+  // on-screen caption (static or word-by-word "karaoke") -- see
+  // video_math.ts's TtsOverlay. Same positioned-rect-plus-time-range shape
+  // as textOverlays, but the content comes from a backend speech-synthesis
+  // call rather than a template alone.
+  ttsOverlays: TtsOverlay[];
   // Which assets play, in order, concatenated into one continuous
   // sequence -- right-click "Add" on a video asset appends a "video" entry
   // (transformations.ts's applyAddSequenceClip); the "Image Templates"

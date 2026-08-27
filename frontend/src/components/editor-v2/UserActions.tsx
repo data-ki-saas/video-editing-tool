@@ -22,12 +22,13 @@
  *    each cutaway (Cutaways rail, CutawayTrack.tsx) and each overlay
  *    (ImageOverlayTrack.tsx/VideoOverlayTrack.tsx) gets its own, via that
  *    clip's own right-click "Filter".
- *  - OVERLAYS: Video Overlay, Image Overlay, Text -- what composites ON TOP
- *    of the base. Video Overlay's icon is tinted amber (matching its rail's
- *    dominant Full-Screen color, VideoOverlayTrack.tsx), Image Overlay's is
- *    tinted sky (matching ImageOverlayTrack.tsx's own palette) -- distinct
- *    hue families so the two read as different overlay kinds at a glance,
- *    same as their rails already do.
+ *  - OVERLAYS: Video Overlay, Image Overlay, Text, TTS -- what composites ON
+ *    TOP of the base. Video Overlay's icon is tinted amber (matching its
+ *    rail's dominant Full-Screen color, VideoOverlayTrack.tsx), Image
+ *    Overlay's is tinted sky (matching ImageOverlayTrack.tsx's own
+ *    palette), TTS's is tinted violet -- distinct hue families so each
+ *    reads as a different overlay kind at a glance, same as the rails that
+ *    have one already do.
  *  - CAPTIONS: Auto-Caption -- its own cluster since it's a different kind
  *    of thing (server-side transcription, not a user-placed clip/overlay).
  *
@@ -113,6 +114,18 @@ function PhotoOverlayIcon({ className }: { className?: string }) {
   );
 }
 
+// Speech bubble with a small waveform inside -- "TTS Narration" 's identity,
+// tinted violet to read as its own distinct family from Text's plain/
+// untinted glyph, Video Overlay's amber, and Image Overlay's sky.
+function TtsIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M4 5.5h16a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1H9l-4 3.5V16H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1Z" />
+      <path d="M8.5 8.5v4M12 7.5v6M15.5 9v3" />
+    </svg>
+  );
+}
+
 // Small notification-style count badge, pinned to the bottom of a tab
 // trigger once it has at least one item -- the at-a-glance equivalent of
 // Clip's own preview swatch (also bottom-pinned via mt-auto) for the tabs
@@ -159,6 +172,8 @@ export function UserActions({
   imageOverlayCount,
   onOpenTextDialog,
   textOverlayCount,
+  onOpenTtsDialog,
+  ttsOverlayCount,
   onOpenTranscriptDialog,
   autoCaptionEnabled,
 }: {
@@ -172,6 +187,8 @@ export function UserActions({
   imageOverlayCount: number;
   onOpenTextDialog: () => void;
   textOverlayCount: number;
+  onOpenTtsDialog: () => void;
+  ttsOverlayCount: number;
   onOpenTranscriptDialog: () => void;
   autoCaptionEnabled: boolean;
 }) {
@@ -249,6 +266,18 @@ export function UserActions({
             Text
           </span>
           <CountBadge count={textOverlayCount} />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenTtsDialog}
+          title="TTS Narration -- type a script, generate speech, and caption it as background text or word-by-word karaoke"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-violet-600 hover:bg-background"
+        >
+          <TtsIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            TTS
+          </span>
+          <CountBadge count={ttsOverlayCount} />
         </button>
       </div>
 

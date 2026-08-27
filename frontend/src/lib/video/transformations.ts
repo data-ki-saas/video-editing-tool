@@ -37,6 +37,7 @@ import {
   type OverlayFraming,
   type SequenceEntry,
   type TextOverlay,
+  type TtsOverlay,
   type VideoOverlayClip,
   type VideoOverlayLayout,
   type ZoomEffect,
@@ -822,6 +823,69 @@ export function applyDeleteTextOverlay(
   return {
     label: "Removed text",
     state: { ...selections, textOverlays: selections.textOverlays.filter((_, index) => index !== overlayIndex) },
+  };
+}
+
+/** Adds a new TTS narration overlay -- from TtsOverlayDialog's "Add". Unlike
+ * applyAddTextOverlay, the whole overlay (including its own generated
+ * assetId/durationSeconds/wordTimings and its authored startTimeSeconds) is
+ * assembled by the dialog itself before this is ever called, since building
+ * it needs the synthesis result and the current playhead position the
+ * dialog already has in scope -- this just appends it. */
+export function applyAddTtsOverlay(selections: EditSelectionsSnapshot, overlay: TtsOverlay): TransformationResult {
+  return { label: "Added narration", state: { ...selections, ttsOverlays: [...selections.ttsOverlays, overlay] } };
+}
+
+/** Replaces an existing TTS narration overlay wholesale -- from
+ * TtsOverlayDialog's "Save", reopened for an already-added overlay. Same
+ * "the dialog assembles the whole object" reasoning as applyAddTtsOverlay. */
+export function applyEditTtsOverlay(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  overlay: TtsOverlay
+): TransformationResult {
+  if (!selections.ttsOverlays[overlayIndex]) return { label: "Edited narration", state: selections };
+  const nextOverlays = [...selections.ttsOverlays];
+  nextOverlays[overlayIndex] = overlay;
+  return { label: "Edited narration", state: { ...selections, ttsOverlays: nextOverlays } };
+}
+
+/** Moving/resizing a TTS overlay's caption rect via its own drag handles --
+ * mirrors applyTextOverlayRectCommit. */
+export function applyTtsOverlayRectCommit(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  nextRect: CropRect
+): TransformationResult {
+  const overlay = selections.ttsOverlays[overlayIndex];
+  if (!overlay) return { label: "Moved narration", state: selections };
+  const nextOverlays = [...selections.ttsOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, rect: nextRect };
+  return { label: "Moved narration", state: { ...selections, ttsOverlays: nextOverlays } };
+}
+
+/** Dragging a TTS overlay to reposition it in time -- unlike
+ * applyTextOverlayRangeChange, only startTimeSeconds ever moves: duration
+ * comes from the real generated audio (video_math.ts's
+ * ttsOverlayEndTimeSeconds), not a freely stretchable end edge. */
+export function applyTtsOverlayPositionChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  startTimeSeconds: number
+): TransformationResult {
+  const overlay = selections.ttsOverlays[overlayIndex];
+  if (!overlay) return { label: "Moved narration", state: selections };
+  const nextOverlays = [...selections.ttsOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, startTimeSeconds };
+  return { label: "Moved narration", state: { ...selections, ttsOverlays: nextOverlays } };
+}
+
+/** Removes one TTS narration overlay outright. */
+export function applyDeleteTtsOverlay(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {
+  if (!selections.ttsOverlays[overlayIndex]) return { label: "Removed narration", state: selections };
+  return {
+    label: "Removed narration",
+    state: { ...selections, ttsOverlays: selections.ttsOverlays.filter((_, index) => index !== overlayIndex) },
   };
 }
 

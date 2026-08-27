@@ -60,6 +60,7 @@ import {
   type ImageOverlayClip,
   type SequenceEntry,
   type TextOverlay,
+  type TtsOverlay,
   type OverlayFraming,
   type VideoOverlayClip,
   type VideoOverlayLayout,
@@ -93,6 +94,9 @@ import {
   applyTextOverlayRectCommit,
   applyTextOverlayRangeChange,
   applyDeleteTextOverlay,
+  applyAddTtsOverlay,
+  applyEditTtsOverlay,
+  applyDeleteTtsOverlay,
   applyEnableTranscriptCaption,
   applyUpdateTranscriptCaption,
   applyDisableTranscriptCaption,
@@ -147,6 +151,7 @@ const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
   trimRanges: [],
   overlayImages: [],
   textOverlays: [],
+  ttsOverlays: [],
   sequenceClips: [],
   videoOverlays: [],
   transcriptCaption: null,
@@ -297,6 +302,11 @@ export function ThreePaneEditor({
   // that existing overlay's text/template.
   const [isTextDialogOpen, setIsTextDialogOpen] = useState(false);
   const [editingTextOverlayIndex, setEditingTextOverlayIndex] = useState<number | null>(null);
+
+  // TtsOverlayDialog's own open/edit-target state -- same add-vs-edit
+  // duality as the text dialog's above.
+  const [isTtsDialogOpen, setIsTtsDialogOpen] = useState(false);
+  const [editingTtsOverlayIndex, setEditingTtsOverlayIndex] = useState<number | null>(null);
 
   // TranscriptCaptionDialog's open state -- no edit-target index needed,
   // there's only ever one transcript caption config (see
@@ -521,6 +531,7 @@ export function ThreePaneEditor({
     trimRanges: rawSelections.trimRanges ?? [],
     overlayImages,
     textOverlays: rawSelections.textOverlays ?? [],
+    ttsOverlays: rawSelections.ttsOverlays ?? [],
     sequenceClips,
     videoOverlays,
     transcriptCaption: rawSelections.transcriptCaption ?? null,
@@ -895,7 +906,8 @@ export function ThreePaneEditor({
     const referencesDeletedAsset =
       selections.overlayImages.some((overlay) => overlay.assetId === assetId) ||
       selections.sequenceClips.some((entry) => entry.assetId === assetId) ||
-      selections.videoOverlays.some((overlay) => overlay.assetId === assetId);
+      selections.videoOverlays.some((overlay) => overlay.assetId === assetId) ||
+      selections.ttsOverlays.some((overlay) => overlay.assetId === assetId);
     if (referencesDeletedAsset) {
       const { label, state } = {
         label: "Removed deleted asset",
@@ -904,6 +916,7 @@ export function ThreePaneEditor({
           overlayImages: selections.overlayImages.filter((overlay) => overlay.assetId !== assetId),
           sequenceClips: selections.sequenceClips.filter((entry) => entry.assetId !== assetId),
           videoOverlays: selections.videoOverlays.filter((overlay) => overlay.assetId !== assetId),
+          ttsOverlays: selections.ttsOverlays.filter((overlay) => overlay.assetId !== assetId),
         },
       };
       pushChange(label, state);
@@ -1494,6 +1507,54 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  // "TTS" button in UserActions -- opens the dialog fresh (no pre-fill).
+  function handleOpenTtsDialog() {
+    setEditingTtsOverlayIndex(null);
+    setIsTtsDialogOpen(true);
+  }
+
+  // ActiveTransformationsList's own narration row -- reopens the dialog
+  // pre-filled (mirrors handleRequestEditTextOverlay).
+  function handleRequestEditTtsOverlay(overlayIndex: number) {
+    setEditingTtsOverlayIndex(overlayIndex);
+    setIsTtsDialogOpen(true);
+  }
+
+  function handleCloseTtsDialog() {
+    setIsTtsDialogOpen(false);
+    setEditingTtsOverlayIndex(null);
+  }
+
+  // TtsOverlayDialog's Add/Save -- the dialog itself already assembled the
+  // whole TtsOverlay (script, voice, synthesis result, mode, template,
+  // rect, position -- see that file's own module comment), so this just
+  // dispatches to add-new or replace-existing and pushes one history entry,
+  // same shape as handleSaveTextOverlay. Also kicks off a fresh assets
+  // fetch (fire-and-forget): the backend persists the newly-synthesized
+  // narration as a real project asset, but this component's own
+  // `assets`/`assetUrlById` won't know about it until the next refresh --
+  // without this, CanvasPlayer's live preview would show no narration audio
+  // until *something else* happened to trigger a refetch.
+  function handleSaveTtsOverlay(overlay: TtsOverlay) {
+    const { label, state } =
+      editingTtsOverlayIndex !== null
+        ? applyEditTtsOverlay(selections, editingTtsOverlayIndex, overlay)
+        : applyAddTtsOverlay(selections, overlay);
+    pushChange(label, state);
+    setIsTtsDialogOpen(false);
+    setEditingTtsOverlayIndex(null);
+    void refreshAssets();
+  }
+
+  function handleDeleteTtsOverlay(overlayIndex: number) {
+    if (editingTtsOverlayIndex === overlayIndex) {
+      setIsTtsDialogOpen(false);
+      setEditingTtsOverlayIndex(null);
+    }
+    const { label, state } = applyDeleteTtsOverlay(selections, overlayIndex);
+    pushChange(label, state);
+  }
+
   function handleSeek(seconds: number) {
     canvasPlayerRef.current?.seekTo(seconds);
   }
@@ -1819,6 +1880,13 @@ export function ThreePaneEditor({
           editingTextOverlay={editingTextOverlayIndex !== null ? displayedTextOverlays[editingTextOverlayIndex] : null}
           onSaveTextOverlay={handleSaveTextOverlay}
           onCloseTextDialog={handleCloseTextDialog}
+          onOpenTtsDialog={handleOpenTtsDialog}
+          isTtsDialogOpen={isTtsDialogOpen}
+          editingTtsOverlay={editingTtsOverlayIndex !== null ? (selections.ttsOverlays[editingTtsOverlayIndex] ?? null) : null}
+          onSaveTtsOverlay={handleSaveTtsOverlay}
+          onCloseTtsDialog={handleCloseTtsDialog}
+          onEditTtsOverlay={handleRequestEditTtsOverlay}
+          onDeleteTtsOverlay={handleDeleteTtsOverlay}
           onOpenTranscriptDialog={handleOpenTranscriptDialog}
           isTranscriptDialogOpen={isTranscriptDialogOpen}
           transcriptCaption={selections.transcriptCaption}
@@ -1849,6 +1917,7 @@ export function ThreePaneEditor({
           trimRanges={selections.trimRanges}
           overlayImages={displayedOverlayImages}
           textOverlays={displayedTextOverlays}
+          ttsOverlays={selections.ttsOverlays}
           sequenceClips={playbackClips}
           videoOverlays={displayedVideoOverlays}
           backgroundTracks={resolvedBackgroundTracks}
@@ -1866,6 +1935,7 @@ export function ThreePaneEditor({
             videoOverlays: displayedVideoOverlays,
           }}
           videoDurationSeconds={videoDurationSeconds}
+          currentTimeSeconds={currentTimeSeconds}
         />
       </section>
 

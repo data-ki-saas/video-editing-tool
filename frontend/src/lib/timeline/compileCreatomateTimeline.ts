@@ -672,6 +672,100 @@ function buildBackgroundAudioElement(
   });
 }
 
+/** TTS narration -- one Audio element per surviving output sub-range (same
+ * trim-splitting as every other time-ranged overlay, via
+ * mapSourceRangeToOutputRanges), given a stable id (nextId("voiceover")) and appMeta role
+ * "voiceover" so resolveAssetSources (api/render/route.ts) resolves it to a
+ * fresh presigned URL the same generic way as every other referenced asset.
+ * Each overlay gets TWO dedicated tracks (not one) -- its own Audio and its
+ * own companion Text caption coexist in time by design (the caption
+ * illustrates the audio playing underneath it), so they can't share a
+ * single track the way e.g. buildTextElements' plain text overlays can
+ * reuse one track across their own non-overlapping output ranges.
+ *
+ * Background mode's companion Text is built the same way buildTextElements
+ * builds a manual caption (reusing buildTextTemplateStyle/
+ * getTextTemplateFontFraction against overlay.templateId). Karaoke mode's
+ * companion Text is driven by Creatomate's own transcriptSource/
+ * transcriptEffect/transcriptSplit against THIS Audio element's own id --
+ * mirrors buildTranscriptCaptionElements' shape closely, but against a
+ * narration's own generated audio (known, exact word timings from the
+ * synthesis itself) rather than ASR transcription of the base video. */
+function buildTtsOverlayElements(
+  ttsOverlays: EditSelectionsSnapshot["ttsOverlays"],
+  segments: RenderSegment[],
+  nextTrack: () => number,
+  appMeta: Record<string, AppMetaEntry>
+): (Audio | Text)[] {
+  const elements: (Audio | Text)[] = [];
+  for (const overlay of ttsOverlays) {
+    const audioTrack = nextTrack();
+    const captionTrack = nextTrack();
+    const overlayEndSeconds = overlay.startTimeSeconds + overlay.durationSeconds;
+    const outputRanges = mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlayEndSeconds);
+
+    for (const range of outputRanges) {
+      const durationSeconds = range.outputEndSeconds - range.outputStartSeconds;
+      // `nextId("voiceover")` itself is this element's own stable,
+      // human-legible identifier (e.g. "voiceover-7") -- the SDK's Audio
+      // element has no separate `name` property to also set.
+      const id = nextId("voiceover");
+      appMeta[id] = { role: "voiceover", assetId: overlay.assetId };
+      elements.push(
+        new Audio({
+          id,
+          track: audioTrack,
+          time: range.outputStartSeconds,
+          duration: durationSeconds,
+          volume: toVolumePercent(overlay.volume ?? 1),
+          // Overwritten server-side by resolveAssetSources, same as every
+          // other element's placeholder source below.
+          source: "",
+        })
+      );
+
+      if (overlay.displayMode === "karaoke") {
+        elements.push(
+          new Text({
+            id: nextId("tts-caption"),
+            track: captionTrack,
+            time: range.outputStartSeconds,
+            duration: durationSeconds,
+            transcriptSource: id,
+            transcriptEffect: "karaoke",
+            transcriptSplit: "word",
+            transcriptColor: "#facc15",
+            textWrap: true,
+            fillColor: "#ffffff",
+            xAnchor: "0%",
+            yAnchor: "0%",
+            ...rectProperties(overlay.rect),
+          })
+        );
+      } else {
+        const fontFraction = getTextTemplateFontFraction(overlay.templateId);
+        elements.push(
+          new Text({
+            id: nextId("tts-caption"),
+            track: captionTrack,
+            time: range.outputStartSeconds,
+            duration: durationSeconds,
+            text: overlay.text,
+            textWrap: true,
+            fontSizeMinimum: "2vh",
+            fontSizeMaximum: `${fontFraction * 100}vh`,
+            xAnchor: "0%",
+            yAnchor: "0%",
+            ...rectProperties(overlay.rect),
+            ...buildTextTemplateStyle(overlay.templateId, durationSeconds),
+          })
+        );
+      }
+    }
+  }
+  return elements;
+}
+
 /** Auto-generated (transcript) captions -- one Text element per VIDEO
  * RenderSegment, each transcribing that segment's own Video element
  * (transcriptSource takes exactly one video element's id, and the
@@ -784,12 +878,24 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     .map((overlay) => ({ ...overlay, endTimeSeconds: Math.min(overlay.endTimeSeconds, totalOriginalDurationSeconds) }))
     .filter((overlay) => overlay.startTimeSeconds < totalOriginalDurationSeconds);
 
+  // Same "a since-shrunk sequence shouldn't leave a stale range" clamp as
+  // clampedTextOverlays above, adapted for TtsOverlay's own shape -- it has
+  // no stored endTimeSeconds (see video_math.ts's ttsOverlayEndTimeSeconds),
+  // so the DURATION is what gets shortened here instead of an end time.
+  const clampedTtsOverlays = selections.ttsOverlays
+    .map((overlay) => ({
+      ...overlay,
+      durationSeconds: Math.min(overlay.durationSeconds, Math.max(totalOriginalDurationSeconds - overlay.startTimeSeconds, 0)),
+    }))
+    .filter((overlay) => overlay.startTimeSeconds < totalOriginalDurationSeconds && overlay.durationSeconds > 0);
+
   let trackCursor = 2;
   const nextTrack = () => trackCursor++;
 
   const videoOverlayElements = buildVideoOverlayElements(clampedVideoOverlays, segments, nextTrack, appMeta, videoOverlaySourceDurations);
   const overlayElements = buildOverlayImageElements(clampedOverlayImages, segments, nextTrack, appMeta);
   const textElements = buildTextElements(clampedTextOverlays, segments, nextTrack);
+  const ttsOverlayElements = buildTtsOverlayElements(clampedTtsOverlays, segments, nextTrack, appMeta);
   const transcriptCaptionElements = buildTranscriptCaptionElements(selections.transcriptCaption, videoSegmentPairs, nextTrack());
   const backgroundAudio = buildBackgroundAudioElement(
     backgroundClips,
@@ -804,6 +910,7 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     ...videoOverlayElements.map((el) => el.toMap() as TemplateElement),
     ...overlayElements.map((el) => el.toMap() as TemplateElement),
     ...textElements.map((el) => el.toMap() as TemplateElement),
+    ...ttsOverlayElements.map((el) => el.toMap() as TemplateElement),
     ...transcriptCaptionElements.map((el) => el.toMap() as TemplateElement),
     ...(backgroundAudio ? [backgroundAudio.toMap() as TemplateElement] : []),
   ];

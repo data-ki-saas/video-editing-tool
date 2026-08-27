@@ -20,7 +20,7 @@
  * fontSizeMinimum/fontSizeMaximum, so this stays a close match for the
  * eventual Creatomate render, not a preview-only fix.
  */
-import { easeInOut } from "./video_math";
+import { easeInOut, type TtsWordTiming } from "./video_math";
 
 export type TextTemplateId =
   | "bold-pop"
@@ -445,4 +445,85 @@ export const TEXT_TEMPLATE_RENDERERS: Record<TextTemplateId, TextTemplateRendere
  * which every caller already treats as "skip this overlay." */
 export function getTextTemplateRenderer(templateId: string): TextTemplateRenderer | undefined {
   return (TEXT_TEMPLATE_RENDERERS as Record<string, TextTemplateRenderer>)[templateId];
+}
+
+/** Karaoke-highlight renderer for a TtsOverlay in "karaoke" displayMode --
+ * a dedicated, simpler-than-the-above renderer (word-wrap + per-word
+ * highlight only, no entrance/exit animation system) since this is driven
+ * by which word is CURRENTLY active, not a single 0..1 progress value the
+ * way every TEXT_TEMPLATE_RENDERERS entry is. Lays every word out via
+ * fitTextToRect's own word-grouping (shared with Word Pop's per-word layout
+ * above) so wrapping stays consistent with the rest of the app, then draws
+ * the active word with a filled highlight pill and every other word plain
+ * white-with-stroke. `words` and the wrapped layout's own flattened word
+ * order line up 1:1 (word-wrap only groups words into lines, it never
+ * reorders or drops any), so `activeIndex` (a plain index into `words`) can
+ * be compared directly against a running counter while iterating the
+ * wrapped layout.
+ *
+ * Exported (not local to one component) so both CanvasPlayer.tsx's live
+ * preview and lib/localRender/exportTimeline.ts's offline export draw
+ * karaoke captions identically -- a preview/render mismatch here would be
+ * exactly the kind of drift this codebase's shared-renderer convention
+ * (getTextTemplateRenderer above) exists to avoid. */
+export function drawKaraokeCaption(
+  ctx: CanvasRenderingContext2D,
+  rectPx: { x: number; y: number; width: number; height: number },
+  words: TtsWordTiming[],
+  activeIndex: number,
+  templateId: string
+) {
+  if (words.length === 0) return;
+  const fontSpec = (size: number) => `bold ${size}px sans-serif`;
+  const fullText = words.map((w) => w.word).join(" ");
+  const baseFontSize = fontSizeFor(rectPx, getTextTemplateFontFraction(templateId));
+  const layout = fitTextToRect(ctx, fullText, rectPx.width, rectPx.height, baseFontSize, fontSpec);
+
+  ctx.save();
+  ctx.font = fontSpec(layout.fontSize);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const spacing = ctx.measureText(" ").width;
+
+  const totalHeight = layout.lineWords.length * layout.lineHeightPx;
+  const startY = rectPx.y + rectPx.height / 2 - totalHeight / 2 + layout.lineHeightPx / 2;
+
+  let globalWordIndex = 0;
+  layout.lineWords.forEach((lineWords, lineIndex) => {
+    const wordWidths = lineWords.map((word) => ctx.measureText(word).width);
+    const lineWidth = wordWidths.reduce((sum, w) => sum + w, 0) + spacing * (lineWords.length - 1);
+    let x = rectPx.x + rectPx.width / 2 - lineWidth / 2;
+    const y = startY + lineIndex * layout.lineHeightPx;
+
+    lineWords.forEach((word, wordIndexInLine) => {
+      const isActive = globalWordIndex === activeIndex;
+      const centerX = x + wordWidths[wordIndexInLine] / 2;
+      if (isActive) {
+        const paddingX = layout.fontSize * 0.15;
+        ctx.save();
+        ctx.fillStyle = "#facc15";
+        ctx.beginPath();
+        ctx.roundRect(
+          x - paddingX,
+          y - layout.lineHeightPx / 2 + 1,
+          wordWidths[wordIndexInLine] + paddingX * 2,
+          layout.lineHeightPx - 2,
+          layout.lineHeightPx * 0.2
+        );
+        ctx.fill();
+        ctx.fillStyle = "#1c1917";
+        ctx.fillText(word, centerX, y);
+        ctx.restore();
+      } else {
+        ctx.lineWidth = layout.fontSize * 0.1;
+        ctx.strokeStyle = "black";
+        ctx.fillStyle = "white";
+        ctx.strokeText(word, centerX, y);
+        ctx.fillText(word, centerX, y);
+      }
+      x += wordWidths[wordIndexInLine] + spacing;
+      globalWordIndex += 1;
+    });
+  });
+  ctx.restore();
 }

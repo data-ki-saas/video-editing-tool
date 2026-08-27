@@ -210,6 +210,77 @@ export async function importStockAsset(
   return handleResponse<Asset>(response);
 }
 
+export interface TtsWordTiming {
+  word: string;
+  startMs: number;
+  endMs: number;
+}
+
+export interface TtsSynthesisResult {
+  assetId: string;
+  url: string;
+  durationSeconds: number;
+  wordTimings: TtsWordTiming[];
+}
+
+export interface TtsVoiceOption {
+  id: string;
+  label: string;
+  locale: string;
+  gender: string;
+}
+
+/** POST /api/tts/synthesize -- converts `text` to speech via the chosen
+ * `voice`, returning the generated audio's own asset id (same private-
+ * asset-then-presigned-URL pattern as every other asset -- see Asset.url's
+ * own comment) plus exact per-word timings for karaoke-style captioning
+ * (see video_math.ts's TtsOverlay). The wire response is snake_case
+ * (asset_id/duration_seconds/word_timings/start_ms/end_ms, matching every
+ * other backend field) -- converted to camelCase here, at the boundary,
+ * since TtsOverlay/TtsWordTiming flow into CanvasPlayer's hot preview loop
+ * where camelCase matches the rest of this codebase's TS (see TextOverlay's
+ * own startTimeSeconds). `rate`/`pitch` are supported by the backend but
+ * have no UI in TtsOverlayDialog yet (see its own module comment) -- omit
+ * to default both to 0. */
+export async function synthesizeTts(
+  projectId: string,
+  text: string,
+  voice: string,
+  rate?: number,
+  pitch?: number
+): Promise<TtsSynthesisResult> {
+  const response = await apiFetch(`${API_BASE_URL}/api/tts/synthesize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({
+      project_id: projectId,
+      text,
+      voice,
+      ...(rate !== undefined ? { rate } : {}),
+      ...(pitch !== undefined ? { pitch } : {}),
+    }),
+  });
+  const body = await handleResponse<{
+    asset_id: string;
+    url: string;
+    duration_seconds: number;
+    word_timings: { word: string; start_ms: number; end_ms: number }[];
+  }>(response);
+  return {
+    assetId: body.asset_id,
+    url: body.url,
+    durationSeconds: body.duration_seconds,
+    wordTimings: body.word_timings.map((w) => ({ word: w.word, startMs: w.start_ms, endMs: w.end_ms })),
+  };
+}
+
+/** GET /api/tts/voices -- the catalog of voices TtsOverlayDialog's own
+ * <select> populates from, fetched fresh on mount rather than hardcoded. */
+export async function listTtsVoices(): Promise<{ voices: TtsVoiceOption[] }> {
+  const response = await apiFetch(`${API_BASE_URL}/api/tts/voices`, { headers: await authHeader() });
+  return handleResponse<{ voices: TtsVoiceOption[] }>(response);
+}
+
 export async function deleteProject(projectId: string) {
   const response = await apiFetch(`${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}`, {
     method: "DELETE",

@@ -33,6 +33,7 @@ import { UploadDialog } from "./UploadDialog";
 import { StockMediaDialog } from "./StockMediaDialog";
 import { UserActions } from "./UserActions";
 import { TextOverlayDialog } from "./TextOverlayDialog";
+import { TtsOverlayDialog } from "./TtsOverlayDialog";
 import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
 import { CutawayDialog } from "./CutawayDialog";
 import type { CutawaySegment } from "./CutawayTrack";
@@ -47,7 +48,7 @@ import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS } from "@/lib/video/transcriptCaptionTemplates";
-import { computeFlipSegments } from "@/lib/video/video_math";
+import { computeFlipSegments, ttsOverlayEndTimeSeconds } from "@/lib/video/video_math";
 import type { Asset } from "@/lib/api";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
 import type {
@@ -58,6 +59,7 @@ import type {
   TextOverlay,
   TranscriptCaption,
   TrimRange,
+  TtsOverlay,
   VideoOverlayClip,
   ZoomEffect,
 } from "@/lib/video/video_math";
@@ -77,9 +79,17 @@ function formatTimeRange(startTimeSeconds: number, endTimeSeconds: number): stri
 function ActiveTransformationsList({
   selections,
   videoDurationSeconds,
+  onEditTtsOverlay,
+  onDeleteTtsOverlay,
 }: {
   selections: EditSelectionsSnapshot;
   videoDurationSeconds: number;
+  // TTS overlays have no dedicated timeline rail (unlike text/image/video
+  // overlays' own Track components) -- this list is their only edit/delete
+  // entry point, so (unlike every other row here, which is plain summary
+  // text) its own rows are interactive.
+  onEditTtsOverlay: (index: number) => void;
+  onDeleteTtsOverlay: (index: number) => void;
 }) {
   const rows: string[] = [];
 
@@ -129,15 +139,37 @@ function ActiveTransformationsList({
     rows.push(`Auto-captions: ${option?.name ?? selections.transcriptCaption.templateId}`);
   }
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && selections.ttsOverlays.length === 0) {
     return <p className="text-xs text-muted">No transformations applied yet.</p>;
   }
 
   return (
     <ul className="flex h-full flex-col gap-0.5 overflow-y-auto">
       {rows.map((row, index) => (
-        <li key={index} className="shrink-0 truncate rounded-md px-2 py-0.5 text-xs text-foreground">
+        <li key={`row-${index}`} className="shrink-0 truncate rounded-md px-2 py-0.5 text-xs text-foreground">
           {row}
+        </li>
+      ))}
+      {selections.ttsOverlays.map((overlay, index) => (
+        <li key={`tts-${index}`} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-xs text-foreground">
+          <button
+            type="button"
+            onClick={() => onEditTtsOverlay(index)}
+            className="min-w-0 flex-1 truncate text-left hover:underline"
+            title="Edit this narration"
+          >
+            Narration ({overlay.displayMode === "karaoke" ? "karaoke" : "captioned"}) &quot;{overlay.text}&quot;{" "}
+            {formatTimeRange(overlay.startTimeSeconds, ttsOverlayEndTimeSeconds(overlay))}
+          </button>
+          <button
+            type="button"
+            onClick={() => onDeleteTtsOverlay(index)}
+            aria-label="Remove narration"
+            title="Remove narration"
+            className="shrink-0 text-muted hover:text-red-600"
+          >
+            ✕
+          </button>
         </li>
       ))}
     </ul>
@@ -202,6 +234,13 @@ export function ActionArea({
   editingTextOverlay,
   onSaveTextOverlay,
   onCloseTextDialog,
+  onOpenTtsDialog,
+  isTtsDialogOpen,
+  editingTtsOverlay,
+  onSaveTtsOverlay,
+  onCloseTtsDialog,
+  onEditTtsOverlay,
+  onDeleteTtsOverlay,
   onOpenTranscriptDialog,
   isTranscriptDialogOpen,
   transcriptCaption,
@@ -232,6 +271,7 @@ export function ActionArea({
   trimRanges,
   overlayImages,
   textOverlays,
+  ttsOverlays,
   sequenceClips,
   videoOverlays,
   backgroundTracks,
@@ -243,6 +283,7 @@ export function ActionArea({
   onPlayerTimeUpdate,
   selections,
   videoDurationSeconds,
+  currentTimeSeconds,
 }: {
   projectId: string;
   assets: Asset[];
@@ -307,6 +348,13 @@ export function ActionArea({
   editingTextOverlay: TextOverlay | null;
   onSaveTextOverlay: (text: string, templateId: string, rect: CropRect) => void;
   onCloseTextDialog: () => void;
+  onOpenTtsDialog: () => void;
+  isTtsDialogOpen: boolean;
+  editingTtsOverlay: TtsOverlay | null;
+  onSaveTtsOverlay: (overlay: TtsOverlay) => void;
+  onCloseTtsDialog: () => void;
+  onEditTtsOverlay: (overlayIndex: number) => void;
+  onDeleteTtsOverlay: (overlayIndex: number) => void;
   onOpenTranscriptDialog: () => void;
   isTranscriptDialogOpen: boolean;
   transcriptCaption: TranscriptCaption | null;
@@ -346,6 +394,7 @@ export function ActionArea({
   trimRanges: TrimRange[];
   overlayImages: ImageOverlayClip[];
   textOverlays: TextOverlay[];
+  ttsOverlays: TtsOverlay[];
   sequenceClips: (SequenceEntry & { url: string })[];
   videoOverlays: VideoOverlayClip[];
   backgroundTracks: { name: string; url: string }[];
@@ -359,6 +408,9 @@ export function ActionArea({
   onPlayerTimeUpdate: (seconds: number) => void;
   selections: EditSelectionsSnapshot;
   videoDurationSeconds: number;
+  // Current playhead position -- TtsOverlayDialog needs this as a freshly-
+  // added overlay's own startTimeSeconds (see that dialog's own comment).
+  currentTimeSeconds: number;
 }) {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
@@ -425,13 +477,20 @@ export function ActionArea({
           imageOverlayCount={overlayImages.length}
           onOpenTextDialog={onOpenTextDialog}
           textOverlayCount={textOverlays.length}
+          onOpenTtsDialog={onOpenTtsDialog}
+          ttsOverlayCount={ttsOverlays.length}
           onOpenTranscriptDialog={onOpenTranscriptDialog}
           autoCaptionEnabled={transcriptCaption !== null}
         />
       </div>
 
       <div className="w-64 shrink-0 overflow-hidden border-r border-border pr-4">
-        <ActiveTransformationsList selections={selections} videoDurationSeconds={videoDurationSeconds} />
+        <ActiveTransformationsList
+          selections={selections}
+          videoDurationSeconds={videoDurationSeconds}
+          onEditTtsOverlay={onEditTtsOverlay}
+          onDeleteTtsOverlay={onDeleteTtsOverlay}
+        />
       </div>
 
       <div className="flex flex-1 items-center justify-end p-2">
@@ -453,6 +512,7 @@ export function ActionArea({
             trimRanges={trimRanges}
             overlayImages={overlayImages}
             textOverlays={textOverlays}
+            ttsOverlays={ttsOverlays}
             videoOverlays={videoOverlays}
             backgroundTracks={backgroundTracks}
             mainAudioVolume={mainAudioVolume}
@@ -511,6 +571,19 @@ export function ActionArea({
           frameAspectRatio={frameAspectRatio}
           onSave={(text, templateId: TextTemplateId, rect) => onSaveTextOverlay(text, templateId, rect)}
           onClose={onCloseTextDialog}
+        />
+      )}
+
+      {isTtsDialogOpen && (
+        <TtsOverlayDialog
+          projectId={projectId}
+          editingOverlay={editingTtsOverlay}
+          editingOverlayAssetUrl={editingTtsOverlay ? (assetUrlById[editingTtsOverlay.assetId] ?? null) : null}
+          previewFrameUrl={previewFrameUrl}
+          frameAspectRatio={frameAspectRatio}
+          currentTimeSeconds={currentTimeSeconds}
+          onSave={onSaveTtsOverlay}
+          onClose={onCloseTtsDialog}
         />
       )}
 

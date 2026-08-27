@@ -793,6 +793,78 @@ export function findActiveTextOverlays(overlays: TextOverlay[], timeSeconds: num
   return overlays.filter((overlay) => timeSeconds >= overlay.startTimeSeconds && timeSeconds < overlay.endTimeSeconds);
 }
 
+/** One word's exact timing within a TTS synthesis result -- see TtsOverlay
+ * below. Millisecond ints, matching the backend's own wire units, since
+ * these are compared against a millisecond playhead offset every preview
+ * tick (see CanvasPlayer.tsx's karaoke renderer) with no unit conversion
+ * needed at that hot call site. */
+export interface TtsWordTiming {
+  word: string;
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * TTS-generated narration composited on top of the base video for a time
+ * range -- the audio comes from a backend speech-synthesis call (assetId
+ * points at the generated mp3, same private-asset-then-presigned-URL
+ * pattern as everything else), and its on-screen text is either a static
+ * captioned block (same template system as TextOverlay) or word-by-word
+ * "karaoke" highlighting driven by wordTimings, exact per-word timestamps
+ * from the synthesis itself (not ASR, unlike TranscriptCaption -- this is
+ * why karaoke mode CAN be live-previewed accurately, unlike TranscriptCaption).
+ */
+export interface TtsOverlay {
+  text: string;
+  voice: string;
+  assetId: string;
+  durationSeconds: number;
+  wordTimings: TtsWordTiming[];
+  startTimeSeconds: number;
+  displayMode: "background" | "karaoke";
+  rect: CropRect;
+  // TextTemplateId -- used for the caption's own font/color when
+  // displayMode === "background", and as the karaoke text's base look too.
+  // Always set (defaults to the first TEXT_TEMPLATE_OPTIONS entry).
+  templateId: string;
+  // 0..1, default 1 -- see CanvasPlayer.tsx's own per-overlay gain node.
+  volume: number;
+}
+
+// Same bottom-third caption-safe default as text overlays.
+export const DEFAULT_TTS_OVERLAY_RECT: CropRect = { x: 0.1, y: 0.7, width: 0.8, height: 0.2 };
+
+// Deliberately NOT a stored field (unlike TextOverlay.endTimeSeconds) --
+// derived from startTimeSeconds + durationSeconds, since duration comes
+// from the real generated audio (durationSeconds, from the synthesis
+// response), not free authoring. Only startTimeSeconds is ever
+// user-editable (drag to reposition in time); the overlay's rect is still
+// drag/resize-able in space same as a text overlay.
+export function ttsOverlayEndTimeSeconds(overlay: TtsOverlay): number {
+  return overlay.startTimeSeconds + overlay.durationSeconds;
+}
+
+/** Every TTS overlay visible at `timeSeconds` -- same multiple-at-once,
+ * half-open-interval semantics as findActiveTextOverlays above. */
+export function findActiveTtsOverlays(overlays: TtsOverlay[], timeSeconds: number): TtsOverlay[] {
+  return overlays.filter((overlay) => timeSeconds >= overlay.startTimeSeconds && timeSeconds < ttsOverlayEndTimeSeconds(overlay));
+}
+
+/** Which word (if any) of a TtsOverlay's exact synthesis-provided timings is
+ * "speaking" at `timeSeconds` -- word_timings are milliseconds relative to
+ * the narration's OWN start, so this converts timeSeconds (the sequence's
+ * own clock, same one findActiveTtsOverlays uses) down to that same
+ * relative-ms scale first. Unlike TranscriptCaption (ASR, ~second-level
+ * accuracy, deliberately never live-previewed -- see its own doc comment
+ * above), these timings come straight from the synthesis engine, so a live
+ * per-word highlight is trustworthy, not just an approximation -- both
+ * CanvasPlayer.tsx's live preview and exportTimeline.ts's offline render
+ * call this so the two never disagree on which word is highlighted when. */
+export function findActiveWordIndex(overlay: TtsOverlay, timeSeconds: number): number {
+  const relativeMs = (timeSeconds - overlay.startTimeSeconds) * 1000;
+  return overlay.wordTimings.findIndex((w) => relativeMs >= w.startMs && relativeMs < w.endMs);
+}
+
 /** How far `timeSeconds` is through a [startTimeSeconds, endTimeSeconds)
  * window, as a 0..1 fraction clamped at both ends -- what every text
  * template renderer uses to drive its own entrance/exit animation, so

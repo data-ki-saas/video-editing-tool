@@ -83,17 +83,21 @@ import {
   buildSequenceClipInfos,
   totalSequenceDuration,
   resolveSequencePosition,
+  findActiveTtsOverlays,
+  ttsOverlayEndTimeSeconds,
+  findActiveWordIndex,
   FULL_FRAME_CROP_RECT,
   type CropRect,
   type ImageOverlayClip,
   type SequenceClipInfo,
   type SequenceEntry,
   type TextOverlay,
+  type TtsOverlay,
   type VideoOverlayClip,
   type TrimRange,
   type ZoomEffect,
 } from "@/lib/video/video_math";
-import { getTextTemplateRenderer } from "@/lib/video/textTemplates";
+import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
 import { getFilterPresetOption } from "@/lib/video/filterPresets";
 import { ReelLoader } from "@/components/ReelLoader";
 import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
@@ -151,6 +155,16 @@ export const CanvasPlayer = forwardRef<
     // named template (see lib/video/textTemplates.ts) -- drawn after image
     // overlays, so text always sits above them.
     textOverlays: TextOverlay[];
+    // TTS-generated narration -- its own audio (decoded/scheduled here, see
+    // this file's module comment) plus its own on-screen caption, drawn
+    // after textOverlays (narration reads as the most prominent caption
+    // layer). `displayMode: "background"` reuses the exact same
+    // TEXT_TEMPLATE_RENDERERS machinery textOverlays already uses (it's
+    // just text-with-a-template); `displayMode: "karaoke"` uses a dedicated
+    // word-highlight renderer (see this file's own drawKaraokeCaption) since
+    // exact per-word timings from the synthesis itself (not ASR) make a
+    // live-accurate highlight actually achievable, unlike TranscriptCaption.
+    ttsOverlays: TtsOverlay[];
     // A second video asset on its own rail, with a switchable layout (see
     // video_math.ts's VideoOverlayClip) -- drawn right after the base
     // frame (before image/text overlays), same tier as those. `assetUrlById`
@@ -185,6 +199,7 @@ export const CanvasPlayer = forwardRef<
     trimRanges,
     overlayImages,
     textOverlays,
+    ttsOverlays,
     videoOverlays,
     assetUrlById,
     backgroundTracks,
@@ -241,6 +256,16 @@ export const CanvasPlayer = forwardRef<
   // scheduled all at once in resumePlaybackFrom -- see its own comment) --
   // stopPlaybackLoop stops and clears all of them together.
   const overlayAudioSourceNodesRef = useRef<AudioBufferSourceNode[]>([]);
+  // Decoded audio for every TTS narration overlay's own generated asset,
+  // keyed by assetId -- same lazy/cached decode pattern as
+  // videoOverlayAudioBuffersByAssetIdRef, just always decoded (unlike video
+  // overlays, a TTS overlay's whole point is its audio, there's no
+  // audioBalance === 0 opt-out).
+  const ttsAudioBuffersByAssetIdRef = useRef<Record<string, AudioBuffer>>({});
+  // Every TTS narration source node currently scheduled for this playback
+  // pass -- stopPlaybackLoop stops and clears all of them together, same as
+  // overlayAudioSourceNodesRef above.
+  const ttsAudioSourceNodesRef = useRef<AudioBufferSourceNode[]>([]);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
@@ -305,6 +330,14 @@ export const CanvasPlayer = forwardRef<
       }
     }
     overlayAudioSourceNodesRef.current = [];
+    for (const node of ttsAudioSourceNodesRef.current) {
+      try {
+        node.stop();
+      } catch {
+        // Already stopped -- fine to ignore.
+      }
+    }
+    ttsAudioSourceNodesRef.current = [];
   }
 
   /** The one canonical "how long is this overlay's source, for looping
@@ -545,6 +578,29 @@ export const CanvasPlayer = forwardRef<
         progress: computeProgress(overlay.startTimeSeconds, overlay.endTimeSeconds, elapsedSeconds),
       });
     }
+
+    // TTS narration captions draw last of all -- on top of manually-typed
+    // text overlays too, since narration is the most "live" caption layer.
+    for (const overlay of findActiveTtsOverlays(ttsOverlays, elapsedSeconds)) {
+      const rectPx = {
+        x: overlay.rect.x * canvas.width,
+        y: overlay.rect.y * canvas.height,
+        width: overlay.rect.width * canvas.width,
+        height: overlay.rect.height * canvas.height,
+      };
+      if (overlay.displayMode === "karaoke") {
+        drawKaraokeCaption(ctx, rectPx, overlay.wordTimings, findActiveWordIndex(overlay, elapsedSeconds), overlay.templateId);
+        continue;
+      }
+      const renderer = getTextTemplateRenderer(overlay.templateId);
+      if (!renderer) continue;
+      renderer({
+        ctx,
+        text: overlay.text,
+        rectPx,
+        progress: computeProgress(overlay.startTimeSeconds, ttsOverlayEndTimeSeconds(overlay), elapsedSeconds),
+      });
+    }
   }
 
   function tick() {
@@ -689,6 +745,52 @@ export const CanvasPlayer = forwardRef<
       overlaySource.connect(overlayGainNode).connect(audioContext.destination);
       overlaySource.start(startCtxTime, elapsedIntoWindowSeconds % overlayBuffer.duration, remainingDurationSeconds);
       overlayAudioSourceNodesRef.current.push(overlaySource);
+    }
+
+    // One AudioBufferSourceNode per TTS narration overlay whose audio has
+    // finished decoding and whose window hasn't fully passed yet -- same
+    // per-item, scheduled-at-its-own-time-offset idiom as the video-overlay
+    // audio block above (NOT the background-music model: narration plays
+    // once at its own instant, it never loops). No ducking of the main
+    // track against narration -- audio-ducking between TTS and the base
+    // clip/background music is a known, deliberate follow-up, not done here
+    // (see this repo's own task notes).
+    ttsAudioSourceNodesRef.current = [];
+    for (const overlay of ttsOverlays) {
+      const overlayEndSeconds = ttsOverlayEndTimeSeconds(overlay);
+      if (overlayEndSeconds <= adjustedOffsetSeconds) continue; // this window is entirely in the past
+      const ttsBuffer = ttsAudioBuffersByAssetIdRef.current[overlay.assetId];
+      if (!ttsBuffer || ttsBuffer.duration <= 0) continue;
+
+      const windowStartSeconds = Math.max(overlay.startTimeSeconds, adjustedOffsetSeconds);
+      const elapsedIntoWindowSeconds = windowStartSeconds - overlay.startTimeSeconds;
+      const remainingDurationSeconds = overlayEndSeconds - windowStartSeconds;
+      if (remainingDurationSeconds <= 0) continue;
+      const startCtxTime = audioContext.currentTime + (windowStartSeconds - adjustedOffsetSeconds);
+
+      const ttsSource = audioContext.createBufferSource();
+      ttsSource.buffer = ttsBuffer;
+      const ttsGainNode = audioContext.createGain();
+      const targetGain = Math.min(Math.max(overlay.volume, 0), 1);
+      // Fades in/out at this window's own start/end, same click/pop
+      // avoidance as the video-overlay audio block above -- skips the
+      // fade-IN when resuming from partway through the narration (nothing
+      // to fade from silence into, it's already playing).
+      const fadeOutStartCtxTime = Math.max(
+        startCtxTime + AUDIO_TRANSITION_RAMP_SECONDS,
+        startCtxTime + remainingDurationSeconds - AUDIO_TRANSITION_RAMP_SECONDS
+      );
+      if (elapsedIntoWindowSeconds <= 0) {
+        ttsGainNode.gain.setValueAtTime(0, startCtxTime);
+        ttsGainNode.gain.linearRampToValueAtTime(targetGain, startCtxTime + AUDIO_TRANSITION_RAMP_SECONDS);
+      } else {
+        ttsGainNode.gain.setValueAtTime(targetGain, startCtxTime);
+      }
+      ttsGainNode.gain.setValueAtTime(targetGain, fadeOutStartCtxTime);
+      ttsGainNode.gain.linearRampToValueAtTime(0, startCtxTime + remainingDurationSeconds);
+      ttsSource.connect(ttsGainNode).connect(audioContext.destination);
+      ttsSource.start(startCtxTime, elapsedIntoWindowSeconds, remainingDurationSeconds);
+      ttsAudioSourceNodesRef.current.push(ttsSource);
     }
 
     // Background music loops on its own (loop = true over the whole
@@ -938,6 +1040,7 @@ export const CanvasPlayer = forwardRef<
     trimRanges,
     overlayImages,
     textOverlays,
+    ttsOverlays,
     videoOverlays,
     isReady,
     isPlaying,
@@ -1065,6 +1168,42 @@ export const CanvasPlayer = forwardRef<
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on overlayAudioLoadKey (joined assetId:url), not the videoOverlays array reference
   }, [overlayAudioLoadKey]);
+
+  // Decodes every TTS narration overlay's own generated audio, independent
+  // of the main clips-loading effect (adding/editing a narration shouldn't
+  // re-extract every video frame from scratch) -- unlike video-overlay
+  // audio above, this always decodes (a narration overlay's whole point is
+  // its audio, there's no audioBalance opt-out to check). Takes effect on
+  // the NEXT resumePlaybackFrom, same as every other audio buffer here.
+  const ttsAssetIds = Array.from(new Set(ttsOverlays.map((overlay) => overlay.assetId)));
+  const ttsAudioLoadKey = ttsAssetIds.map((assetId) => `${assetId}:${assetUrlById[assetId] ?? ""}`).join(",");
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTtsAudio() {
+      for (const assetId of ttsAssetIds) {
+        if (cancelled) return;
+        if (ttsAudioBuffersByAssetIdRef.current[assetId]) continue;
+        const url = assetUrlById[assetId];
+        if (!url) continue;
+        try {
+          const buffer = await decodeAudioBuffer(url);
+          if (cancelled) return;
+          ttsAudioBuffersByAssetIdRef.current[assetId] = buffer;
+        } catch {
+          // Skipped -- this overlay's window just plays silently until a
+          // later successful decode (e.g. once assetUrlById refreshes with
+          // a valid presigned URL).
+        }
+      }
+    }
+
+    void loadTtsAudio();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on ttsAudioLoadKey (joined assetId:url), not the ttsOverlays array reference
+  }, [ttsAudioLoadKey]);
 
   // Decodes/concatenates the background-music sequence independently of the
   // main clips-loading effect above, so adding or swapping a background

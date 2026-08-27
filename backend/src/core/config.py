@@ -20,6 +20,17 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
 
+    # Which TTSProvider src.tts.client.get_tts_provider() returns. Only
+    # "edge" exists today (the free, keyless unofficial Edge Read-Aloud API
+    # via the edge-tts package) but the setting/switch pattern is kept the
+    # same shape as llm_provider above so a paid provider can be added later
+    # without a rewrite.
+    tts_provider: str = "edge"
+    # Abuse guardrail (see usage_events / RENDER_DAILY_LIMIT's frontend
+    # equivalent in api/render/route.ts), not billing/metering -- a fixed
+    # daily cap per user on voiceover generations.
+    tts_daily_cap: int = 15
+
     supabase_url: str = ""
     supabase_service_role_key: str = ""
 
