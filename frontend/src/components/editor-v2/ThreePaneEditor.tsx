@@ -97,6 +97,8 @@ import {
   applyAddTtsOverlay,
   applyEditTtsOverlay,
   applyDeleteTtsOverlay,
+  applyTtsOverlayPositionChange,
+  applyTtsOverlayVolumeChange,
   applyEnableTranscriptCaption,
   applyUpdateTranscriptCaption,
   applyDisableTranscriptCaption,
@@ -279,6 +281,12 @@ export function ThreePaneEditor({
   } | null>(null);
   // VideoOverlayTrack's own per-segment volume slider, same live-edit split again.
   const [liveOverlayAudioBalanceEdit, setLiveOverlayAudioBalanceEdit] = useState<{ index: number; balance: number } | null>(null);
+
+  // TtsOverlayTrack's own body drag (move, duration is fixed -- see that
+  // file's own module comment) and per-segment volume badge, same live-edit
+  // split as every other overlay type above.
+  const [liveTtsOverlayPositionEdit, setLiveTtsOverlayPositionEdit] = useState<{ index: number; startTimeSeconds: number } | null>(null);
+  const [liveTtsOverlayVolumeEdit, setLiveTtsOverlayVolumeEdit] = useState<{ index: number; volume: number } | null>(null);
 
   // A representative still frame per video asset -- lifted up from
   // AssetGallery.tsx (which used to generate this locally) since
@@ -1157,6 +1165,27 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  // TtsOverlayTrack's own body drag (move) and volume badge.
+  function handleChangeTtsOverlayPosition(overlayIndex: number, startTimeSeconds: number) {
+    setLiveTtsOverlayPositionEdit({ index: overlayIndex, startTimeSeconds });
+  }
+
+  function handleCommitTtsOverlayPosition(overlayIndex: number, startTimeSeconds: number) {
+    setLiveTtsOverlayPositionEdit(null);
+    const { label, state } = applyTtsOverlayPositionChange(selections, overlayIndex, startTimeSeconds);
+    pushChange(label, state);
+  }
+
+  function handleChangeTtsOverlayVolume(overlayIndex: number, volume: number) {
+    setLiveTtsOverlayVolumeEdit({ index: overlayIndex, volume });
+  }
+
+  function handleCommitTtsOverlayVolume(overlayIndex: number, volume: number) {
+    setLiveTtsOverlayVolumeEdit(null);
+    const { label, state } = applyTtsOverlayVolumeChange(selections, overlayIndex, volume);
+    pushChange(label, state);
+  }
+
   // VideoOverlayTrack's crosshair button -- opens VideoOverlayFramingDialog
   // for that overlay.
   function handleOpenVideoOverlayFraming(overlayIndex: number) {
@@ -1551,6 +1580,8 @@ export function ThreePaneEditor({
       setIsTtsDialogOpen(false);
       setEditingTtsOverlayIndex(null);
     }
+    setLiveTtsOverlayPositionEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    setLiveTtsOverlayVolumeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
     const { label, state } = applyDeleteTtsOverlay(selections, overlayIndex);
     pushChange(label, state);
   }
@@ -1668,6 +1699,19 @@ export function ThreePaneEditor({
     }
     if (liveOverlayAudioBalanceEdit?.index === index) {
       return { ...overlay, audioBalance: liveOverlayAudioBalanceEdit.balance };
+    }
+    return overlay;
+  });
+
+  // Splices any in-progress TtsOverlayTrack drag/volume edit into the
+  // persisted array at its own index, same pattern as displayedVideoOverlays
+  // above.
+  const displayedTtsOverlays: TtsOverlay[] = selections.ttsOverlays.map((overlay, index) => {
+    if (liveTtsOverlayPositionEdit?.index === index) {
+      return { ...overlay, startTimeSeconds: liveTtsOverlayPositionEdit.startTimeSeconds };
+    }
+    if (liveTtsOverlayVolumeEdit?.index === index) {
+      return { ...overlay, volume: liveTtsOverlayVolumeEdit.volume };
     }
     return overlay;
   });
@@ -1917,7 +1961,7 @@ export function ThreePaneEditor({
           trimRanges={selections.trimRanges}
           overlayImages={displayedOverlayImages}
           textOverlays={displayedTextOverlays}
-          ttsOverlays={selections.ttsOverlays}
+          ttsOverlays={displayedTtsOverlays}
           sequenceClips={playbackClips}
           videoOverlays={displayedVideoOverlays}
           backgroundTracks={resolvedBackgroundTracks}
@@ -1998,6 +2042,13 @@ export function ThreePaneEditor({
           onCommitTextOverlayRange={handleCommitTextOverlayRange}
           onDeleteTextOverlay={handleDeleteTextOverlay}
           onRequestEditTextOverlay={handleRequestEditTextOverlay}
+          ttsOverlays={displayedTtsOverlays}
+          onChangeTtsOverlayPosition={handleChangeTtsOverlayPosition}
+          onCommitTtsOverlayPosition={handleCommitTtsOverlayPosition}
+          onChangeTtsOverlayVolume={handleChangeTtsOverlayVolume}
+          onCommitTtsOverlayVolume={handleCommitTtsOverlayVolume}
+          onEditTtsOverlay={handleRequestEditTtsOverlay}
+          onDeleteTtsOverlay={handleDeleteTtsOverlay}
           videoOverlays={displayedVideoOverlays}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
           videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}

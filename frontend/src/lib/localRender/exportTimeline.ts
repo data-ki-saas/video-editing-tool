@@ -59,7 +59,7 @@ import {
   findActivePictureInPictureOverlays,
   computeOverlayRects,
   computeCoverFitSourceRect,
-  computeMainAudioGainBreakpoints,
+  computeAudioMixBreakpoints,
   mapSourceRangeToOutputRanges,
   totalSequenceDuration,
   AUDIO_TRANSITION_RAMP_SECONDS,
@@ -226,6 +226,62 @@ function findSegmentAtOutputTime(segments: RenderSegment[], outputTimeSeconds: n
   return segments.length > 0 ? segments[segments.length - 1] : null;
 }
 
+/** Schedules `gainNode`'s automation across one already trim-mapped OUTPUT
+ * sub-range as: a fade in from silence to `nominalGain` scaled by whatever
+ * duckScale applies at this sub-range's own SOURCE start, then a plateau at
+ * each `breakpoints` crossing WITHIN the sub-range's own source overlap
+ * (mapped to its own output-time equivalent via the constant offset this
+ * sub-range's own outputStartSeconds/sourceOverlapStartSeconds establish),
+ * finishing with a fade-out to 0 at the sub-range's own end. Mirrors
+ * CanvasPlayer.tsx's own scheduleDuckedGain, just in OfflineAudioContext/
+ * absolute-output-time terms instead of live ctx-relative terms -- see that
+ * file's own comment and video_math.ts's sampleAudioMixAt for the mixer
+ * spec. Offline export always starts fresh at each sub-range's own start
+ * (no "already playing, skip the fade-in" case -- that's a CanvasPlayer-only
+ * concern, live resume-from-an-arbitrary-offset has no equivalent here). */
+function scheduleDuckedGainOffline(
+  gainNode: GainNode,
+  nominalGain: number,
+  outputRange: { outputStartSeconds: number; outputEndSeconds: number; sourceOverlapStartSeconds: number; sourceOverlapEndSeconds: number },
+  breakpoints: { timeSeconds: number; duckScale: number }[]
+) {
+  const windowDurationSeconds = outputRange.outputEndSeconds - outputRange.outputStartSeconds;
+  const startTimeSeconds = outputRange.outputStartSeconds;
+  const fadeOutStartSeconds = Math.max(
+    startTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS,
+    startTimeSeconds + windowDurationSeconds - AUDIO_TRANSITION_RAMP_SECONDS
+  );
+  function duckScaleAt(sourceTimeSeconds: number): number {
+    let scale = 1;
+    for (const bp of breakpoints) {
+      if (bp.timeSeconds > sourceTimeSeconds) break;
+      scale = bp.duckScale;
+    }
+    return scale;
+  }
+  function outputTimeForSource(sourceTimeSeconds: number): number {
+    return outputRange.outputStartSeconds + (sourceTimeSeconds - outputRange.sourceOverlapStartSeconds);
+  }
+
+  gainNode.gain.setValueAtTime(0, startTimeSeconds);
+  let previousGain = nominalGain * duckScaleAt(outputRange.sourceOverlapStartSeconds);
+  let previousTimeSeconds = startTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS;
+  gainNode.gain.linearRampToValueAtTime(previousGain, previousTimeSeconds);
+
+  for (const bp of breakpoints) {
+    if (bp.timeSeconds <= outputRange.sourceOverlapStartSeconds || bp.timeSeconds >= outputRange.sourceOverlapEndSeconds) continue;
+    const rampTimeSeconds = outputTimeForSource(bp.timeSeconds);
+    if (rampTimeSeconds <= previousTimeSeconds) continue;
+    const target = nominalGain * bp.duckScale;
+    gainNode.gain.setValueAtTime(previousGain, rampTimeSeconds);
+    gainNode.gain.linearRampToValueAtTime(target, rampTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS);
+    previousGain = target;
+    previousTimeSeconds = rampTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS;
+  }
+  gainNode.gain.setValueAtTime(previousGain, Math.max(fadeOutStartSeconds, previousTimeSeconds));
+  gainNode.gain.linearRampToValueAtTime(0, startTimeSeconds + windowDurationSeconds);
+}
+
 /** Builds the whole render's final mixed audio (main sequence audio, cut the
  * same way the video is, plus a looping background track under it, plus any
  * video overlay's own audio and the main-track ducking it causes) as one
@@ -274,15 +330,18 @@ async function buildMixedAudioBuffer(
   // can split one interval into two non-adjacent output ranges. Unlike
   // CanvasPlayer (which resumes from an arbitrary live offset), this offline
   // render always starts at output time 0, so every event schedules against
-  // an absolute output time with no resume-offset bookkeeping needed.
-  const breakpoints = computeMainAudioGainBreakpoints(videoOverlays, sourceTotalDurationSeconds);
+  // an absolute output time with no resume-offset bookkeeping needed. This
+  // same `breakpoints` list (mainGain AND duckScale together) is reused
+  // below by the overlay-audio and TTS-audio blocks for their own ducking --
+  // see sampleAudioMixAt's own doc comment for the full mixer spec.
+  const breakpoints = computeAudioMixBreakpoints(videoOverlays, ttsOverlays, sourceTotalDurationSeconds);
   const outputGainEvents: { outputStartSeconds: number; gain: number }[] = [];
   for (let i = 0; i < breakpoints.length; i++) {
     const rangeStartSeconds = breakpoints[i].timeSeconds;
     const rangeEndSeconds = i + 1 < breakpoints.length ? breakpoints[i + 1].timeSeconds : sourceTotalDurationSeconds;
     if (rangeEndSeconds <= rangeStartSeconds) continue;
     for (const outputRange of mapSourceRangeToOutputRanges(segments, rangeStartSeconds, rangeEndSeconds)) {
-      outputGainEvents.push({ outputStartSeconds: outputRange.outputStartSeconds, gain: breakpoints[i].gain * mainAudioVolume });
+      outputGainEvents.push({ outputStartSeconds: outputRange.outputStartSeconds, gain: breakpoints[i].mainGain * mainAudioVolume });
     }
   }
   outputGainEvents.sort((a, b) => a.outputStartSeconds - b.outputStartSeconds);
@@ -332,19 +391,16 @@ async function buildMixedAudioBuffer(
       if (windowDurationSeconds <= 0) continue;
       const startTimeSeconds = outputRange.outputStartSeconds;
       const elapsedIntoWindowSeconds = outputRange.sourceOverlapStartSeconds - overlay.startTimeSeconds;
-      const fadeOutStartSeconds = Math.max(
-        startTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS,
-        startTimeSeconds + windowDurationSeconds - AUDIO_TRANSITION_RAMP_SECONDS
-      );
 
       const overlaySource = offlineContext.createBufferSource();
       overlaySource.buffer = overlayBuffer;
       overlaySource.loop = true;
       const overlayGainNode = offlineContext.createGain();
-      overlayGainNode.gain.setValueAtTime(0, startTimeSeconds);
-      overlayGainNode.gain.linearRampToValueAtTime(overlay.audioBalance, startTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS);
-      overlayGainNode.gain.setValueAtTime(overlay.audioBalance, fadeOutStartSeconds);
-      overlayGainNode.gain.linearRampToValueAtTime(0, startTimeSeconds + windowDurationSeconds);
+      // Ducked against any TTS narration (and, unusually, any other
+      // overlapping overlay) sharing this window -- see
+      // scheduleDuckedGainOffline above and sampleAudioMixAt's own doc
+      // comment for the mixer spec.
+      scheduleDuckedGainOffline(overlayGainNode, overlay.audioBalance, outputRange, breakpoints);
       overlaySource.connect(overlayGainNode).connect(offlineContext.destination);
       overlaySource.start(startTimeSeconds, elapsedIntoWindowSeconds % overlayBuffer.duration, windowDurationSeconds);
     }
@@ -375,25 +431,24 @@ async function buildMixedAudioBuffer(
     const ttsBuffer = ttsAudioByAssetId.get(overlay.assetId);
     if (!ttsBuffer || ttsBuffer.duration <= 0) continue;
     const overlayEndSeconds = ttsOverlayEndTimeSeconds(overlay);
-    const targetGain = Math.min(Math.max(overlay.volume, 0), 1);
+    const nominalGain = Math.min(Math.max(overlay.volume, 0), 1);
 
     for (const outputRange of mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlayEndSeconds)) {
       const windowDurationSeconds = outputRange.outputEndSeconds - outputRange.outputStartSeconds;
       if (windowDurationSeconds <= 0) continue;
       const startTimeSeconds = outputRange.outputStartSeconds;
       const elapsedIntoWindowSeconds = outputRange.sourceOverlapStartSeconds - overlay.startTimeSeconds;
-      const fadeOutStartSeconds = Math.max(
-        startTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS,
-        startTimeSeconds + windowDurationSeconds - AUDIO_TRANSITION_RAMP_SECONDS
-      );
 
       const ttsSource = offlineContext.createBufferSource();
       ttsSource.buffer = ttsBuffer;
       const ttsGainNode = offlineContext.createGain();
-      ttsGainNode.gain.setValueAtTime(0, startTimeSeconds);
-      ttsGainNode.gain.linearRampToValueAtTime(targetGain, startTimeSeconds + AUDIO_TRANSITION_RAMP_SECONDS);
-      ttsGainNode.gain.setValueAtTime(targetGain, fadeOutStartSeconds);
-      ttsGainNode.gain.linearRampToValueAtTime(0, startTimeSeconds + windowDurationSeconds);
+      // Ducked against any active video-overlay audio sharing this window
+      // via the same scheduleDuckedGainOffline/breakpoints the main track
+      // and the video-overlay-audio block above both use -- see
+      // sampleAudioMixAt's own doc comment for the mixer spec (background
+      // music is NOT part of this mix; it plays unaffected by narration, a
+      // deliberate scope decision, not an oversight).
+      scheduleDuckedGainOffline(ttsGainNode, nominalGain, outputRange, breakpoints);
       ttsSource.connect(ttsGainNode).connect(offlineContext.destination);
       ttsSource.start(startTimeSeconds, elapsedIntoWindowSeconds, windowDurationSeconds);
     }
@@ -746,6 +801,7 @@ export async function exportVideoLocally(
           width: overlay.rect.width * canvas.width,
           height: overlay.rect.height * canvas.height,
         };
+        if (overlay.displayMode === "none") continue; // audio-only narration -- nothing drawn
         if (overlay.displayMode === "karaoke") {
           drawKaraokeCaption(ctx, rectPx, overlay.wordTimings, findActiveWordIndex(overlay, sourceTimeSeconds), overlay.templateId);
           continue;

@@ -617,30 +617,76 @@ export function findActivePictureInPictureOverlays<T extends LayoutTimedClip>(cl
 // rate.
 export const AUDIO_TRANSITION_RAMP_SECONDS = 0.03;
 
-/** The base clip's own audio volume (0..1) over time, as a step function --
- * 1 everywhere by default, dipping to `1 - audioBalance` for the duration
- * of any overlay window that wants some of its own audio mixed in (see
- * VideoOverlayClip.audioBalance above), so the base track "ducks" rather
- * than playing at full volume underneath. Multiple Picture-in-Picture
- * overlays CAN be active at once with different balances -- the strongest
- * ducking request wins (`Math.max` of their balances), rather than
- * compounding. Hard cuts at each boundary (no fade) -- callers apply their
- * own short ramp (AUDIO_TRANSITION_RAMP_SECONDS above) around each
- * breakpoint instead. Breakpoints are returned in order, each holding until
- * the next one. All times here are in the ORIGINAL (pre-trim) sequence
- * timeline, same as VideoOverlayClip.startTimeSeconds/endTimeSeconds --
- * see RenderSegment's own doc comment on that convention, and
- * mapSourceRangeToOutputRanges below for translating a breakpoint interval
- * into its OUTPUT-time equivalent(s) for an offline render. */
-export function computeMainAudioGainBreakpoints(
-  overlays: VideoOverlayClip[],
+/**
+ * Samples the three-way audio mix (base track / video-overlay's own audio /
+ * TTS narration) at one instant -- the single formula every ducking call
+ * site below is built from, so live preview, offline export, and (should it
+ * ever reach the Creatomate compiler) a real render can't disagree on it.
+ *
+ * The mixer spec: a video overlay's `audioBalance` and a TTS overlay's
+ * `volume` (both already 0..1 fractions of "full") are each the level that
+ * clip plays at, UNCHANGED, as long as the two don't add up to more than 1
+ * (100%) -- the base track just takes whatever's left over
+ * (`1 - (balance + volume)`). Only once their sum would exceed 100% does the
+ * base track drop to 0 AND the two get scaled back down together (by
+ * `1 / sum`) so they fill exactly 100% instead of playing louder than that
+ * combined -- their own ratio to each other is preserved, neither one is
+ * silenced in favor of the other. `duckScale` is that single multiplier
+ * (1 whenever nothing needs scaling back) -- both an active video overlay's
+ * own gain automation and an active TTS overlay's own gain automation
+ * multiply their nominal level by it at this same instant (see
+ * CanvasPlayer.tsx/exportTimeline.ts's own per-clip gain scheduling).
+ *
+ * With no TTS overlays active, this reduces exactly to the old
+ * audioBalance-only ducking (`mainGain = 1 - balance`, `duckScale` always 1,
+ * since a lone 0..1 balance can never exceed 1 on its own) -- this function
+ * replaces what used to be a video-overlay-only computeMainAudioGainBreakpoints.
+ * Multiple simultaneously-active clips of the SAME kind (two overlapping
+ * Picture-in-Picture overlays, or -- unusual, but not disallowed -- two
+ * overlapping TTS overlays) use `Math.max` of their own levels, same
+ * "strongest request wins, not compounded" convention as before.
+ */
+export function sampleAudioMixAt(
+  videoOverlays: VideoOverlayClip[],
+  ttsOverlays: TtsOverlay[],
+  timeSeconds: number
+): { mainGain: number; duckScale: number } {
+  const overlayBalance = videoOverlays
+    .filter((o) => o.audioBalance > 0 && timeSeconds >= o.startTimeSeconds && timeSeconds < o.endTimeSeconds)
+    .reduce((max, o) => Math.max(max, o.audioBalance), 0);
+  const ttsVolume = ttsOverlays
+    .filter((o) => timeSeconds >= o.startTimeSeconds && timeSeconds < ttsOverlayEndTimeSeconds(o))
+    .reduce((max, o) => Math.max(max, Math.min(Math.max(o.volume, 0), 1)), 0);
+  const combined = overlayBalance + ttsVolume;
+  return { mainGain: Math.max(0, 1 - combined), duckScale: combined > 1 ? 1 / combined : 1 };
+}
+
+/** The base clip's own audio volume (`mainGain`, 0..1) AND the shared
+ * `duckScale` every active video-overlay/TTS clip's own gain multiplies by
+ * (see sampleAudioMixAt above), over time, as a step function -- hard cuts
+ * at each boundary (no fade), callers apply their own short ramp
+ * (AUDIO_TRANSITION_RAMP_SECONDS above) around each breakpoint instead.
+ * Breakpoints are returned in order, each holding until the next one. All
+ * times here are in the ORIGINAL (pre-trim) sequence timeline, same as
+ * VideoOverlayClip.startTimeSeconds/endTimeSeconds -- see RenderSegment's
+ * own doc comment on that convention, and mapSourceRangeToOutputRanges below
+ * for translating a breakpoint interval into its OUTPUT-time equivalent(s)
+ * for an offline render. */
+export function computeAudioMixBreakpoints(
+  videoOverlays: VideoOverlayClip[],
+  ttsOverlays: TtsOverlay[],
   totalDurationSeconds: number
-): { timeSeconds: number; gain: number }[] {
-  const activeOverlays = overlays.filter((o) => o.audioBalance > 0);
+): { timeSeconds: number; mainGain: number; duckScale: number }[] {
+  const activeOverlays = videoOverlays.filter((o) => o.audioBalance > 0);
   const points = new Set<number>([0, totalDurationSeconds]);
   for (const overlay of activeOverlays) {
     if (overlay.startTimeSeconds > 0 && overlay.startTimeSeconds < totalDurationSeconds) points.add(overlay.startTimeSeconds);
     if (overlay.endTimeSeconds > 0 && overlay.endTimeSeconds < totalDurationSeconds) points.add(overlay.endTimeSeconds);
+  }
+  for (const overlay of ttsOverlays) {
+    const endSeconds = ttsOverlayEndTimeSeconds(overlay);
+    if (overlay.startTimeSeconds > 0 && overlay.startTimeSeconds < totalDurationSeconds) points.add(overlay.startTimeSeconds);
+    if (endSeconds > 0 && endSeconds < totalDurationSeconds) points.add(endSeconds);
   }
   const sorted = Array.from(points).sort((a, b) => a - b);
 
@@ -648,10 +694,7 @@ export function computeMainAudioGainBreakpoints(
     // Sampled just after this breakpoint (the midpoint to the next one, or
     // the point itself for the last) to decide what's active starting HERE.
     const sampleAt = index < sorted.length - 1 ? (timeSeconds + sorted[index + 1]) / 2 : timeSeconds;
-    const maxBalance = activeOverlays
-      .filter((o) => sampleAt >= o.startTimeSeconds && sampleAt < o.endTimeSeconds)
-      .reduce((max, o) => Math.max(max, o.audioBalance), 0);
-    return { timeSeconds, gain: 1 - maxBalance };
+    return { timeSeconds, ...sampleAudioMixAt(videoOverlays, ttsOverlays, sampleAt) };
   });
 }
 
@@ -809,10 +852,13 @@ export interface TtsWordTiming {
  * range -- the audio comes from a backend speech-synthesis call (assetId
  * points at the generated mp3, same private-asset-then-presigned-URL
  * pattern as everything else), and its on-screen text is either a static
- * captioned block (same template system as TextOverlay) or word-by-word
- * "karaoke" highlighting driven by wordTimings, exact per-word timestamps
- * from the synthesis itself (not ASR, unlike TranscriptCaption -- this is
- * why karaoke mode CAN be live-previewed accurately, unlike TranscriptCaption).
+ * captioned block (same template system as TextOverlay), word-by-word
+ * "karaoke" highlighting driven by wordTimings (exact per-word timestamps
+ * from the synthesis itself, not ASR -- this is why karaoke mode CAN be
+ * live-previewed accurately, unlike TranscriptCaption), or no text at all
+ * ("none" -- the narration plays as audio only, nothing drawn on screen;
+ * `rect`/`templateId` are simply unused in this mode, kept set rather than
+ * made optional so every TtsOverlay still has one consistent shape).
  */
 export interface TtsOverlay {
   text: string;
@@ -821,7 +867,7 @@ export interface TtsOverlay {
   durationSeconds: number;
   wordTimings: TtsWordTiming[];
   startTimeSeconds: number;
-  displayMode: "background" | "karaoke";
+  displayMode: "background" | "karaoke" | "none";
   rect: CropRect;
   // TextTemplateId -- used for the caption's own font/color when
   // displayMode === "background", and as the karaoke text's base look too.

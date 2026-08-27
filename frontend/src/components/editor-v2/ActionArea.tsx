@@ -158,7 +158,8 @@ function ActiveTransformationsList({
             className="min-w-0 flex-1 truncate text-left hover:underline"
             title="Edit this narration"
           >
-            Narration ({overlay.displayMode === "karaoke" ? "karaoke" : "captioned"}) &quot;{overlay.text}&quot;{" "}
+            Narration ({overlay.displayMode === "karaoke" ? "karaoke" : overlay.displayMode === "none" ? "no text" : "captioned"}){" "}
+            &quot;{overlay.text}&quot;{" "}
             {formatTimeRange(overlay.startTimeSeconds, ttsOverlayEndTimeSeconds(overlay))}
           </button>
           <button

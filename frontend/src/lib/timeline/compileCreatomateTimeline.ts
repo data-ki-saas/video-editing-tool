@@ -351,11 +351,15 @@ function buildOverlayImageElements(
  *
  * KNOWN GAP: `overlay.audioBalance` (video_math.ts's VideoOverlayClip --
  * lets the live preview duck the base track and mix in the overlay's own
- * audio, see CanvasPlayer.tsx's computeMainAudioGainBreakpoints) is not
- * reflected here at all -- every overlay's own `Video` element below plays
- * with Creatomate's own default audio behavior, and the base track's
- * volume is never ducked. Reproducing this server-side would need per-
- * element `volume` (for the overlay's own share) plus keyframed volume
+ * audio, see CanvasPlayer.tsx's computeAudioMixBreakpoints/sampleAudioMixAt)
+ * is not reflected here at all -- every overlay's own `Video` element below
+ * plays with Creatomate's own default audio behavior, and the base track's
+ * volume is never ducked. The same gap extends to the three-way main/
+ * overlay/TTS-narration mix sampleAudioMixAt now describes: buildTtsOverlayElements'
+ * own `Audio` element below plays at a flat `overlay.volume`, with no
+ * corresponding duck of either the base track or an overlapping overlay's
+ * `Video` element. Reproducing any of this server-side would need per-
+ * element `volume` (for each clip's own share) plus keyframed volume
  * automation on the base sequence's own Video elements (for ducking) --
  * real, uncharted-for-this-file work, not attempted here since this whole
  * path isn't reachable from the UI yet regardless (see
@@ -690,7 +694,10 @@ function buildBackgroundAudioElement(
  * transcriptEffect/transcriptSplit against THIS Audio element's own id --
  * mirrors buildTranscriptCaptionElements' shape closely, but against a
  * narration's own generated audio (known, exact word timings from the
- * synthesis itself) rather than ASR transcription of the base video. */
+ * synthesis itself) rather than ASR transcription of the base video.
+ * `displayMode === "none"` (audio-only narration) skips the companion Text
+ * entirely -- and, since there's nothing to caption, never allocates the
+ * second (caption) track that mode would have used. */
 function buildTtsOverlayElements(
   ttsOverlays: EditSelectionsSnapshot["ttsOverlays"],
   segments: RenderSegment[],
@@ -700,7 +707,7 @@ function buildTtsOverlayElements(
   const elements: (Audio | Text)[] = [];
   for (const overlay of ttsOverlays) {
     const audioTrack = nextTrack();
-    const captionTrack = nextTrack();
+    const captionTrack = overlay.displayMode === "none" ? null : nextTrack();
     const overlayEndSeconds = overlay.startTimeSeconds + overlay.durationSeconds;
     const outputRanges = mapSourceRangeToOutputRanges(segments, overlay.startTimeSeconds, overlayEndSeconds);
 
@@ -723,6 +730,8 @@ function buildTtsOverlayElements(
           source: "",
         })
       );
+
+      if (captionTrack === null) continue; // "none" -- audio-only, no caption to build
 
       if (overlay.displayMode === "karaoke") {
         elements.push(

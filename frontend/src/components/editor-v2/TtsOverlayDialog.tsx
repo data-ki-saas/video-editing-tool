@@ -20,7 +20,7 @@
  * that file's own karaoke renderer).
  *
  * Right half: script textarea, a voice <select> (fetched from
- * listTtsVoices() on mount), a Background/Karaoke segmented toggle, the
+ * listTtsVoices() on mount), a Background/Karaoke/No-text segmented toggle, the
  * same TEXT_TEMPLATE_OPTIONS gallery TextOverlayDialog uses (styles the
  * caption in background mode, and karaoke's base look too), a "Generate
  * speech" button, and an <audio controls> preview of whatever's currently
@@ -84,18 +84,17 @@ export function TtsOverlayDialog({
 }) {
   const [text, setText] = useState(editingOverlay?.text ?? "");
   const [voice, setVoice] = useState(editingOverlay?.voice ?? "");
-  const [displayMode, setDisplayMode] = useState<"background" | "karaoke">(editingOverlay?.displayMode ?? "background");
+  const [displayMode, setDisplayMode] = useState<"background" | "karaoke" | "none">(editingOverlay?.displayMode ?? "background");
   const [templateId, setTemplateId] = useState<TextTemplateId>(
     (editingOverlay?.templateId as TextTemplateId) ?? TEXT_TEMPLATE_OPTIONS[0].id
   );
   const [rect, setRect] = useState<CropRect>(editingOverlay?.rect ?? DEFAULT_TTS_OVERLAY_RECT);
-  // No dedicated timeline rail exists for TTS overlays yet (unlike text/
-  // image/video overlays' own Track components -- see ActionArea.tsx's
-  // ActiveTransformationsList, which is this overlay's only edit/delete
-  // entry point), so this plain seconds input is the only way to move a
-  // narration's start time after it's been added -- otherwise it would be
-  // stuck forever at wherever the playhead happened to sit when it was
-  // first placed.
+  // TtsOverlayTrack (FrameStrip.tsx) is the direct-manipulation way to move
+  // a narration's start time after it's been added (drag its segment); this
+  // plain seconds input is still here as the precise/keyboard-only way to
+  // do the same thing from inside the dialog itself, same as every other
+  // overlay dialog's own numeric fields alongside their track's drag
+  // handles.
   const [startTimeSeconds, setStartTimeSeconds] = useState(editingOverlay?.startTimeSeconds ?? currentTimeSeconds);
 
   const [voices, setVoices] = useState<TtsVoiceOption[]>([]);
@@ -246,38 +245,49 @@ export function TtsOverlayDialog({
                   No frame preview yet -- add a video first
                 </p>
               )}
-              <OverlayRectOverlay
-                rect={rect}
-                onChange={setRect}
-                onCommit={setRect}
-                borderColorClassName="border-violet-400"
-                handleColorClassName="bg-violet-400"
-                renderInner={
-                  displayMode === "background" ? (
-                    <TextOverlayCanvas
-                      text={text.trim() || DEFAULT_PREVIEW_TEXT}
-                      templateId={templateId}
-                      progress={PREVIEW_PROGRESS}
-                      className="h-full w-full"
-                    />
-                  ) : (
-                    // Karaoke's live word-by-word highlight only matters
-                    // during real playback (see CanvasPlayer.tsx) -- this
-                    // dialog just shows a plain static preview of the text
-                    // itself, not a simulated word-timing animation.
-                    <div className="flex h-full w-full items-center justify-center bg-black/60 p-2 text-center">
-                      <span className="rounded bg-violet-400/90 px-1 py-0.5 text-sm font-bold text-black">
-                        {(text.trim() || DEFAULT_PREVIEW_TEXT).split(/\s+/)[0]}
-                      </span>
-                      <span className="ml-1 text-sm font-bold text-white">
-                        {text.trim() ? text.trim().split(/\s+/).slice(1).join(" ") : DEFAULT_PREVIEW_TEXT.split(/\s+/).slice(1).join(" ")}
-                      </span>
-                    </div>
-                  )
-                }
-              />
+              {/* "None" has no caption to position, so no draggable rect
+                  either -- just the frame itself with a small notice, rather
+                  than a rect handle that would drag nothing. */}
+              {displayMode === "none" ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/40 p-2 text-center text-xs text-white/80">
+                  Narration plays as audio only -- no text will be shown.
+                </div>
+              ) : (
+                <OverlayRectOverlay
+                  rect={rect}
+                  onChange={setRect}
+                  onCommit={setRect}
+                  borderColorClassName="border-violet-400"
+                  handleColorClassName="bg-violet-400"
+                  renderInner={
+                    displayMode === "background" ? (
+                      <TextOverlayCanvas
+                        text={text.trim() || DEFAULT_PREVIEW_TEXT}
+                        templateId={templateId}
+                        progress={PREVIEW_PROGRESS}
+                        className="h-full w-full"
+                      />
+                    ) : (
+                      // Karaoke's live word-by-word highlight only matters
+                      // during real playback (see CanvasPlayer.tsx) -- this
+                      // dialog just shows a plain static preview of the text
+                      // itself, not a simulated word-timing animation.
+                      <div className="flex h-full w-full items-center justify-center bg-black/60 p-2 text-center">
+                        <span className="rounded bg-violet-400/90 px-1 py-0.5 text-sm font-bold text-black">
+                          {(text.trim() || DEFAULT_PREVIEW_TEXT).split(/\s+/)[0]}
+                        </span>
+                        <span className="ml-1 text-sm font-bold text-white">
+                          {text.trim() ? text.trim().split(/\s+/).slice(1).join(" ") : DEFAULT_PREVIEW_TEXT.split(/\s+/).slice(1).join(" ")}
+                        </span>
+                      </div>
+                    )
+                  }
+                />
+              )}
             </div>
-            <p className="text-[11px] text-muted">Drag to position, drag the corner to resize.</p>
+            <p className="text-[11px] text-muted">
+              {displayMode === "none" ? "Narration plays with no on-screen caption." : "Drag to position, drag the corner to resize."}
+            </p>
           </div>
 
           {/* Right half: script + voice + mode + template gallery. */}
@@ -321,7 +331,7 @@ export function TtsOverlayDialog({
               seconds
             </label>
 
-            {/* Background text / Karaoke captions segmented toggle. */}
+            {/* Background text / Karaoke captions / No Text segmented toggle. */}
             <div className="mb-2 flex overflow-hidden rounded-md border border-border text-xs">
               <button
                 type="button"
@@ -336,6 +346,14 @@ export function TtsOverlayDialog({
                 className={`flex-1 py-1 font-medium ${displayMode === "karaoke" ? "bg-accent text-accent-foreground" : "bg-background text-muted hover:text-foreground"}`}
               >
                 Karaoke captions
+              </button>
+              <button
+                type="button"
+                onClick={() => setDisplayMode("none")}
+                title="Narration plays as audio only, with no text shown on screen"
+                className={`flex-1 py-1 font-medium ${displayMode === "none" ? "bg-accent text-accent-foreground" : "bg-background text-muted hover:text-foreground"}`}
+              >
+                No text
               </button>
             </div>
 

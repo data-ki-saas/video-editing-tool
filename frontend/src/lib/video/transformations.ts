@@ -880,6 +880,20 @@ export function applyTtsOverlayPositionChange(
   return { label: "Moved narration", state: { ...selections, ttsOverlays: nextOverlays } };
 }
 
+/** TtsOverlayTrack's own per-segment volume badge -- mirrors
+ * applyChangeOverlayAudioBalance's clamp-to-0..1 shape. */
+export function applyTtsOverlayVolumeChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  volume: number
+): TransformationResult {
+  const overlay = selections.ttsOverlays[overlayIndex];
+  if (!overlay) return { label: "Changed narration volume", state: selections };
+  const nextOverlays = [...selections.ttsOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, volume: Math.min(Math.max(volume, 0), 1) };
+  return { label: "Changed narration volume", state: { ...selections, ttsOverlays: nextOverlays } };
+}
+
 /** Removes one TTS narration overlay outright. */
 export function applyDeleteTtsOverlay(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {
   if (!selections.ttsOverlays[overlayIndex]) return { label: "Removed narration", state: selections };

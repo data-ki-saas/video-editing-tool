@@ -77,7 +77,8 @@ import {
   computeOverlayRects,
   computeCoverFitSourceRect,
   computeProgress,
-  computeMainAudioGainBreakpoints,
+  computeAudioMixBreakpoints,
+  sampleAudioMixAt,
   AUDIO_TRANSITION_RAMP_SECONDS,
   DEFAULT_OVERLAY_FRAMING,
   buildSequenceClipInfos,
@@ -180,7 +181,7 @@ export const CanvasPlayer = forwardRef<
     // Playground.tsx) -- mainAudioVolume scales the main sequence's own
     // audio (still ducked underneath it during an overlay window that wants
     // its own audio mixed in, same as before this existed -- see
-    // computeMainAudioGainBreakpoints); backgroundVolume scales the
+    // computeAudioMixBreakpoints); backgroundVolume scales the
     // background-music gain directly, replacing what was a hardcoded
     // constant.
     mainAudioVolume: number;
@@ -588,6 +589,7 @@ export const CanvasPlayer = forwardRef<
         width: overlay.rect.width * canvas.width,
         height: overlay.rect.height * canvas.height,
       };
+      if (overlay.displayMode === "none") continue; // audio-only narration -- nothing drawn
       if (overlay.displayMode === "karaoke") {
         drawKaraokeCaption(ctx, rectPx, overlay.wordTimings, findActiveWordIndex(overlay, elapsedSeconds), overlay.templateId);
         continue;
@@ -665,10 +667,11 @@ export const CanvasPlayer = forwardRef<
     const source = audioContext.createBufferSource();
     source.buffer = audioBuffer;
     // Routed through a gain node (rather than straight to destination) so
-    // it can be "ducked" for any video overlay window that wants some of
-    // its own audio mixed in -- see computeMainAudioGainBreakpoints. A
-    // fresh node every resume, same as the source itself; nothing to clean
-    // up beyond what stopping/discarding the source already does.
+    // it can be "ducked" for any video-overlay or TTS-narration window that
+    // wants some of its own audio mixed in -- see computeAudioMixBreakpoints/
+    // sampleAudioMixAt. A fresh node every resume, same as the source
+    // itself; nothing to clean up beyond what stopping/discarding the
+    // source already does.
     const mainGainNode = audioContext.createGain();
     source.connect(mainGainNode).connect(audioContext.destination);
     source.start(0, adjustedOffsetSeconds);
@@ -676,33 +679,98 @@ export const CanvasPlayer = forwardRef<
     playStartedAtCtxTimeRef.current = audioContext.currentTime;
     pausedAtSecondsRef.current = adjustedOffsetSeconds;
 
+    // The full breakpoint list for this resume's whole remaining playback --
+    // shared below by the main track's own ramp AND by every active
+    // overlay-audio/TTS-audio source's own gain automation (each multiplies
+    // its OWN nominal level by breakpoint.duckScale at the same instants),
+    // so all three tracks' ducking can never drift apart mid-window.
+    const audioMixBreakpoints = computeAudioMixBreakpoints(videoOverlays, ttsOverlays, durationRef.current);
+
     // Covers the case where adjustedOffsetSeconds itself lands mid-window
     // (no breakpoint exists exactly there since breakpoints only mark
     // window START/END) -- sets the correct starting gain immediately
     // rather than waiting for whatever breakpoint comes next. Also seeds
     // the ramp loop below, so its first transition starts from what's
     // actually already playing rather than an assumed 1.
-    const initialDucking = videoOverlays
-      .filter((o) => o.audioBalance > 0 && adjustedOffsetSeconds >= o.startTimeSeconds && adjustedOffsetSeconds < o.endTimeSeconds)
-      .reduce((max, o) => Math.max(max, o.audioBalance), 0);
-    mainGainNode.gain.setValueAtTime((1 - initialDucking) * mainAudioVolume, audioContext.currentTime);
+    const initialMix = sampleAudioMixAt(videoOverlays, ttsOverlays, adjustedOffsetSeconds);
+    mainGainNode.gain.setValueAtTime(initialMix.mainGain * mainAudioVolume, audioContext.currentTime);
 
     // Short ramps rather than hard setValueAtTime steps -- a hard step is an
     // audible click/pop. The standard Web Audio pattern for "a step
     // function with brief transitions": anchor the ramp's start value (a
     // no-op numerically, but required so the ramp doesn't creep from
     // whatever far-away event preceded it) then ramp to the new value.
-    // Every breakpoint.gain (a 0..1 ducking fraction against a ceiling of 1)
-    // is scaled by mainAudioVolume so ducking still happens relative to
-    // wherever the user has set the overall level, not against a fixed 1.
-    let previousGain = (1 - initialDucking) * mainAudioVolume;
-    for (const breakpoint of computeMainAudioGainBreakpoints(videoOverlays, durationRef.current)) {
+    // Every breakpoint.mainGain (a 0..1 ducking fraction against a ceiling
+    // of 1) is scaled by mainAudioVolume so ducking still happens relative
+    // to wherever the user has set the overall level, not against a fixed 1.
+    let previousGain = initialMix.mainGain * mainAudioVolume;
+    for (const breakpoint of audioMixBreakpoints) {
       if (breakpoint.timeSeconds < adjustedOffsetSeconds) continue; // already in the past relative to this resume
       const rampStartCtxTime = audioContext.currentTime + (breakpoint.timeSeconds - adjustedOffsetSeconds);
-      const targetGain = breakpoint.gain * mainAudioVolume;
+      const targetGain = breakpoint.mainGain * mainAudioVolume;
       mainGainNode.gain.setValueAtTime(previousGain, rampStartCtxTime);
       mainGainNode.gain.linearRampToValueAtTime(targetGain, rampStartCtxTime + AUDIO_TRANSITION_RAMP_SECONDS);
       previousGain = targetGain;
+    }
+
+    // Schedules `gainNode`'s automation across [windowStartSeconds,
+    // windowEndSeconds) as: a fade (from silence, or an immediate hold when
+    // resuming mid-window and `fadeInFromSilence` is false) to
+    // `nominalGain` scaled by whatever `duckScale` applies at the window's
+    // own start, then a plateau at each audioMixBreakpoints crossing WITHIN
+    // the window (so this clip's own audio actually dips in step with the
+    // main track's own dip during an overlapping TTS/video-overlay window,
+    // not just independently of it), finishing with a fade-out to 0 at the
+    // window's own end. Shared by the video-overlay-audio and
+    // TTS-narration-audio blocks below so their ducking math can't diverge
+    // from each other or from the main-track ramp above (same
+    // audioMixBreakpoints list, same AUDIO_TRANSITION_RAMP_SECONDS ramp).
+    function scheduleDuckedGain(
+      gainNode: GainNode,
+      nominalGain: number,
+      windowStartSeconds: number,
+      windowEndSeconds: number,
+      startCtxTime: number,
+      fadeInFromSilence: boolean
+    ) {
+      const remainingDurationSeconds = windowEndSeconds - windowStartSeconds;
+      const fadeOutStartCtxTime = Math.max(
+        startCtxTime + AUDIO_TRANSITION_RAMP_SECONDS,
+        startCtxTime + remainingDurationSeconds - AUDIO_TRANSITION_RAMP_SECONDS
+      );
+      function duckScaleAt(timeSeconds: number): number {
+        let scale = 1;
+        for (const bp of audioMixBreakpoints) {
+          if (bp.timeSeconds > timeSeconds) break;
+          scale = bp.duckScale;
+        }
+        return scale;
+      }
+
+      let previousGain: number;
+      let previousCtxTime: number;
+      if (fadeInFromSilence) {
+        gainNode.gain.setValueAtTime(0, startCtxTime);
+        previousCtxTime = startCtxTime + AUDIO_TRANSITION_RAMP_SECONDS;
+        previousGain = nominalGain * duckScaleAt(windowStartSeconds);
+        gainNode.gain.linearRampToValueAtTime(previousGain, previousCtxTime);
+      } else {
+        previousGain = nominalGain * duckScaleAt(windowStartSeconds);
+        gainNode.gain.setValueAtTime(previousGain, startCtxTime);
+        previousCtxTime = startCtxTime;
+      }
+      for (const bp of audioMixBreakpoints) {
+        if (bp.timeSeconds <= windowStartSeconds || bp.timeSeconds >= windowEndSeconds) continue;
+        const rampCtxTime = startCtxTime + (bp.timeSeconds - windowStartSeconds);
+        if (rampCtxTime <= previousCtxTime) continue;
+        const target = nominalGain * bp.duckScale;
+        gainNode.gain.setValueAtTime(previousGain, rampCtxTime);
+        gainNode.gain.linearRampToValueAtTime(target, rampCtxTime + AUDIO_TRANSITION_RAMP_SECONDS);
+        previousGain = target;
+        previousCtxTime = rampCtxTime + AUDIO_TRANSITION_RAMP_SECONDS;
+      }
+      gainNode.gain.setValueAtTime(previousGain, Math.max(fadeOutStartCtxTime, previousCtxTime));
+      gainNode.gain.linearRampToValueAtTime(0, startCtxTime + remainingDurationSeconds);
     }
 
     // One AudioBufferSourceNode per overlay that wants some of its own
@@ -729,19 +797,10 @@ export const CanvasPlayer = forwardRef<
       overlaySource.buffer = overlayBuffer;
       overlaySource.loop = true;
       const overlayGainNode = audioContext.createGain();
-      // Fades in/out at this window's own start/end rather than a hard
-      // start/stop (same click/pop concern as the main-track ducking
-      // above), ending the fade-out exactly when the source itself stops
-      // (per its own `duration` param below). Clamped so a very short
-      // window's fade-out never starts before its fade-in has finished.
-      const fadeOutStartCtxTime = Math.max(
-        startCtxTime + AUDIO_TRANSITION_RAMP_SECONDS,
-        startCtxTime + remainingDurationSeconds - AUDIO_TRANSITION_RAMP_SECONDS
-      );
-      overlayGainNode.gain.setValueAtTime(0, startCtxTime);
-      overlayGainNode.gain.linearRampToValueAtTime(overlay.audioBalance, startCtxTime + AUDIO_TRANSITION_RAMP_SECONDS);
-      overlayGainNode.gain.setValueAtTime(overlay.audioBalance, fadeOutStartCtxTime);
-      overlayGainNode.gain.linearRampToValueAtTime(0, startCtxTime + remainingDurationSeconds);
+      // Ducked against any TTS narration (and, unusually, any other
+      // overlapping overlay) sharing this window -- see scheduleDuckedGain
+      // above and sampleAudioMixAt's own doc comment for the mixer spec.
+      scheduleDuckedGain(overlayGainNode, overlay.audioBalance, windowStartSeconds, overlay.endTimeSeconds, startCtxTime, true);
       overlaySource.connect(overlayGainNode).connect(audioContext.destination);
       overlaySource.start(startCtxTime, elapsedIntoWindowSeconds % overlayBuffer.duration, remainingDurationSeconds);
       overlayAudioSourceNodesRef.current.push(overlaySource);
@@ -751,10 +810,13 @@ export const CanvasPlayer = forwardRef<
     // finished decoding and whose window hasn't fully passed yet -- same
     // per-item, scheduled-at-its-own-time-offset idiom as the video-overlay
     // audio block above (NOT the background-music model: narration plays
-    // once at its own instant, it never loops). No ducking of the main
-    // track against narration -- audio-ducking between TTS and the base
-    // clip/background music is a known, deliberate follow-up, not done here
-    // (see this repo's own task notes).
+    // once at its own instant, it never loops). Ducked against any active
+    // video-overlay audio sharing this window via the same
+    // scheduleDuckedGain/audioMixBreakpoints the main track and the
+    // video-overlay-audio block above both use -- see sampleAudioMixAt's
+    // own doc comment for the mixer spec (background music is NOT part of
+    // this mix; it plays unaffected by narration, a deliberate scope
+    // decision, not an oversight).
     ttsAudioSourceNodesRef.current = [];
     for (const overlay of ttsOverlays) {
       const overlayEndSeconds = ttsOverlayEndTimeSeconds(overlay);
@@ -771,23 +833,11 @@ export const CanvasPlayer = forwardRef<
       const ttsSource = audioContext.createBufferSource();
       ttsSource.buffer = ttsBuffer;
       const ttsGainNode = audioContext.createGain();
-      const targetGain = Math.min(Math.max(overlay.volume, 0), 1);
-      // Fades in/out at this window's own start/end, same click/pop
-      // avoidance as the video-overlay audio block above -- skips the
-      // fade-IN when resuming from partway through the narration (nothing
-      // to fade from silence into, it's already playing).
-      const fadeOutStartCtxTime = Math.max(
-        startCtxTime + AUDIO_TRANSITION_RAMP_SECONDS,
-        startCtxTime + remainingDurationSeconds - AUDIO_TRANSITION_RAMP_SECONDS
-      );
-      if (elapsedIntoWindowSeconds <= 0) {
-        ttsGainNode.gain.setValueAtTime(0, startCtxTime);
-        ttsGainNode.gain.linearRampToValueAtTime(targetGain, startCtxTime + AUDIO_TRANSITION_RAMP_SECONDS);
-      } else {
-        ttsGainNode.gain.setValueAtTime(targetGain, startCtxTime);
-      }
-      ttsGainNode.gain.setValueAtTime(targetGain, fadeOutStartCtxTime);
-      ttsGainNode.gain.linearRampToValueAtTime(0, startCtxTime + remainingDurationSeconds);
+      const nominalGain = Math.min(Math.max(overlay.volume, 0), 1);
+      // Skips the fade-IN when resuming from partway through the narration
+      // (nothing to fade from silence into, it's already playing) -- same
+      // reasoning as before this mix became duck-aware.
+      scheduleDuckedGain(ttsGainNode, nominalGain, windowStartSeconds, overlayEndSeconds, startCtxTime, elapsedIntoWindowSeconds <= 0);
       ttsSource.connect(ttsGainNode).connect(audioContext.destination);
       ttsSource.start(startCtxTime, elapsedIntoWindowSeconds, remainingDurationSeconds);
       ttsAudioSourceNodesRef.current.push(ttsSource);
@@ -1136,8 +1186,8 @@ export const CanvasPlayer = forwardRef<
   // already playing doesn't retroactively add its sound until the next
   // resume. A source that fails to decode is skipped -- the base track
   // simply isn't ducked for that overlay's window (see
-  // computeMainAudioGainBreakpoints, which only ducks based on
-  // audioBalance, not on whether the buffer actually loaded).
+  // computeAudioMixBreakpoints, which only ducks based on audioBalance, not
+  // on whether the buffer actually loaded).
   const overlayAudioAssetIds = Array.from(new Set(videoOverlays.filter((o) => o.audioBalance > 0).map((o) => o.assetId)));
   const overlayAudioLoadKey = overlayAudioAssetIds.map((assetId) => `${assetId}:${assetUrlById[assetId] ?? ""}`).join(",");
   useEffect(() => {

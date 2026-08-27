@@ -72,6 +72,7 @@ import type {
   SequenceEntry,
   TextOverlay,
   TrimRange,
+  TtsOverlay,
   VideoOverlayClip,
   VideoOverlayLayout,
   ZoomEffect,
@@ -153,6 +154,13 @@ export function Playground({
   onCommitTextOverlayRange,
   onDeleteTextOverlay,
   onRequestEditTextOverlay,
+  ttsOverlays,
+  onChangeTtsOverlayPosition,
+  onCommitTtsOverlayPosition,
+  onChangeTtsOverlayVolume,
+  onCommitTtsOverlayVolume,
+  onEditTtsOverlay,
+  onDeleteTtsOverlay,
   videoOverlays,
   videoThumbnailUrlByAssetId,
   videoOverlayStartThumbnailByKey,
@@ -245,6 +253,13 @@ export function Playground({
   onCommitTextOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onDeleteTextOverlay: (overlayIndex: number) => void;
   onRequestEditTextOverlay: (overlayIndex: number) => void;
+  ttsOverlays: TtsOverlay[];
+  onChangeTtsOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onCommitTtsOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onChangeTtsOverlayVolume: (overlayIndex: number, level: number) => void;
+  onCommitTtsOverlayVolume: (overlayIndex: number, level: number) => void;
+  onEditTtsOverlay: (overlayIndex: number) => void;
+  onDeleteTtsOverlay: (overlayIndex: number) => void;
   videoOverlays: VideoOverlayClip[];
   videoThumbnailUrlByAssetId: Record<string, string>;
   // A still frame captured at each overlay placement's own sourceStartSeconds
@@ -348,6 +363,13 @@ export function Playground({
             onCommitTextOverlayRange={onCommitTextOverlayRange}
             onDeleteTextOverlay={onDeleteTextOverlay}
             onRequestEditTextOverlay={onRequestEditTextOverlay}
+            ttsOverlays={ttsOverlays}
+            onChangeTtsOverlayPosition={onChangeTtsOverlayPosition}
+            onCommitTtsOverlayPosition={onCommitTtsOverlayPosition}
+            onChangeTtsOverlayVolume={onChangeTtsOverlayVolume}
+            onCommitTtsOverlayVolume={onCommitTtsOverlayVolume}
+            onEditTtsOverlay={onEditTtsOverlay}
+            onDeleteTtsOverlay={onDeleteTtsOverlay}
             videoOverlays={videoOverlays}
             videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
             videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}

@@ -68,8 +68,10 @@
  * outside the z-order stack entirely. Directly above the thumbnails sits
  * the actual compositing z-order stack, TOP = FRONTMOST in the rendered
  * video (matches CanvasPlayer.tsx/exportTimeline.ts's own draw order
- * exactly -- see those files' own comments): TextOverlayTrack, then
- * ImageOverlayTrack's Picture-in-Picture row(s), then VideoOverlayTrack's
+ * exactly -- see those files' own comments): TtsOverlayTrack (narration
+ * captions draw last of all, on top of everything -- see CanvasPlayer.tsx's
+ * own draw order), then TextOverlayTrack, then ImageOverlayTrack's
+ * Picture-in-Picture row(s), then VideoOverlayTrack's
  * Picture-in-Picture row(s), then ImageOverlayTrack's exclusive
  * (Full-Screen/Split-Screen) row, then VideoOverlayTrack's exclusive row,
  * then the thumbnails themselves (the base plate). ZoomEffectsTrack (every
@@ -100,6 +102,7 @@ import { ZoomEffectsTrack } from "./ZoomEffectsTrack";
 import { FlipTrack } from "./FlipTrack";
 import { TrimTrack } from "./TrimTrack";
 import { TextOverlayTrack } from "./TextOverlayTrack";
+import { TtsOverlayTrack } from "./TtsOverlayTrack";
 import { VideoOverlayTrack } from "./VideoOverlayTrack";
 import { ImageOverlayTrack } from "./ImageOverlayTrack";
 import { MarkerTrack } from "./MarkerTrack";
@@ -122,6 +125,7 @@ import {
   type SequenceEntry,
   type TextOverlay,
   type TrimRange,
+  type TtsOverlay,
   type VideoOverlayClip,
   type VideoOverlayLayout,
   type ZoomEffect,
@@ -461,6 +465,13 @@ export function FrameStrip({
   onCommitTextOverlayRange,
   onDeleteTextOverlay,
   onRequestEditTextOverlay,
+  ttsOverlays,
+  onChangeTtsOverlayPosition,
+  onCommitTtsOverlayPosition,
+  onChangeTtsOverlayVolume,
+  onCommitTtsOverlayVolume,
+  onEditTtsOverlay,
+  onDeleteTtsOverlay,
   videoOverlays,
   videoThumbnailUrlByAssetId,
   videoOverlayStartThumbnailByKey,
@@ -560,6 +571,13 @@ export function FrameStrip({
   onCommitTextOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onDeleteTextOverlay: (overlayIndex: number) => void;
   onRequestEditTextOverlay: (overlayIndex: number) => void;
+  ttsOverlays: TtsOverlay[];
+  onChangeTtsOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onCommitTtsOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onChangeTtsOverlayVolume: (overlayIndex: number, level: number) => void;
+  onCommitTtsOverlayVolume: (overlayIndex: number, level: number) => void;
+  onEditTtsOverlay: (overlayIndex: number) => void;
+  onDeleteTtsOverlay: (overlayIndex: number) => void;
   videoOverlays: VideoOverlayClip[];
   videoThumbnailUrlByAssetId: Record<string, string>;
   // See FrameTile's own prop comment -- passed straight through.
@@ -930,6 +948,17 @@ export function FrameStrip({
             draw order). See this file's own module comment for the full
             rationale. */}
         <p className="mb-0.5 text-[9px] uppercase tracking-wide text-muted/70">Overlays -- top renders in front</p>
+
+        <TtsOverlayTrack
+          ttsOverlays={ttsOverlays}
+          videoDurationSeconds={durationSeconds}
+          onChangePosition={onChangeTtsOverlayPosition}
+          onCommitPosition={onCommitTtsOverlayPosition}
+          onChangeVolume={onChangeTtsOverlayVolume}
+          onCommitVolume={onCommitTtsOverlayVolume}
+          onEdit={onEditTtsOverlay}
+          onDelete={onDeleteTtsOverlay}
+        />
 
         <TextOverlayTrack
           textOverlays={textOverlays}
