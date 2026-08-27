@@ -42,6 +42,7 @@ import {
   type ZoomEffect,
 } from "./video_math";
 import { buildKenBurnsEffect } from "./imageTemplates";
+import type { FilterPresetId } from "./filterPresets";
 
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
@@ -158,6 +159,17 @@ export function applyFlipToggle(
     label: "Mirror",
     state: { ...selections, flipVerticalToggles: toggleFlipAt(selections.flipVerticalToggles, currentTimeSeconds) },
   };
+}
+
+/** Picking a color filter preset (or "none") from FilterPresetDialog --
+ * a flat, whole-clip setting like clipRectId, so it just overwrites
+ * colorFilterId directly with no other state to reconcile. */
+export function applySelectFilterPreset(
+  selections: EditSelectionsSnapshot,
+  filterId: FilterPresetId
+): TransformationResult {
+  const label = filterId === "none" ? "Filter: Original" : `Filter: ${filterId}`;
+  return { label, state: { ...selections, colorFilterId: filterId === "none" ? null : filterId } };
 }
 
 /** Prolonging/shortening one transition by dragging its

@@ -58,6 +58,7 @@ import {
 } from "@/lib/video/video_math";
 import { getTextTemplateFontFraction } from "@/lib/video/textTemplates";
 import { getTranscriptCaptionConfig } from "@/lib/video/transcriptCaptionTemplates";
+import { getCreatomateFilterProperties } from "@/lib/video/filterPresets";
 
 export interface CompileTimelineInput {
   selections: EditSelectionsSnapshot;
@@ -186,8 +187,10 @@ function buildMediaSegments(
   baseCropRect: CropRect | null,
   zoomEffects: ZoomEffect[],
   appMeta: Record<string, AppMetaEntry>,
-  mainVolumePercent: string
+  mainVolumePercent: string,
+  colorFilterId: EditSelectionsSnapshot["colorFilterId"]
 ): (Video | Image)[] {
+  const filter = getCreatomateFilterProperties(colorFilterId);
   return segments.map((segment) => {
     const crop = buildCropProperties(segment, baseCropRect, zoomEffects);
 
@@ -203,6 +206,7 @@ function buildMediaSegments(
         xAnchor: "0%",
         yAnchor: "0%",
         ...crop,
+        ...filter,
         // Overwritten server-side by resolveAssetSources (api/render/route.ts)
         // from _appMeta[id].assetId -- never a real playable URL by itself.
         source: "",
@@ -223,6 +227,7 @@ function buildMediaSegments(
       yAnchor: "0%",
       volume: mainVolumePercent,
       ...crop,
+      ...filter,
       // Overwritten server-side by resolveAssetSources (api/render/route.ts)
       // from _appMeta[id].assetId -- never a real playable URL by itself.
       source: "",
@@ -724,7 +729,8 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     selections.cropRect,
     selections.zoomEffects,
     appMeta,
-    toVolumePercent(mainAudioVolume)
+    toVolumePercent(mainAudioVolume),
+    selections.colorFilterId
   );
   const videoSegmentPairs = segments
     .map((segment, index) => ({ segment, element: mediaSegments[index] }))

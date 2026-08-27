@@ -37,6 +37,7 @@ import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
 import { CutawayDialog } from "./CutawayDialog";
 import type { CutawaySegment } from "./CutawayTrack";
 import { ClipRectangleDialog } from "./ClipRectangleDialog";
+import { FilterPresetDialog } from "./FilterPresetDialog";
 import { VideoOverlayFramingDialog } from "./VideoOverlayFramingDialog";
 import { ImageOverlayFramingDialog } from "./ImageOverlayFramingDialog";
 import { VideoOverlayPickerDialog } from "./VideoOverlayPickerDialog";
@@ -44,6 +45,7 @@ import { ImageOverlayPickerDialog } from "./ImageOverlayPickerDialog";
 import { OverlaySourceStartDialog } from "./OverlaySourceStartDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
+import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS } from "@/lib/video/transcriptCaptionTemplates";
 import { computeFlipSegments } from "@/lib/video/video_math";
 import type { Asset } from "@/lib/api";
@@ -84,6 +86,9 @@ function ActiveTransformationsList({
   if (selections.clipRectId) {
     const option = CLIP_RECT_OPTIONS.find((candidate) => candidate.id === selections.clipRectId);
     rows.push(`Clip rectangle: ${option?.ratioLabel ?? selections.clipRectId}`);
+  }
+  if (selections.colorFilterId) {
+    rows.push(`Filter: ${getFilterPresetOption(selections.colorFilterId).name}`);
   }
   for (const effect of selections.zoomEffects) {
     rows.push(`Zoom/pan ${formatTimeRange(effect.startTimeSeconds, effect.endTimeSeconds)}`);
@@ -176,6 +181,8 @@ export function ActionArea({
   onCloseOverlaySourceStartDialog,
   selectedClipRectId,
   onSelectClipRect,
+  selectedFilterId,
+  onSelectFilter,
   onOpenTextDialog,
   isTextDialogOpen,
   editingTextOverlay,
@@ -263,6 +270,8 @@ export function ActionArea({
   onCloseOverlaySourceStartDialog: () => void;
   selectedClipRectId: string | null;
   onSelectClipRect: (id: string) => void;
+  selectedFilterId: FilterPresetId | null;
+  onSelectFilter: (id: FilterPresetId) => void;
   onOpenTextDialog: () => void;
   isTextDialogOpen: boolean;
   editingTextOverlay: TextOverlay | null;
@@ -328,6 +337,9 @@ export function ActionArea({
   // handler) and closes itself in the same click, so nothing outside this
   // component ever needs to know whether it's open.
   const [isClipRectDialogOpen, setIsClipRectDialogOpen] = useState(false);
+  // Same self-contained convention as isClipRectDialogOpen above -- picking
+  // a filter applies it (via onSelectFilter) and closes itself in one click.
+  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
 
   const sequenceKey = sequenceClips.map((clip) => `${clip.id}:${clip.kind === "image" ? clip.durationSeconds : ""}`).join(",");
 
@@ -365,6 +377,8 @@ export function ActionArea({
         <UserActions
           selectedClipRectId={selectedClipRectId}
           onOpenClipRectDialog={() => setIsClipRectDialogOpen(true)}
+          selectedFilterId={selectedFilterId}
+          onOpenFilterDialog={() => setIsFilterDialogOpen(true)}
           onOpenCutawayDialog={onOpenCutawayDialog}
           cutawayCount={sequenceClips.length}
           onOpenVideoOverlayPicker={onOpenVideoOverlayPicker}
@@ -396,6 +410,7 @@ export function ActionArea({
             baseCropRect={baseCropRect}
             zoomEffects={zoomEffects}
             liveCropRectOverride={liveCropRectOverride}
+            colorFilterId={selectedFilterId}
             flipHorizontalToggles={flipHorizontalToggles}
             flipVerticalToggles={flipVerticalToggles}
             trimRanges={trimRanges}
@@ -504,6 +519,16 @@ export function ActionArea({
           selectedClipRectId={selectedClipRectId}
           onSelect={onSelectClipRect}
           onClose={() => setIsClipRectDialogOpen(false)}
+          previewFrameUrl={previewFrameUrl}
+          frameAspectRatio={frameAspectRatio}
+        />
+      )}
+
+      {isFilterDialogOpen && (
+        <FilterPresetDialog
+          selectedFilterId={selectedFilterId}
+          onSelect={onSelectFilter}
+          onClose={() => setIsFilterDialogOpen(false)}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
         />

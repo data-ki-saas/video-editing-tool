@@ -94,6 +94,7 @@ import {
   type ZoomEffect,
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer } from "@/lib/video/textTemplates";
+import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { ReelLoader } from "@/components/ReelLoader";
 import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
 
@@ -125,6 +126,12 @@ export const CanvasPlayer = forwardRef<
     // active tile live, before it's committed. Never applied during
     // playback (dragging and playing at once isn't a real scenario).
     liveCropRectOverride?: CropRect | null;
+    // Whole-clip color filter preset (see lib/video/filterPresets.ts) --
+    // approximated live via a CSS `filter` string set on the canvas 2D
+    // context right before the base frame is drawn (see drawFrameAt),
+    // restored automatically by ctx.restore() same as the flip transform.
+    // Null means unfiltered ("Original").
+    colorFilterId: FilterPresetId | null;
     // "Flip" (horizontal) / "Mirror" (vertical) -- sorted toggle
     // timestamps, not a uniform whole-clip boolean, toggled from
     // CropRectOverlay's edge handles on FrameStrip's active tile (the
@@ -179,6 +186,7 @@ export const CanvasPlayer = forwardRef<
     baseCropRect,
     zoomEffects,
     liveCropRectOverride = null,
+    colorFilterId,
     flipHorizontalToggles,
     flipVerticalToggles,
     trimRanges,
@@ -376,6 +384,7 @@ export const CanvasPlayer = forwardRef<
     // destination, restored via ctx.restore() so it never leaks into the
     // next draw (this canvas is reused every frame).
     ctx.save();
+    ctx.filter = getFilterPresetOption(colorFilterId).cssFilter;
     ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
     ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
     if (baseRect && winningExclusiveLayout?.type === "split-screen") {

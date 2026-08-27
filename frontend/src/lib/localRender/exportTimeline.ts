@@ -67,6 +67,7 @@ import {
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer } from "@/lib/video/textTemplates";
+import { getFilterPresetOption } from "@/lib/video/filterPresets";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
 
 const OUTPUT_FPS = 30;
@@ -377,6 +378,7 @@ export async function exportVideoLocally(
   if (sequenceClips.length === 0) throw new Error("Nothing to render -- add a video to the sequence first.");
 
   const baseCropRect = selections.cropRect ?? FULL_FRAME_CROP_RECT;
+  const filterCssString = getFilterPresetOption(selections.colorFilterId).cssFilter;
   const segments = buildRenderSegments(sequenceClips, selections.trimRanges);
   const totalDurationSeconds = segments.reduce((sum, segment) => sum + segment.durationSeconds, 0);
   const totalFrames = Math.max(1, Math.round(totalDurationSeconds * OUTPUT_FPS));
@@ -533,6 +535,7 @@ export async function exportVideoLocally(
         const flipVertical = computeEffectiveFlip(selections.flipVerticalToggles, sourceTimeSeconds);
 
         ctx.save();
+        ctx.filter = filterCssString;
         ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
         ctx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
         if (baseRect && winningExclusiveLayout?.type === "split-screen") {

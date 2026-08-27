@@ -107,7 +107,9 @@ import {
   applyChangeOverlayAudioBalance,
   applyDeleteVideoOverlay,
   applyChangeVideoOverlaySourceStart,
+  applySelectFilterPreset,
 } from "@/lib/video/transformations";
+import type { FilterPresetId } from "@/lib/video/filterPresets";
 import {
   saveTimeline,
   type Timeline,
@@ -140,6 +142,7 @@ const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
   zoomEffects: [],
   flipHorizontalToggles: [],
   flipVerticalToggles: [],
+  colorFilterId: null,
   trimRanges: [],
   overlayImages: [],
   textOverlays: [],
@@ -503,6 +506,7 @@ export function ThreePaneEditor({
     zoomEffects: rawSelections.zoomEffects ?? [],
     flipHorizontalToggles: rawSelections.flipHorizontalToggles ?? [],
     flipVerticalToggles: rawSelections.flipVerticalToggles ?? [],
+    colorFilterId: rawSelections.colorFilterId ?? null,
     trimRanges: rawSelections.trimRanges ?? [],
     overlayImages,
     textOverlays: rawSelections.textOverlays ?? [],
@@ -905,6 +909,11 @@ export function ThreePaneEditor({
 
   function handleFlip(axis: "horizontal" | "vertical") {
     const { label, state } = applyFlipToggle(selections, axis, currentTimeSeconds);
+    pushChange(label, state);
+  }
+
+  function handleSelectFilter(id: FilterPresetId) {
+    const { label, state } = applySelectFilterPreset(selections, id);
     pushChange(label, state);
   }
 
@@ -1713,6 +1722,8 @@ export function ThreePaneEditor({
           onCloseOverlaySourceStartDialog={handleCloseOverlaySourceStartDialog}
           selectedClipRectId={selections.clipRectId}
           onSelectClipRect={handleSelectClipRect}
+          selectedFilterId={selections.colorFilterId}
+          onSelectFilter={handleSelectFilter}
           onOpenTextDialog={handleOpenTextDialog}
           isTextDialogOpen={isTextDialogOpen}
           editingTextOverlay={editingTextOverlayIndex !== null ? displayedTextOverlays[editingTextOverlayIndex] : null}
