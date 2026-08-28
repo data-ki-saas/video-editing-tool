@@ -14,7 +14,9 @@ const MARKETING_STATIC_PATHS = ["/about", "/contact", "/pricing", "/docs", "/pri
 // full 5-minute MIDDLEWARE_INVOCATION_TIMEOUT / 504 on every navigation
 // while it lasted, since every request runs through this same auth check).
 // This caps every request this client makes so a stalled auth check fails
-// fast instead of blocking the whole page load.
+// fast instead of blocking the whole page load. Deliberately shorter than
+// the browser client's timeout (src/lib/supabase/client.ts) -- this one only
+// guards a redirect decision that fails open, not a credential POST.
 const AUTH_CHECK_TIMEOUT_MS = 8000;
 
 function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
