@@ -4,6 +4,8 @@ import { use, useEffect, useState } from "react";
 import { getProject, type Project } from "@/lib/projects";
 import { setLastProjectId } from "@/lib/lastProject";
 import { ThreePaneEditor } from "@/components/editor-v2/ThreePaneEditor";
+import { MobileEditor } from "@/components/editor-mobile/MobileEditor";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { ReelLoader } from "@/components/ReelLoader";
 
 // No header strip here -- the active reel's name is already shown
@@ -15,6 +17,11 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
 
   const [project, setProject] = useState<Project | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // isReady stays false until the first client-side device check has
+  // actually run (matchMedia can't be read during SSR/first paint) -- see
+  // useIsMobile's own comment. Gated on below alongside `project` so this
+  // never flashes the wrong editor for a phone/desktop viewport.
+  const { isMobile, isReady: isMobileCheckReady } = useIsMobile();
 
   useEffect(() => {
     getProject(projectId)
@@ -30,11 +37,13 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
   if (error) {
     return <p className="p-6 text-sm text-red-600">Couldn&apos;t load this reel: {error}</p>;
   }
-  if (!project) {
+  if (!project || !isMobileCheckReady) {
     return <ReelLoader stage="Loading your reel…" className="h-full p-6" />;
   }
 
-  return (
+  return isMobile ? (
+    <MobileEditor key={project.id} projectId={project.id} initialTimeline={project.timeline} initialProject={project} />
+  ) : (
     <ThreePaneEditor
       key={project.id}
       projectId={project.id}

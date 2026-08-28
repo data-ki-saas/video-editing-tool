@@ -749,6 +749,98 @@ export function applyDeleteSequenceClip(
   };
 }
 
+/** Swaps a base-sequence clip with its immediate neighbor -- MobileAssetStrip's
+ * simple up/down reorder buttons (no drag, deliberately -- see the mobile
+ * quick-create plan). `entryStartSeconds`/`entryDurationSeconds` are passed
+ * by the caller rather than read off the entries themselves, same reasoning
+ * as applyDeleteSequenceClip's own `durationSeconds` param: a video entry
+ * never stores its own duration, only ever probed from the file.
+ *
+ * Reflows every time-anchored selection across the swapped pair's combined
+ * range, so a reel already carrying desktop-authored zoom/pan effects,
+ * overlays, captions, or trims doesn't silently break when reordered on
+ * mobile -- same reflow-by-delta idiom as applyDeleteSequenceClip, just with
+ * two deltas (one per swapped clip's own former time range) instead of one.
+ * Zoom/pan effects get their own shifter (shiftZoomEffectRange) rather than
+ * the generic one below, since ZoomEffect has a third time field
+ * (epicenterTimeSeconds) that a plain start/end shift would leave stale.
+ * No-ops (returns the unchanged state) if there's no such neighbor. */
+export function applyReorderSequenceClip(
+  selections: EditSelectionsSnapshot,
+  entryId: string,
+  direction: "earlier" | "later",
+  entryStartSeconds: (id: string) => number,
+  entryDurationSeconds: (entry: SequenceEntry) => number
+): TransformationResult {
+  const entries = selections.sequenceClips;
+  const index = entries.findIndex((entry) => entry.id === entryId);
+  const neighborIndex = direction === "earlier" ? index - 1 : index + 1;
+  const label = "Reordered clips";
+  if (index === -1 || neighborIndex < 0 || neighborIndex >= entries.length) {
+    return { label, state: selections };
+  }
+
+  const firstIndex = Math.min(index, neighborIndex);
+  const first = entries[firstIndex];
+  const second = entries[firstIndex + 1];
+  const firstStartSeconds = entryStartSeconds(first.id);
+  const firstDurationSeconds = entryDurationSeconds(first);
+  const secondDurationSeconds = entryDurationSeconds(second);
+  const firstEndSeconds = firstStartSeconds + firstDurationSeconds;
+  const secondEndSeconds = firstEndSeconds + secondDurationSeconds;
+
+  // `first`'s old range shifts LATER by `second`'s duration (it now plays
+  // right after where `second` used to be); `second`'s old range shifts
+  // EARLIER by `first`'s duration (it now plays where `first` used to
+  // start). Anything outside [firstStartSeconds, secondEndSeconds) is
+  // unaffected -- it belongs to a clip this swap didn't touch.
+  function deltaFor(timeSeconds: number): number {
+    if (timeSeconds >= firstStartSeconds && timeSeconds < firstEndSeconds) return secondDurationSeconds;
+    if (timeSeconds >= firstEndSeconds && timeSeconds < secondEndSeconds) return -firstDurationSeconds;
+    return 0;
+  }
+
+  const shiftRange = <T extends { startTimeSeconds: number; endTimeSeconds: number }>(item: T): T => {
+    const delta = deltaFor(item.startTimeSeconds);
+    return delta === 0 ? item : { ...item, startTimeSeconds: item.startTimeSeconds + delta, endTimeSeconds: item.endTimeSeconds + delta };
+  };
+  const shiftZoomEffectRange = (effect: ZoomEffect): ZoomEffect => {
+    const delta = deltaFor(effect.startTimeSeconds);
+    return delta === 0
+      ? effect
+      : {
+          ...effect,
+          startTimeSeconds: effect.startTimeSeconds + delta,
+          epicenterTimeSeconds: effect.epicenterTimeSeconds + delta,
+          endTimeSeconds: effect.endTimeSeconds + delta,
+        };
+  };
+  const shiftToggle = (timeSeconds: number): number => timeSeconds + deltaFor(timeSeconds);
+
+  const nextEntries = [...entries];
+  nextEntries[firstIndex] = second;
+  nextEntries[firstIndex + 1] = first;
+
+  return {
+    label,
+    state: {
+      ...selections,
+      sequenceClips: nextEntries,
+      zoomEffects: selections.zoomEffects.map(shiftZoomEffectRange),
+      overlayImages: selections.overlayImages.map(shiftRange),
+      textOverlays: selections.textOverlays.map(shiftRange),
+      ttsOverlays: selections.ttsOverlays.map((overlay) => ({
+        ...overlay,
+        startTimeSeconds: shiftToggle(overlay.startTimeSeconds),
+      })),
+      videoOverlays: selections.videoOverlays.map(shiftRange),
+      trimRanges: selections.trimRanges.map(shiftRange),
+      flipHorizontalToggles: selections.flipHorizontalToggles.map(shiftToggle),
+      flipVerticalToggles: selections.flipVerticalToggles.map(shiftToggle),
+    },
+  };
+}
+
 // Default duration for a freshly-added text overlay. Unlike an image
 // overlay's "always the first frame," a caption is added at whatever
 // moment the playhead is on when the dialog opens -- captions are placed

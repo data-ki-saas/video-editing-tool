@@ -121,13 +121,14 @@ import {
 import type { FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import {
-  saveTimeline,
+  DEFAULT_EDIT_SELECTIONS,
   type Timeline,
   type EditSelectionsSnapshot,
   type Project,
   type TimelineMarker,
 } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
+import { useAutosaveTimeline } from "@/lib/useAutosaveTimeline";
 import { useRenderStatus } from "@/lib/useRenderStatus";
 import { useLocalRender } from "@/lib/useLocalRender";
 import { gatherLocalSequenceClips, gatherLocalBackgroundClips } from "@/lib/localRender/gatherLocalRenderClips";
@@ -145,22 +146,6 @@ import { LocalRenderPopup } from "./LocalRenderPopup";
 import { CoverPicker } from "./CoverPicker";
 
 const THUMBNAIL_INTERVAL_SECONDS = 1;
-const SAVE_DEBOUNCE_MS = 600;
-
-const DEFAULT_SELECTIONS: EditSelectionsSnapshot = {
-  clipRectId: null,
-  cropRect: null,
-  zoomEffects: [],
-  flipHorizontalToggles: [],
-  flipVerticalToggles: [],
-  trimRanges: [],
-  overlayImages: [],
-  textOverlays: [],
-  ttsOverlays: [],
-  sequenceClips: [],
-  videoOverlays: [],
-  transcriptCaption: null,
-};
 
 export function ThreePaneEditor({
   projectId,
@@ -216,7 +201,6 @@ export function ThreePaneEditor({
   const [frameDimensions, setFrameDimensions] = useState<{ width: number; height: number } | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Live position of the crop rect while actively dragging on FrameStrip's
   // active tile, before it's committed to history -- kept separate from
@@ -445,7 +429,7 @@ export function ThreePaneEditor({
     pushChange,
     undo,
     redo,
-  } = useEditHistory<EditSelectionsSnapshot>(DEFAULT_SELECTIONS, initialTimeline.editHistory, initialTimeline.editHistoryIndex);
+  } = useEditHistory<EditSelectionsSnapshot>(DEFAULT_EDIT_SELECTIONS, initialTimeline.editHistory, initialTimeline.editHistoryIndex);
 
   // Timeline.editHistory is untyped JSON from Supabase -- an entry saved
   // before a shape change (e.g. the flipHorizontal/flipVertical booleans
@@ -852,52 +836,10 @@ export function ThreePaneEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the joined clip-id string (sequenceClipsKey), not the sequenceClips array reference, so an unrelated re-render doesn't re-trigger a full re-extraction
   }, [sequenceClipsKey]);
 
-  // Persists selections into Timeline whenever any of them change,
-  // debounced -- and flushes any pending save immediately on unmount (see
-  // the second effect below) rather than silently dropping a change made
-  // just before switching reels or navigating away.
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flushSaveRef = useRef<() => void>(() => {});
-  const hasSkippedInitialSaveRef = useRef(false);
-
-  useEffect(() => {
-    if (!hasSkippedInitialSaveRef.current) {
-      hasSkippedInitialSaveRef.current = true;
-      return;
-    }
-
-    const doSave = () => {
-      const nextTimeline: Timeline = {
-        ...initialTimeline,
-        editHistory: editHistoryEntries,
-        editHistoryIndex,
-        selectedTemplateId,
-        selectedBackgroundTrackId,
-        backgroundSequenceAssetIds,
-        selectedBackgroundAssetId: undefined,
-        markers,
-        mainAudioVolume,
-        backgroundVolume,
-      };
-      saveTimeline(projectId, nextTimeline)
-        .then(() => setSaveError(null))
-        .catch((err) => setSaveError(err instanceof Error ? err.message : "Failed to save your changes"));
-    };
-
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(doSave, SAVE_DEBOUNCE_MS);
-    flushSaveRef.current = () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = null;
-      }
-      doSave();
-    };
-
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    };
-  }, [
+  // Persists selections into Timeline whenever any of them change, debounced
+  // -- shared with MobileEditor.tsx so the two editors' save contracts can't
+  // silently drift apart. See useAutosaveTimeline's own comment.
+  const { saveError } = useAutosaveTimeline({
     projectId,
     initialTimeline,
     editHistoryEntries,
@@ -908,11 +850,7 @@ export function ThreePaneEditor({
     markers,
     mainAudioVolume,
     backgroundVolume,
-  ]);
-
-  useEffect(() => {
-    return () => flushSaveRef.current();
-  }, []);
+  });
 
   function handleUploaded(asset: Asset) {
     setAssets((prev) => [asset, ...prev]);

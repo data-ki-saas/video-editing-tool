@@ -109,6 +109,25 @@ export interface EditSelectionsSnapshot {
   transcriptCaption: TranscriptCaption | null;
 }
 
+// Shared by ThreePaneEditor.tsx and editor-mobile/MobileEditor.tsx -- both
+// seed useEditHistory with this same empty snapshot, so it lives here once
+// rather than as two copies that could drift out of sync with each other or
+// with EditSelectionsSnapshot's own field list.
+export const DEFAULT_EDIT_SELECTIONS: EditSelectionsSnapshot = {
+  clipRectId: null,
+  cropRect: null,
+  zoomEffects: [],
+  flipHorizontalToggles: [],
+  flipVerticalToggles: [],
+  trimRanges: [],
+  overlayImages: [],
+  textOverlays: [],
+  ttsOverlays: [],
+  sequenceClips: [],
+  videoOverlays: [],
+  transcriptCaption: null,
+};
+
 export interface EditHistoryEntrySnapshot {
   label: string;
   state: EditSelectionsSnapshot;
