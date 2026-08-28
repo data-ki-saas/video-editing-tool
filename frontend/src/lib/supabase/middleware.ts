@@ -8,6 +8,19 @@ const GUEST_ONLY_PATHS = ["/login", "/signup"];
 // from the footer), not get redirected away from them.
 const MARKETING_STATIC_PATHS = ["/about", "/contact", "/pricing", "/docs", "/privacy", "/terms"];
 
+// The Supabase client has no built-in request timeout -- a STALLED (not
+// outright failed) response from Auth left this middleware hanging until
+// Vercel's own hard function-timeout killed it (observed in production: a
+// full 5-minute MIDDLEWARE_INVOCATION_TIMEOUT / 504 on every navigation
+// while it lasted, since every request runs through this same auth check).
+// This caps every request this client makes so a stalled auth check fails
+// fast instead of blocking the whole page load.
+const AUTH_CHECK_TIMEOUT_MS = 8000;
+
+function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(AUTH_CHECK_TIMEOUT_MS) });
+}
+
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
@@ -15,6 +28,7 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      global: { fetch: fetchWithTimeout },
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -30,9 +44,20 @@ export async function updateSession(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+  } catch (err) {
+    // Fails OPEN on the redirect decision only -- lets the request through
+    // as-is rather than hanging this navigation for up to Vercel's own
+    // function-timeout. Actual data access stays protected by Supabase RLS
+    // and each page's own client-side auth calls (e.g.
+    // dashboard/[projectId]/page.tsx's getProject().catch) regardless of
+    // what this middleware decided.
+    console.error("[middleware] supabase.auth.getUser() failed or timed out -- passing the request through unchecked", err);
+    return response;
+  }
 
   const { pathname } = request.nextUrl;
   const isGuestOnlyPath = GUEST_ONLY_PATHS.some((path) => pathname.startsWith(path));
