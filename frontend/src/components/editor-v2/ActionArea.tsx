@@ -39,6 +39,8 @@ import { CutawayDialog } from "./CutawayDialog";
 import type { CutawaySegment } from "./CutawayTrack";
 import { ClipRectangleDialog } from "./ClipRectangleDialog";
 import { FilterPresetDialog } from "./FilterPresetDialog";
+import { CutTransitionDialog } from "./CutTransitionDialog";
+import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import { VideoOverlayFramingDialog } from "./VideoOverlayFramingDialog";
 import { ImageOverlayFramingDialog } from "./ImageOverlayFramingDialog";
 import { VideoOverlayPickerDialog } from "./VideoOverlayPickerDialog";
@@ -230,6 +232,11 @@ export function ActionArea({
   onSelectVideoOverlayFilter,
   onSelectImageOverlayFilter,
   onCloseFilterDialog,
+  transitionDialogEntry,
+  transitionDialogOutgoingFrameUrl,
+  transitionDialogIncomingFrameUrl,
+  onSelectClipTransition,
+  onCloseTransitionDialog,
   onOpenTextDialog,
   isTextDialogOpen,
   editingTextOverlay,
@@ -344,6 +351,13 @@ export function ActionArea({
   onSelectVideoOverlayFilter: (id: FilterPresetId) => void;
   onSelectImageOverlayFilter: (id: FilterPresetId) => void;
   onCloseFilterDialog: () => void;
+  // CutTransitionDialog's own currently-open target -- see
+  // ThreePaneEditor.tsx's own transitionDialogEntry state comment.
+  transitionDialogEntry: SequenceEntry | null;
+  transitionDialogOutgoingFrameUrl: string | null;
+  transitionDialogIncomingFrameUrl: string | null;
+  onSelectClipTransition: (id: CutTransitionId | null) => void;
+  onCloseTransitionDialog: () => void;
   onOpenTextDialog: () => void;
   isTextDialogOpen: boolean;
   editingTextOverlay: TextOverlay | null;
@@ -643,6 +657,17 @@ export function ActionArea({
           previewFrameUrl={filterDialogCutawayPreviewFrameUrl ?? previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
           scopeLabel="this cutaway"
+        />
+      )}
+
+      {transitionDialogEntry && (
+        <CutTransitionDialog
+          selectedTransitionId={transitionDialogEntry.cutTransitionInId ?? null}
+          onSelect={onSelectClipTransition}
+          onClose={onCloseTransitionDialog}
+          outgoingFrameUrl={transitionDialogOutgoingFrameUrl}
+          incomingFrameUrl={transitionDialogIncomingFrameUrl}
+          frameAspectRatio={frameAspectRatio}
         />
       )}
 

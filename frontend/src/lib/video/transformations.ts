@@ -44,6 +44,7 @@ import {
 } from "./video_math";
 import { buildKenBurnsEffect } from "./imageTemplates";
 import { getFilterPresetOption, type FilterPresetId } from "./filterPresets";
+import { getCutTransitionOption, type CutTransitionId } from "./cutTransitionPresets";
 
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
@@ -178,6 +179,26 @@ export function applySelectCutawayFilterPreset(
   if (!entry) return { label, state: selections };
   const nextEntries = [...selections.sequenceClips];
   nextEntries[entryIndex] = { ...entry, colorFilterId: filterId === "none" ? null : filterId };
+  return { label, state: { ...selections, sequenceClips: nextEntries } };
+}
+
+/** Picking a cut-transition (or "cut," i.e. none) for the boundary INTO one
+ * specific base-sequence clip from whichever clip precedes it -- same
+ * id-based lookup/shape as applySelectCutawayFilterPreset immediately
+ * above. Named "cutTransition" to stay distinct from this file's OWN,
+ * older "transition" (the pan/zoom Ken Burns effect) -- see
+ * video_math.ts's SequenceEntry.cutTransitionInId doc comment. */
+export function applySelectClipTransition(
+  selections: EditSelectionsSnapshot,
+  entryId: string,
+  cutTransitionId: CutTransitionId | null
+): TransformationResult {
+  const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
+  const entry = selections.sequenceClips[entryIndex];
+  const label = `Transition: ${getCutTransitionOption(cutTransitionId)?.name ?? "Cut"}`;
+  if (!entry) return { label, state: selections };
+  const nextEntries = [...selections.sequenceClips];
+  nextEntries[entryIndex] = { ...entry, cutTransitionInId: cutTransitionId };
   return { label, state: { ...selections, sequenceClips: nextEntries } };
 }
 

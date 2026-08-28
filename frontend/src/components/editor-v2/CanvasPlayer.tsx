@@ -84,6 +84,9 @@ import {
   buildSequenceClipInfos,
   totalSequenceDuration,
   resolveSequencePosition,
+  resolveCutTransitionBlend,
+  resolveCutTransitionOverlapSeconds,
+  buildVirtualCutTransitionSkipRanges,
   findActiveTtsOverlays,
   ttsOverlayEndTimeSeconds,
   findActiveWordIndex,
@@ -100,6 +103,7 @@ import {
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
 import { getFilterPresetOption } from "@/lib/video/filterPresets";
+import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import { ReelLoader } from "@/components/ReelLoader";
 import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
 
@@ -217,6 +221,14 @@ export const CanvasPlayer = forwardRef<
   // position, since a clip that failed to load shifts every later index out
   // of alignment with the `clips` prop.
   const clipFilterById = new Map(clips.map((clip) => [clip.id, clip.colorFilterId ?? null]));
+  // Which cut-transition (see cutTransitionPresets.ts) plays INTO each clip
+  // from whichever clip precedes it -- same id-keyed lookup shape as
+  // clipFilterById above. Distinct from this codebase's OTHER "transition"
+  // (the pan/zoom Ken Burns effect) -- see video_math.ts's
+  // SequenceEntry.cutTransitionInId doc comment.
+  const cutTransitionById: Map<string, CutTransitionId | null | undefined> = new Map(
+    clips.map((clip) => [clip.id, clip.cutTransitionInId ?? null])
+  );
   // Per-clip decoded preview frames + frame rate, indexed the same as
   // loadedClipsRef below (NOT necessarily the same as the `clips` prop --
   // a clip that failed to load is excluded from all three in lockstep). A
@@ -267,6 +279,16 @@ export const CanvasPlayer = forwardRef<
   // pass -- stopPlaybackLoop stops and clears all of them together, same as
   // overlayAudioSourceNodesRef above.
   const ttsAudioSourceNodesRef = useRef<AudioBufferSourceNode[]>([]);
+  // One short-lived AudioBufferSourceNode per cut-transition boundary
+  // scheduled for this playback pass -- each replays a preview of the
+  // incoming clip's own upcoming audio (from the SAME concatenated
+  // audioBufferRef.current, since it's sample-aligned to loadedClipsRef's
+  // own unshifted absolute-time axis -- see this file's cutTransitionById/
+  // getEffectiveSkipRanges) with its own gain ramping in, while
+  // mainGainNode dips during the same window -- see resumePlaybackFrom's own
+  // scheduleCutTransitionAudioCrossfades. stopPlaybackLoop stops and clears
+  // all of them together, same as overlayAudioSourceNodesRef above.
+  const cutTransitionAudioSourceNodesRef = useRef<AudioBufferSourceNode[]>([]);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
@@ -300,6 +322,20 @@ export const CanvasPlayer = forwardRef<
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
+
+  /** The real user-authored `trimRanges` PLUS a synthetic "skip" range for
+   * every cut-transition boundary (see video_math.ts's own module comment
+   * on why CanvasPlayer handles transitions via the trim-skip mechanism
+   * rather than shifting clip start times) -- fed into every
+   * skipTrimmedRanges call below so playback naturally skips the stretch of
+   * an incoming clip already shown early as this file's own transition
+   * preview (see drawFrameAt). NEVER passed to TrimTrack's own UI, which
+   * must keep showing only genuine user-authored cuts. Recomputed on each
+   * call rather than memoized -- loadedClipsRef is a ref, not reactive
+   * state, and this list is tiny. */
+  function getEffectiveSkipRanges(): TrimRange[] {
+    return [...trimRanges, ...buildVirtualCutTransitionSkipRanges(loadedClipsRef.current, cutTransitionById)];
+  }
 
   function ensureAudioContext(): AudioContext {
     if (!audioContextRef.current) audioContextRef.current = new AudioContext();
@@ -339,6 +375,14 @@ export const CanvasPlayer = forwardRef<
       }
     }
     ttsAudioSourceNodesRef.current = [];
+    for (const node of cutTransitionAudioSourceNodesRef.current) {
+      try {
+        node.stop();
+      } catch {
+        // Already stopped -- fine to ignore.
+      }
+    }
+    cutTransitionAudioSourceNodesRef.current = [];
   }
 
   /** The one canonical "how long is this overlay's source, for looping
@@ -410,6 +454,19 @@ export const CanvasPlayer = forwardRef<
       ? computeOverlayRects(winningExclusiveLayout)
       : { baseRect: FULL_FRAME_CROP_RECT, overlayRect: null };
 
+    // Non-null only during a cut-transition's preview window (the
+    // CUT_TRANSITION_DURATION_SECONDS just before the incoming clip's own
+    // real start -- see video_math.ts's resolveCutTransitionBlend doc
+    // comment). KNOWN LIMITATION: skipped entirely whenever a Full-Screen/
+    // Split-Screen overlay is active at the same instant -- blending TWO
+    // base clips on top of an already-swapped overlay layout is a rare
+    // enough combination that a hard cut there (falling back to today's
+    // behavior) is an acceptable simplification rather than handling the
+    // full cross-product.
+    const cutTransitionBlend = winningExclusiveLayout
+      ? null
+      : resolveCutTransitionBlend(loadedClipsRef.current, cutTransitionById, elapsedSeconds);
+
     // Flip/mirror via the canvas transform, not by touching sx/sy/sWidth/
     // sHeight -- scale(-1) + translate the origin to the far edge maps the
     // same source region onto a horizontally/vertically reversed
@@ -459,6 +516,70 @@ export const CanvasPlayer = forwardRef<
       );
     }
     ctx.restore();
+
+    // The incoming side of a cut-transition blend -- drawn as its own
+    // independent save/restore (not nested inside the outgoing clip's own
+    // flip transform above) since the incoming clip can have a different
+    // filter and its own flip state. A live-preview APPROXIMATION of
+    // Creatomate's real Fade/SlideLeft/WipeLeft animation classes, same
+    // "closest same-primitives match available in a 2D canvas" spirit as
+    // filterPresets.ts's own cssFilter disclaimer -- not pixel-identical to
+    // the real render. Only drawn into the simple (non-Split-Screen)
+    // baseRect case, same scope as cutTransitionBlend's own doc comment.
+    if (cutTransitionBlend && baseRect && winningExclusiveLayout?.type !== "split-screen") {
+      const incomingImages = clipImagesRef.current[cutTransitionBlend.toIndex];
+      const incomingEntryId = loadedClipsRef.current[cutTransitionBlend.toIndex]?.id;
+      const incomingCutTransitionId = incomingEntryId ? cutTransitionById.get(incomingEntryId) ?? null : null;
+      if (incomingImages && incomingImages.length > 0) {
+        const incomingFrameIndex = frameIndexAtTime(
+          cutTransitionBlend.toLocalSeconds,
+          frameRatesRef.current[cutTransitionBlend.toIndex],
+          incomingImages.length
+        );
+        const incomingImage = incomingImages[incomingFrameIndex];
+        // The same absolute instant this preview will actually occupy once
+        // real playback reaches it (elapsedSeconds is still PRE-boundary
+        // here) -- evaluating crop/flip against this synthetic time, not the
+        // real elapsedSeconds, means a ZoomEffect/flip toggle authored to
+        // start exactly at the cut previews correctly too.
+        const incomingSyntheticElapsed = elapsedSeconds + cutTransitionBlend.overlapSeconds;
+        const incomingCrop =
+          liveCropRectOverride ?? (baseCropRect ? computeEffectiveCropRect(baseCropRect, zoomEffects, incomingSyntheticElapsed) : FULL_FRAME_CROP_RECT);
+        const incomingSx = incomingCrop.x * incomingImage.width;
+        const incomingSy = incomingCrop.y * incomingImage.height;
+        const incomingSWidth = incomingCrop.width * incomingImage.width;
+        const incomingSHeight = incomingCrop.height * incomingImage.height;
+        const incomingFlipH = computeEffectiveFlip(flipHorizontalToggles, incomingSyntheticElapsed);
+        const incomingFlipV = computeEffectiveFlip(flipVerticalToggles, incomingSyntheticElapsed);
+        const destX = baseRect.x * canvas.width;
+        const destY = baseRect.y * canvas.height;
+        const destWidth = baseRect.width * canvas.width;
+        const destHeight = baseRect.height * canvas.height;
+
+        ctx.save();
+        ctx.filter = getFilterPresetOption(incomingEntryId ? (clipFilterById.get(incomingEntryId) ?? null) : null).cssFilter;
+        if (incomingCutTransitionId === "wipe") {
+          // Reveal grows left-to-right -- an approximation of WipeLeft's own
+          // geometry, not a literal match (see this block's own comment).
+          ctx.beginPath();
+          ctx.rect(destX, destY, destWidth * cutTransitionBlend.progress, destHeight);
+          ctx.clip();
+        } else if (incomingCutTransitionId === "slide") {
+          // Slides in from the right, covering the outgoing frame
+          // underneath -- a "push" reveal, not a true dual-slide (the
+          // outgoing frame itself doesn't also slide out).
+        } else {
+          // "fade" (or an unset/legacy id defaulting to it).
+          ctx.globalAlpha = cutTransitionBlend.progress;
+        }
+        const slideOffsetX = incomingCutTransitionId === "slide" ? (1 - cutTransitionBlend.progress) * destWidth : 0;
+        drawImageFlipped(
+          ctx, incomingImage, incomingSx, incomingSy, incomingSWidth, incomingSHeight,
+          destX + slideOffsetX, destY, destWidth, destHeight, incomingFlipH, incomingFlipV
+        );
+        ctx.restore();
+      }
+    }
 
     // Composited AFTER the flip transform is undone (ctx.restore() above)
     // -- an overlay (image or video) is independent of the base clip's flip
@@ -615,7 +736,7 @@ export const CanvasPlayer = forwardRef<
     // to just past it (not just what's drawn), so audio and video stay in
     // sync through the cut rather than the picture skipping while the
     // audio keeps playing the deleted stretch underneath.
-    const skippedElapsed = skipTrimmedRanges(trimRanges, elapsed);
+    const skippedElapsed = skipTrimmedRanges(getEffectiveSkipRanges(), elapsed);
     if (skippedElapsed !== elapsed) {
       stopPlaybackLoop();
       if (skippedElapsed >= durationRef.current) {
@@ -662,7 +783,7 @@ export const CanvasPlayer = forwardRef<
     if (!audioBuffer) return;
     const audioContext = ensureAudioContext();
 
-    const adjustedOffsetSeconds = Math.min(skipTrimmedRanges(trimRanges, offsetSeconds), durationRef.current);
+    const adjustedOffsetSeconds = Math.min(skipTrimmedRanges(getEffectiveSkipRanges(), offsetSeconds), durationRef.current);
 
     const source = audioContext.createBufferSource();
     source.buffer = audioBuffer;
@@ -843,6 +964,51 @@ export const CanvasPlayer = forwardRef<
       ttsAudioSourceNodesRef.current.push(ttsSource);
     }
 
+    // The audio side of every cut-transition boundary reachable from this
+    // resume: a short-lived source node previews the incoming clip's own
+    // upcoming audio (read from the SAME concatenated `audioBuffer`, at ITS
+    // OWN real, unshifted buffer offset -- see cutTransitionById/
+    // getEffectiveSkipRanges' own module comment) with its gain ramping in,
+    // while `mainGainNode` (still playing the outgoing clip) dips to 0 across
+    // the same window then snaps back right after -- once the boundary is
+    // crossed, tick()'s own skip logic restarts the main source past the
+    // now-redundant preview stretch, so the main track alone carries the
+    // incoming clip's REAL audio from then on. KNOWN LIMITATION: only
+    // windows entirely AHEAD of this resume point are scheduled -- a seek
+    // that lands mid-transition falls back to a plain volume jump for that
+    // one boundary rather than a partial crossfade.
+    cutTransitionAudioSourceNodesRef.current = [];
+    for (let i = 1; i < loadedClipsRef.current.length; i++) {
+      const clip = loadedClipsRef.current[i];
+      const cutTransitionInId = clip.id ? cutTransitionById.get(clip.id) ?? null : null;
+      if (!cutTransitionInId) continue;
+      const overlapSeconds = resolveCutTransitionOverlapSeconds(cutTransitionInId, true, loadedClipsRef.current[i - 1].durationSeconds, clip.durationSeconds);
+      if (overlapSeconds <= 0) continue;
+      const windowStartSeconds = clip.startTimeSeconds - overlapSeconds;
+      if (windowStartSeconds < adjustedOffsetSeconds) continue; // already in the past, or mid-window -- see KNOWN LIMITATION above
+      const startCtxTime = audioContext.currentTime + (windowStartSeconds - adjustedOffsetSeconds);
+      const ambientGain = sampleAudioMixAt(videoOverlays, ttsOverlays, windowStartSeconds).mainGain * mainAudioVolume;
+
+      const previewSource = audioContext.createBufferSource();
+      previewSource.buffer = audioBuffer;
+      const previewGainNode = audioContext.createGain();
+      previewGainNode.gain.setValueAtTime(0, startCtxTime);
+      previewGainNode.gain.linearRampToValueAtTime(ambientGain, startCtxTime + overlapSeconds);
+      previewSource.connect(previewGainNode).connect(audioContext.destination);
+      previewSource.start(startCtxTime, clip.startTimeSeconds, overlapSeconds);
+      cutTransitionAudioSourceNodesRef.current.push(previewSource);
+
+      // The outgoing (main-track) side of the same crossfade -- dips to 0
+      // exactly as the preview above finishes ramping in, then snaps back
+      // to the ambient level right after (the main source itself resumes
+      // playing the incoming clip's own real audio at that point, once
+      // tick() performs its own skip past the redundant preview stretch).
+      mainGainNode.gain.setValueAtTime(ambientGain, startCtxTime);
+      mainGainNode.gain.linearRampToValueAtTime(0, startCtxTime + overlapSeconds);
+      mainGainNode.gain.setValueAtTime(0, startCtxTime + overlapSeconds);
+      mainGainNode.gain.linearRampToValueAtTime(ambientGain, startCtxTime + overlapSeconds + AUDIO_TRANSITION_RAMP_SECONDS);
+    }
+
     // Background music loops on its own (loop = true over the whole
     // buffer) rather than being rescheduled per repeat -- its start offset
     // is taken modulo its own duration so resuming partway through the
@@ -897,7 +1063,7 @@ export const CanvasPlayer = forwardRef<
       } else {
         // resumePlaybackFrom already skips past a cut internally -- this
         // branch doesn't call it, so it needs the same skip itself.
-        const adjusted = Math.min(skipTrimmedRanges(trimRanges, clamped), durationRef.current);
+        const adjusted = Math.min(skipTrimmedRanges(getEffectiveSkipRanges(), clamped), durationRef.current);
         pausedAtSecondsRef.current = adjusted;
         drawFrameAt(adjusted);
         onTimeUpdate?.(adjusted);

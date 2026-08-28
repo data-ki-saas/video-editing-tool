@@ -9,6 +9,7 @@
  * dependencies.
  */
 import type { FilterPresetId } from "./filterPresets";
+import { CUT_TRANSITION_DURATION_SECONDS, type CutTransitionId } from "./cutTransitionPresets";
 
 /**
  * Timestamps (seconds) to sample a clip of the given duration at a fixed
@@ -999,7 +1000,7 @@ export function buildSequenceClipInfos(
  * extraction, live preview, the per-clip duration drag on FrameStrip).
  */
 export type SequenceEntry =
-  | { id: string; kind: "video"; assetId: string; colorFilterId?: FilterPresetId | null }
+  | { id: string; kind: "video"; assetId: string; colorFilterId?: FilterPresetId | null; cutTransitionInId?: CutTransitionId | null }
   | {
       id: string;
       kind: "image";
@@ -1015,7 +1016,17 @@ export type SequenceEntry =
       // Same per-clip color filter as the "video" variant above -- see
       // VideoOverlayClip.colorFilterId's doc comment.
       colorFilterId?: FilterPresetId | null;
+      cutTransitionInId?: CutTransitionId | null;
     };
+
+// Both SequenceEntry variants above carry a `cutTransitionInId` -- which
+// blended-cut transition (see cutTransitionPresets.ts) plays INTO this clip
+// from whichever clip precedes it in sequenceClips. Deliberately named
+// "cutTransition", never bare "transition" -- this codebase already uses
+// "transition" for the OLDER, unrelated pan/zoom Ken Burns effect (see
+// ZoomEffect below and transformations.ts's own "transition" labels).
+// Meaningless (never set/read) on sequenceClips[0], since nothing precedes
+// it.
 
 export function sequenceEntryAssetId(entry: SequenceEntry): string {
   return entry.assetId;
@@ -1061,6 +1072,71 @@ export function resolveSequencePosition(
 }
 
 /**
+ * CanvasPlayer-only cut-transition support. Unlike buildRenderSegments (the
+ * Creatomate/local-export OUTPUT timeline, which is free to shift its own
+ * outputStartSeconds since it's a separate axis from the ORIGINAL timeline
+ * ZoomEffect/overlay/text/TTS ranges are authored against), CanvasPlayer
+ * conflates "which clip's frame to show" and "evaluate every authored-range
+ * effect" into the SAME elapsedSeconds clock -- shifting SequenceClipInfo's
+ * own startTimeSeconds here would drag every authored absolute-time effect
+ * on every clip AFTER a transition out of sync with where the user actually
+ * placed it. So clip start times stay exactly as they are today (a plain
+ * hard-cut concatenation); the blend is instead layered on top via these two
+ * helpers, reusing the SAME "skip a stretch of dead time" mechanism trims
+ * already use (skipTrimmedRanges) rather than a second timeline axis.
+ */
+
+/** Non-null only while elapsedSeconds sits inside an active cut-transition
+ * PREVIEW window -- the CUT_TRANSITION_DURATION_SECONDS just before the
+ * incoming clip's own real (unshifted) start. Gives drawFrameAt everything
+ * needed to blend the outgoing clip's normal frame with an early preview of
+ * the incoming clip's own opening frames: `toLocalSeconds` is the incoming
+ * clip's own local time to sample for that preview (0 at the window's
+ * start, `overlapSeconds` at its end -- continuous with the real local time
+ * it'll have once actual playback reaches it), and `progress` (0..1) is how
+ * much to favor the incoming clip already. */
+export function resolveCutTransitionBlend(
+  clips: SequenceClipInfo[],
+  cutTransitionByEntryId: Map<string, CutTransitionId | null | undefined>,
+  elapsedSeconds: number
+): { fromIndex: number; toIndex: number; toLocalSeconds: number; progress: number; overlapSeconds: number } | null {
+  for (let i = 1; i < clips.length; i++) {
+    const clip = clips[i];
+    const cutTransitionInId = clip.id ? cutTransitionByEntryId.get(clip.id) ?? null : null;
+    const overlapSeconds = resolveCutTransitionOverlapSeconds(cutTransitionInId, true, clips[i - 1].durationSeconds, clip.durationSeconds);
+    if (overlapSeconds <= 0) continue;
+    const windowStart = clip.startTimeSeconds - overlapSeconds;
+    if (elapsedSeconds < windowStart || elapsedSeconds >= clip.startTimeSeconds) continue;
+    const toLocalSeconds = elapsedSeconds - windowStart;
+    return { fromIndex: i - 1, toIndex: i, toLocalSeconds, progress: toLocalSeconds / overlapSeconds, overlapSeconds };
+  }
+  return null;
+}
+
+/** The redundant stretch [clip.startTimeSeconds, clip.startTimeSeconds +
+ * overlapSeconds) of EVERY transitioned clip -- already fully shown as the
+ * early preview resolveCutTransitionBlend renders above, so real playback
+ * must skip past it once the clock reaches it (else the incoming clip's own
+ * opening would play twice: once blended-in, once "for real"). Fed into
+ * skipTrimmedRanges/resumePlaybackFrom ALONGSIDE the user's own real
+ * trimRanges (never into TrimTrack's own UI, which shows only genuine
+ * user-authored cuts) -- same skip mechanism, a synthetic reason to use it. */
+export function buildVirtualCutTransitionSkipRanges(
+  clips: SequenceClipInfo[],
+  cutTransitionByEntryId: Map<string, CutTransitionId | null | undefined>
+): TrimRange[] {
+  const ranges: TrimRange[] = [];
+  for (let i = 1; i < clips.length; i++) {
+    const clip = clips[i];
+    const cutTransitionInId = clip.id ? cutTransitionByEntryId.get(clip.id) ?? null : null;
+    const overlapSeconds = resolveCutTransitionOverlapSeconds(cutTransitionInId, true, clips[i - 1].durationSeconds, clip.durationSeconds);
+    if (overlapSeconds <= 0) continue;
+    ranges.push({ startTimeSeconds: clip.startTimeSeconds, endTimeSeconds: clip.startTimeSeconds + overlapSeconds });
+  }
+  return ranges;
+}
+
+/**
  * One contiguous stretch of the OUTPUT (post-trim) render timeline, all
  * from a single physical clip -- what the Creatomate compiler emits one
  * `Video` element per (lib/timeline/compileCreatomateTimeline.ts).
@@ -1091,6 +1167,68 @@ export interface RenderSegment {
   /** Also this segment's duration in OUTPUT time -- trimming removes stretches, it never changes playback speed. */
   durationSeconds: number;
   outputStartSeconds: number;
+  /** Set only on the FIRST surviving segment of an entry that has a
+   * cutTransitionInId AND has a previous segment to blend with -- outputStartSeconds
+   * above already has cutTransitionOverlapSeconds subtracted, so this segment's
+   * output window genuinely overlaps the end of the segment immediately
+   * before it in this array. Absent/null everywhere else (a hard cut). */
+  cutTransitionInId?: CutTransitionId | null;
+  /** The actual overlap (seconds) applied for cutTransitionInId, already
+   * baked into outputStartSeconds above -- 0 when cutTransitionInId is absent. */
+  cutTransitionOverlapSeconds?: number;
+}
+
+/** How much an incoming segment/clip's OUTPUT start shifts EARLIER to
+ * overlap the one immediately before it, for a blended cut-transition -- 0
+ * when there's nothing before it or no transition is set. Clamped so the
+ * overlap never exceeds either neighbor's own duration (a very short clip
+ * either side of the cut shouldn't produce a negative remaining duration).
+ * Shared by buildRenderSegments below (the Creatomate/local-export OUTPUT
+ * timeline) and CanvasPlayer's own transition-blend math (which uses the
+ * SAME clamp against the ORIGINAL, unshifted SequenceClipInfo list -- see
+ * resolveCutTransitionBlend) so every consumer agrees on exactly the same
+ * overlap amount. */
+export function resolveCutTransitionOverlapSeconds(
+  cutTransitionInId: CutTransitionId | null | undefined,
+  hasPrevious: boolean,
+  prevDurationSeconds: number,
+  thisDurationSeconds: number
+): number {
+  if (!cutTransitionInId || !hasPrevious) return 0;
+  return Math.max(0, Math.min(CUT_TRANSITION_DURATION_SECONDS, prevDurationSeconds, thisDurationSeconds));
+}
+
+/** The output-timeline (RenderSegment) counterpart to CanvasPlayer's own
+ * resolveCutTransitionBlend, used by exportTimeline.ts's frame-by-frame
+ * local render -- segments already carry their own real, already-shifted
+ * outputStartSeconds (see buildRenderSegments), so unlike CanvasPlayer this
+ * needs no separate skip trick: a segment's own sourceStartSeconds/
+ * clipLocalStartSeconds already give the correct sample position for
+ * whatever outputTimeSeconds falls within its (possibly overlapping)
+ * output window. Non-null only while outputTimeSeconds sits inside a
+ * transitioned segment's own overlap window. */
+export function resolveRenderSegmentBlend(
+  segments: RenderSegment[],
+  outputTimeSeconds: number
+): { fromSegment: RenderSegment; toSegment: RenderSegment; progress: number } | null {
+  for (let i = 1; i < segments.length; i++) {
+    const toSegment = segments[i];
+    const overlapSeconds = toSegment.cutTransitionOverlapSeconds ?? 0;
+    if (overlapSeconds <= 0) continue;
+    if (outputTimeSeconds < toSegment.outputStartSeconds || outputTimeSeconds >= toSegment.outputStartSeconds + overlapSeconds) continue;
+    return { fromSegment: segments[i - 1], toSegment, progress: (outputTimeSeconds - toSegment.outputStartSeconds) / overlapSeconds };
+  }
+  return null;
+}
+
+/** Sum of RenderSegment durations overcounts once transitions overlap two
+ * segments' windows -- the real total is however far the LAST segment's own
+ * output window reaches, not a naive sum. Every consumer that needs "the
+ * output video's total duration" (background-music loop length, the flip
+ * wrapper's own keyframe span, overlay-range clamping against the output
+ * timeline) must use this instead of summing durationSeconds directly. */
+export function totalRenderOutputDuration(segments: RenderSegment[]): number {
+  return segments.reduce((max, s) => Math.max(max, s.outputStartSeconds + s.durationSeconds), 0);
 }
 
 // A segment shorter than this (typically left over when a trim edge lands
@@ -1117,13 +1255,32 @@ export function invertTrimRanges(trimRanges: TrimRange[], totalDurationSeconds: 
   return kept;
 }
 
+// How close subStart needs to land to a clip's own startTimeSeconds to
+// count as "the first surviving bit of this physical clip" (rather than a
+// mid-clip split from a trim cut) -- floating-point cumulative sums can be
+// off by a hair, and a cutTransition should only ever apply at a clip's
+// genuine start.
+const CLIP_START_EPSILON_SECONDS = 0.001;
+
 /**
  * Turns an ordered clip sequence + trim ranges into contiguous OUTPUT
  * segments. Splits every kept (post-trim) stretch further at each clip
  * boundary, so no segment ever spans more than one physical clip, even
- * when a trim cuts across the seam between two clips.
+ * when a trim cuts across the seam between two clips. `cutTransitionByEntryId`
+ * (entry id -> its own cutTransitionInId, absent/empty for a sequence with no
+ * transitions) lets a segment that's the genuine first surviving bit of an
+ * entry with a transition overlap the segment immediately before it in the
+ * OUTPUT timeline -- see resolveCutTransitionOverlapSeconds. A segment
+ * resulting from a trim that cuts INTO a transitioned clip's own head never
+ * gets the overlap (there's no undamaged "start of this clip" left to blend
+ * from) -- an accepted limitation, same as this project's other trim-vs.-
+ * feature edge cases.
  */
-export function buildRenderSegments(clips: SequenceClipInfo[], trimRanges: TrimRange[]): RenderSegment[] {
+export function buildRenderSegments(
+  clips: SequenceClipInfo[],
+  trimRanges: TrimRange[],
+  cutTransitionByEntryId?: Map<string, CutTransitionId | null | undefined>
+): RenderSegment[] {
   const totalDurationSeconds = totalSequenceDuration(clips);
   const keptRanges = invertTrimRanges(trimRanges, totalDurationSeconds);
   const clipBoundaries = clips.map((clip) => clip.startTimeSeconds);
@@ -1148,6 +1305,16 @@ export function buildRenderSegments(clips: SequenceClipInfo[], trimRanges: TrimR
       if (!position) continue;
       const clip = clips[position.clipIndex];
 
+      const isClipStart = Math.abs(subStart - clip.startTimeSeconds) < CLIP_START_EPSILON_SECONDS;
+      const cutTransitionInId = isClipStart && clip.id ? cutTransitionByEntryId?.get(clip.id) ?? null : null;
+      const overlapSeconds = resolveCutTransitionOverlapSeconds(
+        cutTransitionInId,
+        segments.length > 0,
+        segments[segments.length - 1]?.durationSeconds ?? 0,
+        durationSeconds
+      );
+
+      const outputStartSeconds = outputCursor - overlapSeconds;
       segments.push({
         assetId: clip.assetId,
         entryId: clip.id,
@@ -1155,9 +1322,11 @@ export function buildRenderSegments(clips: SequenceClipInfo[], trimRanges: TrimR
         sourceStartSeconds: subStart,
         clipLocalStartSeconds: subStart - clip.startTimeSeconds,
         durationSeconds,
-        outputStartSeconds: outputCursor,
+        outputStartSeconds,
+        cutTransitionInId: overlapSeconds > 0 ? cutTransitionInId : null,
+        cutTransitionOverlapSeconds: overlapSeconds,
       });
-      outputCursor += durationSeconds;
+      outputCursor = outputStartSeconds + durationSeconds;
     }
   }
 

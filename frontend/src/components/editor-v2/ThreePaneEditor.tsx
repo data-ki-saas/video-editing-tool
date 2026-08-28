@@ -45,7 +45,7 @@
  * authored duration, with silent audio").
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listAssets, type Asset } from "@/lib/api";
+import { listAssets, deleteAsset, type Asset } from "@/lib/api";
 import { extractThumbnails, getVideoDuration, captureSingleFrame } from "@/lib/video/video";
 import {
   generateSampleTimestamps,
@@ -116,8 +116,10 @@ import {
   applySelectCutawayFilterPreset,
   applySelectImageOverlayFilterPreset,
   applySelectVideoOverlayFilterPreset,
+  applySelectClipTransition,
 } from "@/lib/video/transformations";
 import type { FilterPresetId } from "@/lib/video/filterPresets";
+import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import {
   saveTimeline,
   type Timeline,
@@ -340,6 +342,11 @@ export function ThreePaneEditor({
   // SequenceEntry/VideoOverlayClip/ImageOverlayClip). At most one is
   // non-null at a time -- opened from that clip's own right-click "Filter".
   const [filterDialogCutaway, setFilterDialogCutaway] = useState<CutawaySegment | null>(null);
+  // CutTransitionDialog's own currently-open target -- the INCOMING clip of
+  // whichever boundary badge was clicked on FrameStrip (cutTransitionInId
+  // lives on this entry, never on the one before it -- see
+  // video_math.ts's SequenceEntry doc comment).
+  const [transitionDialogEntry, setTransitionDialogEntry] = useState<SequenceEntry | null>(null);
   const [filterDialogVideoOverlayIndex, setFilterDialogVideoOverlayIndex] = useState<number | null>(null);
   const [filterDialogImageOverlayIndex, setFilterDialogImageOverlayIndex] = useState<number | null>(null);
 
@@ -966,6 +973,18 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  // FrameStrip's own clip-boundary badge click -- same "set this dialog
+  // target" convention as handleOpenCutawayFilter above.
+  function handleOpenClipTransition(entry: SequenceEntry) {
+    setTransitionDialogEntry(entry);
+  }
+
+  function handleSelectClipTransition(id: CutTransitionId | null) {
+    if (!transitionDialogEntry) return;
+    const { label, state } = applySelectClipTransition(selections, transitionDialogEntry.id, id);
+    pushChange(label, state);
+  }
+
   function handleSelectImageOverlayFilter(id: FilterPresetId) {
     if (filterDialogImageOverlayIndex === null) return;
     const { label, state } = applySelectImageOverlayFilterPreset(selections, filterDialogImageOverlayIndex, id);
@@ -1554,6 +1573,29 @@ export function ThreePaneEditor({
     setEditingTtsOverlayIndex(null);
   }
 
+  // A TTS narration's audio is a freshly-synthesized asset unique to that
+  // one overlay -- unlike overlayImages/videoOverlays, which point at assets
+  // the user picked from their own uploads and may still want kept around,
+  // nothing else creates a TTS asset. Regenerating (handleSaveTtsOverlay) or
+  // removing (handleDeleteTtsOverlay) an overlay therefore orphans its old
+  // audio unless something deletes it -- but a generated narration clip CAN
+  // end up reused on the background-music rail too, via AssetGallery's own
+  // "Add" action on an audio-kind asset (see that file's renderTile), so
+  // this only deletes once nothing else -- another tts overlay, or the
+  // background sequence -- still points at it.
+  function cleanupOrphanedTtsAsset(assetId: string, nextState: EditSelectionsSnapshot) {
+    const stillReferenced =
+      nextState.ttsOverlays.some((overlay) => overlay.assetId === assetId) ||
+      backgroundSequenceAssetIds.includes(assetId);
+    if (stillReferenced) return;
+    setAssets((prev) => prev.filter((asset) => asset.id !== assetId));
+    void deleteAsset(assetId).catch(() => {
+      // Best-effort -- an orphaned asset left behind on failure is a
+      // storage-cost nit, not worth surfacing as a page-level error for an
+      // edit the user already sees succeed.
+    });
+  }
+
   // TtsOverlayDialog's Add/Save -- the dialog itself already assembled the
   // whole TtsOverlay (script, voice, synthesis result, mode, template,
   // rect, position -- see that file's own module comment), so this just
@@ -1573,6 +1615,7 @@ export function ThreePaneEditor({
   // string of the main video clip too -- flipping CanvasPlayer's clipsKey
   // and reloading the live preview for an edit that never touched that clip.
   function handleSaveTtsOverlay(overlay: TtsOverlay) {
+    const previousOverlay = editingTtsOverlayIndex !== null ? selections.ttsOverlays[editingTtsOverlayIndex] : null;
     const { label, state } =
       editingTtsOverlayIndex !== null
         ? applyEditTtsOverlay(selections, editingTtsOverlayIndex, overlay)
@@ -1580,6 +1623,13 @@ export function ThreePaneEditor({
     pushChange(label, state);
     setIsTtsDialogOpen(false);
     setEditingTtsOverlayIndex(null);
+    // Regenerating speech for an existing overlay swaps in a brand-new
+    // assetId (see TtsOverlayDialog's handleGenerateSpeech) -- the old audio
+    // is no longer this overlay's, so clear it out unless it's still doing
+    // double duty somewhere else.
+    if (previousOverlay && previousOverlay.assetId !== overlay.assetId) {
+      cleanupOrphanedTtsAsset(previousOverlay.assetId, state);
+    }
     void listAssets(projectId)
       .then((data) => {
         setAssets((prev) => {
@@ -1595,6 +1645,7 @@ export function ThreePaneEditor({
   }
 
   function handleDeleteTtsOverlay(overlayIndex: number) {
+    const deletedOverlay = selections.ttsOverlays[overlayIndex];
     if (editingTtsOverlayIndex === overlayIndex) {
       setIsTtsDialogOpen(false);
       setEditingTtsOverlayIndex(null);
@@ -1603,6 +1654,7 @@ export function ThreePaneEditor({
     setLiveTtsOverlayVolumeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
     const { label, state } = applyDeleteTtsOverlay(selections, overlayIndex);
     pushChange(label, state);
+    if (deletedOverlay) cleanupOrphanedTtsAsset(deletedOverlay.assetId, state);
   }
 
   function handleSeek(seconds: number) {
@@ -1649,6 +1701,35 @@ export function ThreePaneEditor({
           return index >= 0 ? thumbnails[index] : null;
         })()
     : null;
+
+  // CutTransitionDialog's own two preview frames -- the outgoing clip's TAIL
+  // (near its own end) and the incoming clip's HEAD (near its own start),
+  // rather than either clip's midpoint, so the preview shows something
+  // closer to what the actual cut looks like. `transitionDialogEntry` is
+  // always the INCOMING clip (see this file's own state comment); its
+  // outgoing neighbor is simply whichever entry precedes it in
+  // effectiveSequenceEntries -- always defined, since FrameStrip's boundary
+  // badge never opens this dialog for the very first clip (nothing precedes
+  // it -- see video_math.ts's SequenceEntry.cutTransitionInId doc comment).
+  const transitionDialogIncomingIndex = transitionDialogEntry
+    ? effectiveSequenceEntries.findIndex((entry) => entry.id === transitionDialogEntry.id)
+    : -1;
+  function frameUrlNear(entry: SequenceEntry | undefined, index: number, biasTowardStart: boolean): string | null {
+    if (!entry) return null;
+    if (entry.kind === "image") return assetUrlById[entry.assetId] ?? null;
+    const startTimeSeconds = index === 0 ? 0 : clipBoundarySeconds[index - 1];
+    const endTimeSeconds = index < clipBoundarySeconds.length ? clipBoundarySeconds[index] : videoDurationSeconds;
+    const bias = (endTimeSeconds - startTimeSeconds) * 0.1;
+    const targetSeconds = biasTowardStart ? startTimeSeconds + bias : endTimeSeconds - bias;
+    const frameIndex = findClosestTimestampIndex(thumbnailTimestampsSeconds, targetSeconds);
+    return frameIndex >= 0 ? thumbnails[frameIndex] : null;
+  }
+  const transitionDialogOutgoingFrameUrl =
+    transitionDialogIncomingIndex > 0
+      ? frameUrlNear(effectiveSequenceEntries[transitionDialogIncomingIndex - 1], transitionDialogIncomingIndex - 1, false)
+      : null;
+  const transitionDialogIncomingFrameUrl =
+    transitionDialogIncomingIndex >= 0 ? frameUrlNear(transitionDialogEntry ?? undefined, transitionDialogIncomingIndex, true) : null;
 
   const filterDialogImageOverlayPreviewFrameUrl =
     filterDialogImageOverlayIndex !== null
@@ -1938,6 +2019,11 @@ export function ThreePaneEditor({
             setFilterDialogVideoOverlayIndex(null);
             setFilterDialogImageOverlayIndex(null);
           }}
+          transitionDialogEntry={transitionDialogEntry}
+          transitionDialogOutgoingFrameUrl={transitionDialogOutgoingFrameUrl}
+          transitionDialogIncomingFrameUrl={transitionDialogIncomingFrameUrl}
+          onSelectClipTransition={handleSelectClipTransition}
+          onCloseTransitionDialog={() => setTransitionDialogEntry(null)}
           onOpenTextDialog={handleOpenTextDialog}
           isTextDialogOpen={isTextDialogOpen}
           editingTextOverlay={editingTextOverlayIndex !== null ? displayedTextOverlays[editingTextOverlayIndex] : null}
@@ -2014,6 +2100,7 @@ export function ThreePaneEditor({
           onEditCutaway={handleEditCutaway}
           onDeleteCutaway={handleDeleteCutaway}
           onOpenCutawayFilter={handleOpenCutawayFilter}
+          onOpenClipTransition={handleOpenClipTransition}
           mainAudioVolume={mainAudioVolume}
           onChangeMainAudioVolume={setMainAudioVolume}
           backgroundVolume={backgroundVolume}

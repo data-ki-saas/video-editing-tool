@@ -39,12 +39,16 @@ import {
   Keyframe,
   TextTypewriter,
   TextAppearWordByWord,
+  Fade,
+  SlideLeft,
+  WipeLeft,
 } from "creatomate";
 import type { EditSelectionsSnapshot, Timeline, TemplateElement, AppMetaEntry } from "@/lib/projects";
 import {
   buildRenderSegments,
   mapSourceRangeToOutputRanges,
   totalSequenceDuration,
+  totalRenderOutputDuration,
   computeEffectiveCropRect,
   computeFlipSegments,
   computeOverlayRects,
@@ -59,6 +63,7 @@ import {
 import { getTextTemplateFontFraction } from "@/lib/video/textTemplates";
 import { getTranscriptCaptionConfig } from "@/lib/video/transcriptCaptionTemplates";
 import { getCreatomateFilterProperties, type FilterPresetId } from "@/lib/video/filterPresets";
+import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 
 export interface CompileTimelineInput {
   selections: EditSelectionsSnapshot;
@@ -100,6 +105,27 @@ const CROP_EASING = "cubic-in-out";
 // has no step/hold value, so it's expressed as two keyframes this close
 // together instead.
 const FLIP_KEYFRAME_EPSILON_SECONDS = 1 / 60;
+const CUT_TRANSITION_EASING = "linear";
+
+/** Maps a cutTransitionInId (see cutTransitionPresets.ts) to the real
+ * Creatomate SDK animation class that renders it -- SlideLeft/WipeLeft are
+ * the one fixed smart-default direction for each type (no direction picker,
+ * per this project's driving vision). `durationSeconds` is always the
+ * segment's own already-computed cutTransitionOverlapSeconds (the overlap
+ * this file's own buildRenderSegments/buildMediaSegments already placed the
+ * two elements' `time`s to create -- see this file's module comment on why
+ * the overlap is computed here rather than left to Creatomate's own
+ * transition-property auto-shift). */
+function getCreatomateCutTransitionAnimation(id: CutTransitionId, durationSeconds: number) {
+  switch (id) {
+    case "fade":
+      return new Fade({ duration: durationSeconds, easing: CUT_TRANSITION_EASING });
+    case "slide":
+      return new SlideLeft({ duration: durationSeconds, easing: CUT_TRANSITION_EASING });
+    case "wipe":
+      return new WipeLeft({ duration: durationSeconds, easing: CUT_TRANSITION_EASING });
+  }
+}
 
 let idCounter = 0;
 function nextId(prefix: string): string {
@@ -190,34 +216,61 @@ function buildMediaSegments(
   mainVolumePercent: string,
   cutawayFilterByEntryId: Map<string, FilterPresetId | null>
 ): (Video | Image)[] {
-  return segments.map((segment) => {
+  const elements: (Video | Image)[] = [];
+
+  segments.forEach((segment, index) => {
     const crop = buildCropProperties(segment, baseCropRect, zoomEffects);
     const filter = getCreatomateFilterProperties(
       segment.entryId ? (cutawayFilterByEntryId.get(segment.entryId) ?? null) : null
     );
+    // Both the transition ANIMATION (renders the blend) and this element's
+    // own `time` (segment.outputStartSeconds, already shifted earlier by
+    // buildRenderSegments) come from the SAME cutTransitionInId/
+    // cutTransitionOverlapSeconds this segment already carries -- nothing
+    // here recomputes the overlap.
+    const cutTransition =
+      segment.cutTransitionInId && segment.cutTransitionOverlapSeconds
+        ? { transition: getCreatomateCutTransitionAnimation(segment.cutTransitionInId, segment.cutTransitionOverlapSeconds) }
+        : {};
 
     if (segment.kind === "image") {
       const id = nextId("clip");
       appMeta[id] = { role: "clip", assetId: segment.assetId };
-      return new Image({
-        id,
-        track: 1,
-        time: segment.outputStartSeconds,
-        duration: segment.durationSeconds,
-        fit: "fill",
-        xAnchor: "0%",
-        yAnchor: "0%",
-        ...crop,
-        ...filter,
-        // Overwritten server-side by resolveAssetSources (api/render/route.ts)
-        // from _appMeta[id].assetId -- never a real playable URL by itself.
-        source: "",
-      });
+      elements.push(
+        new Image({
+          id,
+          track: 1,
+          time: segment.outputStartSeconds,
+          duration: segment.durationSeconds,
+          fit: "fill",
+          xAnchor: "0%",
+          yAnchor: "0%",
+          ...crop,
+          ...filter,
+          ...cutTransition,
+          // Overwritten server-side by resolveAssetSources (api/render/route.ts)
+          // from _appMeta[id].assetId -- never a real playable URL by itself.
+          source: "",
+        })
+      );
+      return;
     }
+
+    // Audio crossfade companion to the video blend above -- the incoming
+    // clip's own volume ramps up from silence across the overlap instead of
+    // starting at full volume mid-blend (an anchor keyframe at t=0 is
+    // required, same reasoning as buildFlipScaleKeyframes' own anchor
+    // keyframes: Creatomate has nothing to interpolate FROM otherwise). Uses
+    // the SDK's own audioFadeIn/audioFadeOut (Video-specific, NOT a
+    // ValueOrKeyframes property -- volume itself only accepts a flat
+    // number/string, see node_modules/creatomate/dist/elements/Video.d.ts)
+    // rather than hand-rolled Keyframe volume automation -- same "trust the
+    // real SDK properties" philosophy this file's own module comment states.
+    const overlapSeconds = segment.cutTransitionOverlapSeconds ?? 0;
 
     const id = nextId("clip");
     appMeta[id] = { role: "clip", assetId: segment.assetId };
-    return new Video({
+    const element = new Video({
       id,
       track: 1,
       time: segment.outputStartSeconds,
@@ -228,13 +281,27 @@ function buildMediaSegments(
       xAnchor: "0%",
       yAnchor: "0%",
       volume: mainVolumePercent,
+      ...(overlapSeconds > 0 ? { audioFadeIn: overlapSeconds } : {}),
       ...crop,
       ...filter,
+      ...cutTransition,
       // Overwritten server-side by resolveAssetSources (api/render/route.ts)
       // from _appMeta[id].assetId -- never a real playable URL by itself.
       source: "",
     });
+    elements.push(element);
+
+    // The OUTGOING side of this same crossfade -- the element immediately
+    // preceding this one fades ITS OWN tail out via the same audioFadeOut
+    // property. Only when that element is itself a Video (an Image segment
+    // has no audio, hence no audioFadeOut, at all).
+    const previous = index > 0 ? elements[elements.length - 2] : undefined;
+    if (overlapSeconds > 0 && previous instanceof Video) {
+      previous.properties.audioFadeOut = overlapSeconds;
+    }
   });
+
+  return elements;
 }
 
 /** The flip/mirror wrapper -- one composition spanning the WHOLE output
@@ -830,8 +897,10 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const appMeta: Record<string, AppMetaEntry> = {};
 
   const totalOriginalDurationSeconds = totalSequenceDuration(sequenceClips);
-  const segments = buildRenderSegments(sequenceClips, selections.trimRanges);
-  const totalOutputDurationSeconds = segments.reduce((sum, s) => sum + s.durationSeconds, 0);
+  const cutTransitionByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.cutTransitionInId ?? null]));
+  const segments = buildRenderSegments(sequenceClips, selections.trimRanges, cutTransitionByEntryId);
+  // Overlapping segments overcount a naive sum -- see totalRenderOutputDuration's own doc comment.
+  const totalOutputDurationSeconds = totalRenderOutputDuration(segments);
 
   const cutawayFilterByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.colorFilterId ?? null]));
   const mediaSegments = buildMediaSegments(

@@ -62,6 +62,8 @@ import {
   computeAudioMixBreakpoints,
   mapSourceRangeToOutputRanges,
   totalSequenceDuration,
+  totalRenderOutputDuration,
+  resolveRenderSegmentBlend,
   AUDIO_TRANSITION_RAMP_SECONDS,
   DEFAULT_OVERLAY_FRAMING,
   FULL_FRAME_CROP_RECT,
@@ -354,12 +356,39 @@ async function buildMixedAudioBuffer(
     previousGain = event.gain;
   }
 
-  for (const segment of segments) {
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
     const buffer = decodedByAssetId.get(segment.assetId);
     if (!buffer) continue;
     const source = offlineContext.createBufferSource();
     source.buffer = buffer;
-    source.connect(mainGainNode);
+
+    // The audio side of a cut-transition -- each segment already gets its
+    // OWN source node here (unlike CanvasPlayer's single continuous
+    // concatenated buffer), so a per-segment gain node chained ahead of the
+    // shared mainGainNode is all a crossfade needs: fades THIS segment's
+    // own audio in from silence if a transition plays INTO it
+    // (cutTransitionOverlapSeconds), and/or fades it out to silence if the
+    // NEXT segment transitions in FROM it -- a clip sandwiched between two
+    // transitions gets both. Ducking automation stays on the shared
+    // mainGainNode, unaffected, so it still applies on top.
+    const incomingOverlapSeconds = segment.cutTransitionOverlapSeconds ?? 0;
+    const nextOverlapSeconds = segments[i + 1]?.cutTransitionOverlapSeconds ?? 0;
+    if (incomingOverlapSeconds > 0 || nextOverlapSeconds > 0) {
+      const transitionGainNode = offlineContext.createGain();
+      if (incomingOverlapSeconds > 0) {
+        transitionGainNode.gain.setValueAtTime(0, segment.outputStartSeconds);
+        transitionGainNode.gain.linearRampToValueAtTime(1, segment.outputStartSeconds + incomingOverlapSeconds);
+      }
+      if (nextOverlapSeconds > 0) {
+        const fadeOutStartSeconds = segment.outputStartSeconds + segment.durationSeconds - nextOverlapSeconds;
+        transitionGainNode.gain.setValueAtTime(1, fadeOutStartSeconds);
+        transitionGainNode.gain.linearRampToValueAtTime(0, segment.outputStartSeconds + segment.durationSeconds);
+      }
+      source.connect(transitionGainNode).connect(mainGainNode);
+    } else {
+      source.connect(mainGainNode);
+    }
     source.start(segment.outputStartSeconds, segment.clipLocalStartSeconds, segment.durationSeconds);
   }
 
@@ -491,9 +520,13 @@ export async function exportVideoLocally(
   // colorFilterId" model as compileCreatomateTimeline.ts's identical map --
   // see that file's own comment on cutawayFilterByEntryId.
   const cutawayFilterByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.colorFilterId ?? null]));
+  // Same cut-transition lookup compileCreatomateTimeline.ts builds -- see
+  // that file's own cutTransitionByEntryId comment.
+  const cutTransitionByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.cutTransitionInId ?? null]));
   const cssFilterFor = (colorFilterId: FilterPresetId | null | undefined) => getFilterPresetOption(colorFilterId ?? null).cssFilter;
-  const segments = buildRenderSegments(sequenceClips, selections.trimRanges);
-  const totalDurationSeconds = segments.reduce((sum, segment) => sum + segment.durationSeconds, 0);
+  const segments = buildRenderSegments(sequenceClips, selections.trimRanges, cutTransitionByEntryId);
+  // Overlapping segments overcount a naive sum -- see totalRenderOutputDuration's own doc comment.
+  const totalDurationSeconds = totalRenderOutputDuration(segments);
   const totalFrames = Math.max(1, Math.round(totalDurationSeconds * OUTPUT_FPS));
 
   const { format, mimeType, videoCodec, audioCodec } = await pickOutputConfig(outputWidth, outputHeight);
@@ -678,6 +711,66 @@ export async function exportVideoLocally(
         ctx.restore();
       } else {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+
+      // The incoming side of a cut-transition blend -- the SAME
+      // Fade/Slide/Wipe approximation (alpha/translate/clip-rect)
+      // CanvasPlayer's own drawFrameAt uses, sourced here from a real
+      // seeked <video>/<img> instead of a pre-extracted frame. Segments
+      // already carry their own correctly-shifted outputStartSeconds (see
+      // buildRenderSegments), so unlike CanvasPlayer this needs no separate
+      // skip trick -- resolveRenderSegmentBlend just reads it straight off
+      // the segment. Skipped (same KNOWN LIMITATION as CanvasPlayer)
+      // whenever a Full-Screen/Split-Screen overlay is active at the same
+      // instant.
+      const blend = winningExclusiveLayout ? null : resolveRenderSegmentBlend(segments, outputTimeSeconds);
+      if (blend) {
+        const toSegment = blend.toSegment;
+        const incomingSource: HTMLVideoElement | HTMLImageElement | null =
+          toSegment.kind === "image"
+            ? (imageClipElementsByAssetId.get(toSegment.assetId) ?? null)
+            : (videoElementsByAssetId.get(toSegment.assetId) ?? null);
+        if (incomingSource) {
+          const incomingSourceTimeSeconds = toSegment.sourceStartSeconds + (outputTimeSeconds - toSegment.outputStartSeconds);
+          const incomingLocalSeconds = toSegment.clipLocalStartSeconds + (outputTimeSeconds - toSegment.outputStartSeconds);
+          if (incomingSource instanceof HTMLVideoElement) {
+            await seekVideoTo(incomingSource, incomingLocalSeconds);
+          }
+          const incomingSourceWidth = incomingSource instanceof HTMLVideoElement ? incomingSource.videoWidth : incomingSource.naturalWidth;
+          const incomingSourceHeight = incomingSource instanceof HTMLVideoElement ? incomingSource.videoHeight : incomingSource.naturalHeight;
+          const incomingCrop = computeEffectiveCropRect(baseCropRect, selections.zoomEffects, incomingSourceTimeSeconds);
+          const incomingSx = incomingCrop.x * incomingSourceWidth;
+          const incomingSy = incomingCrop.y * incomingSourceHeight;
+          const incomingSWidth = incomingCrop.width * incomingSourceWidth;
+          const incomingSHeight = incomingCrop.height * incomingSourceHeight;
+          const incomingFlipH = computeEffectiveFlip(selections.flipHorizontalToggles, incomingSourceTimeSeconds);
+          const incomingFlipV = computeEffectiveFlip(selections.flipVerticalToggles, incomingSourceTimeSeconds);
+          const destX = baseRect ? baseRect.x * canvas.width : 0;
+          const destY = baseRect ? baseRect.y * canvas.height : 0;
+          const destWidth = baseRect ? baseRect.width * canvas.width : canvas.width;
+          const destHeight = baseRect ? baseRect.height * canvas.height : canvas.height;
+
+          ctx.save();
+          ctx.filter = cssFilterFor(toSegment.entryId ? cutawayFilterByEntryId.get(toSegment.entryId) : null);
+          if (toSegment.cutTransitionInId === "wipe") {
+            // Reveal grows left-to-right -- an approximation of WipeLeft's
+            // own geometry, not a literal match (see drawFrameAt's identical
+            // disclaimer in CanvasPlayer.tsx).
+            ctx.beginPath();
+            ctx.rect(destX, destY, destWidth * blend.progress, destHeight);
+            ctx.clip();
+          } else if (toSegment.cutTransitionInId !== "slide") {
+            ctx.globalAlpha = blend.progress; // "fade" (or an unset/legacy id defaulting to it)
+          }
+          // Slides in from the right, covering the outgoing frame
+          // underneath -- a "push" reveal, not a true dual-slide.
+          const slideOffsetX = toSegment.cutTransitionInId === "slide" ? (1 - blend.progress) * destWidth : 0;
+          drawImageFlipped(
+            ctx, incomingSource, incomingSx, incomingSy, incomingSWidth, incomingSHeight,
+            destX + slideOffsetX, destY, destWidth, destHeight, incomingFlipH, incomingFlipV
+          );
+          ctx.restore();
+        }
       }
 
       // Composited AFTER the flip transform above is undone -- an overlay

@@ -107,6 +107,7 @@ import { VideoOverlayTrack } from "./VideoOverlayTrack";
 import { ImageOverlayTrack } from "./ImageOverlayTrack";
 import { MarkerTrack } from "./MarkerTrack";
 import { CutawayTrack, type CutawaySegment } from "./CutawayTrack";
+import { CutTransitionIcon } from "./CutTransitionDialog";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import type { TimelineMarker } from "@/lib/projects";
@@ -421,6 +422,7 @@ export function FrameStrip({
   onEditCutaway,
   onDeleteCutaway,
   onOpenCutawayFilter,
+  onOpenClipTransition,
   isLoading,
   durationSeconds,
   currentTimeSeconds,
@@ -521,6 +523,12 @@ export function FrameStrip({
   // The Cutaways rail's own right-click "Filter" -- opens FilterPresetDialog
   // scoped to just this cutaway (see applySelectCutawayFilterPreset).
   onOpenCutawayFilter: (segment: CutawaySegment) => void;
+  // The clip-boundary transition badge's own click (see clipBoundarySeconds'
+  // own render block below) -- opens CutTransitionDialog scoped to the
+  // INCOMING clip of that boundary (whichever sequenceEntries[index+1] is),
+  // since that's the entry cutTransitionInId actually lives on (see
+  // video_math.ts's SequenceEntry doc comment).
+  onOpenClipTransition: (entry: SequenceEntry) => void;
   isLoading: boolean;
   durationSeconds: number;
   currentTimeSeconds: number;
@@ -1109,29 +1117,44 @@ export function FrameStrip({
           const isDraggingThis = draggingBoundary?.index === index;
           const positionSeconds = isDraggingThis ? draggingBoundary.candidateSeconds : boundarySeconds;
           const leftPercent = durationSeconds > 0 ? (positionSeconds / durationSeconds) * 100 : 0;
-
-          if (!isImageBoundary) {
-            return (
-              <div
-                key={index}
-                title="Clip boundary"
-                className="pointer-events-none absolute inset-y-0 w-px bg-white/60"
-                style={{ left: `${leftPercent}%` }}
-              />
-            );
-          }
+          // The INCOMING clip of this boundary -- cutTransitionInId lives
+          // on sequenceEntries[index+1], never on sequenceEntries[index]
+          // (see video_math.ts's own doc comment) -- always defined since
+          // clipBoundarySeconds only has one entry per SEAM (never one for
+          // the very last clip's own end), so index+1 is always a real clip.
+          const incomingEntry = sequenceEntries[index + 1];
 
           return (
-            <div
-              key={index}
-              title="Drag to resize this photo clip's duration"
-              onPointerDown={(e) => handleBoundaryPointerDown(index, clipStartSeconds, boundarySeconds, e)}
-              onPointerMove={handleBoundaryPointerMove}
-              onPointerUp={handleBoundaryPointerUp}
-              className="absolute inset-y-0 flex w-3 -translate-x-1/2 cursor-ew-resize items-center justify-center"
-              style={{ left: `${leftPercent}%` }}
-            >
-              <div className={"h-full w-0.5 " + (isDraggingThis ? "bg-accent" : "bg-accent/70")} />
+            <div key={index} className="pointer-events-none absolute inset-y-0" style={{ left: `${leftPercent}%` }}>
+              {isImageBoundary ? (
+                <div
+                  title="Drag to resize this photo clip's duration"
+                  onPointerDown={(e) => handleBoundaryPointerDown(index, clipStartSeconds, boundarySeconds, e)}
+                  onPointerMove={handleBoundaryPointerMove}
+                  onPointerUp={handleBoundaryPointerUp}
+                  className="pointer-events-auto absolute inset-y-0 flex w-3 -translate-x-1/2 cursor-ew-resize items-center justify-center"
+                >
+                  <div className={"h-full w-0.5 " + (isDraggingThis ? "bg-accent" : "bg-accent/70")} />
+                </div>
+              ) : (
+                <div className="absolute inset-y-0 w-px bg-white/60" />
+              )}
+              {incomingEntry && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenClipTransition(incomingEntry);
+                  }}
+                  title={incomingEntry.cutTransitionInId ? `Transition: ${incomingEntry.cutTransitionInId}` : "Transition: Cut -- click to change"}
+                  className={
+                    "pointer-events-auto absolute top-1 z-10 flex h-4 w-4 -translate-x-1/2 items-center justify-center rounded-full border " +
+                    (incomingEntry.cutTransitionInId ? "border-accent bg-accent text-accent-foreground" : "border-white/60 bg-black/50 text-white/80 hover:bg-black/70")
+                  }
+                >
+                  <CutTransitionIcon id={incomingEntry.cutTransitionInId ?? null} className="h-2.5 w-2.5" />
+                </button>
+              )}
             </div>
           );
         })}
