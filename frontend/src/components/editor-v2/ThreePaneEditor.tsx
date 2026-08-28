@@ -142,6 +142,7 @@ import { FeedbackArea } from "./FeedbackArea";
 import type { CanvasPlayerHandle } from "./CanvasPlayer";
 import { RenderComingSoonPopup } from "./RenderComingSoonPopup";
 import { LocalRenderPopup } from "./LocalRenderPopup";
+import { CoverPicker } from "./CoverPicker";
 
 const THUMBNAIL_INTERVAL_SECONDS = 1;
 const SAVE_DEBOUNCE_MS = 600;
@@ -391,6 +392,14 @@ export function ThreePaneEditor({
   const [isLocalRenderPopupOpen, setIsLocalRenderPopupOpen] = useState(false);
 
   const canvasPlayerRef = useRef<CanvasPlayerHandle>(null);
+
+  // Cover/thumbnail picker (see CoverPicker.tsx) -- seeded from the row this
+  // reel was loaded with, then kept in sync locally as the user saves/clears
+  // a cover, same as isRenderComingSoonOpen etc. above rather than a
+  // dedicated hook (unlike render status, there's no async polling here --
+  // every CoverPicker action is a single request/response).
+  const [isCoverPickerOpen, setIsCoverPickerOpen] = useState(false);
+  const [coverThumbnailUrl, setCoverThumbnailUrl] = useState<string | null>(initialProject.thumbnail_url);
 
   // Cosmetic-only, persisted but not history-tracked (see this file's
   // module comment). No UI sets this anymore (the Template picker was
@@ -1970,6 +1979,8 @@ export function ThreePaneEditor({
         localRenderUnsupportedReason={localRenderUnsupportedReason}
         onLocalRenderClick={handleLocalRenderClick}
         transcriptCaption={selections.transcriptCaption}
+        coverThumbnailUrl={coverThumbnailUrl}
+        onCoverClick={() => setIsCoverPickerOpen(true)}
       />
 
       <section className="min-h-0 flex-[3] overflow-hidden border-b border-border">
@@ -2199,6 +2210,17 @@ export function ThreePaneEditor({
       </section>
 
       {isRenderComingSoonOpen && <RenderComingSoonPopup onClose={() => setIsRenderComingSoonOpen(false)} />}
+      {isCoverPickerOpen && (
+        <CoverPicker
+          projectId={projectId}
+          playerRef={canvasPlayerRef}
+          currentTimeSeconds={currentTimeSeconds}
+          thumbnailUrl={coverThumbnailUrl}
+          onSaved={(url) => setCoverThumbnailUrl(url)}
+          onCleared={() => setCoverThumbnailUrl(null)}
+          onClose={() => setIsCoverPickerOpen(false)}
+        />
+      )}
       {isLocalRenderPopupOpen && (
         <LocalRenderPopup
           isRendering={isLocalRendering}

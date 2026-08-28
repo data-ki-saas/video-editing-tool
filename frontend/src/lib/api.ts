@@ -308,6 +308,52 @@ export async function resetProject(projectId: string) {
   }
 }
 
+export interface ThumbnailInfo {
+  thumbnail_url: string;
+  thumbnail_source: "frame" | "upload";
+  thumbnail_time_seconds: number | null;
+}
+
+/** POST /api/projects/{id}/thumbnail -- backs both of CoverPicker's modes.
+ * `source: "frame"` sends a JPEG blob captured client-side from
+ * CanvasPlayer's own canvas (see CanvasPlayer.tsx's captureFrame) with
+ * `timeSeconds` set to the playhead position it was captured at;
+ * `source: "upload"` sends a user-picked image file with no `timeSeconds`.
+ * Either way the backend writes a fresh R2 object and returns its
+ * permanent public URL -- see projects/service.py's upload_thumbnail. */
+export async function uploadThumbnail(
+  projectId: string,
+  file: File | Blob,
+  source: "frame" | "upload",
+  timeSeconds?: number
+): Promise<ThumbnailInfo> {
+  const formData = new FormData();
+  formData.append("file", file, source === "frame" ? "cover.jpg" : (file as File).name);
+  formData.append("source", source);
+  if (timeSeconds !== undefined) formData.append("time_seconds", String(timeSeconds));
+
+  const response = await apiFetch(`${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}/thumbnail`, {
+    method: "POST",
+    headers: await authHeader(),
+    body: formData,
+  });
+  return handleResponse<ThumbnailInfo>(response);
+}
+
+/** Clears a project's cover back to "no custom thumbnail" -- routed through
+ * the backend (not a direct Supabase write) since it also deletes the R2
+ * object, same reason deleteProject/resetProject are. */
+export async function clearThumbnail(projectId: string) {
+  const response = await apiFetch(`${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}/thumbnail`, {
+    method: "DELETE",
+    headers: await authHeader(),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${response.status})`);
+  }
+}
+
 export interface RenderTriggerResult {
   renderId: string;
   status: string;

@@ -47,6 +47,9 @@ def r2_settings(moto_r2_server, monkeypatch):
     monkeypatch.setattr(settings, "r2_renders_access_key_id", "test")
     monkeypatch.setattr(settings, "r2_renders_secret_access_key", "test")
     monkeypatch.setattr(settings, "r2_renders_bucket_name", "test-renders-bucket")
+    # Doesn't need to be a real public URL in tests -- upload_public_object/
+    # thumbnail_key_from_url only need it to round-trip consistently.
+    monkeypatch.setattr(settings, "r2_renders_public_url", f"{moto_r2_server}/test-renders-bucket")
 
 
 class FakeAssetsTable:
@@ -64,6 +67,9 @@ class FakeAssetsTable:
         render_id: str | None = None,
         render_status: str | None = None,
         render_url: str | None = None,
+        thumbnail_url: str | None = None,
+        thumbnail_source: str | None = None,
+        thumbnail_time_seconds: float | None = None,
     ) -> str:
         project_id = str(uuid.uuid4())
         self.projects[project_id] = {
@@ -72,6 +78,9 @@ class FakeAssetsTable:
             "render_id": render_id,
             "render_status": render_status,
             "render_url": render_url,
+            "thumbnail_url": thumbnail_url,
+            "thumbnail_source": thumbnail_source,
+            "thumbnail_time_seconds": thumbnail_time_seconds,
         }
         return project_id
 
@@ -80,7 +89,13 @@ class FakeAssetsTable:
         if row is None or row["owner_id"] != owner_id:
             return None
         return projects_repository.ProjectRecord(
-            id=row["id"], render_id=row["render_id"], render_status=row["render_status"], render_url=row["render_url"]
+            id=row["id"],
+            render_id=row["render_id"],
+            render_status=row["render_status"],
+            render_url=row["render_url"],
+            thumbnail_url=row["thumbnail_url"],
+            thumbnail_source=row["thumbnail_source"],
+            thumbnail_time_seconds=row["thumbnail_time_seconds"],
         )
 
     def delete_project(self, project_id: str) -> None:
@@ -94,6 +109,20 @@ class FakeAssetsTable:
             row["render_id"] = None
             row["render_status"] = None
             row["render_url"] = None
+
+    def set_thumbnail(self, project_id: str, *, url: str, source: str, time_seconds: float | None) -> None:
+        row = self.projects.get(project_id)
+        if row is not None:
+            row["thumbnail_url"] = url
+            row["thumbnail_source"] = source
+            row["thumbnail_time_seconds"] = time_seconds
+
+    def clear_thumbnail(self, project_id: str) -> None:
+        row = self.projects.get(project_id)
+        if row is not None:
+            row["thumbnail_url"] = None
+            row["thumbnail_source"] = None
+            row["thumbnail_time_seconds"] = None
 
     def project_owned_by(self, project_id: str, owner_id: str) -> bool:
         project = self.projects.get(project_id)
@@ -148,6 +177,8 @@ def fake_assets_table(monkeypatch):
     monkeypatch.setattr(projects_repository, "get_project", table.get_project)
     monkeypatch.setattr(projects_repository, "delete_project", table.delete_project)
     monkeypatch.setattr(projects_repository, "clear_render_state", table.clear_render_state)
+    monkeypatch.setattr(projects_repository, "set_thumbnail", table.set_thumbnail)
+    monkeypatch.setattr(projects_repository, "clear_thumbnail", table.clear_thumbnail)
     return table
 
 

@@ -62,6 +62,37 @@ def delete_render_object(project_id: str, render_id: str) -> None:
     get_r2_renders_client().delete_object(Bucket=settings.r2_renders_bucket_name, Key=key)
 
 
+def upload_public_object(local_path: Path, key: str, content_type: str) -> str:
+    """Writes straight to the PUBLIC renders bucket and returns its public
+    URL -- used only by the thumbnail/cover picker (projects/service.py's
+    upload_thumbnail), which needs a synchronous upload+URL, unlike every
+    other write to this bucket (worker/src/server.js's async render
+    mirror)."""
+    get_r2_renders_client().upload_file(
+        str(local_path),
+        settings.r2_renders_bucket_name,
+        key,
+        ExtraArgs={"ContentType": content_type},
+        Config=_UPLOAD_TRANSFER_CONFIG,
+    )
+    return f"{settings.r2_renders_public_url.rstrip('/')}/{key}"
+
+
+def delete_public_object(key: str) -> None:
+    get_r2_renders_client().delete_object(Bucket=settings.r2_renders_bucket_name, Key=key)
+
+
+def thumbnail_key_from_url(url: str) -> str | None:
+    """Recovers the R2 key from a previously-returned upload_public_object
+    URL, so a replaced/cleared cover can delete its old object without a
+    dedicated storage-key column -- there's only ever one live thumbnail per
+    project, so this is cheaper than tracking a key for it separately."""
+    prefix = f"{settings.r2_renders_public_url.rstrip('/')}/"
+    if not url.startswith(prefix):
+        return None
+    return url[len(prefix):]
+
+
 def presigned_get_url(key: str) -> str:
     """A time-limited, signed read URL for a private R2 object -- the bucket
     itself must NOT be public. Every caller re-checks Supabase ownership

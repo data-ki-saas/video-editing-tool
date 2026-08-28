@@ -109,6 +109,15 @@ import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
 
 export interface CanvasPlayerHandle {
   seekTo(seconds: number): void;
+  // Grabs the exact pixels currently drawn to the preview canvas as a JPEG
+  // Blob -- backs CoverPicker's "use current frame" action. Deliberately
+  // NOT a re-render: this file's own module comment already notes the live
+  // preview is an approximation of the real render (CSS-filter/transition
+  // shortcuts), but a cover image only needs to match what the user is
+  // looking at when they click, so that's authoritative by construction
+  // here. Resolves null if nothing has been drawn yet (isReady false) or
+  // the browser's toBlob fails.
+  captureFrame(): Promise<Blob | null>;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -1068,6 +1077,11 @@ export const CanvasPlayer = forwardRef<
         drawFrameAt(adjusted);
         onTimeUpdate?.(adjusted);
       }
+    },
+    captureFrame() {
+      if (!isReady || !canvasRef.current) return Promise.resolve(null);
+      const canvas = canvasRef.current;
+      return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92));
     },
   }));
 

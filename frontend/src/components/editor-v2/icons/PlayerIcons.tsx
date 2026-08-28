@@ -88,3 +88,23 @@ export function LocalRenderIcon(props: IconProps) {
     </svg>
   );
 }
+
+/** Simple picture/image glyph for the cover/thumbnail picker action --
+ * outline, matching LocalRenderIcon/RenderIcon's stroke style. */
+export function CoverIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <rect x="3" y="4" width="18" height="16" rx="1" />
+      <circle cx="9" cy="10" r="1.5" />
+      <path d="m4 17 5-5 4 4 3-3 4 4" />
+    </svg>
+  );
+}

@@ -8,7 +8,7 @@
  * controls the bare /dashboard route shows via its own (chrome) layout.
  */
 import Link from "next/link";
-import { RenderIcon, LocalRenderIcon } from "./icons/PlayerIcons";
+import { RenderIcon, LocalRenderIcon, CoverIcon } from "./icons/PlayerIcons";
 import { SignOutButton } from "@/components/SignOutButton";
 import { SettingsIcon } from "@/components/icons/UIIcons";
 import type { TranscriptCaption } from "@/lib/video/video_math";
@@ -26,6 +26,8 @@ export function TopMenuBar({
   localRenderUnsupportedReason,
   onLocalRenderClick,
   transcriptCaption,
+  coverThumbnailUrl,
+  onCoverClick,
 }: {
   canRender: boolean;
   isRendering: boolean;
@@ -37,6 +39,8 @@ export function TopMenuBar({
   localRenderUnsupportedReason: string | null;
   onLocalRenderClick: () => void;
   transcriptCaption: TranscriptCaption | null;
+  coverThumbnailUrl: string | null;
+  onCoverClick: () => void;
 }) {
   const renderDisabled =
     !canRender || isRendering || (renderStatus !== null && !TERMINAL_RENDER_STATUSES.has(renderStatus));
@@ -78,6 +82,21 @@ export function TopMenuBar({
           className="rounded-full bg-green-300 p-2 text-white hover:bg-green-400 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <LocalRenderIcon className="h-5 w-5" />
+        </button>
+
+        <button
+          type="button"
+          onClick={onCoverClick}
+          aria-label="Cover"
+          title="Cover"
+          className="relative overflow-hidden rounded-full bg-neutral-700 p-2 text-white hover:bg-neutral-600"
+        >
+          {coverThumbnailUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- a permanent R2 URL, not a Next-optimizable remote image worth configuring
+            <img src={coverThumbnailUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          ) : (
+            <CoverIcon className="h-5 w-5" />
+          )}
         </button>
       </div>
 

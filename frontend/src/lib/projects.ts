@@ -205,6 +205,17 @@ export interface Project {
   // non-terminal for far longer than normal.
   render_error: string | null;
   render_started_at: string | null;
+  // Cover/thumbnail picker (see components/editor-v2/CoverPicker.tsx) --
+  // a standalone public R2 image the user downloads and attaches manually
+  // when publishing to YouTube/TikTok/IG, not something embedded in the
+  // exported video. Backend-owned (like render_*), written via
+  // lib/api.ts's uploadThumbnail/clearThumbnail, NOT a direct Supabase
+  // write like `timeline` -- see supabase/migrations/
+  // 0011_add_project_thumbnail.sql for why.
+  thumbnail_url: string | null;
+  thumbnail_source: "frame" | "upload" | null;
+  // Only meaningful when thumbnail_source === "frame"; null for "upload".
+  thumbnail_time_seconds: number | null;
   created_at: string;
   updated_at: string;
 }

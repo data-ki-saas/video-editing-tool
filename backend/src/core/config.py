@@ -40,12 +40,21 @@ class Settings(BaseSettings):
     r2_bucket_name: str = ""
     # The finished-renders bucket is public (fed by worker/, see its own
     # README) and secured by a SEPARATE API token from the uploads bucket
-    # above (see DEPLOY.md step 2b) -- these three exist only so
-    # projects/service.py can delete a project's render object on reel
-    # delete; nothing here ever writes to this bucket, worker/ does that.
+    # above (see DEPLOY.md step 2b). Originally only used so
+    # projects/service.py could delete a project's render object on reel
+    # delete -- worker/ owned every write here. The thumbnail/cover picker
+    # is the one exception: projects/service.py's upload_thumbnail writes a
+    # cover image straight to this bucket itself (the token already has
+    # write permission, per DEPLOY.md), since that upload is a synchronous
+    # request/response, not a Creatomate render worker/ mirrors after the
+    # fact.
     r2_renders_access_key_id: str = ""
     r2_renders_secret_access_key: str = ""
     r2_renders_bucket_name: str = ""
+    # Same value as the worker's R2_RENDERS_PUBLIC_URL env var -- lets the
+    # backend construct a public URL for an object it just wrote (uploaded
+    # thumbnails), the same way worker/src/server.js does for renders.
+    r2_renders_public_url: str = ""
     # Overrides the computed R2 endpoint — set only in tests, to point boto3's
     # S3 client at a local mock server instead of real R2.
     r2_endpoint_override: str = ""
