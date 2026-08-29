@@ -5,10 +5,18 @@ from src.llm.providers.base import LLMProvider
 
 class AnthropicProvider(LLMProvider):
     def __init__(self, *, api_key: str, model: str):
+        self._api_key = api_key
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
 
     async def complete(self, prompt: str, *, system: str | None = None, max_tokens: int = 1024) -> str:
+        if not self._api_key:
+            # Same reasoning as DeepSeekProvider's own check -- fail with an
+            # obvious cause instead of whatever cryptic error an empty key
+            # produces further down (a real incident: it read identically to
+            # a truncated-JSON generation failure from the caller's side).
+            raise ValueError("Anthropic API key is not configured (ANTHROPIC_API_KEY is empty).")
+
         response = await self._client.messages.create(
             model=self._model,
             max_tokens=max_tokens,

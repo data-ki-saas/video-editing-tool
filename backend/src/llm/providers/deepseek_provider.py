@@ -13,6 +13,16 @@ class DeepSeekProvider(LLMProvider):
         self._model = model
 
     async def complete(self, prompt: str, *, system: str | None = None, max_tokens: int = 1024) -> str:
+        if not self._api_key:
+            # Without this check, an empty key produces the header
+            # "Authorization: Bearer " (trailing space, no token) -- httpx
+            # rejects that BEFORE ever reaching DeepSeek, as
+            # httpx.LocalProtocolError: Illegal header value b'Bearer '. That
+            # error gives no hint the actual problem is a missing
+            # DEEPSEEK_API_KEY env var (a real incident: it looked identical
+            # to a truncated-JSON generation failure from the caller's side).
+            raise ValueError("DeepSeek API key is not configured (DEEPSEEK_API_KEY is empty).")
+
         messages = []
         if system:
             messages.append({"role": "system", "content": system})

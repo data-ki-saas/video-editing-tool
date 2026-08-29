@@ -43,11 +43,14 @@ const STEPS: WizardStep[] = [
   { id: "review", label: "Review" },
 ];
 
-function acceptForSlotKind(kind: MediaSlot["kind"]): string {
-  if (kind === "image") return "image/jpeg,image/png";
-  if (kind === "video") return "video/mp4";
-  return "video/mp4,image/jpeg,image/png";
-}
+// Every slot accepts either a photo or a video, regardless of the niche
+// config's own `kind` hint (see MediaSlot) -- autoAssembleFromWizard.ts
+// already Ken Burns-animates any photo into a moving clip wherever it
+// lands, so hard-restricting a slot's file picker to video-only (as this
+// used to do for kind === "video") just blocked a real-estate agent with
+// only photos from filling a REQUIRED slot like "hero exterior" for no
+// real technical reason. `kind`/`hint` stay purely advisory copy.
+const SLOT_UPLOAD_ACCEPT = "video/mp4,image/jpeg,image/png";
 
 interface ContactInfo {
   name: string;
@@ -585,7 +588,7 @@ export default function NewReelPage() {
                       <>
                         <input
                           type="file"
-                          accept={acceptForSlotKind(slot.kind)}
+                          accept={SLOT_UPLOAD_ACCEPT}
                           disabled={isUploading}
                           onChange={(e) => {
                             const file = e.target.files?.[0];
