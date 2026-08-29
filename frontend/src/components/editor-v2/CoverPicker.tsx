@@ -106,7 +106,7 @@ export function CoverPicker({
           </button>
         </div>
 
-        <div className="mb-3 flex aspect-[9/16] w-full items-center justify-center overflow-hidden rounded-md bg-neutral-950">
+        <div className="mx-auto mb-3 flex aspect-[9/16] w-40 items-center justify-center overflow-hidden rounded-md bg-neutral-950">
           {thumbnailUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- a permanent R2 URL, not a Next-optimizable remote image worth configuring
             <img src={thumbnailUrl} alt="Current cover" className="h-full w-full object-cover" />

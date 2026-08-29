@@ -89,7 +89,7 @@ export function TopMenuBar({
           onClick={onCoverClick}
           aria-label="Cover"
           title="Cover"
-          className="relative overflow-hidden rounded-full bg-neutral-700 p-2 text-white hover:bg-neutral-600"
+          className="relative h-9 w-9 shrink-0 overflow-hidden rounded-lg bg-neutral-700 p-2 text-white hover:bg-neutral-600"
         >
           {coverThumbnailUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- a permanent R2 URL, not a Next-optimizable remote image worth configuring

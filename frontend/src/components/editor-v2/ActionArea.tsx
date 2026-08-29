@@ -20,11 +20,11 @@
  *
  * The action list -- a live summary of every transformation currently
  * ACTIVE on the clip (clip rectangle, each zoom/pan transition, every
- * flip/mirror window, etc.) -- sits immediately left of the play area, so
- * it reads alongside the video it describes. It's not a log of every click
- * that got here; undo/redo (Ctrl+Z/Ctrl+Y, see ThreePaneEditor.tsx) still
- * walks that click-by-click history underneath (lib/useEditHistory.ts) --
- * this list just shows what it currently adds up to.
+ * flip/mirror window, etc.) -- sits at the far right, past the play area.
+ * It's not a log of every click that got here; undo/redo (Ctrl+Z/Ctrl+Y,
+ * see ThreePaneEditor.tsx) still walks that click-by-click history
+ * underneath (lib/useEditHistory.ts) -- this list just shows what it
+ * currently adds up to.
  */
 import { useState } from "react";
 import { ProjectList } from "./ProjectList";
@@ -499,16 +499,7 @@ export function ActionArea({
         />
       </div>
 
-      <div className="w-64 shrink-0 overflow-hidden border-r border-border pr-4">
-        <ActiveTransformationsList
-          selections={selections}
-          videoDurationSeconds={videoDurationSeconds}
-          onEditTtsOverlay={onEditTtsOverlay}
-          onDeleteTtsOverlay={onDeleteTtsOverlay}
-        />
-      </div>
-
-      <div className="flex flex-1 items-center justify-end p-2">
+      <div className="flex flex-1 items-center justify-start p-2">
         {sequenceClips.length > 0 ? (
           // CanvasPlayer sizes its own visible panel from the canvas's real
           // intrinsic aspect ratio (already correct -- see its own module
@@ -556,6 +547,15 @@ export function ActionArea({
             )}
           </div>
         )}
+      </div>
+
+      <div className="w-64 shrink-0 overflow-hidden border-l border-border pl-4">
+        <ActiveTransformationsList
+          selections={selections}
+          videoDurationSeconds={videoDurationSeconds}
+          onEditTtsOverlay={onEditTtsOverlay}
+          onDeleteTtsOverlay={onDeleteTtsOverlay}
+        />
       </div>
 
       {isUploadDialogOpen && (

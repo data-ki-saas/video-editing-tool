@@ -120,13 +120,39 @@ export interface CanvasPlayerHandle {
   captureFrame(): Promise<Blob | null>;
 }
 
+/** Loads `src` via fetch()+blob URL rather than a plain `<img>` (or one with
+ * `crossOrigin="anonymous"`) -- CoverPicker's "use current frame" reads
+ * pixels back off this canvas via captureFrame()/toBlob, and a cross-origin
+ * image drawn onto it without a real CORS response taints the whole canvas
+ * (see exportTimeline.ts's loadOverlayImage for the fuller writeup,
+ * including why crossOrigin="anonymous" alone is unsafe: this exact URL is
+ * also loaded elsewhere -- AssetGallery's thumbnail, OverlayTrack -- with no
+ * crossOrigin at all, and re-requesting it with crossOrigin set can silently
+ * fail against an already-cached non-CORS response for it). The blob URL is
+ * revoked immediately once the image has decoded (onload) -- safe, since the
+ * pixel data is already captured into the image element by then. */
 function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Could not decode an extracted preview frame"));
-    img.src = src;
-  });
+  return fetch(src, { mode: "cors" })
+    .then((res) => {
+      if (!res.ok) throw new Error(`Could not fetch image (HTTP ${res.status})`);
+      return res.blob();
+    })
+    .then(
+      (blob) =>
+        new Promise<HTMLImageElement>((resolve, reject) => {
+          const blobUrl = URL.createObjectURL(blob);
+          const img = new Image();
+          img.onload = () => {
+            URL.revokeObjectURL(blobUrl);
+            resolve(img);
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(blobUrl);
+            reject(new Error("Could not decode image"));
+          };
+          img.src = blobUrl;
+        })
+    );
 }
 
 export const CanvasPlayer = forwardRef<
