@@ -10,7 +10,8 @@
 import Link from "next/link";
 import { RenderIcon, LocalRenderIcon, CoverIcon } from "./icons/PlayerIcons";
 import { SignOutButton } from "@/components/SignOutButton";
-import { SettingsIcon } from "@/components/icons/UIIcons";
+import { AccountIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
+import { useIsAdmin } from "@/lib/useIsAdmin";
 import type { TranscriptCaption } from "@/lib/video/video_math";
 
 const TERMINAL_RENDER_STATUSES = new Set(["completed", "failed"]);
@@ -42,6 +43,7 @@ export function TopMenuBar({
   coverThumbnailUrl: string | null;
   onCoverClick: () => void;
 }) {
+  const isAdmin = useIsAdmin();
   const renderDisabled =
     !canRender || isRendering || (renderStatus !== null && !TERMINAL_RENDER_STATUSES.has(renderStatus));
 
@@ -101,6 +103,24 @@ export function TopMenuBar({
       </div>
 
       <div className="flex items-center gap-1">
+        {isAdmin && (
+          <Link
+            href="/admin"
+            aria-label="Admin"
+            title="Admin"
+            className="rounded-full p-2 text-muted hover:bg-foreground/10"
+          >
+            <ToolsIcon className="h-5 w-5" />
+          </Link>
+        )}
+        <Link
+          href="/account/usage"
+          aria-label="Account"
+          title="Account"
+          className="rounded-full p-2 text-muted hover:bg-foreground/10"
+        >
+          <AccountIcon className="h-5 w-5" />
+        </Link>
         <Link
           href="/settings"
           aria-label="Settings"

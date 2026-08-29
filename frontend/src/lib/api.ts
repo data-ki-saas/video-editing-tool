@@ -360,6 +360,31 @@ export async function getAvatarGeneration(id: string): Promise<AvatarGeneration>
   return { id: body.id, status: body.status, assetId: body.asset_id, url: body.url, error: body.error };
 }
 
+export interface UsageSummaryItem {
+  eventType: string;
+  label: string;
+  count: number;
+  limit: number;
+}
+
+/** GET /api/usage/summary -- current daily usage vs. cap for each
+ * paywalled-style feature (render/voiceover/avatar_video), shown on
+ * /account/usage. */
+export async function getUsageSummary(): Promise<{ items: UsageSummaryItem[] }> {
+  const response = await apiFetch(`${API_BASE_URL}/api/usage/summary`, { headers: await authHeader() });
+  const body = await handleResponse<{
+    items: { event_type: string; label: string; count: number; limit: number }[];
+  }>(response);
+  return {
+    items: body.items.map((item) => ({
+      eventType: item.event_type,
+      label: item.label,
+      count: item.count,
+      limit: item.limit,
+    })),
+  };
+}
+
 export async function deleteProject(projectId: string) {
   const response = await apiFetch(`${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}`, {
     method: "DELETE",

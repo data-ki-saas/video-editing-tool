@@ -60,6 +60,28 @@ export function SettingsIcon(props: IconProps) {
   );
 }
 
+// A person-in-circle glyph -- links to /account/usage from the header, left
+// of SettingsIcon (see TopMenuBar.tsx / dashboard/(chrome)/layout.tsx).
+export function AccountIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="10" r="3" />
+      <path d="M6.5 18.5a6 6 0 0 1 11 0" />
+    </svg>
+  );
+}
+
+// A wrench glyph -- links to /admin from the header, left of AccountIcon,
+// shown only when useIsAdmin() resolves true.
+export function ToolsIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.65 2.65-2.12-2.12Z" />
+    </svg>
+  );
+}
+
 export function CropToolIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" {...props}>

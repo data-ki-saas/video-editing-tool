@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     # daily cap per user on voiceover generations.
     tts_daily_cap: int = 15
 
+    # Display-only mirror of RENDER_DAILY_LIMIT in
+    # frontend/src/app/api/render/route.ts -- that Next.js route is still
+    # the actual enforcement point (see this repo's root CLAUDE.md on why
+    # renders stay server-side there), this value only feeds GET
+    # /api/usage/summary so the frontend doesn't need a second source for
+    # the render cap. Keep both values in sync by hand.
+    render_daily_cap: int = 10
+
     # This server's own publicly reachable base URL -- needed only so
     # avatar/service.py can hand HeyGen a callback_url pointing back at
     # itself (POST /api/render never needed this, since Creatomate's

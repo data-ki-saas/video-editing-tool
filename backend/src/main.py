@@ -12,6 +12,7 @@ from src.niches.router import router as niches_router
 from src.projects.router import router as projects_router
 from src.stock_media.router import router as stock_media_router
 from src.tts.router import router as tts_router
+from src.usage.router import router as usage_router
 
 # Render's log stream is the only visibility into a deployed failure -- there's
 # no APM/observability stack here, so a plain root logger configured once at
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(projects_router)
     app.include_router(stock_media_router)
     app.include_router(tts_router)
+    app.include_router(usage_router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:

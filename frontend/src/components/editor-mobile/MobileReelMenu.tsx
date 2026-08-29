@@ -16,10 +16,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { listProjects, type Project } from "@/lib/projects";
 import { SignOutButton } from "@/components/SignOutButton";
-import { SettingsIcon } from "@/components/icons/UIIcons";
+import { AccountIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
+import { useIsAdmin } from "@/lib/useIsAdmin";
 
 export function MobileReelMenu({ currentProjectId, onClose }: { currentProjectId: string; onClose: () => void }) {
   const router = useRouter();
+  const isAdmin = useIsAdmin();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,6 +83,26 @@ export function MobileReelMenu({ currentProjectId, onClose }: { currentProjectId
           + New Reel
         </Link>
         <div className="flex items-center gap-1">
+          {isAdmin && (
+            <Link
+              href="/admin"
+              onClick={onClose}
+              aria-label="Admin"
+              title="Admin"
+              className="rounded-full p-2 text-muted hover:bg-foreground/10"
+            >
+              <ToolsIcon className="h-5 w-5" />
+            </Link>
+          )}
+          <Link
+            href="/account/usage"
+            onClick={onClose}
+            aria-label="Account"
+            title="Account"
+            className="rounded-full p-2 text-muted hover:bg-foreground/10"
+          >
+            <AccountIcon className="h-5 w-5" />
+          </Link>
           <Link
             href="/settings"
             aria-label="Settings"
