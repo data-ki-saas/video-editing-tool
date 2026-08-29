@@ -93,16 +93,19 @@ class HeyGenProvider(AvatarProvider):
 
     async def list_avatars(self) -> list[AvatarOption]:
         # /v3/avatars/looks (not /v3/avatars, which lists GROUPS -- containers
-        # of looks, not directly usable as an avatar_id) -- ownership=public
-        # limits this to HeyGen's own preset avatars, not filtering by any
-        # account's private/custom ones. See
+        # of looks, not directly usable as an avatar_id) -- ownership=private
+        # returns the avatars actually created/uploaded under THIS account's
+        # own HeyGen credentials, not HeyGen's generic preset catalog
+        # (ownership=public would be that instead -- a real mixup fixed
+        # here, since a creator picking "their" avatar should see the ones
+        # they made, not a stock list they've never seen before). See
         # https://developers.heygen.com/reference/list-avatar-looks
         self._require_api_key()
         async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
             response = await client.get(
                 "/v3/avatars/looks",
                 headers={"x-api-key": self._api_key},
-                params={"ownership": "public", "limit": 50},
+                params={"ownership": "private", "limit": 50},
             )
         response.raise_for_status()
         rows = response.json().get("data") or []

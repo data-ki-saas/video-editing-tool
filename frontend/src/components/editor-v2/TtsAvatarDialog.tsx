@@ -139,28 +139,33 @@ export function TtsAvatarDialog({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[85vh] w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-lg bg-surface p-4 shadow-lg"
+        className="flex max-h-[85vh] w-full max-w-lg flex-col gap-3 rounded-lg bg-surface p-4 shadow-lg"
       >
-        <div className="flex items-center justify-between">
+        <div className="flex shrink-0 items-center justify-between">
           <h2 className="text-sm font-semibold">TTS + Avatar</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-foreground">
             ✕
           </button>
         </div>
-        <p className="text-[11px] text-muted">
+        <p className="shrink-0 text-[11px] text-muted">
           Generates a talking-avatar video reading your script, then adds it as a Video Overlay you can position
           and switch layouts on like any other.
         </p>
 
+        {/* shrink-0 -- a flex column shrinks every child proportionally by
+            default once total content exceeds max-h-[85vh], which was
+            squeezing this below its own 3-row height. The avatar section
+            below is the one part that should actually flex/scroll instead
+            of this. */}
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="Type what the avatar should say…"
           rows={3}
-          className="w-full resize-none rounded-md border border-border bg-background px-2 py-1 text-sm"
+          className="w-full shrink-0 resize-none rounded-md border border-border bg-background px-2 py-1 text-sm"
         />
 
-        <label className="flex flex-col gap-1 text-xs text-muted">
+        <label className="flex shrink-0 flex-col gap-1 text-xs text-muted">
           Voice
           <select
             value={voice}
@@ -176,50 +181,61 @@ export function TtsAvatarDialog({
             ))}
           </select>
         </label>
-        {voicesError && <p className="text-[11px] text-red-600">{voicesError}</p>}
+        {voicesError && <p className="shrink-0 text-[11px] text-red-600">{voicesError}</p>}
 
-        <div className="flex flex-col gap-1">
-          <p className="text-xs text-muted">Avatar</p>
-          {isLoadingAvatars && <p className="text-xs text-muted">Loading avatars…</p>}
-          {avatarsError && <p className="text-xs text-red-600">{avatarsError}</p>}
+        {/* The one flexible/scrollable section -- grows to fill whatever
+            space the fixed rows above/below leave, and scrolls internally
+            once the avatar grid outgrows that, rather than shrinking
+            everything else on the page. */}
+        <div className="flex min-h-0 flex-1 flex-col gap-1">
+          <p className="shrink-0 text-xs text-muted">Your avatars</p>
+          {isLoadingAvatars && <p className="shrink-0 text-xs text-muted">Loading avatars…</p>}
+          {avatarsError && <p className="shrink-0 text-xs text-red-600">{avatarsError}</p>}
+          {!isLoadingAvatars && !avatarsError && avatars.length === 0 && (
+            <p className="shrink-0 text-xs text-muted">
+              No avatars found on your HeyGen account yet -- create one at heygen.com first.
+            </p>
+          )}
           {avatars.length > 0 && (
-            <div className="grid grid-cols-4 gap-2">
-              {avatars.map((avatar) => (
-                <label
-                  key={avatar.id}
-                  className={`flex cursor-pointer flex-col items-center gap-1 rounded-md border p-1.5 ${
-                    avatarId === avatar.id ? "border-violet-500 bg-violet-500/10" : "border-border"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="avatar"
-                    checked={avatarId === avatar.id}
-                    onChange={() => setAvatarId(avatar.id)}
-                    className="sr-only"
-                  />
-                  {avatar.previewImageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- an external HeyGen-hosted thumbnail, not a Next-optimizable static asset
-                    <img src={avatar.previewImageUrl} alt={avatar.name} className="aspect-square w-full rounded object-cover" />
-                  ) : (
-                    <div className="flex aspect-square w-full items-center justify-center rounded bg-background text-xs text-muted">
-                      {avatar.name}
-                    </div>
-                  )}
-                  <span className="w-full truncate text-center text-[10px] text-foreground">{avatar.name}</span>
-                </label>
-              ))}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="grid grid-cols-4 gap-2">
+                {avatars.map((avatar) => (
+                  <label
+                    key={avatar.id}
+                    className={`flex cursor-pointer flex-col items-center gap-1 rounded-md border p-1.5 ${
+                      avatarId === avatar.id ? "border-violet-500 bg-violet-500/10" : "border-border"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="avatar"
+                      checked={avatarId === avatar.id}
+                      onChange={() => setAvatarId(avatar.id)}
+                      className="sr-only"
+                    />
+                    {avatar.previewImageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- an external HeyGen-hosted thumbnail, not a Next-optimizable static asset
+                      <img src={avatar.previewImageUrl} alt={avatar.name} className="aspect-square w-full rounded object-cover" />
+                    ) : (
+                      <div className="flex aspect-square w-full items-center justify-center rounded bg-background text-xs text-muted">
+                        {avatar.name}
+                      </div>
+                    )}
+                    <span className="w-full truncate text-center text-[10px] text-foreground">{avatar.name}</span>
+                  </label>
+                ))}
+              </div>
             </div>
           )}
         </div>
 
-        {error && <p className="text-[11px] text-red-600">{error}</p>}
+        {error && <p className="shrink-0 text-[11px] text-red-600">{error}</p>}
 
         <button
           type="button"
           onClick={handleGenerate}
           disabled={!canGenerate}
-          className="mt-1 w-full rounded-md bg-violet-600 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          className="mt-1 w-full shrink-0 rounded-md bg-violet-600 py-1.5 text-sm font-medium text-white disabled:opacity-50"
         >
           {isGenerating ? (stage ?? "Generating…") : "Generate & add"}
         </button>
