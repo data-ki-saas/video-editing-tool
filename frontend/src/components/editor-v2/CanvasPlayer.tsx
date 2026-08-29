@@ -1517,7 +1517,7 @@ export const CanvasPlayer = forwardRef<
     // flex-1 (flex-basis 0%) has nothing to grow into once the canvas went
     // absolute/out-of-flow (see below): the shrink-wrap collapses to just
     // the controls column's width and the video panel disappears entirely.
-    <div className="flex h-full w-full min-w-0 items-center gap-2 p-2">
+    <div className="flex h-full w-full min-w-0 items-center gap-2 p-2" style={{ containerType: "size" }}>
       {/* This box IS the visible video panel -- flex-1/min-w-0 so it takes
           whatever width this row has left rather than requesting its own
           intrinsic width (the previous h-full+w-auto-on-the-canvas approach
@@ -1528,8 +1528,17 @@ export const CanvasPlayer = forwardRef<
           frame inside it. object-contain on the canvas below is what
           actually pins the aspect ratio now: whatever box this ends up
           with, the canvas always letterboxes/pillarboxes inside it rather
-          than distorting -- so this can shrink freely and safely). */}
-      <div className="relative h-full min-w-0 flex-1 overflow-hidden rounded-md border border-border bg-black">
+          than distorting -- so this can shrink freely and safely).
+          max-w-[235cqh] caps it at the widest real clip ratio (2.35:1
+          cinematic widescreen) relative to ITS OWN height -- container query
+          units, not a percentage of the row's width, since the row can be
+          far wider than 2.35x tall (see the parent's own container-type:
+          size above, which is what makes cqh resolve against this row's
+          height instead of the nearest ancestor that happens to have one).
+          Below that ratio (the vast majority of reels, which are portrait or
+          square) flex-1 still governs the width exactly as before -- this
+          only ever clamps DOWN from what flex-1 would otherwise claim. */}
+      <div className="relative h-full min-w-0 max-w-[235cqh] flex-1 overflow-hidden rounded-md border border-border bg-black">
         {/* absolute inset-0 + object-contain, not h-full/w-auto -- lets this
             fill whatever box the wrapper above ends up with while the
             canvas's own width/height attributes (set in drawFrameAt to the

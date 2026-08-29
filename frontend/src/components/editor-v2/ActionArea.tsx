@@ -93,6 +93,10 @@ function ActiveTransformationsList({
   onEditTtsOverlay: (index: number) => void;
   onDeleteTtsOverlay: (index: number) => void;
 }) {
+  // Plain-text summary rows and the interactive TTS rows are built up
+  // separately (TTS overlays need onClick handlers the rest don't), then
+  // merged into one list below so they can share a single latest-first
+  // ordering instead of TTS rows always trailing at the bottom.
   const rows: string[] = [];
 
   if (selections.clipRectId) {
@@ -145,38 +149,42 @@ function ActiveTransformationsList({
     return <p className="text-xs text-muted">No transformations applied yet.</p>;
   }
 
-  return (
-    <ul className="flex h-full flex-col gap-0.5 overflow-y-auto">
-      {rows.map((row, index) => (
-        <li key={`row-${index}`} className="shrink-0 truncate rounded-md px-2 py-0.5 text-xs text-foreground">
-          {row}
-        </li>
-      ))}
-      {selections.ttsOverlays.map((overlay, index) => (
-        <li key={`tts-${index}`} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-xs text-foreground">
-          <button
-            type="button"
-            onClick={() => onEditTtsOverlay(index)}
-            className="min-w-0 flex-1 truncate text-left hover:underline"
-            title="Edit this narration"
-          >
-            Narration ({overlay.displayMode === "karaoke" ? "karaoke" : overlay.displayMode === "none" ? "no text" : "captioned"}){" "}
-            &quot;{overlay.text}&quot;{" "}
-            {formatTimeRange(overlay.startTimeSeconds, ttsOverlayEndTimeSeconds(overlay))}
-          </button>
-          <button
-            type="button"
-            onClick={() => onDeleteTtsOverlay(index)}
-            aria-label="Remove narration"
-            title="Remove narration"
-            className="shrink-0 text-muted hover:text-red-600"
-          >
-            ✕
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
+  const items = [
+    ...rows.map((row, index) => (
+      <li key={`row-${index}`} className="shrink-0 truncate rounded-md px-2 py-0.5 text-xs text-foreground">
+        {row}
+      </li>
+    )),
+    ...selections.ttsOverlays.map((overlay, index) => (
+      <li key={`tts-${index}`} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-xs text-foreground">
+        <button
+          type="button"
+          onClick={() => onEditTtsOverlay(index)}
+          className="min-w-0 flex-1 truncate text-left hover:underline"
+          title="Edit this narration"
+        >
+          Narration ({overlay.displayMode === "karaoke" ? "karaoke" : overlay.displayMode === "none" ? "no text" : "captioned"}){" "}
+          &quot;{overlay.text}&quot;{" "}
+          {formatTimeRange(overlay.startTimeSeconds, ttsOverlayEndTimeSeconds(overlay))}
+        </button>
+        <button
+          type="button"
+          onClick={() => onDeleteTtsOverlay(index)}
+          aria-label="Remove narration"
+          title="Remove narration"
+          className="shrink-0 text-muted hover:text-red-600"
+        >
+          ✕
+        </button>
+      </li>
+    )),
+  ];
+
+  // Latest-first: within any one category items are appended in the order
+  // they were added, so reversing the merged list surfaces each category's
+  // most-recently-added item (and the most-recently-touched category) at
+  // the top instead of always at the bottom.
+  return <ul className="flex h-full flex-col gap-0.5 overflow-y-auto">{items.slice().reverse()}</ul>;
 }
 
 // Fallback play-area ratio before any clip rectangle has been picked yet --
