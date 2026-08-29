@@ -20,6 +20,10 @@ class NicheConfigRecord:
     fields: list[dict]
     script_template: str | None
     created_at: str
+    media_slots: list[dict]
+    hooks: list[str]
+    cta_template: str | None
+    hashtag_seed: list[str]
 
 
 def _strip_internal(row: dict) -> dict:
@@ -34,7 +38,16 @@ def get_niche_by_key(niche_key: str) -> NicheConfigRecord | None:
 
 
 def create_niche(
-    *, niche_key: str, display_name: str, fields: list[dict], script_template: str | None, created_by: str
+    *,
+    niche_key: str,
+    display_name: str,
+    fields: list[dict],
+    script_template: str | None,
+    created_by: str,
+    media_slots: list[dict],
+    hooks: list[str],
+    cta_template: str | None,
+    hashtag_seed: list[str],
 ) -> NicheConfigRecord:
     payload = {
         "id": str(uuid.uuid4()),
@@ -43,6 +56,10 @@ def create_niche(
         "fields": fields,
         "script_template": script_template,
         "created_by": created_by,
+        "media_slots": media_slots,
+        "hooks": hooks,
+        "cta_template": cta_template,
+        "hashtag_seed": hashtag_seed,
     }
     result = get_supabase_client().table(_TABLE).insert(payload).execute()
     return NicheConfigRecord(**_strip_internal(result.data[0]))

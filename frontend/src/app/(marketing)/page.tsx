@@ -92,10 +92,11 @@ export default function Home() {
               Video Reel Maker for Any Business
             </h1>
             <p className="max-w-xl text-lg text-muted">
-              Turn the photos and clips you already have into a finished, share-ready
-              video reel — real estate, hotels, auto dealers, shops, or anything else.
-              Available on desktop with a live editor, and on mobile with a one-tap quick
-              create.
+              Turn your phone&apos;s photos and clips into high-converting, scroll-stopping
+              Reels for Instagram, YouTube Shorts, and Facebook. Perfect for real estate
+              agents, local shops, hotels, auto dealers, and creators looking to grow their
+              business online. Edit seamlessly on desktop or create instant reels on mobile
+              with one tap.
             </p>
           </div>
 

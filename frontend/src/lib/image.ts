@@ -15,7 +15,10 @@
 const MAX_LONG_EDGE_PX = 2048;
 const JPEG_QUALITY = 0.85;
 
-function loadImageElement(url: string): Promise<HTMLImageElement> {
+/** Exported for callers that need the decoded image itself (e.g. its
+ * naturalWidth/naturalHeight for a default crop rect), not just a resized
+ * File -- see lib/timeline/autoAssembleFromWizard.ts. */
+export function loadImageElement(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);

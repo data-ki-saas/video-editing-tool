@@ -31,6 +31,35 @@ class Settings(BaseSettings):
     # daily cap per user on voiceover generations.
     tts_daily_cap: int = 15
 
+    # This server's own publicly reachable base URL -- needed only so
+    # avatar/service.py can hand HeyGen a callback_url pointing back at
+    # itself (POST /api/render never needed this, since Creatomate's
+    # webhook is handled by the Next.js frontend instead -- see
+    # frontend/src/app/api/webhooks/creatomate/route.ts). No trailing slash.
+    backend_public_url: str = ""
+
+    # Which AvatarProvider src.avatar.client.get_avatar_provider() returns.
+    # Only "heygen" exists today -- same switch-pattern precedent as
+    # llm_provider/tts_provider above, kept even with one implementation so
+    # a second provider doesn't require a rewrite.
+    avatar_provider: str = "heygen"
+    heygen_api_key: str = ""
+    # A single pre-created HeyGen avatar_id used for every generation until
+    # a real avatar-picker UI exists -- create one at heygen.com and paste
+    # its id here (see DEPLOY.md).
+    heygen_default_avatar_id: str = ""
+    # Our own shared secret, appended as a query param on the callback_url
+    # handed to HeyGen -- see HeyGenProvider's own comment on why this
+    # (rather than HeyGen's registered-endpoint HMAC signature) is the
+    # actual verification boundary for now. Generate a long random value,
+    # same handling as any other API secret.
+    heygen_webhook_secret: str = ""
+    # Real per-generation cost (~$0.02-0.07/sec of avatar video), unlike
+    # every other daily cap in this file -- deliberately small. Not
+    # billing/metering (see tts_daily_cap's own comment), just a hard
+    # ceiling on how much this feature can spend per user per day.
+    avatar_daily_cap: int = 3
+
     supabase_url: str = ""
     supabase_service_role_key: str = ""
 

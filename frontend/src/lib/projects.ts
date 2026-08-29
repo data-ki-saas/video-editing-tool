@@ -211,7 +211,11 @@ export interface Project {
   owner_id: string;
   name: string;
   niche: string | null;
-  attributes: Record<string, string | number>;
+  // Widened from Record<string, string|number> to hold the wizard's nested
+  // sections (contact: {name,phone,whatsapp}, highlights: string[]) too --
+  // still a freeform jsonb column with no enforced shape either way (see
+  // @/lib/niches's own comment on why `fields` never becomes real columns).
+  attributes: Record<string, unknown>;
   timeline: Timeline;
   render_id: string | null;
   render_status: string | null;
@@ -242,7 +246,7 @@ export interface Project {
 export interface NewProjectInput {
   name: string;
   niche?: string;
-  attributes?: Record<string, string | number>;
+  attributes?: Record<string, unknown>;
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -290,6 +294,15 @@ export async function saveTimeline(projectId: string, timeline: Timeline): Promi
   // sign-out racing this call, so RLS filters the write to nothing) still
   // reports success with no `error`, and the save would silently no-op.
   const { data, error } = await supabase.from("projects").update({ timeline }).eq("id", projectId).select("id");
+  if (error) throw new Error(error.message);
+  if (!data || data.length === 0) {
+    throw new Error("Save didn't apply -- your session may have expired");
+  }
+}
+
+export async function updateProjectAttributes(projectId: string, attributes: Record<string, unknown>): Promise<void> {
+  const supabase = createClient();
+  const { data, error } = await supabase.from("projects").update({ attributes }).eq("id", projectId).select("id");
   if (error) throw new Error(error.message);
   if (!data || data.length === 0) {
     throw new Error("Save didn't apply -- your session may have expired");

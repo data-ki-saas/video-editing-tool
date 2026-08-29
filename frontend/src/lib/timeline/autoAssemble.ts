@@ -7,11 +7,12 @@ const SECONDS_PER_CLIP = 4;
 const MAX_TOTAL_SECONDS = 60;
 const MAX_CLIPS = Math.floor(MAX_TOTAL_SECONDS / SECONDS_PER_CLIP);
 
-/** Interpolates {key} placeholders in a niche's script_template with actual
+/** Interpolates {key} placeholders in a niche's script_template (or any
+ * other {key}-templated string, e.g. a wizard hook/CTA) with actual
  * attribute values. A placeholder with no matching attribute is dropped
  * entirely rather than left as a literal "{key}" -- e.g. "{make} {model}"
  * with only make set becomes "Honda", not "Honda {model}". */
-function interpolateScript(template: string, attributes: Record<string, string | number>): string {
+export function interpolateScript(template: string, attributes: Record<string, string | number>): string {
   return template
     .replace(/\{(\w+)\}/g, (_match, key: string) => {
       const value = attributes[key];

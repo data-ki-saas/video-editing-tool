@@ -219,6 +219,18 @@ the next push that touches `supabase/migrations/`.
    | `R2_SIGNED_URL_EXPIRES_SECONDS` | optional | `3600` |
    | `PEXELS_API_KEY` | optional (stock photo/video search disabled without it) | `<PEXELS_API_KEY>` |
    | `FREESOUND_API_KEY` | optional (stock music search disabled without it) | `<FREESOUND_API_KEY>` |
+   | `BACKEND_PUBLIC_URL` | required for the avatar-video feature | this same backend's own Render URL, e.g. `https://<your-backend>.onrender.com` (no trailing slash) -- lets it hand HeyGen a callback URL pointing back at itself |
+   | `HEYGEN_API_KEY` | required for the avatar-video feature | [app.heygen.com](https://app.heygen.com) > **API** — pay-as-you-go, no free tier as of writing |
+   | `HEYGEN_DEFAULT_AVATAR_ID` | required for the avatar-video feature | the `avatar_id` of one avatar you create in HeyGen's dashboard — there's no in-app avatar picker yet, every generation uses this one |
+   | `HEYGEN_WEBHOOK_SECRET` | required for the avatar-video feature | any long random string you generate — appended as a query param on the callback URL HeyGen POSTs back to; see `avatar/providers/heygen_provider.py`'s own comment for why this (not HeyGen's signature header) is the real verification boundary here |
+   | `AVATAR_DAILY_CAP` | optional | `3` — keep this small; unlike TTS this has a real per-generation cost (~$0.02-0.07/sec of avatar video) |
+
+   The avatar-video feature (a talking avatar delivering the AI-generated
+   narration, via HeyGen) is entirely optional — without the four `HEYGEN_*`/
+   `BACKEND_PUBLIC_URL` variables above, the wizard's voiceover step still
+   works, just without the "Deliver as a talking avatar video" checkbox
+   doing anything (`POST /api/avatar/generate` 500s with a clear "not
+   configured" message instead).
 
    Do **not** set `R2_ENDPOINT_OVERRIDE` — it exists only for the test
    suite (pointing at a local moto server).
@@ -316,6 +328,11 @@ the next push that touches `supabase/migrations/`.
       "Recent Deliveries" or similar under your project/webhook settings)
 - [ ] `projects.render_status` reaches `completed` and `render_url` resolves
       to a playable video served from your Cloudflare custom domain
+- [ ] (if `HEYGEN_*`/`BACKEND_PUBLIC_URL` are set) In the wizard's Review
+      step, generate a voiceover, check "Deliver as a talking avatar video,"
+      and confirm the reel opens on a real avatar clip after "Generate My
+      Reel" — check `avatar_generations.status` reaches `completed` if it
+      doesn't (a `failed` row's `error` column has the reason)
 
 ---
 

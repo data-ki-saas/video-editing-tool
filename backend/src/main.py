@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.assets.router import router as assets_router
+from src.avatar.router import router as avatar_router
 from src.core.config import settings
 from src.niches.router import router as niches_router
 from src.projects.router import router as projects_router
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
     app.include_router(assets_router)
+    app.include_router(avatar_router)
     app.include_router(niches_router)
     app.include_router(projects_router)
     app.include_router(stock_media_router)

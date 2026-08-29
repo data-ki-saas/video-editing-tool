@@ -281,6 +281,85 @@ export async function listTtsVoices(): Promise<{ voices: TtsVoiceOption[] }> {
   return handleResponse<{ voices: TtsVoiceOption[] }>(response);
 }
 
+export type AvatarGenerationStatus = "waiting" | "completed" | "failed";
+
+export interface AvatarGeneration {
+  id: string;
+  status: AvatarGenerationStatus;
+  assetId: string | null;
+  url: string | null;
+  error: string | null;
+}
+
+/** POST /api/avatar/generate -- kicks off a talking-avatar video lip-synced
+ * to an ALREADY-GENERATED narration audio asset (see synthesizeTts above;
+ * the avatar provider never does its own text-to-speech here, only the
+ * visual side). `avatarId` omitted falls back to the server's configured
+ * default (see listAvatars below for picking one explicitly). Async:
+ * returns immediately with status "waiting" -- poll getAvatarGeneration
+ * below until it's terminal. */
+export async function generateAvatarVideo(
+  projectId: string,
+  audioAssetId: string,
+  avatarId?: string
+): Promise<AvatarGeneration> {
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({
+      project_id: projectId,
+      audio_asset_id: audioAssetId,
+      ...(avatarId ? { avatar_id: avatarId } : {}),
+    }),
+  });
+  const body = await handleResponse<{ id: string; status: AvatarGenerationStatus }>(response);
+  return { id: body.id, status: body.status, assetId: null, url: null, error: null };
+}
+
+export interface AvatarOption {
+  id: string;
+  name: string;
+  previewImageUrl: string | null;
+  gender: string | null;
+  preferredOrientation: string | null;
+}
+
+/** GET /api/avatar/avatars -- HeyGen's own preset-avatar catalog (names +
+ * thumbnails), cached server-side for an hour (see avatar/service.py) so
+ * this is cheap to call on every Review-step visit rather than something
+ * that needs its own client-side caching too. */
+export async function listAvatars(): Promise<{ avatars: AvatarOption[] }> {
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/avatars`, { headers: await authHeader() });
+  const body = await handleResponse<{
+    avatars: { id: string; name: string; preview_image_url: string | null; gender: string | null; preferred_orientation: string | null }[];
+  }>(response);
+  return {
+    avatars: body.avatars.map((a) => ({
+      id: a.id,
+      name: a.name,
+      previewImageUrl: a.preview_image_url,
+      gender: a.gender,
+      preferredOrientation: a.preferred_orientation,
+    })),
+  };
+}
+
+/** GET /api/avatar/generations/{id} -- poll until status is "completed" or
+ * "failed" (see dashboard/(chrome)/new/page.tsx's pollAvatarGeneration). */
+export async function getAvatarGeneration(id: string): Promise<AvatarGeneration> {
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/generations/${encodeURIComponent(id)}`, {
+    headers: await authHeader(),
+  });
+  const body = await handleResponse<{
+    id: string;
+    status: AvatarGenerationStatus;
+    asset_id: string | null;
+    url: string | null;
+    error: string | null;
+  }>(response);
+  return { id: body.id, status: body.status, assetId: body.asset_id, url: body.url, error: body.error };
+}
+
 export async function deleteProject(projectId: string) {
   const response = await apiFetch(`${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}`, {
     method: "DELETE",

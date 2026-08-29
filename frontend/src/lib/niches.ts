@@ -18,12 +18,32 @@ export interface NicheField {
   required: boolean;
 }
 
+export type MediaSlotKind = "image" | "video" | "either";
+
+export interface MediaSlot {
+  key: string;
+  label: string;
+  hint: string;
+  kind: MediaSlotKind;
+  required: boolean;
+}
+
 export interface NicheConfig {
   id: string;
   niche_key: string;
   display_name: string;
   fields: NicheField[];
   script_template: string | null;
+  // Wizard scaffolding (backend/src/niches/service.py) -- ordered upload
+  // slots with per-slot shooting guidance, pre-written opening hooks, an
+  // end-screen CTA template, and hashtag stems for future social-copy
+  // generation. Not yet consumed by the UI (still the flat 2-step form in
+  // dashboard/(chrome)/new/page.tsx) -- typed now so the contract matches
+  // the backend as the guided wizard gets built on top of it.
+  media_slots: MediaSlot[];
+  hooks: string[];
+  cta_template: string | null;
+  hashtag_seed: string[];
   created_at: string;
 }
 
