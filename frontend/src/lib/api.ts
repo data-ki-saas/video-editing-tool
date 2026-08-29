@@ -48,12 +48,73 @@ function formatErrorDetail(detail: unknown): string | undefined {
   return undefined;
 }
 
-async function handleResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    console.error(`[api] request to ${response.url} failed: HTTP ${response.status}`, body);
-    throw new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${response.status})`);
+/** Thrown for a 403 shaped like backend/src/permissions/service.py's
+ * feature_denied_detail -- lets a catch block distinguish "you're not
+ * allowed to do this, upgrade to unlock it" from any other error, instead
+ * of pattern-matching on a generic Error's message string. */
+export class FeatureLockedError extends Error {
+  readonly feature: string;
+  readonly role: string;
+  readonly roleLabel: string;
+  readonly upgradeUrl?: string;
+
+  constructor(detail: {
+    feature: string;
+    feature_label: string;
+    role: string;
+    role_label: string;
+    message: string;
+    upgrade_url?: string;
+  }) {
+    super(detail.message);
+    this.name = "FeatureLockedError";
+    this.feature = detail.feature;
+    this.role = detail.role;
+    this.roleLabel = detail.role_label;
+    this.upgradeUrl = detail.upgrade_url;
   }
+}
+
+function isFeatureNotAllowedDetail(detail: unknown): detail is {
+  code: "feature_not_allowed";
+  feature: string;
+  feature_label: string;
+  role: string;
+  role_label: string;
+  message: string;
+  upgrade_url?: string;
+} {
+  return Boolean(detail && typeof detail === "object" && (detail as { code?: unknown }).code === "feature_not_allowed");
+}
+
+/** Turns a non-ok response's parsed `detail` into the right Error to throw.
+ * A structured "you need to upgrade" 403 becomes a FeatureLockedError; a
+ * plain {message} object (e.g. role-delete-blocked's 409) surfaces that
+ * message directly; anything else falls back to formatErrorDetail's
+ * string/422-array handling. Shared by every throwing call site below so
+ * this shape is recognized consistently instead of degrading to a generic
+ * "Request failed (HTTP nnn)". */
+function errorFromDetail(status: number, detail: unknown): Error {
+  if (isFeatureNotAllowedDetail(detail)) return new FeatureLockedError(detail);
+  if (detail && typeof detail === "object" && typeof (detail as { message?: unknown }).message === "string") {
+    return new Error((detail as { message: string }).message);
+  }
+  return new Error(formatErrorDetail(detail) ?? `Request failed (HTTP ${status})`);
+}
+
+/** Throws (via errorFromDetail) if `response` isn't ok -- otherwise resolves
+ * with no value. Shared by every call site that only cares about success/
+ * failure, not a parsed body (deleteAsset, resetProject, clearThumbnail,
+ * deleteRole, ...). */
+async function throwIfNotOk(response: Response): Promise<void> {
+  if (response.ok) return;
+  const body = await response.json().catch(() => ({}));
+  console.error(`[api] request to ${response.url} failed: HTTP ${response.status}`, body);
+  throw errorFromDetail(response.status, body.detail);
+}
+
+async function handleResponse<T>(response: Response): Promise<T> {
+  await throwIfNotOk(response);
   return response.json();
 }
 
@@ -128,7 +189,7 @@ export function uploadAssetWithProgress(
             resolve(body as unknown as Asset);
           } else {
             console.error(`[api] upload to ${url} failed: HTTP ${xhr.status}`, body);
-            reject(new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${xhr.status})`));
+            reject(errorFromDetail(xhr.status, body.detail));
           }
         };
 
@@ -160,10 +221,7 @@ export async function deleteAsset(assetId: string) {
     method: "DELETE",
     headers: await authHeader(),
   });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${response.status})`);
-  }
+  await throwIfNotOk(response);
 }
 
 export type StockMediaKind = "photo" | "video" | "music";
@@ -390,10 +448,7 @@ export async function deleteProject(projectId: string) {
     method: "DELETE",
     headers: await authHeader(),
   });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${response.status})`);
-  }
+  await throwIfNotOk(response);
 }
 
 // Wipes a reel's assets and render state but keeps the row -- see
@@ -406,10 +461,7 @@ export async function resetProject(projectId: string) {
     method: "POST",
     headers: await authHeader(),
   });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${response.status})`);
-  }
+  await throwIfNotOk(response);
 }
 
 export interface ThumbnailInfo {
@@ -452,10 +504,7 @@ export async function clearThumbnail(projectId: string) {
     method: "DELETE",
     headers: await authHeader(),
   });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(formatErrorDetail(body.detail) ?? `Request failed (HTTP ${response.status})`);
-  }
+  await throwIfNotOk(response);
 }
 
 export interface RenderTriggerResult {
@@ -478,7 +527,189 @@ export async function triggerRender(projectId: string, compileInput: CompileTime
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
+    // The route forwards backend/src/permissions/router.py's /assert body
+    // verbatim on a permission denial (see api/render/route.ts's own
+    // comment) -- `body.detail` is that shape; every other error this route
+    // returns is its own native `{error}` shape.
+    if (isFeatureNotAllowedDetail(body.detail)) throw new FeatureLockedError(body.detail);
     throw new Error(body.error ?? `Request failed (HTTP ${response.status})`);
   }
   return body as RenderTriggerResult;
+}
+
+// --- Roles & permissions (backend/src/permissions/*) ---------------------
+
+export interface FeatureInfo {
+  key: string;
+  label: string;
+  group: string;
+}
+
+export interface MyPermissions {
+  role: string;
+  roleLabel: string;
+  badgeColor: string;
+  features: string[];
+}
+
+/** GET /api/permissions/me -- the signed-in user's own role + granted
+ * feature keys, backing usePermissions().  */
+export async function getMyPermissions(): Promise<MyPermissions> {
+  const response = await apiFetch(`${API_BASE_URL}/api/permissions/me`, { headers: await authHeader() });
+  const body = await handleResponse<{ role: string; role_label: string; badge_color: string; features: string[] }>(
+    response
+  );
+  return { role: body.role, roleLabel: body.role_label, badgeColor: body.badge_color, features: body.features };
+}
+
+/** GET /api/permissions/features -- the full feature registry, for the
+ * admin role-editor's checklist. */
+export async function listFeatures(): Promise<FeatureInfo[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/permissions/features`, { headers: await authHeader() });
+  return handleResponse<FeatureInfo[]>(response);
+}
+
+export interface RoleInfo {
+  key: string;
+  displayName: string;
+  description: string | null;
+  isSystem: boolean;
+  isDefault: boolean;
+  badgeColor: string;
+  userCount: number;
+  features: string[];
+}
+
+interface RoleWire {
+  key: string;
+  display_name: string;
+  description: string | null;
+  is_system: boolean;
+  is_default: boolean;
+  badge_color: string;
+  user_count: number;
+  features: string[];
+}
+
+function roleFromWire(row: RoleWire): RoleInfo {
+  return {
+    key: row.key,
+    displayName: row.display_name,
+    description: row.description,
+    isSystem: row.is_system,
+    isDefault: row.is_default,
+    badgeColor: row.badge_color,
+    userCount: row.user_count,
+    features: row.features,
+  };
+}
+
+/** GET /api/roles -- admin-only (require_feature("admin_manage_roles")). */
+export async function listRoles(): Promise<RoleInfo[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/roles`, { headers: await authHeader() });
+  const body = await handleResponse<RoleWire[]>(response);
+  return body.map(roleFromWire);
+}
+
+export async function createRole(input: {
+  key: string;
+  displayName: string;
+  description?: string;
+  badgeColor?: string;
+}): Promise<RoleInfo> {
+  const response = await apiFetch(`${API_BASE_URL}/api/roles`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({
+      key: input.key,
+      display_name: input.displayName,
+      description: input.description,
+      ...(input.badgeColor ? { badge_color: input.badgeColor } : {}),
+    }),
+  });
+  return roleFromWire(await handleResponse<RoleWire>(response));
+}
+
+export async function updateRole(
+  roleKey: string,
+  input: { displayName?: string; description?: string; badgeColor?: string }
+): Promise<RoleInfo> {
+  const response = await apiFetch(`${API_BASE_URL}/api/roles/${encodeURIComponent(roleKey)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({
+      ...(input.displayName !== undefined ? { display_name: input.displayName } : {}),
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.badgeColor !== undefined ? { badge_color: input.badgeColor } : {}),
+    }),
+  });
+  return roleFromWire(await handleResponse<RoleWire>(response));
+}
+
+/** DELETE /api/roles/{key} -- 409s (via errorFromDetail's {message} branch)
+ * if the role is a protected system role or still has users assigned. */
+export async function deleteRole(roleKey: string): Promise<void> {
+  const response = await apiFetch(`${API_BASE_URL}/api/roles/${encodeURIComponent(roleKey)}`, {
+    method: "DELETE",
+    headers: await authHeader(),
+  });
+  await throwIfNotOk(response);
+}
+
+export async function updateRoleFeatures(roleKey: string, features: string[]): Promise<RoleInfo> {
+  const response = await apiFetch(`${API_BASE_URL}/api/roles/${encodeURIComponent(roleKey)}/features`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ features }),
+  });
+  return roleFromWire(await handleResponse<RoleWire>(response));
+}
+
+export interface AdminUserInfo {
+  id: string;
+  email: string | null;
+  displayName: string | null;
+  role: string;
+  roleLabel: string;
+  badgeColor: string;
+}
+
+interface AdminUserWire {
+  id: string;
+  email: string | null;
+  display_name: string | null;
+  role: string;
+  role_label: string;
+  badge_color: string;
+}
+
+function userFromWire(row: AdminUserWire): AdminUserInfo {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    role: row.role,
+    roleLabel: row.role_label,
+    badgeColor: row.badge_color,
+  };
+}
+
+/** GET /api/users?search= -- email substring search across every signed-up
+ * user (not just ones with a profiles row -- see permissions/repository.py's
+ * list_users), for the admin user-role-assignment page. */
+export async function listUsers(search?: string): Promise<AdminUserInfo[]> {
+  const url = new URL(`${API_BASE_URL}/api/users`);
+  if (search) url.searchParams.set("search", search);
+  const response = await apiFetch(url.toString(), { headers: await authHeader() });
+  const body = await handleResponse<{ users: AdminUserWire[] }>(response);
+  return body.users.map(userFromWire);
+}
+
+export async function updateUserRole(userId: string, role: string): Promise<AdminUserInfo> {
+  const response = await apiFetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}/role`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ role }),
+  });
+  return userFromWire(await handleResponse<AdminUserWire>(response));
 }

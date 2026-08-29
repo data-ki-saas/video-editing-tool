@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, UploadFile
 
 from src.assets import service
 from src.assets.schemas import AssetInfo
-from src.core.auth import CurrentUser, get_current_user
+from src.core.auth import CurrentUser, get_current_user, require_feature
 
-router = APIRouter(prefix="/api/assets", tags=["assets"])
+router = APIRouter(prefix="/api/assets", tags=["assets"], dependencies=[Depends(require_feature("assets_manage"))])
 
 
 @router.post("", response_model=AssetInfo, status_code=201)

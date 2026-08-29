@@ -20,6 +20,7 @@
  */
 import { useEffect, useState } from "react";
 import {
+  FeatureLockedError,
   generateAvatarVideo,
   listAssets,
   listAvatars,
@@ -30,6 +31,8 @@ import {
   type TtsVoiceOption,
 } from "@/lib/api";
 import { pollAvatarGeneration } from "@/lib/avatarGeneration";
+import { usePermissions } from "@/lib/usePermissions";
+import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
 
 export function TtsAvatarDialog({
   projectId,
@@ -58,6 +61,13 @@ export function TtsAvatarDialog({
   const [isGenerating, setIsGenerating] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lockedError, setLockedError] = useState<FeatureLockedError | null>(null);
+
+  // Proactive-but-not-authoritative hint -- real enforcement is
+  // require_feature("tts_synthesize"/"avatar_generate") on the backend; see
+  // this dialog's own catch below for what actually happens if it's denied.
+  const { loading: isLoadingPermissions, has: hasFeature } = usePermissions();
+  const canGenerateAvatar = isLoadingPermissions || (hasFeature("tts_synthesize") && hasFeature("avatar_generate"));
 
   useEffect(() => {
     let cancelled = false;
@@ -122,7 +132,8 @@ export function TtsAvatarDialog({
 
       onGenerated(asset);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate the avatar video");
+      if (err instanceof FeatureLockedError) setLockedError(err);
+      else setError(err instanceof Error ? err.message : "Failed to generate the avatar video");
     } finally {
       setIsGenerating(false);
       setStage(null);
@@ -235,11 +246,15 @@ export function TtsAvatarDialog({
           type="button"
           onClick={handleGenerate}
           disabled={!canGenerate}
-          className="mt-1 w-full shrink-0 rounded-md bg-violet-600 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          className="mt-1 flex w-full shrink-0 items-center justify-center gap-1.5 rounded-md bg-violet-600 py-1.5 text-sm font-medium text-white disabled:opacity-50"
         >
           {isGenerating ? (stage ?? "Generating…") : "Generate & add"}
+          {!isGenerating && !canGenerateAvatar && (
+            <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase">Pro</span>
+          )}
         </button>
       </div>
+      {lockedError && <UpgradeRequiredDialog error={lockedError} onClose={() => setLockedError(null)} />}
     </div>
   );
 }

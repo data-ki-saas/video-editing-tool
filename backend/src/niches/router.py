@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends
 
-from src.core.auth import CurrentUser, get_current_user
+from src.core.auth import CurrentUser, get_current_user, require_feature
 from src.llm.client import get_llm_provider
 from src.niches import service
 from src.niches.schemas import GenerateNicheRequest, NicheConfig
 
-router = APIRouter(prefix="/api/niches", tags=["niches"])
+router = APIRouter(prefix="/api/niches", tags=["niches"], dependencies=[Depends(require_feature("niches_use"))])
 
 
 @router.get("", response_model=list[NicheConfig])

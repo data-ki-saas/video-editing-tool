@@ -7,7 +7,7 @@ from src.avatar.schemas import (
     GenerateAvatarVideoRequest,
     GenerateAvatarVideoResponse,
 )
-from src.core.auth import CurrentUser, get_current_user
+from src.core.auth import CurrentUser, get_current_user, require_feature
 
 router = APIRouter(prefix="/api/avatar", tags=["avatar"])
 
@@ -19,7 +19,7 @@ async def list_avatars(user: CurrentUser = Depends(get_current_user)) -> AvatarO
 
 @router.post("/generate", response_model=GenerateAvatarVideoResponse, status_code=201)
 async def generate(
-    body: GenerateAvatarVideoRequest, user: CurrentUser = Depends(get_current_user)
+    body: GenerateAvatarVideoRequest, user: CurrentUser = Depends(require_feature("avatar_generate"))
 ) -> GenerateAvatarVideoResponse:
     return await service.generate(body.project_id, body.audio_asset_id, body.avatar_id, user)
 

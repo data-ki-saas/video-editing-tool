@@ -1,47 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { usePermissions } from "@/lib/usePermissions";
 
 /** Backs the header's admin-only Tools icon and /admin's own page guard.
- * Reads profiles.role directly via Supabase (RLS select-own, see
- * supabase/migrations/0014_create_profiles.sql) rather than a backend
- * round-trip -- same shape as settings/page.tsx's own supabase.auth.getUser()
- * call. Returns null while loading; a missing profiles row or any error
- * resolves to false (fail closed -- see auth.py's _lookup_role for the
- * server-side equivalent). This client-side check is a UI convenience only,
- * not a security boundary -- any real admin endpoint must gate on the
- * backend's require_admin instead. */
+ * Delegates to usePermissions()'s "admin_manage_roles" feature (see
+ * backend/src/permissions/features.py) rather than checking profiles.role
+ * directly -- role is no longer synonymous with "admin" now that roles are
+ * admin-creatable (see supabase/migrations/0015). Returns null while
+ * loading; a failed/unresolved permissions fetch resolves to false (fail
+ * closed -- see usePermissions' own comment). This client-side check is a
+ * UI convenience only, not a security boundary -- any real admin endpoint
+ * must gate on the backend's require_feature("admin_manage_roles") instead. */
 export function useIsAdmin(): boolean | null {
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const supabase = createClient();
-
-    supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) {
-        if (!cancelled) setIsAdmin(false);
-        return;
-      }
-      const { data: profile, error } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("user_id", data.user.id)
-        .maybeSingle();
-      if (cancelled) return;
-      if (error) {
-        console.error("[useIsAdmin] failed to look up role", error);
-        setIsAdmin(false);
-        return;
-      }
-      setIsAdmin(profile?.role === "admin");
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return isAdmin;
+  const { loading, has } = usePermissions();
+  if (loading) return null;
+  return has("admin_manage_roles");
 }

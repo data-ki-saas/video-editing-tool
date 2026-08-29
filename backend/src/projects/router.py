@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, Form, UploadFile
 
-from src.core.auth import CurrentUser, get_current_user
+from src.core.auth import CurrentUser, get_current_user, require_feature
 from src.projects import service
 from src.projects.schemas import ThumbnailInfo
 
-router = APIRouter(prefix="/api/projects", tags=["projects"])
+router = APIRouter(prefix="/api/projects", tags=["projects"], dependencies=[Depends(require_feature("projects_manage"))])
 
 
 @router.delete("/{project_id}", status_code=204)

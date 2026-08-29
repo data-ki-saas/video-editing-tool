@@ -42,8 +42,10 @@ import { TEXT_TEMPLATE_OPTIONS, type TextTemplateId } from "@/lib/video/textTemp
 import { TextOverlayCanvas } from "./TextOverlayCanvas";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
 import { DEFAULT_TTS_OVERLAY_RECT, type CropRect, type TtsOverlay, type TtsWordTiming } from "@/lib/video/video_math";
-import { listTtsVoices, synthesizeTts, type TtsVoiceOption } from "@/lib/api";
+import { FeatureLockedError, listTtsVoices, synthesizeTts, type TtsVoiceOption } from "@/lib/api";
 import { getAudioDuration } from "@/lib/video/audio";
+import { usePermissions } from "@/lib/usePermissions";
+import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
 
 const PREVIEW_PROGRESS = 0.6;
 const DEFAULT_PREVIEW_TEXT = "Your narration here";
@@ -122,6 +124,15 @@ export function TtsOverlayDialog({
   );
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [synthesisError, setSynthesisError] = useState<string | null>(null);
+  const [lockedError, setLockedError] = useState<FeatureLockedError | null>(null);
+
+  // Proactive-but-not-authoritative: real enforcement is
+  // require_feature("tts_synthesize") on the backend (see
+  // backend/src/tts/router.py) -- this just shows the "Pro" hint before the
+  // user bothers typing a script, and catches the same denial below if it
+  // still happens (e.g. their role changed mid-session).
+  const { loading: isLoadingPermissions, has: hasFeature } = usePermissions();
+  const canSynthesize = isLoadingPermissions || hasFeature("tts_synthesize");
 
   // Re-syncs if a different overlay is opened for editing (or the dialog is
   // reopened fresh for "Add") while already mounted -- same convention as
@@ -194,7 +205,8 @@ export function TtsOverlayDialog({
       setSynthesis({ ...result, durationSeconds: realDurationSeconds });
       setSynthesizedText(trimmed);
     } catch (err) {
-      setSynthesisError(err instanceof Error ? err.message : "Failed to generate speech");
+      if (err instanceof FeatureLockedError) setLockedError(err);
+      else setSynthesisError(err instanceof Error ? err.message : "Failed to generate speech");
     } finally {
       setIsSynthesizing(false);
     }
@@ -372,9 +384,12 @@ export function TtsOverlayDialog({
                 type="button"
                 onClick={handleGenerateSpeech}
                 disabled={!trimmedText || !voice || isSynthesizing}
-                className="rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
               >
                 {isSynthesizing ? "Generating…" : "Generate speech"}
+                {!canSynthesize && (
+                  <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase">Pro</span>
+                )}
               </button>
               {canSave && <span className="text-[11px] text-green-600">Speech ready ({synthesis?.durationSeconds.toFixed(1)}s)</span>}
             </div>
@@ -421,6 +436,7 @@ export function TtsOverlayDialog({
           </div>
         </div>
       </div>
+      {lockedError && <UpgradeRequiredDialog error={lockedError} onClose={() => setLockedError(null)} />}
     </div>
   );
 }

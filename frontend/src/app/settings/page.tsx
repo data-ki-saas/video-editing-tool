@@ -6,12 +6,14 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useTheme } from "@/components/theme-provider";
 import { COLOR_THEMES, THEME_MODES } from "@/lib/theme";
+import { resetPermissionsCache, usePermissions } from "@/lib/usePermissions";
 
 export default function SettingsPage() {
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const { mode, colorTheme, setMode, setColorTheme } = useTheme();
+  const { loading: isLoadingRole, roleLabel, badgeColor } = usePermissions();
 
   useEffect(() => {
     const supabase = createClient();
@@ -22,6 +24,7 @@ export default function SettingsPage() {
     setSigningOut(true);
     const supabase = createClient();
     await supabase.auth.signOut();
+    resetPermissionsCache(); // a different user signing in in this tab shouldn't see this session's cached role/features
     router.push("/");
     router.refresh();
   }
@@ -37,7 +40,17 @@ export default function SettingsPage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-medium">Account</h2>
-        <p className="text-sm text-muted">{email ?? "Loading…"}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-muted">{email ?? "Loading…"}</p>
+          {!isLoadingRole && roleLabel && (
+            <span
+              className="rounded-full px-2 py-0.5 text-xs font-medium text-white"
+              style={{ backgroundColor: badgeColor ?? "#64748b" }}
+            >
+              {roleLabel}
+            </span>
+          )}
+        </div>
         <button
           type="button"
           onClick={handleSignOut}

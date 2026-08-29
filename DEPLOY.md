@@ -54,6 +54,15 @@ earlier one.
      no route/UI uses it yet).
    - `0008_create_niche_configs.sql` — `niche_configs`, the shared, LLM-generated
      per-niche form-field cache (see README.md's "Niches").
+   - `0015_create_roles_and_permissions.sql` — `roles`/`role_features` tables
+     (admin-creatable roles with fine-grained feature access, replacing
+     `profiles.role`'s old fixed check-constraint enum) plus seeds
+     `admin`/`free_user`/`paid_user`. It assigns none of them to any real
+     user, so the very first admin still has to be set by hand:
+     `update public.profiles set role = 'admin' where user_id = '<uuid>';`
+     (or `insert into public.profiles (user_id, role) values ('<uuid>', 'admin') on conflict (user_id) do update set role = 'admin';`
+     if that user has no `profiles` row yet). Every other role assignment can
+     then be done from `/admin/users`.
 3. **Auth settings** (Authentication > Providers > Email): if you leave
    "Confirm email" ON (the default) and haven't configured SMTP, sign-up
    will silently require a confirmation email that never arrives — either

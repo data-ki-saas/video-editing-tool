@@ -183,6 +183,30 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
+  // The permission source of truth lives entirely in the backend (roles +
+  // role_features -- see supabase/migrations/0015 and
+  // backend/src/permissions/), not queried directly from here, so this
+  // logic and its "upgrade" copy exist in one language. Fails CLOSED (a
+  // network error or non-2xx blocks the render) -- the opposite of this
+  // route's own render-rate-limit check above, which fails open, since this
+  // gates access rather than abuse.
+  const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+  try {
+    if (!backendUrl) throw new Error("NEXT_PUBLIC_API_BASE_URL is not set");
+    const assertRes = await fetch(`${backendUrl.replace(/\/$/, "")}/api/permissions/assert`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ feature: "render_generate" }),
+    });
+    if (!assertRes.ok) {
+      const body = await assertRes.json().catch(() => ({ error: "Render is not allowed for your account" }));
+      return NextResponse.json(body, { status: assertRes.status });
+    }
+  } catch (err) {
+    console.error("[api/render] failed to check render permission", projectId, err);
+    return NextResponse.json({ error: "Could not verify render permission -- try again shortly" }, { status: 503 });
+  }
+
   let timeline: ReturnType<typeof compileCreatomateTimeline>;
   try {
     timeline = compileCreatomateTimeline(compileInput);

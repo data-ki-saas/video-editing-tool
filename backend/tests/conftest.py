@@ -8,9 +8,17 @@ from moto.server import ThreadedMotoServer
 from src.assets import repository
 from src.core.auth import CurrentUser, get_current_user
 from src.core.config import settings
+from src.permissions.features import FEATURE_KEYS
 from src.projects import repository as projects_repository
 
-TEST_USER = CurrentUser(id="test-user-id", email="test@example.com")
+# Full access by default so existing router/service tests (written before
+# the permissions module existed) keep exercising real behavior rather than
+# tripping a 403 from require_feature. A test that specifically wants to
+# exercise permission-denied behavior overrides get_current_user itself with
+# a CurrentUser carrying a restricted `features` set.
+TEST_USER = CurrentUser(
+    id="test-user-id", email="test@example.com", role="admin", role_label="Admin", features=frozenset(FEATURE_KEYS)
+)
 
 
 @pytest.fixture(scope="session")
@@ -179,6 +187,122 @@ def fake_assets_table(monkeypatch):
     monkeypatch.setattr(projects_repository, "clear_render_state", table.clear_render_state)
     monkeypatch.setattr(projects_repository, "set_thumbnail", table.set_thumbnail)
     monkeypatch.setattr(projects_repository, "clear_thumbnail", table.clear_thumbnail)
+    return table
+
+
+class FakeRolesTable:
+    """In-memory stand-in for the `roles`/`role_features`/`profiles`/`users`
+    tables used by permissions/service.py -- same purpose as FakeAssetsTable
+    above, avoids hitting a real Supabase project."""
+
+    def __init__(self):
+        self.roles: dict[str, dict] = {}
+        self.role_features: dict[str, set[str]] = {}
+        self.profiles: dict[str, str] = {}
+        self.users: dict[str, dict] = {}
+
+    def add_role(self, key, *, display_name="Role", is_system=False, is_default=False, badge_color="#000000", features=()):
+        self.roles[key] = {
+            "key": key,
+            "display_name": display_name,
+            "description": None,
+            "is_system": is_system,
+            "is_default": is_default,
+            "badge_color": badge_color,
+        }
+        self.role_features[key] = set(features)
+        return key
+
+    def add_user(self, user_id, *, email, display_name=None, role=None):
+        self.users[user_id] = {"id": user_id, "email": email, "display_name": display_name}
+        if role is not None:
+            self.profiles[user_id] = role
+        return user_id
+
+    def _row(self, key: str) -> dict:
+        return {**self.roles[key], "features": sorted(self.role_features[key])}
+
+    def list_roles(self) -> list[dict]:
+        return [self._row(key) for key in self.roles]
+
+    def get_role(self, key: str) -> dict | None:
+        return self._row(key) if key in self.roles else None
+
+    def count_users_by_role(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for role in self.profiles.values():
+            counts[role] = counts.get(role, 0) + 1
+        return counts
+
+    def create_role(self, *, key, display_name, description, badge_color):
+        self.roles[key] = {
+            "key": key,
+            "display_name": display_name,
+            "description": description,
+            "is_system": False,
+            "is_default": False,
+            "badge_color": badge_color,
+        }
+        self.role_features[key] = set()
+
+    def update_role(self, role_key, **fields):
+        self.roles[role_key].update(fields)
+
+    def delete_role(self, role_key):
+        self.roles.pop(role_key, None)
+        self.role_features.pop(role_key, None)
+
+    def set_role_features(self, role_key, feature_keys):
+        self.role_features[role_key] = set(feature_keys)
+
+    def count_roles_granting(self, feature_key) -> int:
+        return sum(1 for features in self.role_features.values() if feature_key in features)
+
+    def list_users(self, search: str | None) -> list[dict]:
+        rows = []
+        for user_id, user in self.users.items():
+            if search and search.lower() not in (user.get("email") or "").lower():
+                continue
+            role = self.profiles.get(user_id)
+            rows.append({**user, "profiles": {"role": role} if role else None})
+        return rows
+
+    def get_user_basic(self, user_id: str) -> dict | None:
+        return self.users.get(user_id)
+
+    def upsert_user_role(self, user_id: str, role_key: str) -> None:
+        self.profiles[user_id] = role_key
+
+
+@pytest.fixture
+def fake_roles_table(monkeypatch):
+    from src.permissions import repository as permissions_repository
+    from src.permissions.features import FEATURE_KEYS
+
+    table = FakeRolesTable()
+    table.add_role("admin", display_name="Admin", is_system=True, badge_color="#7c3aed", features=FEATURE_KEYS)
+    table.add_role(
+        "free_user",
+        display_name="Free",
+        is_system=True,
+        is_default=True,
+        badge_color="#64748b",
+        features=["assets_manage", "stock_media_use", "projects_manage", "niches_use"],
+    )
+    table.add_role(
+        "paid_user", display_name="Paid", badge_color="#f59e0b", features=FEATURE_KEYS - {"admin_manage_roles"}
+    )
+    monkeypatch.setattr(permissions_repository, "list_roles", table.list_roles)
+    monkeypatch.setattr(permissions_repository, "get_role", table.get_role)
+    monkeypatch.setattr(permissions_repository, "count_users_by_role", table.count_users_by_role)
+    monkeypatch.setattr(permissions_repository, "create_role", table.create_role)
+    monkeypatch.setattr(permissions_repository, "update_role", table.update_role)
+    monkeypatch.setattr(permissions_repository, "delete_role", table.delete_role)
+    monkeypatch.setattr(permissions_repository, "set_role_features", table.set_role_features)
+    monkeypatch.setattr(permissions_repository, "count_roles_granting", table.count_roles_granting)
+    monkeypatch.setattr(permissions_repository, "list_users", table.list_users)
+    monkeypatch.setattr(permissions_repository, "get_user_basic", table.get_user_basic)
+    monkeypatch.setattr(permissions_repository, "upsert_user_role", table.upsert_user_role)
     return table
 
 

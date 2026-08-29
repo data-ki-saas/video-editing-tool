@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends
 
 from src.assets.schemas import AssetInfo
-from src.core.auth import CurrentUser, get_current_user
+from src.core.auth import CurrentUser, get_current_user, require_feature
 from src.stock_media import service
 from src.stock_media.schemas import ImportStockAssetRequest, StockMediaKind, StockSearchResponse
 
-router = APIRouter(prefix="/api/stock-media", tags=["stock-media"])
+router = APIRouter(
+    prefix="/api/stock-media", tags=["stock-media"], dependencies=[Depends(require_feature("stock_media_use"))]
+)
 
 
 @router.get("/search", response_model=StockSearchResponse)
