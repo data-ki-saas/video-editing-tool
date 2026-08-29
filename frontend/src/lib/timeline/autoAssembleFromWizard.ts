@@ -1,5 +1,5 @@
 import type { Asset } from "@/lib/api";
-import { loadImageElement } from "@/lib/image";
+import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { DEFAULT_EDIT_SELECTIONS, type EditSelectionsSnapshot } from "@/lib/projects";
 import type { ImageTemplateId } from "@/lib/video/imageTemplates";
 import {
@@ -117,8 +117,13 @@ export async function autoAssembleFromWizard(
 
     let cropRect: CropRect = FULL_FRAME_CROP_RECT;
     try {
-      const image = await loadImageElement(asset.url);
+      // Via loadCrossOriginImage, not a plain <img>/new Image() -- see that
+      // function's own module comment for why a plain no-cors load of this
+      // exact URL can poison the browser's cache against CanvasPlayer's
+      // later CORS-mode fetch of it once the wizard hands off to the editor.
+      const { image, blobUrl } = await loadCrossOriginImage(asset.url);
       cropRect = computeMaxCoverageCropFraction(image.naturalWidth / image.naturalHeight, TARGET_ASPECT_RATIO);
+      URL.revokeObjectURL(blobUrl);
     } catch {
       // Falls back to the full frame if the photo can't be decoded for its
       // dimensions -- still a valid (if uncropped) clip, not a failure.

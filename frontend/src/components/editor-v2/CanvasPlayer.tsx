@@ -104,6 +104,7 @@ import {
 import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
 import { getFilterPresetOption } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
+import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { ReelLoader } from "@/components/ReelLoader";
 import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
 
@@ -123,36 +124,29 @@ export interface CanvasPlayerHandle {
 /** Loads `src` via fetch()+blob URL rather than a plain `<img>` (or one with
  * `crossOrigin="anonymous"`) -- CoverPicker's "use current frame" reads
  * pixels back off this canvas via captureFrame()/toBlob, and a cross-origin
- * image drawn onto it without a real CORS response taints the whole canvas
- * (see exportTimeline.ts's loadOverlayImage for the fuller writeup,
- * including why crossOrigin="anonymous" alone is unsafe: this exact URL is
- * also loaded elsewhere -- AssetGallery's thumbnail, OverlayTrack -- with no
- * crossOrigin at all, and re-requesting it with crossOrigin set can silently
- * fail against an already-cached non-CORS response for it). The blob URL is
- * revoked immediately once the image has decoded (onload) -- safe, since the
- * pixel data is already captured into the image element by then. */
+ * image drawn onto it without a real CORS response taints the whole canvas.
+ * This is the ORIGINAL discovery site of a real production incident: this
+ * exact URL is also loaded elsewhere (AssetGallery's thumbnail, Cutaway's
+ * preview, etc.) via a plain `<img>` -- doing so requests it in "no-cors"
+ * mode, which the browser can cache as an opaque, header-less response; a
+ * LATER "cors"-mode fetch for the identical URL (this function) can then be
+ * served that cached opaque response instead of a fresh CORS-checked one,
+ * failing with "No 'Access-Control-Allow-Origin' header is present" even
+ * though the bucket's real CORS policy is completely correct --
+ * `crossOrigin="anonymous"` on a plain `<img>` does NOT protect against
+ * this, since the poisoning happens at whichever OTHER call site loads the
+ * URL first without it. The real fix (see crossOriginImage.ts's fuller
+ * writeup) is for EVERY caller across the app to load a project asset's URL
+ * through loadCrossOriginImage instead of a plain `<img>`/`new Image()` --
+ * this function is now a thin wrapper over that shared implementation,
+ * revoking the blob URL immediately once decoded (safe here: the pixel
+ * data is already captured into the image element by then, and this
+ * function's callers only ever need pixels, never a long-lived <img src>). */
 function loadImage(src: string): Promise<HTMLImageElement> {
-  return fetch(src, { mode: "cors" })
-    .then((res) => {
-      if (!res.ok) throw new Error(`Could not fetch image (HTTP ${res.status})`);
-      return res.blob();
-    })
-    .then(
-      (blob) =>
-        new Promise<HTMLImageElement>((resolve, reject) => {
-          const blobUrl = URL.createObjectURL(blob);
-          const img = new Image();
-          img.onload = () => {
-            URL.revokeObjectURL(blobUrl);
-            resolve(img);
-          };
-          img.onerror = () => {
-            URL.revokeObjectURL(blobUrl);
-            reject(new Error("Could not decode image"));
-          };
-          img.src = blobUrl;
-        })
-    );
+  return loadCrossOriginImage(src).then(({ image, blobUrl }) => {
+    URL.revokeObjectURL(blobUrl);
+    return image;
+  });
 }
 
 export const CanvasPlayer = forwardRef<

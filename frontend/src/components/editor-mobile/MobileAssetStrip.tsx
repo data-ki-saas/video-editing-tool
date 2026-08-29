@@ -14,6 +14,7 @@
 import { useState } from "react";
 import type { Asset } from "@/lib/api";
 import { UploadDialog } from "@/components/editor-v2/UploadDialog";
+import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import type { SequenceEntry } from "@/lib/video/video_math";
 
 export function MobileAssetStrip({
@@ -45,6 +46,14 @@ export function MobileAssetStrip({
 }) {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+
+  // Image thumbnails must never load asset.url via a plain <img> -- see
+  // useCrossOriginImageSrcMap's own comment for why that can poison the
+  // browser's cache against CanvasPlayer's later CORS-mode fetch of the
+  // exact same URL for the live preview.
+  const imageThumbnailSrcById = useCrossOriginImageSrcMap(
+    assets.filter((asset) => asset.kind === "image").map((asset) => ({ id: asset.id, url: asset.url }))
+  );
 
   return (
     <div className="flex flex-col gap-4 p-3">
@@ -147,9 +156,11 @@ export function MobileAssetStrip({
               >
                 {asset.kind === "audio" ? (
                   <span className="flex h-full w-full items-center justify-center text-lg text-muted">🎵</span>
+                ) : asset.kind === "image" && imageThumbnailSrcById[asset.id] ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- a blob: URL from a safe CORS-mode fetch, not a Next-optimizable static asset
+                  <img src={imageThumbnailSrcById[asset.id]} alt={asset.filename} className="h-full w-full object-cover" />
                 ) : asset.kind === "image" ? (
-                  // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset
-                  <img src={asset.url} alt={asset.filename} className="h-full w-full object-cover" />
+                  <span className="flex h-full w-full items-center justify-center text-xs text-muted">🖼</span>
                 ) : videoThumbnailUrlByAssetId[asset.id] ? (
                   // eslint-disable-next-line @next/next/no-img-element -- a captured video-frame data URL, not a Next-optimizable static asset
                   <img src={videoThumbnailUrlByAssetId[asset.id]} alt={asset.filename} className="h-full w-full object-cover" />

@@ -38,6 +38,7 @@ import { useEffect, useRef, useState } from "react";
 import { deleteAsset, type Asset, type AssetKind } from "@/lib/api";
 import { getVideoDuration } from "@/lib/video/video";
 import { getAudioDuration } from "@/lib/video/audio";
+import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { ReelLoader } from "@/components/ReelLoader";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import { PauseIcon } from "./icons/PlayerIcons";
@@ -115,6 +116,14 @@ export function AssetGallery({
   const [playbackProgress, setPlaybackProgress] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
+
+  // Image thumbnails must never load asset.url via a plain <img> -- see
+  // useCrossOriginImageSrcMap's own comment for why that can poison the
+  // browser's cache against CanvasPlayer's later CORS-mode fetch of the
+  // exact same URL for the live preview.
+  const imageThumbnailSrcById = useCrossOriginImageSrcMap(
+    assets.filter((asset) => asset.kind === "image").map((asset) => ({ id: asset.id, url: asset.url }))
+  );
 
   // Each video/music tile's own real duration, painted as a small badge
   // (see the "0:12" pill in renderTile below) -- probed once per asset,
@@ -194,7 +203,7 @@ export function AssetGallery({
   }
 
   function renderTile(asset: Asset) {
-    const thumbnailSrc = asset.kind === "image" ? asset.url : videoThumbnailUrlByAssetId[asset.id];
+    const thumbnailSrc = asset.kind === "image" ? imageThumbnailSrcById[asset.id] : videoThumbnailUrlByAssetId[asset.id];
     const isDeleting = deletingAssetIds.has(asset.id);
     return (
       <button

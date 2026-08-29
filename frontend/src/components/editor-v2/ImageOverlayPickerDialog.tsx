@@ -10,6 +10,7 @@
  * this dialog closes itself.
  */
 import type { Asset } from "@/lib/api";
+import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 
 export function ImageOverlayPickerDialog({
   assets,
@@ -21,6 +22,11 @@ export function ImageOverlayPickerDialog({
   onClose: () => void;
 }) {
   const imageAssets = assets.filter((asset) => asset.kind === "image");
+  // Must never load asset.url via a plain <img> -- see
+  // useCrossOriginImageSrcMap's own comment for why that can poison the
+  // browser's cache against CanvasPlayer's later CORS-mode fetch of the
+  // exact same URL for the live preview.
+  const imageSrcById = useCrossOriginImageSrcMap(imageAssets.map((asset) => ({ id: asset.id, url: asset.url })));
 
   return (
     <div
@@ -52,8 +58,10 @@ export function ImageOverlayPickerDialog({
                 onClick={() => onPick(asset)}
                 className="aspect-square overflow-hidden rounded-md border-2 border-transparent hover:border-sky-500"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset */}
-                <img src={asset.url} alt={asset.filename} className="h-full w-full object-cover" />
+                {imageSrcById[asset.id] && (
+                  // eslint-disable-next-line @next/next/no-img-element -- a blob: URL from a safe CORS-mode fetch, not a Next-optimizable static asset
+                  <img src={imageSrcById[asset.id]} alt={asset.filename} className="h-full w-full object-cover" />
+                )}
               </button>
             ))}
           </div>

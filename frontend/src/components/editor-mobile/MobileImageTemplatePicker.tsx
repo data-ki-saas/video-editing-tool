@@ -25,6 +25,7 @@ import {
   MIN_IMAGE_CLIP_DURATION_SECONDS,
   MAX_IMAGE_CLIP_DURATION_SECONDS,
 } from "@/lib/video/transformations";
+import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 
 const PREVIEW_CANVAS_SIZE_PX = 480;
 
@@ -57,15 +58,28 @@ export function MobileImageTemplatePicker({
   const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null);
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
 
+  // Via loadCrossOriginImage, not a plain new Image() -- see that
+  // function's own module comment for why a plain no-cors load of this
+  // exact URL can poison the browser's cache against CanvasPlayer's later
+  // CORS-mode fetch of it for the live preview.
   useEffect(() => {
     let cancelled = false;
-    const img = new window.Image();
-    img.onload = () => {
-      if (!cancelled) setLoadedImage(img);
-    };
-    img.src = asset.url;
+    let ownBlobUrl: string | null = null;
+    loadCrossOriginImage(asset.url)
+      .then(({ image, blobUrl }) => {
+        if (cancelled) {
+          URL.revokeObjectURL(blobUrl);
+          return;
+        }
+        ownBlobUrl = blobUrl;
+        setLoadedImage(image);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedImage(null);
+      });
     return () => {
       cancelled = true;
+      if (ownBlobUrl) URL.revokeObjectURL(ownBlobUrl);
     };
   }, [asset]);
 

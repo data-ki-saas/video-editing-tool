@@ -22,6 +22,7 @@ import { interpolateScript } from "@/lib/timeline/autoAssemble";
 import { autoAssembleFromWizard, type WizardSlotAsset } from "@/lib/timeline/autoAssembleFromWizard";
 import { createEmptyReelTimeline } from "@/lib/timeline/resolve";
 import { getAudioDuration } from "@/lib/video/audio";
+import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { TEXT_TEMPLATE_OPTIONS } from "@/lib/video/textTemplates";
 import { DEFAULT_TTS_OVERLAY_RECT, type TtsOverlay } from "@/lib/video/video_math";
 import { WizardProgress, type WizardStep } from "@/components/wizard/WizardProgress";
@@ -115,6 +116,15 @@ export default function NewReelPage() {
   const [slotUploading, setSlotUploading] = useState<Record<string, boolean>>({});
   const [slotProgress, setSlotProgress] = useState<Record<string, number>>({});
   const [slotError, setSlotError] = useState<Record<string, string | null>>({});
+  // Must never load a slot's asset.url via a plain <img> -- see
+  // useCrossOriginImageSrcMap's own comment for why that can poison the
+  // browser's cache against CanvasPlayer's later CORS-mode fetch of the
+  // exact same URL once the wizard hands off to the editor.
+  const slotImageSrcById = useCrossOriginImageSrcMap(
+    Object.values(slotAssets)
+      .filter((asset) => asset.kind === "image")
+      .map((asset) => ({ id: asset.id, url: asset.url }))
+  );
 
   // Details step
   const [name, setName] = useState("");
@@ -575,8 +585,14 @@ export default function NewReelPage() {
                     {asset ? (
                       <div className="flex items-center gap-2">
                         {asset.kind === "image" ? (
-                          // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned thumbnail, not a Next-optimizable static asset
-                          <img src={asset.url} alt={asset.filename} className="h-14 w-14 rounded object-cover" />
+                          slotImageSrcById[asset.id] ? (
+                            // eslint-disable-next-line @next/next/no-img-element -- a blob: URL from a safe CORS-mode fetch, not a Next-optimizable static asset
+                            <img src={slotImageSrcById[asset.id]} alt={asset.filename} className="h-14 w-14 rounded object-cover" />
+                          ) : (
+                            <div className="flex h-14 w-14 items-center justify-center rounded bg-background text-xs text-muted">
+                              …
+                            </div>
+                          )
                         ) : (
                           <div className="flex h-14 w-14 items-center justify-center rounded bg-background text-xs text-muted">
                             Video

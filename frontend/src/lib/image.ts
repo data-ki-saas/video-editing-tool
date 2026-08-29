@@ -15,10 +15,12 @@
 const MAX_LONG_EDGE_PX = 2048;
 const JPEG_QUALITY = 0.85;
 
-/** Exported for callers that need the decoded image itself (e.g. its
- * naturalWidth/naturalHeight for a default crop rect), not just a resized
- * File -- see lib/timeline/autoAssembleFromWizard.ts. */
-export function loadImageElement(url: string): Promise<HTMLImageElement> {
+// Only ever called below with a local blob: URL (from a freshly-selected
+// File) -- never a cross-origin asset URL. Use crossOriginImage.ts's
+// loadCrossOriginImage for that instead; a plain new Image() against a
+// cross-origin R2 URL can poison the browser's cache against a LATER
+// CORS-mode fetch of the same URL (see that file's own module comment).
+function loadImageElement(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);

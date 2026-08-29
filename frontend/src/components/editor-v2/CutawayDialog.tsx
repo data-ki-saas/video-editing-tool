@@ -45,6 +45,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Asset } from "@/lib/api";
 import { computeEffectiveCropRect, computeMaxCoverageCropFraction, FULL_FRAME_CROP_RECT, type CropRect } from "@/lib/video/video_math";
+import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { IMAGE_TEMPLATE_AXES, IMAGE_TEMPLATE_OPTIONS, buildKenBurnsEffect, type ImageTemplateId } from "@/lib/video/imageTemplates";
 import { CropRectOverlay } from "./CropRectOverlay";
 import {
@@ -177,8 +178,13 @@ export function CutawayDialog({
   // effect below.
   const [photoCropRect, setPhotoCropRect] = useState<CropRect | null>(null);
 
-  // Loads the selected photo once per asset change -- a plain <img>, not
-  // extraction of any kind, since it's already a static file.
+  // Loads the selected photo once per asset change, via loadCrossOriginImage
+  // rather than a plain <img>/new Image() -- see that function's own module
+  // comment for why a plain no-cors load of this exact URL can poison the
+  // browser's cache against CanvasPlayer's later CORS-mode fetch of it for
+  // the live preview. loadedImage.src ends up being the resulting blob:
+  // URL, reused directly below for the static preview <img> too, so this is
+  // the only fetch of the photo this dialog ever makes.
   useEffect(() => {
     if (!selectedAsset) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change, same pattern as TranscriptCaptionDialog's own re-sync effect
@@ -186,13 +192,22 @@ export function CutawayDialog({
       return;
     }
     let cancelled = false;
-    const img = new window.Image();
-    img.onload = () => {
-      if (!cancelled) setLoadedImage(img);
-    };
-    img.src = selectedAsset.url;
+    let ownBlobUrl: string | null = null;
+    loadCrossOriginImage(selectedAsset.url)
+      .then(({ image, blobUrl }) => {
+        if (cancelled) {
+          URL.revokeObjectURL(blobUrl);
+          return;
+        }
+        ownBlobUrl = blobUrl;
+        setLoadedImage(image);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedImage(null);
+      });
     return () => {
       cancelled = true;
+      if (ownBlobUrl) URL.revokeObjectURL(ownBlobUrl);
     };
   }, [selectedAsset]);
 
@@ -464,8 +479,10 @@ export function CutawayDialog({
                     className="relative mx-auto h-full max-w-full overflow-hidden"
                     style={loadedImage ? { aspectRatio: `${loadedImage.naturalWidth} / ${loadedImage.naturalHeight}` } : undefined}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset */}
-                    <img src={selectedAsset.url} alt={selectedAsset.filename} className="absolute inset-0 h-full w-full object-cover" />
+                    {loadedImage && (
+                      // eslint-disable-next-line @next/next/no-img-element -- loadedImage.src is a blob: URL from a safe CORS-mode fetch, not a Next-optimizable static asset
+                      <img src={loadedImage.src} alt={selectedAsset.filename} className="absolute inset-0 h-full w-full object-cover" />
+                    )}
                     {photoCropRect && (
                       <CropRectOverlay cropRect={photoCropRect} onChange={setPhotoCropRect} onCommit={setPhotoCropRect} />
                     )}
