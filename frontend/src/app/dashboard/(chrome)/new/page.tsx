@@ -4,17 +4,16 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   type Asset,
-  type AvatarGeneration,
   type AvatarOption,
   deleteAsset,
   generateAvatarVideo,
-  getAvatarGeneration,
   listAvatars,
   listTtsVoices,
   synthesizeTts,
   uploadAssetWithProgress,
   type TtsVoiceOption,
 } from "@/lib/api";
+import { pollAvatarGeneration } from "@/lib/avatarGeneration";
 import { downscaleImageIfNeeded } from "@/lib/image";
 import { getOrCreateNiche, listNiches, type MediaSlot, type NicheConfig } from "@/lib/niches";
 import { createProject, renameProject, saveTimeline, updateProjectAttributes, type Project } from "@/lib/projects";
@@ -195,23 +194,6 @@ export default function NewReelPage() {
   const [generating, setGenerating] = useState(false);
   const [generatingStage, setGeneratingStage] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
-
-  /** Polls GET /api/avatar/generations/{id} until it reaches a terminal
-   * status or the attempt budget runs out -- generation typically takes
-   * 30-60s per HeyGen's docs, so this budgets a bit past that rather than
-   * timing out right at the typical case. Returns the last-seen state
-   * either way; a timeout looks the same to the caller as a slow "waiting"
-   * (both fall back to audio-only narration, see handleGenerate). */
-  async function pollAvatarGeneration(id: string): Promise<AvatarGeneration> {
-    const POLL_INTERVAL_MS = 4000;
-    const MAX_ATTEMPTS = 25; // ~100s
-    let last = await getAvatarGeneration(id);
-    for (let attempt = 0; attempt < MAX_ATTEMPTS && last.status === "waiting"; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
-      last = await getAvatarGeneration(id);
-    }
-    return last;
-  }
 
   function currentFieldValues(): Record<string, string | number> {
     const result: Record<string, string | number> = {};

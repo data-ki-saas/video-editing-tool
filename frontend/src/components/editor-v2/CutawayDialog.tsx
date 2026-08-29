@@ -46,6 +46,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Asset } from "@/lib/api";
 import { computeContainRect, computeEffectiveCropRect, computeMaxCoverageCropFraction, FULL_FRAME_CROP_RECT, type CropRect } from "@/lib/video/video_math";
 import { loadCrossOriginImage } from "@/lib/crossOriginImage";
+import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { IMAGE_TEMPLATE_AXES, IMAGE_TEMPLATE_OPTIONS, buildKenBurnsEffect, type ImageTemplateId } from "@/lib/video/imageTemplates";
 import { CropRectOverlay } from "./CropRectOverlay";
 import {
@@ -159,6 +160,11 @@ export function CutawayDialog({
 
   const imageAssets = assets.filter((asset) => asset.kind === "image");
   const videoAssets = assets.filter((asset) => asset.kind === "video");
+  // Photo-picker thumbnails must never load asset.url via a plain <img> --
+  // see useCrossOriginImageSrcMap's own comment for why that can poison
+  // the browser's cache against CanvasPlayer's later CORS-mode fetch of
+  // the exact same URL for the live preview.
+  const imageThumbnailSrcById = useCrossOriginImageSrcMap(imageAssets.map((asset) => ({ id: asset.id, url: asset.url })));
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(
     editing?.assetId ?? preselectedAssetId ?? imageAssets[0]?.id ?? null
   );
@@ -378,8 +384,10 @@ export function CutawayDialog({
                     (selectedAssetId === asset.id ? "border-accent" : "border-transparent")
                   }
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset */}
-                  <img src={asset.url} alt={asset.filename} className="h-full w-full object-cover" />
+                  {imageThumbnailSrcById[asset.id] && (
+                    // eslint-disable-next-line @next/next/no-img-element -- a blob: URL from a safe CORS-mode fetch, not a Next-optimizable static asset
+                    <img src={imageThumbnailSrcById[asset.id]} alt={asset.filename} className="h-full w-full object-cover" />
+                  )}
                 </button>
               ))}
             </div>

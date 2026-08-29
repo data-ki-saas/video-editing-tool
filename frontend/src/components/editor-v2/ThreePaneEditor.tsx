@@ -308,6 +308,11 @@ export function ThreePaneEditor({
   const [isTtsDialogOpen, setIsTtsDialogOpen] = useState(false);
   const [editingTtsOverlayIndex, setEditingTtsOverlayIndex] = useState<number | null>(null);
 
+  // TtsAvatarDialog's own open state -- no edit-target index, unlike TTS
+  // narration: it always generates a fresh avatar video and hands off to
+  // the Video Overlay mechanism, never edits an existing overlay in place.
+  const [isTtsAvatarDialogOpen, setIsTtsAvatarDialogOpen] = useState(false);
+
   // TranscriptCaptionDialog's open state -- no edit-target index needed,
   // there's only ever one transcript caption config (see
   // video_math.ts's TranscriptCaption).
@@ -1057,6 +1062,21 @@ export function ThreePaneEditor({
     setIsVideoOverlayPickerOpen(false);
   }
 
+  // TtsAvatarDialog's own "Generate & add" -- the dialog already generated
+  // the avatar video and resolved it to a real project Asset (fetching a
+  // fresh listAssets() itself, since the backend just created this asset
+  // and this component's own `assets` state doesn't know about it yet).
+  // Adds it to local state (same as handleUploaded) and places it exactly
+  // like any other video overlay (handleAddVideoOverlay), since a talking-
+  // avatar clip needs nothing special beyond that -- Full-Screen/
+  // Picture-in-Picture/Split Screen, framing, deletion all already work on
+  // it unchanged.
+  function handleGeneratedTtsAvatar(asset: Asset) {
+    setAssets((prev) => (prev.some((existing) => existing.id === asset.id) ? prev : [asset, ...prev]));
+    setIsTtsAvatarDialogOpen(false);
+    void handleAddVideoOverlay(asset);
+  }
+
   // VideoOverlayTrack's right-click "Switch to..." entries -- an instant
   // change, no drag/commit split needed.
   function handleChangeVideoOverlayLayout(
@@ -1357,6 +1377,11 @@ export function ThreePaneEditor({
   // the clip rectangle the dialog's own preview positioned for this
   // specific photo, not the project's video-frame cropRect.
   function handleAddImageSequenceClip(assetId: string, durationSeconds: number, templateIds: string[], cropRect: CropRect) {
+    const replacedAssetId =
+      editingCutaway && editingCutaway.kind === "image" && editingCutaway.assetId !== assetId
+        ? editingCutaway.assetId
+        : null;
+
     const { label, state } =
       editingCutaway && editingCutaway.kind === "image"
         ? applyEditImageSequenceClip(
@@ -1373,6 +1398,31 @@ export function ThreePaneEditor({
     setIsCutawayDialogOpen(false);
     setEditingCutaway(null);
     setCutawayDialogPreselectedAssetId(null);
+
+    // Swapping a cutaway's photo leaves the OLD asset row/R2 object
+    // orphaned unless something cleans it up -- nothing else in this app
+    // does, since replacing which asset a SequenceEntry points at isn't a
+    // "delete" from the backend's perspective. Only actually deletes it
+    // when it's not referenced anywhere ELSE in the resulting timeline
+    // (same reference set handleAssetDeleted's own scrub checks below) --
+    // the same photo could legitimately still be used as a different
+    // clip/overlay/background track.
+    if (replacedAssetId) {
+      const stillReferenced =
+        state.overlayImages.some((overlay) => overlay.assetId === replacedAssetId) ||
+        state.sequenceClips.some((entry) => entry.assetId === replacedAssetId) ||
+        state.videoOverlays.some((overlay) => overlay.assetId === replacedAssetId) ||
+        state.ttsOverlays.some((overlay) => overlay.assetId === replacedAssetId) ||
+        backgroundSequenceAssetIds.includes(replacedAssetId);
+      if (!stillReferenced) {
+        deleteAsset(replacedAssetId)
+          .then(() => setAssets((prev) => prev.filter((asset) => asset.id !== replacedAssetId)))
+          .catch(() => {
+            // Best-effort -- the swap already succeeded either way; a
+            // failed cleanup just leaves one orphaned asset, not a stuck UI.
+          });
+      }
+    }
   }
 
   // "Remove Cutaway" -- from CutawayTrack's own right-click menu (every
@@ -2029,6 +2079,10 @@ export function ThreePaneEditor({
           onCloseTtsDialog={handleCloseTtsDialog}
           onEditTtsOverlay={handleRequestEditTtsOverlay}
           onDeleteTtsOverlay={handleDeleteTtsOverlay}
+          onOpenTtsAvatarDialog={() => setIsTtsAvatarDialogOpen(true)}
+          isTtsAvatarDialogOpen={isTtsAvatarDialogOpen}
+          onGeneratedTtsAvatar={handleGeneratedTtsAvatar}
+          onCloseTtsAvatarDialog={() => setIsTtsAvatarDialogOpen(false)}
           onOpenTranscriptDialog={handleOpenTranscriptDialog}
           isTranscriptDialogOpen={isTranscriptDialogOpen}
           transcriptCaption={selections.transcriptCaption}

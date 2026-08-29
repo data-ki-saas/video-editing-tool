@@ -652,7 +652,17 @@ export function applyResizeImageClip(
  * replacement entry as an explicit object, not `{ ...entry, ... }` --
  * `entry` may still carry a legacy `templateId` string from data persisted
  * before multi-select existed, which must not linger alongside the fresh
- * `templateIds` array. */
+ * `templateIds` array.
+ *
+ * If this clip has no zoomEffect at its own time range at all (its own
+ * entry was deleted some other way -- e.g. it's what applySelectClipRect
+ * used to do to every sequence clip's Ken Burns motion before that bug was
+ * fixed), the .map() below that would normally replace it in place has
+ * nothing to match and silently drops the freshly-built effect on the
+ * floor -- "editing and saving again" LOOKED like it worked (the entry's
+ * own templateIds/cropRect genuinely did update) but no animation ever
+ * came back. Appending it when nothing matched covers that recovery path,
+ * not just the normal in-place edit. */
 export function applyEditImageSequenceClip(
   selections: EditSelectionsSnapshot,
   entryId: string,
@@ -690,11 +700,16 @@ export function applyEditImageSequenceClip(
 
   const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, clipStartSeconds, clampedDuration);
 
-  const nextZoomEffects = selections.zoomEffects.map((effect) =>
+  const hasExistingEffectAtThisClip = selections.zoomEffects.some(
+    (effect) =>
+      effect.startTimeSeconds === clipStartSeconds && effect.endTimeSeconds === clipStartSeconds + entry.durationSeconds
+  );
+  const mappedZoomEffects = selections.zoomEffects.map((effect) =>
     effect.startTimeSeconds === clipStartSeconds && effect.endTimeSeconds === clipStartSeconds + entry.durationSeconds
       ? newZoomEffect
       : shiftEffectRange(effect)
   );
+  const nextZoomEffects = hasExistingEffectAtThisClip ? mappedZoomEffects : [...mappedZoomEffects, newZoomEffect];
 
   return {
     label: "Edited image cutaway",

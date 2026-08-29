@@ -79,9 +79,15 @@ import type {
 } from "@/lib/video/video_math";
 import type { TimelineMarker } from "@/lib/projects";
 
-// Fixed height for both audio rails -- same tier as every other rail in the
-// strip (TrimTrack's h-4, VideoOverlayTrack's h-5, ...), not resizable.
+// Fixed height for the main audio rail -- same tier as every other rail in
+// the strip (TrimTrack's h-4, VideoOverlayTrack's h-5, ...), not resizable.
 const AUDIO_RAIL_HEIGHT_PX = 16;
+// The background rail is taller than that -- unlike every other rail, its
+// segments need to show the track's own name and a remove button directly
+// on the segment (see BackgroundTrackStrip's own comment on why that's the
+// only real way to swap background music, since Add always appends to a
+// queue rather than replacing).
+const BACKGROUND_RAIL_HEIGHT_PX = 28;
 // Height of the proxy scrollbar row below BackgroundTrackStrip -- just
 // enough for a comfortable drag target for the thin themed scrollbar
 // (globals.css's own `* { scrollbar-width: thin }`), not a full rail tier.
@@ -436,7 +442,7 @@ export function Playground({
           />
         </div>
 
-        <div className="relative shrink-0" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
+        <div className="relative shrink-0" style={{ height: BACKGROUND_RAIL_HEIGHT_PX }}>
           <div className="absolute left-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
             <span
               title="Background music"
@@ -453,6 +459,7 @@ export function Playground({
           </div>
           <BackgroundTrackStrip
             tracks={backgroundTracks}
+            onRemoveTrack={onRemoveBackgroundTrack}
             videoDurationSeconds={videoDurationSeconds}
             pixelsPerSecond={PIXELS_PER_SECOND}
             scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}
@@ -474,39 +481,6 @@ export function Playground({
           <div style={{ width: videoDurationSeconds * PIXELS_PER_SECOND, height: 1 }} />
         </div>
       </div>
-
-      {/* Background music is queue-based (Add appends, see
-          ThreePaneEditor's handleAddToBackgroundSequence) rather than a
-          single swappable choice, but the background rail itself (16px
-          tall, AUDIO_RAIL_HEIGHT_PX) has no room to show what's actually
-          queued or a way to remove one -- this is that: a plain-text list
-          with a remove button each, the only way to actually swap to
-          different music short of deleting the asset outright. */}
-      {backgroundTracks.some((track) => track.assetId) && (
-        <div className="flex shrink-0 flex-wrap gap-1.5 px-1 py-1.5">
-          {backgroundTracks
-            .filter((track): track is { assetId: string; name: string; url: string } => Boolean(track.assetId))
-            .map((track, index) => (
-              <span
-                key={`${track.assetId}-${index}`}
-                className="flex items-center gap-1 rounded-full border border-border bg-surface py-0.5 pl-2 pr-1 text-xs text-foreground"
-              >
-                <span className="max-w-40 truncate" title={track.name}>
-                  {track.name}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onRemoveBackgroundTrack(track.assetId)}
-                  aria-label={`Remove ${track.name} from background music`}
-                  title="Remove"
-                  className="rounded-full p-0.5 text-muted hover:bg-foreground/10 hover:text-foreground"
-                >
-                  ✕
-                </button>
-              </span>
-            ))}
-        </div>
-      )}
     </div>
   );
 }
