@@ -121,11 +121,23 @@ async def get_or_create_niche(name: str, user_id: str, provider: LLMProvider) ->
     if existing is not None:
         return _to_schema(existing)
 
+    response: str | None = None
     try:
-        response = await provider.complete(f"Business niche: {name.strip()}", system=SYSTEM_PROMPT, max_tokens=800)
+        # 800 was enough back when this only asked for fields+script_template;
+        # media_slots/hooks/cta_template/hashtag_seed made the expected JSON
+        # much larger (a rich niche like real estate easily wants 6 detailed
+        # media slots + 5 hooks), and a response cut off mid-JSON fails
+        # json.loads() below just like a real generation error would -- kept
+        # generous rather than tuned tight, since a bigger cap costs nothing
+        # when the model naturally stops earlier for a simpler niche.
+        response = await provider.complete(f"Business niche: {name.strip()}", system=SYSTEM_PROMPT, max_tokens=1800)
         parsed = json.loads(response)
     except Exception as exc:
-        logger.exception("niche generation failed for %r", name)
+        # Include the raw response on a JSON-parse failure specifically --
+        # "invalid JSON" alone doesn't say whether it was truncated,
+        # malformed, or wrapped in markdown fences despite the prompt saying
+        # not to, and this is the one thing that actually shows which.
+        logger.exception("niche generation failed for %r; raw response: %r", name, response)
         raise HTTPException(status_code=502, detail="Couldn't generate a form for that niche -- try again") from exc
 
     display_name = parsed.get("display_name") if isinstance(parsed, dict) else None

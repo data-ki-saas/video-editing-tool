@@ -16,7 +16,7 @@ import {
   type TtsVoiceOption,
 } from "@/lib/api";
 import { downscaleImageIfNeeded } from "@/lib/image";
-import { getOrCreateNiche, type MediaSlot, type NicheConfig } from "@/lib/niches";
+import { getOrCreateNiche, listNiches, type MediaSlot, type NicheConfig } from "@/lib/niches";
 import { createProject, renameProject, saveTimeline, updateProjectAttributes, type Project } from "@/lib/projects";
 import { interpolateScript } from "@/lib/timeline/autoAssemble";
 import { autoAssembleFromWizard, type WizardSlotAsset } from "@/lib/timeline/autoAssembleFromWizard";
@@ -35,7 +35,7 @@ const secondaryButtonClass =
 type StepId = "niche" | "media" | "details" | "hook" | "contact" | "review";
 
 const STEPS: WizardStep[] = [
-  { id: "niche", label: "Niche" },
+  { id: "niche", label: "Get started" },
   { id: "media", label: "Media" },
   { id: "details", label: "Details" },
   { id: "hook", label: "Hook" },
@@ -55,6 +55,20 @@ interface ContactInfo {
   whatsapp: string;
 }
 
+// Same list the marketing homepage advertises (see (marketing)/page.tsx's
+// EXAMPLE_NICHES) -- shown as suggestions here too so a first-time user
+// (before anyone's generated ANY niche yet, i.e. an empty niche_configs
+// table) still has good starting options instead of a blank text box.
+const SUGGESTED_NICHES = [
+  "Real estate",
+  "Hotels",
+  "Short-term rentals",
+  "Auto dealerships",
+  "Garment shops",
+  "Gift shops",
+  "Hardware stores",
+];
+
 export default function NewReelPage() {
   const router = useRouter();
 
@@ -65,6 +79,24 @@ export default function NewReelPage() {
   const [niche, setNiche] = useState<NicheConfig | null>(null);
   const [nicheError, setNicheError] = useState<string | null>(null);
   const [loadingNiche, setLoadingNiche] = useState(false);
+  // Niches someone has already generated (and are therefore cached, so
+  // picking one is instant and can't hit an LLM-generation failure) --
+  // fetched once on mount, shown as a dropdown alongside the free-text
+  // input rather than replacing it (any niche can still be typed fresh).
+  const [existingNiches, setExistingNiches] = useState<NicheConfig[]>([]);
+  // "I'll do it myself" bypass -- a separate flag from loadingNiche so the
+  // two buttons' busy states don't get confused with each other while one
+  // is pending.
+  const [creatingBlank, setCreatingBlank] = useState(false);
+
+  useEffect(() => {
+    listNiches()
+      .then(setExistingNiches)
+      .catch(() => {
+        // Non-fatal -- the dropdown just falls back to suggestions-only;
+        // the free-text input still works either way.
+      });
+  }, []);
 
   // A draft project is created as soon as the niche resolves, so every
   // subsequent step (starting with Media) can upload straight into it via
@@ -211,17 +243,19 @@ export default function NewReelPage() {
     };
   }, [step, niche?.script_template]);
 
-  async function handleNicheSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!nicheName.trim()) return;
+  async function submitNiche(rawName: string) {
+    const trimmed = rawName.trim();
+    if (!trimmed) return;
 
     setLoadingNiche(true);
     setNicheError(null);
     try {
       // First time any given niche is requested, the backend's configured
       // LLM provider generates its field/media-slot/hook schema -- can take
-      // a few seconds; instant on every call after that.
-      const config = await getOrCreateNiche(nicheName.trim());
+      // a few seconds; instant on every call after that (including when
+      // picked from the "Already set up" dropdown below, which only ever
+      // lists niches that succeeded before).
+      const config = await getOrCreateNiche(trimmed);
       const draft = await createProject({
         name: `New ${config.display_name} Reel`,
         niche: config.niche_key,
@@ -235,6 +269,28 @@ export default function NewReelPage() {
       setNicheError(err instanceof Error ? err.message : "Failed to set up that niche");
     } finally {
       setLoadingNiche(false);
+    }
+  }
+
+  function handleNicheSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    void submitNiche(nicheName);
+  }
+
+  /** "I'll do it myself" -- skips the guided wizard entirely for someone
+   * who already knows what they want. A blank project (no niche/attributes)
+   * is still a normal project, so it's created the exact same way and lands
+   * in the exact same full editor as a wizard-generated one -- there's just
+   * nothing pre-assembled in its timeline yet. */
+  async function handleSkipToEditor() {
+    setCreatingBlank(true);
+    setNicheError(null);
+    try {
+      const draft = await createProject({ name: "New Reel" });
+      router.push(`/dashboard/${draft.id}`);
+    } catch (err) {
+      setNicheError(err instanceof Error ? err.message : "Failed to create a new reel");
+      setCreatingBlank(false);
     }
   }
 
@@ -416,6 +472,42 @@ export default function NewReelPage() {
             What kind of business is this reel for? (e.g. real estate, hotel, auto dealership, garment shop, gift
             shop, hardware store — anything works)
           </p>
+
+          {(existingNiches.length > 0 || SUGGESTED_NICHES.length > 0) && (
+            <select
+              value=""
+              onChange={(e) => e.target.value && void submitNiche(e.target.value)}
+              disabled={loadingNiche || creatingBlank}
+              className={inputClass}
+            >
+              <option value="">Choose a niche…</option>
+              {existingNiches.length > 0 && (
+                <optgroup label="Already set up (instant)">
+                  {existingNiches.map((n) => (
+                    <option key={n.niche_key} value={n.display_name}>
+                      {n.display_name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              <optgroup label="Suggestions">
+                {SUGGESTED_NICHES.filter(
+                  (name) => !existingNiches.some((n) => n.display_name.toLowerCase() === name.toLowerCase())
+                ).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          )}
+
+          <div className="flex items-center gap-2 text-xs text-muted">
+            <div className="h-px flex-1 bg-border" />
+            or type your own
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
           <form onSubmit={handleNicheSubmit} className="flex flex-col gap-3">
             <input
               placeholder="Business niche"
@@ -425,10 +517,19 @@ export default function NewReelPage() {
               required
             />
             {nicheError && <p className="text-sm text-red-500">{nicheError}</p>}
-            <button type="submit" disabled={loadingNiche} className={primaryButtonClass}>
+            <button type="submit" disabled={loadingNiche || creatingBlank} className={primaryButtonClass}>
               {loadingNiche ? "Setting up…" : "Continue"}
             </button>
           </form>
+
+          <button
+            type="button"
+            onClick={handleSkipToEditor}
+            disabled={loadingNiche || creatingBlank}
+            className="text-center text-sm text-muted underline hover:text-foreground disabled:opacity-50"
+          >
+            {creatingBlank ? "Creating…" : "I'll do it myself — take me to the editor"}
+          </button>
         </section>
       )}
 
