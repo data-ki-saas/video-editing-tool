@@ -98,6 +98,7 @@ const PROXY_SCROLLBAR_INDEX = 3;
 
 export function Playground({
   backgroundTracks,
+  onRemoveBackgroundTrack,
   videoDurationSeconds,
   thumbnails,
   thumbnailTimestampsSeconds,
@@ -188,7 +189,8 @@ export function Playground({
   onTogglePinMarker,
   onOpenSourceStart,
 }: {
-  backgroundTracks: { name: string; url: string }[];
+  backgroundTracks: { assetId: string | null; name: string; url: string }[];
+  onRemoveBackgroundTrack: (assetId: string) => void;
   videoDurationSeconds: number;
   thumbnails: string[];
   thumbnailTimestampsSeconds: number[];
@@ -303,13 +305,18 @@ export function Playground({
 
   return (
     <div className="flex h-full flex-col overflow-y-auto bg-surface px-2">
-      {/* One seamless panel (shared bg-neutral-950, no gap between rows) --
-          the frame strip and the two audio rails all represent one
-          continuous timeline (see this file's own module comment) and
-          should read as one panel, not three separate floating cards. The
-          primary reel audio sits immediately below the frames it's the
-          sound for; background music sits at the very bottom, furthest
-          from the main video content it plays under. */}
+      {/* One shared panel (shared bg-neutral-950) -- the frame strip and the
+          two audio rails all represent one continuous timeline (see this
+          file's own module comment) and should read as one panel, not
+          three separate floating cards. A small gap sits between the frame
+          strip and the audio rails below (see mt-2 further down) so the
+          video content doesn't visually run into the audio rails -- the
+          two audio rails themselves stay flush against each other, since
+          together they represent one "audio" concept (reel sound, then
+          background music under it). The primary reel audio sits
+          immediately below the frames it's the sound for; background music
+          sits at the very bottom, furthest from the main video content it
+          plays under. */}
       <div className="flex flex-col rounded-md bg-neutral-950">
         <div className="shrink-0">
           <FrameStrip
@@ -404,7 +411,7 @@ export function Playground({
           />
         </div>
 
-        <div className="relative shrink-0" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
+        <div className="relative mt-2 shrink-0" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
           <div className="absolute left-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
             <span
               title="This reel's own captured sound"
@@ -467,6 +474,39 @@ export function Playground({
           <div style={{ width: videoDurationSeconds * PIXELS_PER_SECOND, height: 1 }} />
         </div>
       </div>
+
+      {/* Background music is queue-based (Add appends, see
+          ThreePaneEditor's handleAddToBackgroundSequence) rather than a
+          single swappable choice, but the background rail itself (16px
+          tall, AUDIO_RAIL_HEIGHT_PX) has no room to show what's actually
+          queued or a way to remove one -- this is that: a plain-text list
+          with a remove button each, the only way to actually swap to
+          different music short of deleting the asset outright. */}
+      {backgroundTracks.some((track) => track.assetId) && (
+        <div className="flex shrink-0 flex-wrap gap-1.5 px-1 py-1.5">
+          {backgroundTracks
+            .filter((track): track is { assetId: string; name: string; url: string } => Boolean(track.assetId))
+            .map((track, index) => (
+              <span
+                key={`${track.assetId}-${index}`}
+                className="flex items-center gap-1 rounded-full border border-border bg-surface py-0.5 pl-2 pr-1 text-xs text-foreground"
+              >
+                <span className="max-w-40 truncate" title={track.name}>
+                  {track.name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onRemoveBackgroundTrack(track.assetId)}
+                  aria-label={`Remove ${track.name} from background music`}
+                  title="Remove"
+                  className="rounded-full p-0.5 text-muted hover:bg-foreground/10 hover:text-foreground"
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+        </div>
+      )}
     </div>
   );
 }

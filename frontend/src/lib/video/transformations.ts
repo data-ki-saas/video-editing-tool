@@ -55,10 +55,19 @@ export interface TransformationResult {
 }
 
 /** Picking a clip-rectangle ratio always resets to a fresh max-coverage
- * crop and drops every zoom/pan effect -- a new ratio invalidates whatever
- * transitions were built on the old one's geometry. Flip state is
- * untouched -- it's an independent, uniform toggle, not tied to any one
- * ratio. */
+ * crop for the single base clip. Its own zoom/pan effects get dropped too
+ * -- a new ratio invalidates whatever transitions were built on that base
+ * rect's old geometry -- but ONLY when there's no sequence yet
+ * (sequenceClips.length === 0): once a sequence exists, `zoomEffects` also
+ * holds each image clip's own Ken Burns motion (applyAddImageSequenceClip),
+ * each built from THAT clip's own cropRect (stored on the SequenceEntry
+ * itself, untouched by this), not the base rect's ratio at all -- those
+ * stay geometrically valid regardless of what the overall clip rectangle
+ * changes to, so wiping the whole array here used to silently delete every
+ * photo's Ken Burns animation (including every one a niche wizard
+ * auto-assembled) the first time someone picked a clip rectangle
+ * afterward. Flip state is untouched either way -- it's an independent,
+ * uniform toggle, not tied to any one ratio. */
 export function applySelectClipRect(
   selections: EditSelectionsSnapshot,
   clipRectId: string,
@@ -66,7 +75,8 @@ export function applySelectClipRect(
   sourceAspectRatio: number
 ): TransformationResult {
   const cropRect = computeMaxCoverageCropFraction(sourceAspectRatio, targetRatio);
-  return { label: `Clip rectangle: ${clipRectId}`, state: { ...selections, clipRectId, cropRect, zoomEffects: [] } };
+  const zoomEffects = selections.sequenceClips.length === 0 ? [] : selections.zoomEffects;
+  return { label: `Clip rectangle: ${clipRectId}`, state: { ...selections, clipRectId, cropRect, zoomEffects } };
 }
 
 /**

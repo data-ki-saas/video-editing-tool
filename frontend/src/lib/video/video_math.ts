@@ -790,6 +790,33 @@ export function computeCoverFitSourceRect(
   };
 }
 
+/** Where to draw `targetRatio`-shaped content inside a `containerWidth` x
+ * `containerHeight` box so it's letterboxed (never stretched) -- the pixel
+ * equivalent of CSS `object-fit: contain`, for a canvas whose own drawImage
+ * destination isn't automatically shaped by CSS the way an <img>'s is.
+ * Shared by CutawayDialog.tsx and MobileImageTemplatePicker.tsx's own
+ * animated Ken Burns previews, both of which have a FIXED-aspect preview
+ * canvas buffer (e.g. 960x540 or a square) regardless of the project's
+ * actual clip-rectangle ratio -- drawing straight into
+ * `0,0,canvas.width,canvas.height` silently stretches any crop whose own
+ * ratio doesn't match the buffer's, which for this app's default 9:16
+ * reels was every single one. */
+export function computeContainRect(
+  containerWidth: number,
+  containerHeight: number,
+  targetRatio: number
+): { x: number; y: number; width: number; height: number } {
+  const containerRatio = containerWidth / containerHeight;
+  if (targetRatio > containerRatio) {
+    const width = containerWidth;
+    const height = width / targetRatio;
+    return { x: 0, y: (containerHeight - height) / 2, width, height };
+  }
+  const height = containerHeight;
+  const width = height * targetRatio;
+  return { x: (containerWidth - width) / 2, y: 0, width, height };
+}
+
 /**
  * Text composited on top of the base video for a time range, rendered via
  * a named template (see lib/video/textTemplates.ts) rather than free-form

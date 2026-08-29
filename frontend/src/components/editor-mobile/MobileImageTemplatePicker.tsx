@@ -18,7 +18,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { Asset } from "@/lib/api";
-import { computeEffectiveCropRect, computeMaxCoverageCropFraction, FULL_FRAME_CROP_RECT, type CropRect } from "@/lib/video/video_math";
+import { computeContainRect, computeEffectiveCropRect, computeMaxCoverageCropFraction, FULL_FRAME_CROP_RECT, type CropRect } from "@/lib/video/video_math";
 import { IMAGE_TEMPLATE_AXES, IMAGE_TEMPLATE_OPTIONS, buildKenBurnsEffect, type ImageTemplateId } from "@/lib/video/imageTemplates";
 import {
   DEFAULT_IMAGE_CLIP_DURATION_SECONDS,
@@ -113,8 +113,9 @@ export function MobileImageTemplatePicker({
       const sy = crop.y * img.naturalHeight;
       const sw = crop.width * img.naturalWidth;
       const sh = crop.height * img.naturalHeight;
+      const dest = computeContainRect(canvas!.width, canvas!.height, crop.width / crop.height);
       ctx!.clearRect(0, 0, canvas!.width, canvas!.height);
-      ctx!.drawImage(img, sx, sy, sw, sh, 0, 0, canvas!.width, canvas!.height);
+      ctx!.drawImage(img, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height);
       rafId = requestAnimationFrame(draw);
     }
     rafId = requestAnimationFrame(draw);

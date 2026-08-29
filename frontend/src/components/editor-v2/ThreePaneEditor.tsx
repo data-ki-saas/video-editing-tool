@@ -47,6 +47,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listAssets, deleteAsset, type Asset } from "@/lib/api";
 import { extractThumbnails, getVideoDuration, captureSingleFrame } from "@/lib/video/video";
+import { getAudioDuration } from "@/lib/video/audio";
 import {
   generateSampleTimestamps,
   findClosestTimestampIndex,
@@ -285,6 +286,10 @@ export function ThreePaneEditor({
   // Full-Screen/Split-Screen overlay's window so it never asks to play
   // more of the source than exists (its in-point is fixed at 0 for v1).
   const [overlaySourceDurationSeconds, setOverlaySourceDurationSeconds] = useState<Record<string, number>>({});
+  // Each background-music track's own probed duration, by assetId --
+  // handleAddToBackgroundSequence uses this to warn before adding a track
+  // that can never actually be heard (see that handler's own comment).
+  const [backgroundTrackDurationSeconds, setBackgroundTrackDurationSeconds] = useState<Record<string, number>>({});
   // A still frame captured AT each overlay placement's own sourceStartSeconds
   // (flag icon / OverlaySourceStartDialog), keyed by videoOverlayStartThumbnailKey
   // -- lets FrameStrip's main track show what the overlay actually looks like
@@ -401,8 +406,10 @@ export function ThreePaneEditor({
   // Set instead of selectedBackgroundTrackId when the background music is
   // one or more of this project's own assets -- ordered, appended to by
   // AssetGallery's right-click "Add" on a music tile (multiple tracks
-  // concatenate, see BackgroundTrackStrip) -- mutually exclusive with the
-  // catalog choice, see handleAddToBackgroundSequence.
+  // concatenate, see BackgroundTrackStrip), removed one at a time via
+  // BackgroundTrackStrip's own remove control (handleRemoveBackgroundTrack)
+  // -- mutually exclusive with the catalog choice, see
+  // handleAddToBackgroundSequence.
   // Seeds from the old singular `selectedBackgroundAssetId` field if the
   // array form isn't present yet (the one commit where it briefly existed
   // in that shape) -- a one-time runtime seed, not a persisted migration.
@@ -1399,11 +1406,48 @@ export function ThreePaneEditor({
   // Right-click "Add" on a music asset in AssetGallery -- appends it to
   // the background-music sequence (multiple appended tracks concatenate,
   // then the whole thing loops across the video's duration -- see
-  // BackgroundTrackStrip). Mutually exclusive with the curated catalog
-  // choice; cosmetic/not history-tracked, like the catalog choice.
-  function handleAddToBackgroundSequence(asset: Asset) {
+  // BackgroundTrackStrip). A single track is almost always already longer
+  // than the whole reel, so anything appended after the first one won't
+  // actually be heard during playback until the first is removed --
+  // handleRemoveBackgroundTrack (BackgroundTrackStrip's own remove
+  // control) is how a creator swaps to a different track, not by adding a
+  // second one on top. Warns (rather than silently no-op'ing) whenever the
+  // tracks already queued up already cover the whole reel on their own,
+  // since that's exactly the case where this add would never be heard --
+  // confirmable anyway, since a creator might genuinely want it queued for
+  // a reel they're about to lengthen. Mutually exclusive with the curated
+  // catalog choice; cosmetic/not history-tracked, like the catalog choice.
+  async function handleAddToBackgroundSequence(asset: Asset) {
+    let duration = backgroundTrackDurationSeconds[asset.id];
+    if (duration === undefined) {
+      try {
+        duration = await getAudioDuration(asset.url);
+        setBackgroundTrackDurationSeconds((prev) => ({ ...prev, [asset.id]: duration! }));
+      } catch {
+        duration = 0; // probe failed -- don't block the add over an unrelated decode issue
+      }
+    }
+
+    const queuedSeconds = backgroundSequenceAssetIds.reduce(
+      (sum, id) => sum + (backgroundTrackDurationSeconds[id] ?? 0),
+      0
+    );
+    if (backgroundSequenceAssetIds.length > 0 && videoDurationSeconds > 0 && queuedSeconds >= videoDurationSeconds) {
+      const proceed = window.confirm(
+        `Your current background music already runs ${Math.round(queuedSeconds)}s -- longer than this ${Math.round(videoDurationSeconds)}s reel. "${asset.filename}" would be queued after it and never actually play unless you remove the existing track(s) first. Add it anyway?`
+      );
+      if (!proceed) return;
+    }
+
     setBackgroundSequenceAssetIds((prev) => [...prev, asset.id]);
     setSelectedBackgroundTrackId("none");
+  }
+
+  // BackgroundTrackStrip's own per-track remove control -- the only way to
+  // actually swap background music, since Add always appends (see that
+  // handler's own comment on why a second track alone doesn't do it).
+  function handleRemoveBackgroundTrack(assetId: string) {
+    setBackgroundSequenceAssetIds((prev) => prev.filter((id) => id !== assetId));
   }
 
   // Image overlay's own Picture-in-Picture box, dragged via the reused
@@ -2040,6 +2084,7 @@ export function ThreePaneEditor({
       <section className="min-h-0 flex-[7] overflow-hidden border-b border-border">
         <Playground
           backgroundTracks={resolvedBackgroundTracks}
+          onRemoveBackgroundTrack={handleRemoveBackgroundTrack}
           videoDurationSeconds={videoDurationSeconds}
           thumbnails={thumbnails}
           thumbnailTimestampsSeconds={thumbnailTimestampsSeconds}
