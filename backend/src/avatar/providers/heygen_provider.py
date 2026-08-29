@@ -31,6 +31,7 @@ class HeyGenProvider(AvatarProvider):
     async def create_video(
         self, *, audio_url: str, avatar_id: str, aspect_ratio: str, callback_url: str
     ) -> AvatarVideoHandle:
+        self._require_api_key()
         async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
             response = await client.post(
                 "/v3/videos",
@@ -78,12 +79,25 @@ class HeyGenProvider(AvatarProvider):
             error=str(error) if error else None,
         )
 
+    def _require_api_key(self) -> None:
+        # Unlike DeepSeekProvider's Authorization: Bearer header, HeyGen's
+        # x-api-key header is technically legal even empty (no
+        # httpx.LocalProtocolError) -- an empty key here instead surfaces
+        # only as a 401 from HeyGen once raise_for_status() runs, which reads
+        # identically to "wrong key" and "not configured at all" alike. This
+        # check gives the actually-more-likely cause (never set on this
+        # deploy yet, see DEPLOY.md's HEYGEN_* row) its own clear message,
+        # same reasoning as the LLM providers' own empty-key checks.
+        if not self._api_key:
+            raise ValueError("HeyGen API key is not configured (HEYGEN_API_KEY is empty).")
+
     async def list_avatars(self) -> list[AvatarOption]:
         # /v3/avatars/looks (not /v3/avatars, which lists GROUPS -- containers
         # of looks, not directly usable as an avatar_id) -- ownership=public
         # limits this to HeyGen's own preset avatars, not filtering by any
         # account's private/custom ones. See
         # https://developers.heygen.com/reference/list-avatar-looks
+        self._require_api_key()
         async with httpx.AsyncClient(base_url=_BASE_URL, timeout=30) as client:
             response = await client.get(
                 "/v3/avatars/looks",

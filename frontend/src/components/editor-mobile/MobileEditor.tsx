@@ -72,9 +72,11 @@ import { TtsOverlayDialog } from "@/components/editor-v2/TtsOverlayDialog";
 import { TranscriptCaptionDialog } from "@/components/editor-v2/TranscriptCaptionDialog";
 import { CoverPicker } from "@/components/editor-v2/CoverPicker";
 import { RenderComingSoonPopup } from "@/components/editor-v2/RenderComingSoonPopup";
+import { MenuIcon } from "@/components/icons/UIIcons";
 import { MobileAssetStrip } from "./MobileAssetStrip";
 import { MobileClipEditor } from "./MobileClipEditor";
 import { MobileImageTemplatePicker } from "./MobileImageTemplatePicker";
+import { MobileReelMenu } from "./MobileReelMenu";
 
 type ImageSequenceEntry = Extract<SequenceEntry, { kind: "image" }>;
 
@@ -93,6 +95,7 @@ export function MobileEditor({
   const [videoDurationByAssetId, setVideoDurationByAssetId] = useState<Record<string, number>>({});
   const [frameDimensions, setFrameDimensions] = useState<{ width: number; height: number } | null>(null);
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
+  const [isReelMenuOpen, setIsReelMenuOpen] = useState(false);
 
   const {
     state: rawSelections,
@@ -442,7 +445,17 @@ export function MobileEditor({
   return (
     <div className="flex h-full flex-col overflow-y-auto bg-background">
       <div className="flex items-center justify-between border-b border-border p-3">
-        <h1 className="truncate text-sm font-semibold text-foreground">{initialProject.name}</h1>
+        <div className="flex min-w-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setIsReelMenuOpen(true)}
+            aria-label="Your reels"
+            className="shrink-0 rounded-full p-1.5 text-muted hover:bg-foreground/10"
+          >
+            <MenuIcon className="h-5 w-5" />
+          </button>
+          <h1 className="truncate text-sm font-semibold text-foreground">{initialProject.name}</h1>
+        </div>
         <div className="flex shrink-0 gap-2">
           <button
             type="button"
@@ -460,6 +473,8 @@ export function MobileEditor({
           </button>
         </div>
       </div>
+
+      {isReelMenuOpen && <MobileReelMenu currentProjectId={projectId} onClose={() => setIsReelMenuOpen(false)} />}
 
       {(assetsError || saveError) && (
         <p className="border-b border-border bg-red-600/10 px-3 py-1.5 text-xs text-red-600">{assetsError ?? saveError}</p>

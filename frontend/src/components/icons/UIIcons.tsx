@@ -39,6 +39,18 @@ export function MusicNoteIcon(props: IconProps) {
   );
 }
 
+// Opens MobileReelMenu's reel-switcher/settings/sign-out drawer -- the
+// mobile editor's only entry point to any of that, since it has no
+// persistent sidebar (unlike ThreePaneEditor's ProjectList) or (chrome)
+// layout (unlike bare /dashboard) to put those controls in otherwise.
+export function MenuIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
 export function SettingsIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
