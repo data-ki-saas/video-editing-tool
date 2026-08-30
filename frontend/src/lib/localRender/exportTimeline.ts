@@ -49,6 +49,7 @@ import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
 import {
   buildRenderSegments,
   computeEffectiveCropRect,
+  reprojectCropRect,
   computeEffectiveFlip,
   computeProgress,
   findActiveTextOverlays,
@@ -516,6 +517,21 @@ export async function exportVideoLocally(
   if (sequenceClips.length === 0) throw new Error("Nothing to render -- add a video to the sequence first.");
 
   const baseCropRect = selections.cropRect ?? FULL_FRAME_CROP_RECT;
+  // `baseCropRect`/a user-dragged pan-zoom ZoomEffect are authored against
+  // the sequence's REFERENCE clip (the first one -- see CanvasPlayer's
+  // referenceFrameSizeRef), and need re-projecting onto each OTHER
+  // segment's own real aspect ratio before use -- see reprojectCropRect's
+  // own doc comment (video_math.ts) for why reusing it verbatim against a
+  // differently-shaped clip stretches instead of cropping. Gated on
+  // `selections.cropRect` being non-null (not just checked against the
+  // FULL_FRAME_CROP_RECT fallback above) -- reprojectCropRect must never
+  // be called when no clip rectangle ratio was ever chosen at all, only
+  // when one was chosen and happens to equal full-frame for THIS clip
+  // (see that function's own doc comment on why the two are otherwise
+  // indistinguishable).
+  const hasClipRectangle = selections.cropRect !== null;
+  const referenceClip = sequenceClips[0];
+  const referenceAspectRatio = referenceClip?.width && referenceClip?.height ? referenceClip.width / referenceClip.height : null;
   // Per-cutaway/per-overlay filter lookup, same "each clip carries its own
   // colorFilterId" model as compileCreatomateTimeline.ts's identical map --
   // see that file's own comment on cutawayFilterByEntryId.
@@ -671,7 +687,15 @@ export async function exportVideoLocally(
       if (source) {
         const sourceWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.naturalWidth;
         const sourceHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.naturalHeight;
-        const crop = computeEffectiveCropRect(baseCropRect, selections.zoomEffects, sourceTimeSeconds);
+        const authoredCrop = computeEffectiveCropRect(baseCropRect, selections.zoomEffects, sourceTimeSeconds);
+        // Self-scoped already for an image clip's own Ken Burns motion --
+        // see reprojectCropRect's own doc comment for why only a video
+        // segment's rect (always authored against the reference clip)
+        // needs re-projecting here.
+        const crop =
+          !hasClipRectangle || segment.kind === "image" || referenceAspectRatio === null
+            ? authoredCrop
+            : reprojectCropRect(authoredCrop, referenceAspectRatio, sourceWidth / sourceHeight);
         const sx = crop.x * sourceWidth;
         const sy = crop.y * sourceHeight;
         const sWidth = crop.width * sourceWidth;
@@ -738,7 +762,11 @@ export async function exportVideoLocally(
           }
           const incomingSourceWidth = incomingSource instanceof HTMLVideoElement ? incomingSource.videoWidth : incomingSource.naturalWidth;
           const incomingSourceHeight = incomingSource instanceof HTMLVideoElement ? incomingSource.videoHeight : incomingSource.naturalHeight;
-          const incomingCrop = computeEffectiveCropRect(baseCropRect, selections.zoomEffects, incomingSourceTimeSeconds);
+          const authoredIncomingCrop = computeEffectiveCropRect(baseCropRect, selections.zoomEffects, incomingSourceTimeSeconds);
+          const incomingCrop =
+            !hasClipRectangle || toSegment.kind === "image" || referenceAspectRatio === null
+              ? authoredIncomingCrop
+              : reprojectCropRect(authoredIncomingCrop, referenceAspectRatio, incomingSourceWidth / incomingSourceHeight);
           const incomingSx = incomingCrop.x * incomingSourceWidth;
           const incomingSy = incomingCrop.y * incomingSourceHeight;
           const incomingSWidth = incomingCrop.width * incomingSourceWidth;

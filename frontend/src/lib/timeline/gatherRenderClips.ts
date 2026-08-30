@@ -9,30 +9,57 @@
  * bundle -- this file only touches plain browser APIs (video.ts/audio.ts)
  * and is safe to import directly from ThreePaneEditor.tsx.
  *
- * Only durations travel over the wire to /api/render (via
- * CompileTimelineInput) -- not URLs, since the compiler only needs each
- * clip's assetId (for `_appMeta`) and duration; a fresh, non-expired
- * presigned URL is resolved server-side from the assetId right before the
- * actual Creatomate call (see resolveAssetSources in api/render/route.ts).
+ * Durations and real pixel dimensions travel over the wire to /api/render
+ * (via CompileTimelineInput) -- not URLs, since the compiler only needs
+ * each clip's assetId (for `_appMeta`), duration, and width/height; a
+ * fresh, non-expired presigned URL is resolved server-side from the
+ * assetId right before the actual Creatomate call (see resolveAssetSources
+ * in api/render/route.ts). Width/height let the server-side compiler
+ * re-project the sequence's authored crop rect onto each clip's own real
+ * aspect ratio (video_math.ts's reprojectCropRect) instead of reusing it
+ * verbatim against a differently-shaped clip -- see that function's own
+ * doc comment.
  */
-import { getVideoDuration } from "@/lib/video/video";
+import { getVideoDurationAndDimensions } from "@/lib/video/video";
 import { getAudioDuration } from "@/lib/video/audio";
+import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { buildSequenceClipInfos, type SequenceClipInfo, type SequenceEntry } from "@/lib/video/video_math";
 
 export async function gatherSequenceClipInfos(
   clips: (SequenceEntry & { url: string })[]
 ): Promise<SequenceClipInfo[]> {
-  const clipMeta: { id: string; assetId: string; url: string; durationSeconds: number; kind: "video" | "image" }[] = [];
+  const clipMeta: {
+    id: string;
+    assetId: string;
+    url: string;
+    durationSeconds: number;
+    kind: "video" | "image";
+    width?: number;
+    height?: number;
+  }[] = [];
   for (const clip of clips) {
     if (clip.kind === "image") {
-      // No file to probe -- an image clip's duration is authored (see
-      // lib/video/imageTemplates.ts), not read from anywhere.
-      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: clip.durationSeconds, kind: "image" });
+      // Duration is authored (see lib/video/imageTemplates.ts), not read
+      // from anywhere -- but dimensions still need probing, same as a
+      // video clip (see this file's own module comment).
+      let width: number | undefined;
+      let height: number | undefined;
+      try {
+        const { image, blobUrl } = await loadCrossOriginImage(clip.url);
+        width = image.naturalWidth;
+        height = image.naturalHeight;
+        URL.revokeObjectURL(blobUrl);
+      } catch {
+        // Dimensions stay unknown -- reprojectCropRect's callers fall back
+        // to leaving the authored rect unchanged, same as before this
+        // probe existed, rather than blocking the render on it.
+      }
+      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: clip.durationSeconds, kind: "image", width, height });
       continue;
     }
     try {
-      const durationSeconds = await getVideoDuration(clip.url);
-      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds, kind: "video" });
+      const { durationSeconds, width, height } = await getVideoDurationAndDimensions(clip.url);
+      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds, kind: "video", width, height });
     } catch {
       // Skipped -- same "one bad clip shouldn't block the rest" policy as
       // CanvasPlayer's own sequence loading.

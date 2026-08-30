@@ -69,6 +69,7 @@ import {
   frameIndexAtTime,
   pickPreviewFrameRate,
   computeEffectiveCropRect,
+  reprojectCropRect,
   computeEffectiveFlip,
   skipTrimmedRanges,
   findActiveTextOverlays,
@@ -446,7 +447,33 @@ export const CanvasPlayer = forwardRef<
     const frameIndex = frameIndexAtTime(position.localSeconds, frameRatesRef.current[position.clipIndex], images.length);
     const image = images[frameIndex];
 
-    const crop = liveCropRectOverride ?? (baseCropRect ? computeEffectiveCropRect(baseCropRect, zoomEffects, elapsedSeconds) : FULL_FRAME_CROP_RECT);
+    const hasAuthoredCrop = liveCropRectOverride != null || baseCropRect != null;
+    const authoredCrop = liveCropRectOverride ?? (baseCropRect ? computeEffectiveCropRect(baseCropRect, zoomEffects, elapsedSeconds) : FULL_FRAME_CROP_RECT);
+
+    // `authoredCrop` is expressed in the CURRENT clip's own aspect space
+    // for an image clip's own Ken Burns motion (buildKenBurnsEffect,
+    // imageTemplates.ts) -- already correctly scoped, no re-projection
+    // needed -- but in the SEQUENCE's reference (first-clip) aspect space
+    // for the base rect, a live drag, or any user-dragged pan/zoom
+    // (applyCropRectCommit). See reprojectCropRect's own doc comment
+    // (video_math.ts) for why reusing a reference-space rect verbatim
+    // against a differently-shaped clip stretches instead of cropping --
+    // and for why this is skipped entirely (`hasAuthoredCrop` false)
+    // whenever no clip rectangle/live drag exists at all, rather than
+    // reprojecting the FULL_FRAME_CROP_RECT fallback as if it meant
+    // something.
+    const currentClipKind = loadedClipsRef.current[position.clipIndex]?.kind;
+    const clipAspectRatio = image.width / image.height;
+    const referenceAspectRatio = referenceFrameSizeRef.current.width / referenceFrameSizeRef.current.height;
+    const shouldReprojectForClip = hasAuthoredCrop && currentClipKind !== "image";
+    const crop = shouldReprojectForClip ? reprojectCropRect(authoredCrop, referenceAspectRatio, clipAspectRatio) : authoredCrop;
+    // Mirrored back into the reference clip's own aspect space purely to
+    // size the canvas consistently below (a no-op reproject when crop was
+    // already reference-space, i.e. for every non-image clip).
+    const referenceSpaceCrop =
+      hasAuthoredCrop && currentClipKind === "image"
+        ? reprojectCropRect(authoredCrop, clipAspectRatio, referenceAspectRatio)
+        : authoredCrop;
 
     // Source rect: sampled from THIS frame's own natural size (clips can
     // have different native resolutions). Destination (canvas) size: the
@@ -457,8 +484,8 @@ export const CanvasPlayer = forwardRef<
     const sWidth = crop.width * image.width;
     const sHeight = crop.height * image.height;
 
-    const targetWidth = Math.max(1, Math.round(crop.width * referenceFrameSizeRef.current.width));
-    const targetHeight = Math.max(1, Math.round(crop.height * referenceFrameSizeRef.current.height));
+    const targetWidth = Math.max(1, Math.round(referenceSpaceCrop.width * referenceFrameSizeRef.current.width));
+    const targetHeight = Math.max(1, Math.round(referenceSpaceCrop.height * referenceFrameSizeRef.current.height));
     if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
       canvas.width = targetWidth;
       canvas.height = targetHeight;
@@ -572,8 +599,14 @@ export const CanvasPlayer = forwardRef<
         // real elapsedSeconds, means a ZoomEffect/flip toggle authored to
         // start exactly at the cut previews correctly too.
         const incomingSyntheticElapsed = elapsedSeconds + cutTransitionBlend.overlapSeconds;
-        const incomingCrop =
+        const authoredIncomingCrop =
           liveCropRectOverride ?? (baseCropRect ? computeEffectiveCropRect(baseCropRect, zoomEffects, incomingSyntheticElapsed) : FULL_FRAME_CROP_RECT);
+        // Same re-projection rule as the outgoing clip's own `crop` above.
+        const incomingClipKind = loadedClipsRef.current[cutTransitionBlend.toIndex]?.kind;
+        const incomingCrop =
+          !hasAuthoredCrop || incomingClipKind === "image"
+            ? authoredIncomingCrop
+            : reprojectCropRect(authoredIncomingCrop, referenceAspectRatio, incomingImage.width / incomingImage.height);
         const incomingSx = incomingCrop.x * incomingImage.width;
         const incomingSy = incomingCrop.y * incomingImage.height;
         const incomingSWidth = incomingCrop.width * incomingImage.width;

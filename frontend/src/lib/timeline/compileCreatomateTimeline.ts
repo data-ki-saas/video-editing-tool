@@ -50,6 +50,7 @@ import {
   totalSequenceDuration,
   totalRenderOutputDuration,
   computeEffectiveCropRect,
+  reprojectCropRect,
   computeFlipSegments,
   computeOverlayRects,
   FULL_FRAME_CROP_RECT,
@@ -166,15 +167,43 @@ function findCropBreakpoints(zoomEffects: ZoomEffect[], segStart: number, segEnd
 }
 
 /** Builds the crop x/y/width/height properties (plain values, or Keyframe
- * arrays when a ZoomEffect overlaps this segment) for one Video element. */
-function buildCropProperties(segment: RenderSegment, baseCropRect: CropRect | null, zoomEffects: ZoomEffect[]) {
+ * arrays when a ZoomEffect overlaps this segment) for one Video element.
+ *
+ * `baseCropRect`/a user-dragged pan-zoom ZoomEffect are authored against
+ * the sequence's REFERENCE clip (the first one), not this segment's own --
+ * reused verbatim against a segment whose own real aspect ratio differs,
+ * the sampled region would no longer match the output frame's own ratio
+ * and get non-uniformly stretched instead of cleanly cropped. Re-projected
+ * here via reprojectCropRect before handing off to cropRectToVideoTransform,
+ * UNLESS this segment is an image clip's own Ken Burns motion (built from
+ * that photo's own cropRect, imageTemplates.ts's buildKenBurnsEffect --
+ * already correctly scoped to this segment's own aspect ratio, so
+ * re-projecting it FROM the reference clip's would be wrong). Also skipped
+ * whenever `baseCropRect` itself is null -- no clip rectangle ratio was
+ * ever chosen, so every clip already shows its own full native frame
+ * (FULL_FRAME_CROP_RECT) regardless of aspect ratio, and reprojectCropRect
+ * must not be called against that value (see its own doc comment) -- or
+ * whenever either aspect ratio is unknown (referenceAspectRatio null, or
+ * this segment's own width/height wasn't probed), the pre-fix behavior,
+ * rather than guessing. */
+function buildCropProperties(
+  segment: RenderSegment,
+  baseCropRect: CropRect | null,
+  zoomEffects: ZoomEffect[],
+  referenceAspectRatio: number | null
+) {
   const segStart = segment.sourceStartSeconds;
   const segEnd = segment.sourceStartSeconds + segment.durationSeconds;
   const base = baseCropRect ?? FULL_FRAME_CROP_RECT;
+  const segmentAspectRatio = segment.width && segment.height ? segment.width / segment.height : null;
+  const reproject = (crop: CropRect): CropRect =>
+    baseCropRect === null || segment.kind === "image" || referenceAspectRatio === null || segmentAspectRatio === null
+      ? crop
+      : reprojectCropRect(crop, referenceAspectRatio, segmentAspectRatio);
 
   const overlaps = zoomEffects.some((effect) => effect.endTimeSeconds > segStart && effect.startTimeSeconds < segEnd);
   if (!overlaps) {
-    return cropRectToVideoTransform(computeEffectiveCropRect(base, zoomEffects, segStart));
+    return cropRectToVideoTransform(reproject(computeEffectiveCropRect(base, zoomEffects, segStart)));
   }
 
   const breakpoints = findCropBreakpoints(zoomEffects, segStart, segEnd);
@@ -184,7 +213,7 @@ function buildCropProperties(segment: RenderSegment, baseCropRect: CropRect | nu
   const y: Keyframe<string>[] = [];
 
   for (const t of breakpoints) {
-    const crop = computeEffectiveCropRect(base, zoomEffects, t);
+    const crop = reproject(computeEffectiveCropRect(base, zoomEffects, t));
     const transform = cropRectToVideoTransform(crop);
     // SEGMENT-LOCAL TIME -- see this file's module comment.
     const localTime = t - segStart;
@@ -214,12 +243,13 @@ function buildMediaSegments(
   zoomEffects: ZoomEffect[],
   appMeta: Record<string, AppMetaEntry>,
   mainVolumePercent: string,
-  cutawayFilterByEntryId: Map<string, FilterPresetId | null>
+  cutawayFilterByEntryId: Map<string, FilterPresetId | null>,
+  referenceAspectRatio: number | null
 ): (Video | Image)[] {
   const elements: (Video | Image)[] = [];
 
   segments.forEach((segment, index) => {
-    const crop = buildCropProperties(segment, baseCropRect, zoomEffects);
+    const crop = buildCropProperties(segment, baseCropRect, zoomEffects, referenceAspectRatio);
     const filter = getCreatomateFilterProperties(
       segment.entryId ? (cutawayFilterByEntryId.get(segment.entryId) ?? null) : null
     );
@@ -925,13 +955,22 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const totalOutputDurationSeconds = totalRenderOutputDuration(segments);
 
   const cutawayFilterByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.colorFilterId ?? null]));
+  // `selections.cropRect`/a user-dragged pan-zoom ZoomEffect are always
+  // authored against the sequence's REFERENCE clip -- the first one (see
+  // CanvasPlayer's referenceFrameSizeRef) -- and need re-projecting onto
+  // each OTHER segment's own real aspect ratio before use; see
+  // buildCropProperties/reprojectCropRect below.
+  const referenceClip = sequenceClips[0];
+  const referenceAspectRatio =
+    referenceClip?.width && referenceClip?.height ? referenceClip.width / referenceClip.height : null;
   const mediaSegments = buildMediaSegments(
     segments,
     selections.cropRect,
     selections.zoomEffects,
     appMeta,
     toVolumePercent(mainAudioVolume),
-    cutawayFilterByEntryId
+    cutawayFilterByEntryId,
+    referenceAspectRatio
   );
   const videoSegmentPairs = segments
     .map((segment, index) => ({ segment, element: mediaSegments[index] }))

@@ -163,6 +163,74 @@ export function computeMaxCoverageCropFraction(sourceAspectRatio: number, target
 }
 
 /**
+ * Re-projects a CropRect authored against ONE source aspect ratio onto a
+ * DIFFERENT source aspect ratio, preserving the crop's own target ratio,
+ * pan position, and zoom depth. `selections.cropRect` (the clip rectangle)
+ * and any user-dragged pan/zoom ZoomEffect (applyCropRectCommit) are always
+ * authored against the sequence's reference clip (the first one loaded --
+ * see CanvasPlayer's referenceFrameSizeRef) and, before this function
+ * existed, were reused verbatim against every later clip regardless of its
+ * own real aspect ratio -- fine when every clip happens to share the same
+ * shape, but for a later clip with a genuinely different one (e.g. a 16:9
+ * GoPro clip spliced after 9:16 phone footage), multiplying that same
+ * fraction rect by the new clip's own pixel dimensions produces a sampled
+ * region whose OWN aspect ratio no longer matches the output frame's,
+ * which then gets non-uniformly stretched to fill it instead of cleanly
+ * cropped.
+ *
+ * Fixes this by decomposing the rect into the same panX/panY/zoom terms
+ * OverlayFraming already uses for video-overlay footage
+ * (computeCoverFitSourceRect) -- recovering "where the user panned to" and
+ * "how far they zoomed in", independent of any particular aspect ratio --
+ * then re-applying those same terms against the new aspect ratio.
+ *
+ * Callers must NOT call this at all when there's no real authored crop to
+ * begin with (`selections.cropRect`/baseCropRect is null -- no clip
+ * rectangle ratio was ever chosen) -- in that case every clip should show
+ * its own full, native frame untouched, and FULL_FRAME_CROP_RECT ({x:0,
+ * y:0, width:1, height:1}) already means exactly that regardless of aspect
+ * ratio. Reprojecting it here anyway would be wrong: this function has no
+ * way to tell "a rect that happens to equal full-frame because the CHOSEN
+ * target ratio matches the reference clip's own shape" (which DOES need
+ * reprojecting onto a later, differently-shaped clip) apart from "full
+ * frame because no ratio was ever chosen at all" (which must stay full
+ * frame for every clip) -- both arrive here as the identical {0,0,1,1}
+ * value, so the two cases can only be told apart by whichever caller still
+ * has `baseCropRect`'s original null-ness in scope.
+ *
+ * Also NOT for a per-clip rect that's already self-scoped to its own clip
+ * (an image sequence entry's own Ken Burns ZoomEffect, built from that
+ * image's own cropRect via buildKenBurnsEffect/imageTemplates.ts) --
+ * reprojecting one of those FROM the reference aspect ratio would be
+ * wrong, since it was never authored in that space to begin with. Callers
+ * key off SequenceEntry.kind for this: reproject for "video", pass through
+ * unchanged for "image".
+ */
+export function reprojectCropRect(crop: CropRect, fromAspectRatio: number, toAspectRatio: number): CropRect {
+  if (!(fromAspectRatio > 0) || !(toAspectRatio > 0) || Math.abs(fromAspectRatio - toAspectRatio) < 1e-9) {
+    return crop;
+  }
+
+  // Recover this rect's own target ratio and, via the same cover-fit
+  // geometry computeCoverFitSourceRect uses, its panX/panY/zoom against the
+  // frame it was authored for (sourceHeight pinned to 1 -- see
+  // computeMaxCoverageCropFraction's identical normalized-frame convention).
+  const targetRatio = (crop.width * fromAspectRatio) / crop.height;
+  const sWidth = crop.width * fromAspectRatio;
+  const sHeight = crop.height;
+  const coverHeight = fromAspectRatio > targetRatio ? 1 : fromAspectRatio / targetRatio;
+  const zoom = coverHeight / sHeight;
+  const xSlack = fromAspectRatio - sWidth;
+  const ySlack = 1 - sHeight;
+  const panX = xSlack > 1e-9 ? (crop.x * fromAspectRatio) / xSlack : 0.5;
+  const panY = ySlack > 1e-9 ? crop.y / ySlack : 0.5;
+
+  // Re-apply the same target ratio + pan/zoom against the new aspect ratio.
+  const projected = computeCoverFitSourceRect(toAspectRatio, 1, targetRatio, 1, panX, panY, zoom);
+  return { x: projected.sx / toAspectRatio, y: projected.sy, width: projected.sWidth / toAspectRatio, height: projected.sHeight };
+}
+
+/**
  * Eases a linear progress value 0..1 into an ease-in-out curve (slow ->
  * fast -> slow) -- applied before interpolating a transition's rect so a
  * zoom/pan accelerates into and decelerates out of the move instead of
@@ -995,10 +1063,28 @@ export interface SequenceClipInfo {
   durationSeconds: number;
   startTimeSeconds: number;
   kind: "video" | "image";
+  // This clip's own real pixel dimensions -- absent for a background-music
+  // track (no visual shape) or wherever it hasn't been probed yet.
+  // reprojectCropRect (above) needs a clip's OWN aspect ratio to correctly
+  // re-project the reference clip's authored crop rect onto it, instead of
+  // reusing that rect's raw fractions against a differently-shaped clip
+  // (which stretches rather than crops -- see that function's own doc
+  // comment). Probed client-side alongside durationSeconds -- see
+  // lib/localRender/gatherLocalRenderClips.ts and lib/timeline/gatherRenderClips.ts.
+  width?: number;
+  height?: number;
 }
 
 export function buildSequenceClipInfos(
-  clips: { id?: string; assetId: string; url: string; durationSeconds: number; kind?: "video" | "image" }[]
+  clips: {
+    id?: string;
+    assetId: string;
+    url: string;
+    durationSeconds: number;
+    kind?: "video" | "image";
+    width?: number;
+    height?: number;
+  }[]
 ): SequenceClipInfo[] {
   let cursor = 0;
   return clips.map((clip) => {
@@ -1188,6 +1274,12 @@ export interface RenderSegment {
    * Image (no source trim, since a still image has no timeline of its own)
    * for it. See lib/timeline/compileCreatomateTimeline.ts. */
   kind: "video" | "image";
+  // The originating SequenceClipInfo's own real pixel dimensions, when
+  // known -- see that field's own doc comment (reprojectCropRect needs
+  // this to re-project the sequence's reference-clip-authored crop rect
+  // onto THIS segment's own real aspect ratio).
+  width?: number;
+  height?: number;
   sourceStartSeconds: number;
   /** This clip's own local offset where this segment begins -- Creatomate's Video.trimStart. */
   clipLocalStartSeconds: number;
@@ -1346,6 +1438,8 @@ export function buildRenderSegments(
         assetId: clip.assetId,
         entryId: clip.id,
         kind: clip.kind,
+        width: clip.width,
+        height: clip.height,
         sourceStartSeconds: subStart,
         clipLocalStartSeconds: subStart - clip.startTimeSeconds,
         durationSeconds,

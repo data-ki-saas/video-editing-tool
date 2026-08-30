@@ -160,6 +160,19 @@ export async function getVideoDuration(url: string): Promise<number> {
   return duration;
 }
 
+/** Same probe as getVideoDuration, also returning the file's own real
+ * pixel dimensions -- needed by gatherLocalRenderClips.ts/gatherRenderClips.ts
+ * so a render can re-project the sequence's authored crop rect onto each
+ * clip's own aspect ratio (video_math.ts's reprojectCropRect) instead of
+ * reusing it verbatim against a differently-shaped clip. */
+export async function getVideoDurationAndDimensions(url: string): Promise<{ durationSeconds: number; width: number; height: number }> {
+  const video = await loadVideoElement(url, "metadata");
+  const result = { durationSeconds: video.duration, width: video.videoWidth, height: video.videoHeight };
+  video.removeAttribute("src");
+  video.load();
+  return result;
+}
+
 /**
  * Grabs a single representative frame from the video at `url` -- used by the
  * asset gallery's thumbnail tiles, which need one small preview per video

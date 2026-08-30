@@ -13,24 +13,48 @@
  * fine. Reuses the same duration probes and sequencing math as the cloud
  * path (getVideoDuration/getAudioDuration/buildSequenceClipInfos).
  */
-import { getVideoDuration } from "@/lib/video/video";
+import { getVideoDurationAndDimensions } from "@/lib/video/video";
 import { getAudioDuration } from "@/lib/video/audio";
+import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { buildSequenceClipInfos, type SequenceClipInfo, type SequenceEntry } from "@/lib/video/video_math";
 
 export async function gatherLocalSequenceClips(
   clips: (SequenceEntry & { url: string })[]
 ): Promise<SequenceClipInfo[]> {
-  const clipMeta: { id: string; assetId: string; url: string; durationSeconds: number; kind: "video" | "image" }[] = [];
+  const clipMeta: {
+    id: string;
+    assetId: string;
+    url: string;
+    durationSeconds: number;
+    kind: "video" | "image";
+    width?: number;
+    height?: number;
+  }[] = [];
   for (const clip of clips) {
     if (clip.kind === "image") {
-      // No file to probe -- an image clip's duration is authored (see
-      // lib/video/imageTemplates.ts), not read from anywhere.
-      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: clip.durationSeconds, kind: "image" });
+      // Duration is authored (see lib/video/imageTemplates.ts), not read
+      // from anywhere -- but dimensions still need probing, same as a
+      // video clip, so a render can re-project the sequence's authored
+      // crop rect onto this photo's own real aspect ratio
+      // (video_math.ts's reprojectCropRect) when it's the reference clip.
+      let width: number | undefined;
+      let height: number | undefined;
+      try {
+        const { image, blobUrl } = await loadCrossOriginImage(clip.url);
+        width = image.naturalWidth;
+        height = image.naturalHeight;
+        URL.revokeObjectURL(blobUrl);
+      } catch {
+        // Dimensions stay unknown -- reprojectCropRect's callers fall back
+        // to leaving the authored rect unchanged, same as before this
+        // probe existed, rather than blocking the render on it.
+      }
+      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: clip.durationSeconds, kind: "image", width, height });
       continue;
     }
     try {
-      const durationSeconds = await getVideoDuration(clip.url);
-      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds, kind: "video" });
+      const { durationSeconds, width, height } = await getVideoDurationAndDimensions(clip.url);
+      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds, kind: "video", width, height });
     } catch {
       // Skipped -- same "one bad clip shouldn't block the rest" policy as
       // CanvasPlayer's own sequence loading.
