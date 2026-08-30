@@ -443,6 +443,62 @@ export async function getUsageSummary(): Promise<{ items: UsageSummaryItem[] }> 
   };
 }
 
+export interface AdminUsageTotal {
+  eventType: string;
+  quantitySum: number;
+  costEstimateCentsSum: number;
+  count: number;
+}
+
+export interface AdminUsageDaily {
+  date: string;
+  costEstimateCents: number;
+}
+
+export interface AdminUsageTopUser {
+  userId: string;
+  email: string | null;
+  costEstimateCentsSum: number;
+}
+
+export interface AdminUsageSummary {
+  days: number;
+  totals: AdminUsageTotal[];
+  daily: AdminUsageDaily[];
+  topUsers: AdminUsageTopUser[];
+}
+
+/** GET /api/metering/admin-summary -- cross-user cost/usage rollup for
+ * /admin/usage, gated by the metering_admin_view feature. Distinct from
+ * getUsageSummary above, which is a per-user guardrail widget backed by
+ * usage_events, not usage_ledger. */
+export async function getAdminUsageSummary(days: number): Promise<AdminUsageSummary> {
+  const response = await apiFetch(`${API_BASE_URL}/api/metering/admin-summary?days=${encodeURIComponent(days)}`, {
+    headers: await authHeader(),
+  });
+  const body = await handleResponse<{
+    days: number;
+    totals: { event_type: string; quantity_sum: number; cost_estimate_cents_sum: number; count: number }[];
+    daily: { date: string; cost_estimate_cents: number }[];
+    top_users: { user_id: string; email: string | null; cost_estimate_cents_sum: number }[];
+  }>(response);
+  return {
+    days: body.days,
+    totals: body.totals.map((t) => ({
+      eventType: t.event_type,
+      quantitySum: t.quantity_sum,
+      costEstimateCentsSum: t.cost_estimate_cents_sum,
+      count: t.count,
+    })),
+    daily: body.daily.map((d) => ({ date: d.date, costEstimateCents: d.cost_estimate_cents })),
+    topUsers: body.top_users.map((u) => ({
+      userId: u.user_id,
+      email: u.email,
+      costEstimateCentsSum: u.cost_estimate_cents_sum,
+    })),
+  };
+}
+
 export async function deleteProject(projectId: string) {
   const response = await apiFetch(`${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}`, {
     method: "DELETE",

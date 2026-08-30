@@ -165,6 +165,17 @@ export interface Timeline {
   height: number;
   elements: TemplateElement[];
   _appMeta: Record<string, AppMetaEntry>;
+  // App-private, same underscore convention as _appMeta above (tolerated by
+  // Creatomate as an extra source-template key it doesn't recognize) --
+  // read back by api/render/route.ts to persist as projects.
+  // render_output_duration_seconds, since Creatomate's webhook payload
+  // itself never reports the render's actual duration (see
+  // webhooks/creatomate/route.ts's CreatomatePayload). Optional since the
+  // handful of non-render Timeline constructors (createEmptyReelTimeline,
+  // autoAssemble, resetProject's blank save) have no meaningful duration to
+  // report -- only compileCreatomateTimeline (the actual render path)
+  // always sets it.
+  _totalOutputDurationSeconds?: number;
   // Persists ThreePaneEditor's undo-able change list (see
   // lib/useEditHistory.ts) so reopening a reel resumes with the same
   // history and current selection, not a blank slate. Optional/absent on

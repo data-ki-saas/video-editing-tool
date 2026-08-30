@@ -37,6 +37,20 @@ export default function AdminPage() {
           <p className="font-medium">Users</p>
           <p className="text-sm text-muted">Look up a user by email and change their role.</p>
         </Link>
+        <Link
+          href="/admin/integrations"
+          className="rounded-md border border-border p-4 hover:bg-surface"
+        >
+          <p className="font-medium">Third-party integrations</p>
+          <p className="text-sm text-muted">Pricing and plan notes for every external service this app depends on.</p>
+        </Link>
+        <Link
+          href="/admin/usage"
+          className="rounded-md border border-border p-4 hover:bg-surface"
+        >
+          <p className="font-medium">Usage & cost dashboard</p>
+          <p className="text-sm text-muted">Estimated cost and usage across all users, by feature.</p>
+        </Link>
       </div>
     </main>
   );

@@ -3,7 +3,10 @@ import logging
 
 from fastapi import HTTPException
 
+from src.core.config import settings
 from src.llm.providers.base import LLMProvider
+from src.metering import pricing as metering_pricing
+from src.metering import repository as metering_repository
 from src.niches import repository
 from src.niches.repository import normalize_niche_key
 from src.niches.schemas import MediaSlot, NicheConfig, NicheField
@@ -130,7 +133,8 @@ async def get_or_create_niche(name: str, user_id: str, provider: LLMProvider) ->
         # json.loads() below just like a real generation error would -- kept
         # generous rather than tuned tight, since a bigger cap costs nothing
         # when the model naturally stops earlier for a simpler niche.
-        response = await provider.complete(f"Business niche: {name.strip()}", system=SYSTEM_PROMPT, max_tokens=1800)
+        completion = await provider.complete(f"Business niche: {name.strip()}", system=SYSTEM_PROMPT, max_tokens=1800)
+        response = completion.text
         parsed = json.loads(response)
     except Exception as exc:
         # Include the raw response on a JSON-parse failure specifically --
@@ -139,6 +143,21 @@ async def get_or_create_niche(name: str, user_id: str, provider: LLMProvider) ->
         # not to, and this is the one thing that actually shows which.
         logger.exception("niche generation failed for %r; raw response: %r", name, response)
         raise HTTPException(status_code=502, detail="Couldn't generate a form for that niche -- try again") from exc
+
+    # No completion means no billable tokens either way, per each provider's
+    # own billing model -- only log on the success path above.
+    if completion.prompt_tokens is not None and completion.completion_tokens is not None:
+        metering_repository.record_event(
+            user_id=user_id,
+            event_type="llm_completion",
+            provider=settings.llm_provider,
+            quantity=completion.prompt_tokens + completion.completion_tokens,
+            unit="tokens",
+            cost_estimate_cents=metering_pricing.llm_cost_cents(
+                settings.llm_provider, completion.prompt_tokens, completion.completion_tokens
+            ),
+            metadata={"niche_name": name},
+        )
 
     display_name = parsed.get("display_name") if isinstance(parsed, dict) else None
     fields = _parse_generated_fields(parsed.get("fields") if isinstance(parsed, dict) else None)

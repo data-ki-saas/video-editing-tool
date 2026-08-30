@@ -999,5 +999,6 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     height: outputHeight,
     elements,
     _appMeta: appMeta,
+    _totalOutputDurationSeconds: totalOutputDurationSeconds,
   };
 }

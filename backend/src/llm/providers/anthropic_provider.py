@@ -1,6 +1,6 @@
 from anthropic import AsyncAnthropic
 
-from src.llm.providers.base import LLMProvider
+from src.llm.providers.base import CompletionResult, LLMProvider
 
 
 class AnthropicProvider(LLMProvider):
@@ -9,7 +9,7 @@ class AnthropicProvider(LLMProvider):
         self._client = AsyncAnthropic(api_key=api_key)
         self._model = model
 
-    async def complete(self, prompt: str, *, system: str | None = None, max_tokens: int = 1024) -> str:
+    async def complete(self, prompt: str, *, system: str | None = None, max_tokens: int = 1024) -> CompletionResult:
         if not self._api_key:
             # Same reasoning as DeepSeekProvider's own check -- fail with an
             # obvious cause instead of whatever cryptic error an empty key
@@ -36,4 +36,8 @@ class AnthropicProvider(LLMProvider):
                 f"content block types={block_types!r}) -- try again, or raise max_tokens if this "
                 "keeps happening on larger prompts."
             )
-        return text
+        return CompletionResult(
+            text=text,
+            prompt_tokens=response.usage.input_tokens,
+            completion_tokens=response.usage.output_tokens,
+        )

@@ -252,6 +252,10 @@ export async function POST(request: Request) {
         render_status: render.status,
         render_started_at: new Date().toISOString(),
         render_error: null,
+        // Read back by the webhook to log this render's usage_ledger entry
+        // at completion -- Creatomate's own payload never reports it (see
+        // Timeline's own comment on _totalOutputDurationSeconds).
+        render_output_duration_seconds: timeline._totalOutputDurationSeconds ?? null,
       })
       .eq("id", projectId)
       .eq("owner_id", user.id);

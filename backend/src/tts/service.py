@@ -7,6 +7,8 @@ from src.assets import repository as assets_repository
 from src.assets.service import store_asset_bytes
 from src.core.auth import CurrentUser
 from src.core.config import settings
+from src.metering import pricing as metering_pricing
+from src.metering import repository as metering_repository
 from src.tts import repository as tts_repository
 from src.tts.client import get_tts_provider
 from src.tts.schemas import SynthesizeResponse, VoiceOption, VoicesResponse, WordTiming
@@ -49,6 +51,15 @@ async def synthesize(project_id: str, text: str, voice: str, rate: int, pitch: i
     # Best-effort -- a failure to record usage shouldn't fail a synthesis
     # that already succeeded and was already stored as an asset.
     tts_repository.record_voiceover_event(user.id)
+    metering_repository.record_event(
+        user_id=user.id,
+        project_id=project_id,
+        event_type="voiceover",
+        provider=settings.tts_provider,
+        quantity=result.duration_seconds,
+        unit="seconds",
+        cost_estimate_cents=metering_pricing.voiceover_cost_cents(result.duration_seconds),
+    )
 
     return SynthesizeResponse(
         asset_id=asset.id,

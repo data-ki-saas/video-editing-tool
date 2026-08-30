@@ -54,6 +54,42 @@ function extractPayload(body: unknown): CreatomatePayload | null {
   };
 }
 
+// Mirrors backend/src/core/config.py's creatomate_cost_cents_per_second --
+// keep both in sync by hand, same precedent as RENDER_DAILY_LIMIT/
+// render_daily_cap.
+const CREATOMATE_COST_CENTS_PER_SECOND = 2.5;
+
+/** Best-effort, same "a failure here shouldn't undo work already done"
+ * posture as every other usage-recording call site in this app. Writes to
+ * usage_ledger (see supabase/migrations/0016) -- the metering/billing-basis
+ * table, distinct from usage_events' abuse-guardrail counter. */
+async function recordUsageLedgerEvent(
+  supabase: ServiceRoleClient,
+  event: {
+    userId: string;
+    projectId: string;
+    externalRef: string;
+    quantitySeconds: number | null;
+    status: "succeeded" | "failed";
+  }
+): Promise<void> {
+  const quantity = event.quantitySeconds ?? 0;
+  const { error } = await supabase.from("usage_ledger").insert({
+    user_id: event.userId,
+    project_id: event.projectId,
+    event_type: "render",
+    provider: "creatomate",
+    external_ref: event.externalRef,
+    quantity,
+    unit: "seconds",
+    cost_estimate_cents: event.status === "succeeded" ? quantity * CREATOMATE_COST_CENTS_PER_SECOND : 0,
+    status: event.status,
+  });
+  if (error) {
+    console.error("[webhooks/creatomate] failed to record usage ledger event", event.projectId, event.externalRef, error);
+  }
+}
+
 const NOTIFY_WORKER_MAX_ATTEMPTS = 3;
 const NOTIFY_WORKER_RETRY_DELAY_MS = 1000;
 
@@ -188,7 +224,7 @@ export async function POST(request: Request) {
     .update({ render_status: dbStatus, render_url: finalCreatomateUrl, render_error: dbError })
     .eq("id", projectId)
     .eq("render_id", renderId)
-    .select("id")
+    .select("id, owner_id, render_output_duration_seconds")
     .maybeSingle();
 
   if (error) {
@@ -203,6 +239,16 @@ export async function POST(request: Request) {
     // acknowledge with 2xx rather than inviting a retry storm.
     console.warn("[webhooks/creatomate] no matching project for render", projectId, renderId);
     return NextResponse.json({ ok: true }, { status: 200 });
+  }
+
+  if (dbStatus === "succeeded" || dbStatus === "failed") {
+    void recordUsageLedgerEvent(supabase, {
+      userId: data.owner_id,
+      projectId,
+      externalRef: renderId,
+      quantitySeconds: data.render_output_duration_seconds,
+      status: dbStatus,
+    });
   }
 
   if (dbStatus === "succeeded" && finalCreatomateUrl) {

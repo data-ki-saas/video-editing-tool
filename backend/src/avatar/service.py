@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import time
@@ -5,6 +6,7 @@ import uuid
 
 import httpx
 from fastapi import HTTPException
+from mutagen.mp4 import MP4
 
 from src.assets import repository as assets_repository
 from src.assets.service import store_asset_bytes
@@ -13,6 +15,8 @@ from src.avatar.client import get_avatar_provider
 from src.avatar.schemas import AvatarGenerationDetail, AvatarOptionResponse, GenerateAvatarVideoResponse
 from src.core.auth import CurrentUser
 from src.core.config import settings
+from src.metering import pricing as metering_pricing
+from src.metering import repository as metering_repository
 from src.storage import r2_client
 
 logger = logging.getLogger(__name__)
@@ -155,6 +159,30 @@ async def handle_webhook(*, raw_body: bytes, headers: dict[str, str], query_secr
         return
 
     avatar_repository.mark_completed(generation.id, asset.id)
+
+    # HeyGen exposes no duration anywhere in its request, response, or
+    # webhook payload (see HeyGenProvider.parse_webhook's own "not verified
+    # against a live delivery" comment) -- probe the downloaded bytes
+    # directly instead. mutagen is pure-Python (no ffprobe/ffmpeg binary),
+    # consistent with this app having deliberately moved off self-hosted
+    # ffmpeg infra (see project memory "Render backend decision"). Skip the
+    # ledger row entirely on a probe failure rather than guess.
+    try:
+        duration_seconds = MP4(io.BytesIO(video_bytes)).info.length
+    except Exception:
+        logger.exception("failed to probe avatar video duration for generation=%s", generation.id)
+        return
+
+    metering_repository.record_event(
+        user_id=generation.user_id,
+        project_id=generation.project_id,
+        event_type="avatar_video",
+        provider=settings.avatar_provider,
+        external_ref=generation.id,
+        quantity=duration_seconds,
+        unit="seconds",
+        cost_estimate_cents=metering_pricing.avatar_cost_cents(duration_seconds),
+    )
 
 
 async def list_avatars() -> list[AvatarOptionResponse]:

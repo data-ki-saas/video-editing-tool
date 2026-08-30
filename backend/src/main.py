@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from src.assets.router import router as assets_router
 from src.avatar.router import router as avatar_router
 from src.core.config import settings
+from src.metering.router import router as metering_router
 from src.niches.router import router as niches_router
 from src.permissions.router import router as permissions_router
 from src.projects.router import router as projects_router
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
 
     app.include_router(assets_router)
     app.include_router(avatar_router)
+    app.include_router(metering_router)
     app.include_router(niches_router)
     app.include_router(permissions_router)
     app.include_router(projects_router)

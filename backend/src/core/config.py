@@ -68,6 +68,21 @@ class Settings(BaseSettings):
     # ceiling on how much this feature can spend per user per day.
     avatar_daily_cap: int = 3
 
+    # Estimated external costs backing usage_ledger.cost_estimate_cents (see
+    # backend/src/metering/pricing.py) -- hand-maintained placeholders, not
+    # live provider rates. Cross-reference frontend/src/app/admin/integrations
+    # page.tsx's pricingNote text and keep both in sync by hand, same
+    # precedent as render_daily_cap mirroring RENDER_DAILY_LIMIT above.
+    # heygen_cost_cents_per_second sits at the midpoint of that page's
+    # documented $0.02-0.07/sec range; the rest have no public per-unit rate
+    # yet and are rough placeholders pending real invoices.
+    creatomate_cost_cents_per_second: float = 2.5
+    heygen_cost_cents_per_second: float = 5.0
+    tts_cost_cents_per_second: float = 0.0  # edge-tts is free
+    deepseek_cost_cents_per_1k_tokens: float = 0.14
+    anthropic_cost_cents_per_1k_input_tokens: float = 0.3
+    anthropic_cost_cents_per_1k_output_tokens: float = 1.5
+
     supabase_url: str = ""
     supabase_service_role_key: str = ""
 

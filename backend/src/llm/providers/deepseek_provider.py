@@ -1,6 +1,6 @@
 import httpx
 
-from src.llm.providers.base import LLMProvider
+from src.llm.providers.base import CompletionResult, LLMProvider
 
 # DeepSeek's API is OpenAI-chat-completions-compatible, so no vendor SDK is
 # needed — a plain HTTP POST is enough. https://api-docs.deepseek.com
@@ -12,7 +12,7 @@ class DeepSeekProvider(LLMProvider):
         self._api_key = api_key
         self._model = model
 
-    async def complete(self, prompt: str, *, system: str | None = None, max_tokens: int = 1024) -> str:
+    async def complete(self, prompt: str, *, system: str | None = None, max_tokens: int = 1024) -> CompletionResult:
         if not self._api_key:
             # Without this check, an empty key produces the header
             # "Authorization: Bearer " (trailing space, no token) -- httpx
@@ -35,11 +35,19 @@ class DeepSeekProvider(LLMProvider):
                 json={"model": self._model, "messages": messages, "max_tokens": max_tokens},
             )
         response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
+        body = response.json()
+        content = body["choices"][0]["message"]["content"]
         if not content:
             # Same reasoning as AnthropicProvider's non-empty check: every
             # caller feeds this into json.loads(), which would otherwise fail
             # with an opaque "Expecting value" error that hides the actual
             # problem.
             raise ValueError("DeepSeek response had no content -- try again.")
-        return content
+        # DeepSeek's response is OpenAI-chat-completions-shaped, so usage
+        # (when present) carries prompt_tokens/completion_tokens directly.
+        usage = body.get("usage") or {}
+        return CompletionResult(
+            text=content,
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+        )
