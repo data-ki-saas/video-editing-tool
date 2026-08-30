@@ -498,6 +498,7 @@ export function MobileEditor({
               clips={playbackClips}
               baseCropRect={selections.cropRect}
               zoomEffects={selections.zoomEffects}
+              outputAspectRatio={clipRectAspectRatio}
               flipHorizontalToggles={selections.flipHorizontalToggles}
               flipVerticalToggles={selections.flipVerticalToggles}
               trimRanges={selections.trimRanges}

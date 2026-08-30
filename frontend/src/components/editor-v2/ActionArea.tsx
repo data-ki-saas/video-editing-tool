@@ -531,6 +531,7 @@ export function ActionArea({
             baseCropRect={baseCropRect}
             zoomEffects={zoomEffects}
             liveCropRectOverride={liveCropRectOverride}
+            outputAspectRatio={playAreaRatio}
             flipHorizontalToggles={flipHorizontalToggles}
             flipVerticalToggles={flipVerticalToggles}
             trimRanges={trimRanges}

@@ -35,16 +35,21 @@
  * AudioContext.currentTime, no listening to a hidden <video>'s
  * timeupdate/seeked events, and no per-frame syncing logic at all.
  *
- * Canvas pixel size is fixed once per sequence load (from the first loaded
- * clip's first frame's natural size) rather than recomputed from whichever
- * frame is currently drawn -- different clips can have different native
- * resolutions, and recomputing per-frame would visibly resize the canvas
- * at every clip boundary. It still responds live to the crop rect's own
- * ratio changing (just always scaled against that one fixed reference
- * resolution, not the current frame's own size) -- and, as a side effect,
- * a zoom-in now renders at full canvas resolution instead of shrinking the
- * canvas's own pixel size while zoomed (a visible sharpness improvement,
- * not a regression).
+ * Canvas pixel size is fixed to the PROJECT'S REAL OUTPUT resolution --
+ * computeOutputDimensions(outputAspectRatio) (video_math.ts), the exact same
+ * helper both the local and cloud render paths use to size their own output
+ * -- not recomputed from whichever frame or crop rect is currently drawn.
+ * Ken Burns zoom and clip-rectangle cropping only ever change which SOURCE
+ * rectangle drawFrameAt samples (sx/sy/sWidth/sHeight below); the
+ * destination canvas stays pinned at that one fixed resolution throughout.
+ * Get this backwards -- e.g. sizing the canvas itself down to the crop
+ * rect's own (shrinking, while zoomed in) pixel extent -- and the preview
+ * silently renders at a lower resolution than the real render, then the
+ * browser stretches that softer bitmap back up via the canvas element's CSS
+ * size, visibly softening every zoom-in; worse, since an image clip's crop
+ * can carry a different aspect ratio than the sequence's other clips, that
+ * bug would also briefly change the canvas's OWN shape during a photo
+ * cutaway, not just its sharpness.
  *
  * Exposes an imperative `seekTo` (via ref) so the Playground's frame-strip
  * timeline can scrub this player, and reports playback position upward via
@@ -91,6 +96,7 @@ import {
   findActiveTtsOverlays,
   ttsOverlayEndTimeSeconds,
   findActiveWordIndex,
+  computeOutputDimensions,
   FULL_FRAME_CROP_RECT,
   type CropRect,
   type ImageOverlayClip,
@@ -165,6 +171,12 @@ export const CanvasPlayer = forwardRef<
     // active tile live, before it's committed. Never applied during
     // playback (dragging and playing at once isn't a real scenario).
     liveCropRectOverride?: CropRect | null;
+    // The project's real output ratio (width/height) -- same value the
+    // local/cloud render paths derive from the selected clip rectangle (see
+    // ThreePaneEditor's handleLocalRenderClick) -- fed into
+    // computeOutputDimensions to pin this player's canvas to the actual
+    // render resolution. See this file's own module comment.
+    outputAspectRatio: number;
     // "Flip" (horizontal) / "Mirror" (vertical) -- sorted toggle
     // timestamps, not a uniform whole-clip boolean, toggled from
     // CropRectOverlay's edge handles on FrameStrip's active tile (the
@@ -229,6 +241,7 @@ export const CanvasPlayer = forwardRef<
     baseCropRect,
     zoomEffects,
     liveCropRectOverride = null,
+    outputAspectRatio,
     flipHorizontalToggles,
     flipVerticalToggles,
     trimRanges,
@@ -273,9 +286,11 @@ export const CanvasPlayer = forwardRef<
   // durationRef.current is derived from (their total).
   const loadedClipsRef = useRef<SequenceClipInfo[]>([]);
   const durationRef = useRef(0);
-  // Fixed once per sequence load, from the first loaded clip's first
-  // frame -- see this file's module comment on why canvas size is no
-  // longer recomputed from whichever frame is currently drawn.
+  // Fixed once per sequence load, from the first loaded clip's first frame.
+  // Used only as the aspect-ratio space crop rects are authored/reprojected
+  // against (see drawFrameAt's referenceAspectRatio/reprojectCropRect) --
+  // NOT to size the canvas itself, which is pinned to the project's real
+  // output resolution instead (see this file's own module comment).
   const referenceFrameSizeRef = useRef({ width: 0, height: 0 });
   // Loaded overlay images, keyed by assetId -- populated asynchronously
   // (see the loading effect below), so drawFrameAt just skips an overlay
@@ -467,25 +482,20 @@ export const CanvasPlayer = forwardRef<
     const referenceAspectRatio = referenceFrameSizeRef.current.width / referenceFrameSizeRef.current.height;
     const shouldReprojectForClip = hasAuthoredCrop && currentClipKind !== "image";
     const crop = shouldReprojectForClip ? reprojectCropRect(authoredCrop, referenceAspectRatio, clipAspectRatio) : authoredCrop;
-    // Mirrored back into the reference clip's own aspect space purely to
-    // size the canvas consistently below (a no-op reproject when crop was
-    // already reference-space, i.e. for every non-image clip).
-    const referenceSpaceCrop =
-      hasAuthoredCrop && currentClipKind === "image"
-        ? reprojectCropRect(authoredCrop, clipAspectRatio, referenceAspectRatio)
-        : authoredCrop;
 
     // Source rect: sampled from THIS frame's own natural size (clips can
-    // have different native resolutions). Destination (canvas) size: the
-    // fixed reference resolution, so different clips scale into the same
-    // pixel dimensions rather than resizing the canvas at each cut.
+    // have different native resolutions) -- Ken Burns zoom and clip-rect
+    // cropping only ever shrink/grow THIS, never the destination below.
     const sx = crop.x * image.width;
     const sy = crop.y * image.height;
     const sWidth = crop.width * image.width;
     const sHeight = crop.height * image.height;
 
-    const targetWidth = Math.max(1, Math.round(referenceSpaceCrop.width * referenceFrameSizeRef.current.width));
-    const targetHeight = Math.max(1, Math.round(referenceSpaceCrop.height * referenceFrameSizeRef.current.height));
+    // Destination (canvas) size: pinned to the project's real output
+    // resolution regardless of crop/zoom/clip -- see this file's own module
+    // comment on why sizing this from the crop rect instead (as before)
+    // softens the preview and can flash the canvas's own aspect ratio.
+    const { width: targetWidth, height: targetHeight } = computeOutputDimensions(outputAspectRatio);
     if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
       canvas.width = targetWidth;
       canvas.height = targetHeight;
@@ -1569,9 +1579,10 @@ export const CanvasPlayer = forwardRef<
         {/* absolute inset-0 + object-contain, not h-full/w-auto -- lets this
             fill whatever box the wrapper above ends up with while the
             canvas's own width/height attributes (set in drawFrameAt to the
-            fixed reference-resolution crop size) still drive the frame's
-            real aspect ratio via object-fit, immune to the wrapper being
-            squeezed on resize (see its comment). */}
+            project's fixed real output resolution -- see this file's own
+            module comment) still drive the frame's real aspect ratio via
+            object-fit, immune to the wrapper being squeezed on resize (see
+            its comment). */}
         <canvas ref={canvasRef} className="absolute inset-0 h-full w-full object-contain" />
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60">
