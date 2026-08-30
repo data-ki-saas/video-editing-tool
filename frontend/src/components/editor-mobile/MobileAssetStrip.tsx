@@ -74,13 +74,18 @@ export function MobileAssetStrip({
         <ul className="flex flex-col gap-2">
           {sequenceClips.map((entry, index) => {
             const asset = assetById.get(entry.assetId);
-            const thumbnailUrl = entry.kind === "image" ? asset?.url : videoThumbnailUrlByAssetId[entry.assetId];
+            // Must go through the CORS-safe blob map (built above), not
+            // asset?.url directly -- same reason as imageThumbnailSrcById's
+            // own comment: a plain <img> load of the raw presigned URL here
+            // can poison the browser's cache against CanvasPlayer's later
+            // CORS-mode fetch of that exact clip for the live preview.
+            const thumbnailUrl = entry.kind === "image" ? imageThumbnailSrcById[entry.assetId] : videoThumbnailUrlByAssetId[entry.assetId];
             return (
               <li key={entry.id} className="flex items-center gap-2 rounded-md border border-border bg-surface p-2">
                 <button type="button" onClick={() => onOpenClipMenu(entry)} className="flex flex-1 items-center gap-2 text-left">
                   <div className="h-12 w-12 shrink-0 overflow-hidden rounded bg-neutral-800">
                     {thumbnailUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL / captured frame, not a Next-optimizable static asset
+                      // eslint-disable-next-line @next/next/no-img-element -- a CORS-safe blob: URL (image) or a captured video-frame data URL, not a Next-optimizable static asset
                       <img src={thumbnailUrl} alt="" className="h-full w-full object-cover" />
                     ) : (
                       <span className="flex h-full w-full items-center justify-center text-xs text-muted">▶</span>

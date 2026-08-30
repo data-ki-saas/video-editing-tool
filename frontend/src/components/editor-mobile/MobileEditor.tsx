@@ -63,6 +63,7 @@ import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import { DEFAULT_EDIT_SELECTIONS, type Timeline, type EditSelectionsSnapshot, type Project } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
 import { useAutosaveTimeline } from "@/lib/useAutosaveTimeline";
+import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { CLIP_RECT_OPTIONS } from "@/components/editor-v2/ClipRectIcon";
 import { CanvasPlayer, type CanvasPlayerHandle } from "@/components/editor-v2/CanvasPlayer";
 import { ClipRectangleDialog } from "@/components/editor-v2/ClipRectangleDialog";
@@ -225,6 +226,15 @@ export function MobileEditor({
 
   const assetUrlById = Object.fromEntries(assets.map((asset) => [asset.id, asset.url]));
 
+  // previewFrameUrlForEntry below must never hand an image clip's raw
+  // asset.url to these dialogs -- same reason as MobileAssetStrip's own
+  // imageThumbnailSrcById: a plain <img> load of that URL can poison the
+  // browser's cache against CanvasPlayer's later CORS-mode fetch of the
+  // exact same clip for the live preview.
+  const imagePreviewSrcById = useCrossOriginImageSrcMap(
+    assets.filter((asset) => asset.kind === "image").map((asset) => ({ id: asset.id, url: asset.url }))
+  );
+
   // One representative still frame per video asset -- same helper/pattern
   // ThreePaneEditor uses for AssetGallery, NOT the full per-second
   // extractThumbnails strip (see this file's own module comment).
@@ -312,7 +322,7 @@ export function MobileEditor({
     if (!entry) return null;
     const asset = assets.find((a) => a.id === entry.assetId);
     if (!asset) return null;
-    return entry.kind === "image" ? asset.url : (videoThumbnailUrlByAssetId[entry.assetId] ?? null);
+    return entry.kind === "image" ? (imagePreviewSrcById[entry.assetId] ?? null) : (videoThumbnailUrlByAssetId[entry.assetId] ?? null);
   }
   const generalPreviewFrameUrl = previewFrameUrlForEntry(sequenceClips[0]);
 

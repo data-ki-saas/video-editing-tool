@@ -87,7 +87,8 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
           return (
             <li
               key={project.id}
-              className="flex items-center gap-1"
+              aria-current={isActive ? "page" : undefined}
+              className={`flex items-center gap-1 rounded-md ${isActive ? "bg-accent/10" : ""}`}
               onContextMenu={(e) =>
                 openContextMenu(e, [
                   { label: "Reset", onSelect: () => void handleReset(project) },
