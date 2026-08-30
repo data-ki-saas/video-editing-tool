@@ -356,6 +356,23 @@ function rectProperties(rect: CropRect) {
   return { x: pct(rect.x), y: pct(rect.y), width: pct(rect.width), height: pct(rect.height) };
 }
 
+/** Same as rectProperties, but for an anchor other than the rect's own
+ * top-left corner -- x/y move to the anchor point (e.g. the rect's center)
+ * instead of staying at the corner, so xAnchor/yAnchor and x/y can never
+ * drift out of sync. Pairs an anchor switch with its position recompute in
+ * one place; anchorX/anchorY are 0..1 fractions of the rect ("0" = the
+ * corner rectProperties uses, "0.5" = center). */
+function anchoredRectProperties(rect: CropRect, anchorX: number, anchorY: number) {
+  return {
+    x: pct(rect.x + rect.width * anchorX),
+    y: pct(rect.y + rect.height * anchorY),
+    width: pct(rect.width),
+    height: pct(rect.height),
+    xAnchor: pct(anchorX),
+    yAnchor: pct(anchorY),
+  };
+}
+
 /** Image overlays -- root-level siblings of the crop viewport, since their
  * rect is a fraction of the OUTPUT frame (post-crop), matching
  * CanvasPlayer's own compositing order (drawn after the flip transform is
@@ -505,12 +522,7 @@ function buildVideoOverlayElements(
         new Composition({
           id: nextId("overlay-flip"),
           track,
-          x: pct(overlayRect.x + overlayRect.width / 2),
-          y: pct(overlayRect.y + overlayRect.height / 2),
-          width: pct(overlayRect.width),
-          height: pct(overlayRect.height),
-          xAnchor: "50%",
-          yAnchor: "50%",
+          ...anchoredRectProperties(overlayRect, 0.5, 0.5),
           xScale: overlay.framing.flipHorizontal ? "-100%" : "100%",
           yScale: overlay.framing.flipVertical ? "-100%" : "100%",
           clip: true,
@@ -592,6 +604,7 @@ function buildTextElements(
     for (const range of outputRanges) {
       const durationSeconds = range.outputEndSeconds - range.outputStartSeconds;
       const fontFraction = getTextTemplateFontFraction(overlay.templateId);
+      const anchor = getTextTemplateAnchorFraction(overlay.templateId);
       elements.push(
         new Text({
           id: nextId("text"),
@@ -602,9 +615,7 @@ function buildTextElements(
           textWrap: true,
           fontSizeMinimum: "2vh",
           fontSizeMaximum: `${fontFraction * 100}vh`,
-          xAnchor: "0%",
-          yAnchor: "0%",
-          ...rectProperties(overlay.rect),
+          ...anchoredRectProperties(overlay.rect, anchor.x, anchor.y),
           ...buildTextTemplateStyle(overlay.templateId, durationSeconds),
         })
       );
@@ -613,12 +624,28 @@ function buildTextElements(
   return elements;
 }
 
+/** Templates whose entrance animation scales from the middle (Bold Pop,
+ * Bounce In) need a center anchor so xScale/yScale zooms from the box's
+ * actual center rather than its top-left corner. Every other template
+ * anchors at the rect's own corner. Read by anchoredRectProperties'
+ * callers below -- kept as the one place this is decided so a template's
+ * anchor and its x/y recompute can't drift apart, same pairing
+ * buildVideoOverlayElements' flip wrapper already does for its own
+ * center-anchored Composition. */
+const CENTER_ANCHORED_TEXT_TEMPLATES = new Set(["bold-pop", "bounce-in"]);
+
+function getTextTemplateAnchorFraction(templateId: string): { x: number; y: number } {
+  return CENTER_ANCHORED_TEXT_TEMPLATES.has(templateId) ? { x: 0.5, y: 0.5 } : { x: 0, y: 0 };
+}
+
 /** Per-template style + entrance animation. DIY scale-in entrances
  * (Bold Pop, Bounce In) use property keyframes directly on xScale/yScale
  * rather than Creatomate's canned Bounce/TextScale animation classes,
  * which describe a different motion (a repeated bounce, or a scale with
  * no controllable start value) than our one-shot pop -- see the plan's
- * mapping table for why each template's animation was chosen. */
+ * mapping table for why each template's animation was chosen. Anchor is
+ * NOT set here -- see getTextTemplateAnchorFraction/anchoredRectProperties,
+ * called by this function's callers before this style is spread on top. */
 function buildTextTemplateStyle(templateId: string, durationSeconds: number): Record<string, unknown> {
   switch (templateId) {
     case "bold-pop":
@@ -627,8 +654,6 @@ function buildTextTemplateStyle(templateId: string, durationSeconds: number): Re
         fillColor: "#ffffff",
         strokeColor: "#000000",
         strokeWidth: "2%",
-        xAnchor: "50%",
-        yAnchor: "50%",
         xScale: [new Keyframe("80%", 0, CROP_EASING), new Keyframe("100%", durationSeconds * 0.2, CROP_EASING)],
         yScale: [new Keyframe("80%", 0, CROP_EASING), new Keyframe("100%", durationSeconds * 0.2, CROP_EASING)],
       };
@@ -655,8 +680,6 @@ function buildTextTemplateStyle(templateId: string, durationSeconds: number): Re
         fillColor: "#ffffff",
         strokeColor: "#000000",
         strokeWidth: "2%",
-        xAnchor: "50%",
-        yAnchor: "50%",
         xScale: [new Keyframe("50%", 0, "back-out"), new Keyframe("100%", durationSeconds * 0.35, "back-out")],
         yScale: [new Keyframe("50%", 0, "back-out"), new Keyframe("100%", durationSeconds * 0.35, "back-out")],
       };
@@ -820,6 +843,7 @@ function buildTtsOverlayElements(
         );
       } else {
         const fontFraction = getTextTemplateFontFraction(overlay.templateId);
+        const anchor = getTextTemplateAnchorFraction(overlay.templateId);
         elements.push(
           new Text({
             id: nextId("tts-caption"),
@@ -830,9 +854,7 @@ function buildTtsOverlayElements(
             textWrap: true,
             fontSizeMinimum: "2vh",
             fontSizeMaximum: `${fontFraction * 100}vh`,
-            xAnchor: "0%",
-            yAnchor: "0%",
-            ...rectProperties(overlay.rect),
+            ...anchoredRectProperties(overlay.rect, anchor.x, anchor.y),
             ...buildTextTemplateStyle(overlay.templateId, durationSeconds),
           })
         );
