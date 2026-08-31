@@ -1203,7 +1203,8 @@ export function applyAddVideoOverlay(
   assetId: string,
   sourceDurationSeconds: number,
   currentTimeSeconds: number,
-  videoDurationSeconds: number
+  videoDurationSeconds: number,
+  removeBackground?: boolean
 ): TransformationResult {
   const overlays = selections.videoOverlays;
   const containing = overlays.find(
@@ -1227,8 +1228,35 @@ export function applyAddVideoOverlay(
     layout: { type: "full-screen" },
     framing: DEFAULT_OVERLAY_FRAMING,
     audioBalance: 0,
+    // matteAssetId starts null -- the caller (ThreePaneEditor's
+    // handleAddVideoOverlay) kicks off the actual matting job right after
+    // this and patches it in later via applySetVideoOverlayBackgroundRemoval
+    // once the async job completes, same staging as applyAddSequenceClip's
+    // own removeBackground handling above.
+    ...(removeBackground ? { backgroundRemoval: { enabled: true, matteAssetId: null } } : {}),
   };
   return { label: "Added overlay", state: { ...selections, videoOverlays: [...overlays, newOverlay] } };
+}
+
+/** Patches one placed video overlay's backgroundRemoval field in place --
+ * the video-overlay equivalent of applySetBackgroundRemoval above, indexed
+ * by position in `videoOverlays` (overlays carry no stable id, same
+ * convention as applyChangeVideoOverlayLayout/applyToggleSplitScreenSides
+ * etc.) rather than by entry id. Used by ThreePaneEditor's request/poll flow
+ * to silently write in the real matteAssetId once VEED's job completes --
+ * no new undo step for that (same reasoning as applySetBackgroundRemoval's
+ * own callers). */
+export function applySetVideoOverlayBackgroundRemoval(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  backgroundRemoval: { enabled: boolean; matteAssetId?: string | null } | null
+): TransformationResult {
+  const overlay = selections.videoOverlays[overlayIndex];
+  const label = backgroundRemoval?.enabled ? "Remove background" : "Restore background";
+  if (!overlay) return { label, state: selections };
+  const nextOverlays = [...selections.videoOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, backgroundRemoval };
+  return { label, state: { ...selections, videoOverlays: nextOverlays } };
 }
 
 /** Switches a placed overlay's layout in place -- Full-Screen, Picture-in-

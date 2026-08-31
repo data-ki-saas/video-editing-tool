@@ -68,7 +68,7 @@
  * plays without music that time around rather than blocking playback on it.
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { extractPreviewFrames, getVideoDuration, drawImageFlipped } from "@/lib/video/video";
+import { extractPreviewFrames, getVideoDuration, drawImageFlipped, drawImageFlippedMasked } from "@/lib/video/video";
 import { segmentClipFramesApproximate, lumaFramesToAlphaMasks, segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { drawBrandWatermark } from "@/lib/video/brandWatermark";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
@@ -339,6 +339,15 @@ export const CanvasPlayer = forwardRef<
   // <video> or a single static image, since a video overlay must actually
   // play back over its window.
   const videoOverlayFramesByAssetIdRef = useRef<Record<string, { images: ImageBitmap[]; frameRate: number; durationSeconds: number }>>({});
+  // AI background-removal alpha masks for a video overlay's own frames --
+  // same sharing convention (keyed by assetId) as videoOverlayFramesByAssetIdRef
+  // above, and the same real-matte-or-approximate-fallback staging as the
+  // base sequence's own `mattes` (see loadClipAt's video branch below):
+  // extracted only for an assetId at least one active overlay clip has
+  // backgroundRemoval.enabled on. Index-aligned with that same assetId's
+  // entry in videoOverlayFramesByAssetIdRef (same frameRate, same frame
+  // count), consumed by drawFrameAt's masked-overlay composite.
+  const videoOverlayMattesByAssetIdRef = useRef<Record<string, ImageBitmap[]>>({});
   // Decoded audio for every video overlay source asset that at least one
   // overlay actually wants audio from (audioBalance > 0) -- keyed by
   // assetId, same sharing convention as videoOverlayFramesByAssetIdRef.
@@ -383,6 +392,19 @@ export const CanvasPlayer = forwardRef<
   // composite (see drawFrameAt's own "destination-in" branch) -- resized in
   // place rather than reallocated every frame.
   const maskCompositeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Resizes/returns the scratch canvas above -- shared by the base clip's
+  // own masked composite AND a masked video overlay's (see drawFrameAt's
+  // exclusive/PiP overlay branches below), which draw to it at different
+  // points in the same frame, so this must re-check the size every call
+  // rather than assuming whichever branch ran first already got it right.
+  function getMaskCanvas(width: number, height: number): HTMLCanvasElement {
+    if (maskCompositeCanvasRef.current === null || maskCompositeCanvasRef.current.width !== width || maskCompositeCanvasRef.current.height !== height) {
+      maskCompositeCanvasRef.current = document.createElement("canvas");
+      maskCompositeCanvasRef.current.width = width;
+      maskCompositeCanvasRef.current.height = height;
+    }
+    return maskCompositeCanvasRef.current;
+  }
   const animationFrameIdRef = useRef<number | null>(null);
   // Wall-clock bookkeeping for the AudioContext-driven playback clock:
   // elapsed = pausedAtSeconds while stopped, or
@@ -874,10 +896,30 @@ export const CanvasPlayer = forwardRef<
           activeExclusiveVideoOverlay.framing.panX, activeExclusiveVideoOverlay.framing.panY, activeExclusiveVideoOverlay.framing.zoom
         );
         ctx.filter = getFilterPresetOption(activeExclusiveVideoOverlay.colorFilterId ?? null).cssFilter;
-        drawImageFlipped(
-          ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
-          activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
-        );
+        const overlayMattes = activeExclusiveVideoOverlay.backgroundRemoval?.enabled
+          ? videoOverlayMattesByAssetIdRef.current[activeExclusiveVideoOverlay.assetId]
+          : undefined;
+        if (overlayMattes && overlayMattes.length > 0) {
+          // Same proportional-fraction mapping onto the matte's own pixel
+          // dimensions as the base clip's crop-fraction path above -- an
+          // overlay has no separate `crop` fraction of its own, so this is
+          // derived directly from osx/osy/osw/osh (already computed against
+          // overlayImage's pixel space by computeCoverFitSourceRect).
+          const matte = overlayMattes[Math.min(overlayFrameIndex, overlayMattes.length - 1)];
+          drawImageFlippedMasked(
+            ctx, getMaskCanvas(canvas.width, canvas.height), overlayImage, matte,
+            osx, osy, osw, osh,
+            (osx / overlayImage.width) * matte.width, (osy / overlayImage.height) * matte.height,
+            (osw / overlayImage.width) * matte.width, (osh / overlayImage.height) * matte.height,
+            destX, destY, destWidth, destHeight,
+            activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
+          );
+        } else {
+          drawImageFlipped(
+            ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+            activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
+          );
+        }
         ctx.filter = "none";
       }
     }
@@ -905,7 +947,21 @@ export const CanvasPlayer = forwardRef<
         pipImage.width, pipImage.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
       );
       ctx.filter = getFilterPresetOption(pip.colorFilterId ?? null).cssFilter;
-      drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+      const pipMattes = pip.backgroundRemoval?.enabled ? videoOverlayMattesByAssetIdRef.current[pip.assetId] : undefined;
+      if (pipMattes && pipMattes.length > 0) {
+        // Same proportional mapping as the exclusive-overlay branch above.
+        const matte = pipMattes[Math.min(pipFrameIndex, pipMattes.length - 1)];
+        drawImageFlippedMasked(
+          ctx, getMaskCanvas(canvas.width, canvas.height), pipImage, matte,
+          psx, psy, psw, psh,
+          (psx / pipImage.width) * matte.width, (psy / pipImage.height) * matte.height,
+          (psw / pipImage.width) * matte.width, (psh / pipImage.height) * matte.height,
+          destX, destY, destWidth, destHeight,
+          pip.framing.flipHorizontal, pip.framing.flipVertical
+        );
+      } else {
+        drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+      }
       ctx.filter = "none";
     }
 
@@ -1646,6 +1702,75 @@ export const CanvasPlayer = forwardRef<
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on videoOverlaysLoadKey (joined assetId:url), not the videoOverlays array reference; drawFrameAt is freshly defined every render and always closes over the latest props
   }, [videoOverlaysLoadKey, isReady, isPlaying]);
+
+  // AI background removal for a video overlay -- separate from the frame-
+  // extraction effect above since its own key (videoOverlayRemovalLoadKey,
+  // below) must react to matteAssetId arriving LATER (once VEED's async job
+  // completes and ThreePaneEditor's requestAndPollVideoOverlayBackgroundRemoval
+  // patches it in) even after this asset's frames are already cached --
+  // nesting this inside the frames effect's own "not yet cached" branch
+  // would miss that update entirely, since that branch is skipped once
+  // videoOverlayFramesByAssetIdRef already has an entry for this assetId.
+  // Same real-matte-or-approximate-fallback staging as loadClipAt's own
+  // video branch above (see this file's module comment on the two-stage
+  // live preview) -- one overlay clip per asset needs backgroundRemoval
+  // enabled for every overlay sharing that asset to get keyed out, same
+  // per-assetId sharing as the frames themselves.
+  const videoOverlayRemovalLoadKey = videoOverlayAssetIds
+    .map((assetId) => {
+      const overlay = videoOverlays.find((o) => o.assetId === assetId && o.backgroundRemoval?.enabled);
+      if (!overlay) return "";
+      const matteAssetId = overlay.backgroundRemoval?.matteAssetId ?? "";
+      return `${assetId}:${matteAssetId}:${assetUrlById[matteAssetId] ?? ""}`;
+    })
+    .join(",");
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadVideoOverlayMattes() {
+      for (const assetId of videoOverlayAssetIds) {
+        if (cancelled) return;
+        const overlay = videoOverlays.find((o) => o.assetId === assetId && o.backgroundRemoval?.enabled);
+        if (!overlay) continue;
+        const matteAssetId = overlay.backgroundRemoval?.matteAssetId ?? null;
+        const matteUrl = matteAssetId ? assetUrlById[matteAssetId] : undefined;
+        // Once the real matte's ready, replace whatever approximate mask (or
+        // nothing) is cached -- re-keyed into videoOverlayRemovalLoadKey via
+        // the matteAssetId component above, so this only re-runs when that
+        // actually changes.
+        try {
+          // The sibling frames-extraction effect above runs concurrently,
+          // not necessarily finished by the time this effect's own first
+          // pass reaches this assetId (real matte doesn't need frames at
+          // all, but the approximate fallback runs MediaPipe against these
+          // same frames) -- a short bounded wait rather than giving up and
+          // leaving this overlay undrawn until some unrelated key change
+          // happens to re-run this effect.
+          let frames = videoOverlayFramesByAssetIdRef.current[assetId];
+          for (let attempt = 0; !frames && !matteUrl && attempt < 25 && !cancelled; attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            frames = videoOverlayFramesByAssetIdRef.current[assetId];
+          }
+          const mattes = matteUrl
+            ? await lumaFramesToAlphaMasks(await extractPreviewFrames(matteUrl, frames?.frameRate ?? pickPreviewFrameRate(frames?.durationSeconds ?? 0, navigator.hardwareConcurrency || 4)))
+            : frames
+              ? await segmentClipFramesApproximate(frames.images)
+              : null;
+          if (cancelled || !mattes) continue;
+          videoOverlayMattesByAssetIdRef.current[assetId] = mattes;
+          if (isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
+        } catch (err) {
+          console.error("background-removal mask extraction failed for video overlay asset=%s", assetId, err);
+        }
+      }
+    }
+
+    void loadVideoOverlayMattes();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on videoOverlayRemovalLoadKey; drawFrameAt is freshly defined every render and always closes over the latest props
+  }, [videoOverlayRemovalLoadKey, isReady, isPlaying]);
 
   // Decodes audio ONLY for a video overlay source asset that at least one
   // overlay actually wants some audio from (audioBalance > 0) -- most

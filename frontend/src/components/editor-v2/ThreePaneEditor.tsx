@@ -121,6 +121,7 @@ import {
   applySelectClipTransition,
   applySelectCanvasFillMode,
   applySetBackgroundRemoval,
+  applySetVideoOverlayBackgroundRemoval,
 } from "@/lib/video/transformations";
 import type { FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
@@ -1120,7 +1121,7 @@ export function ThreePaneEditor({
   // size/clamp the default window against -- reuses the cache built by the
   // probing effect above, or probes it fresh (and caches it) if this is the
   // first time this asset's been used this way.
-  async function handleAddVideoOverlay(asset: Asset) {
+  async function handleAddVideoOverlay(asset: Asset, options?: { removeBackground?: boolean }) {
     let sourceDurationSeconds = overlaySourceDurationSeconds[asset.id];
     if (sourceDurationSeconds === undefined) {
       try {
@@ -1130,9 +1131,44 @@ export function ThreePaneEditor({
         sourceDurationSeconds = Infinity; // probe failed -- the edge-drag clamp still falls back to [0, videoDurationSeconds]
       }
     }
-    const { label, state } = applyAddVideoOverlay(selections, asset.id, sourceDurationSeconds, currentTimeSeconds, videoDurationSeconds);
+    const { label, state } = applyAddVideoOverlay(
+      selections,
+      asset.id,
+      sourceDurationSeconds,
+      currentTimeSeconds,
+      videoDurationSeconds,
+      options?.removeBackground
+    );
     pushChange(label, state);
     setIsVideoOverlayPickerOpen(false);
+
+    if (options?.removeBackground) {
+      const newOverlayIndex = state.videoOverlays.length - 1;
+      if (state.videoOverlays[newOverlayIndex]?.assetId === asset.id) {
+        void requestAndPollVideoOverlayBackgroundRemoval(asset.id, newOverlayIndex);
+      }
+    }
+  }
+
+  // Video-overlay equivalent of requestAndPollBackgroundRemoval above --
+  // same request/poll/refreshAssets/patch-in-matteAssetId flow, just landing
+  // via applySetVideoOverlayBackgroundRemoval (indexed into videoOverlays,
+  // not sequenceClips) instead. Same "not stale-safe against edits made
+  // during the wait" accepted risk as that function's own comment.
+  async function requestAndPollVideoOverlayBackgroundRemoval(sourceAssetId: string, overlayIndex: number) {
+    try {
+      const initial = await requestBackgroundRemoval(projectId, sourceAssetId);
+      const result = initial.status === "waiting" ? await pollBackgroundRemoval(sourceAssetId) : initial;
+      if (result.status !== "completed" || !result.matteAssetId) return;
+      await refreshAssets();
+      const { label, state } = applySetVideoOverlayBackgroundRemoval(selections, overlayIndex, {
+        enabled: true,
+        matteAssetId: result.matteAssetId,
+      });
+      pushChange(label, state);
+    } catch (err) {
+      console.error("background removal failed for video overlay asset=%s", sourceAssetId, err);
+    }
   }
 
   // TtsAvatarDialog's own "Generate & add" -- the dialog already generated

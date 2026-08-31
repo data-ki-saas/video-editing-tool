@@ -642,6 +642,16 @@ export interface VideoOverlayClip {
   // badge/popup -- see CanvasPlayer.tsx for how this is actually scheduled
   // as gain automation during playback.
   audioBalance: number;
+  // Same AI background removal as SequenceEntry's "video" variant (see its
+  // own doc comment) -- keys out this overlay's own footage (e.g. a
+  // green-screen talking-head clip) so the Ken Burns/base track beneath it
+  // shows through instead of a solid color. Set via
+  // VideoOverlayPickerDialog.tsx's "Remove background" toggle;
+  // ThreePaneEditor's requestAndPollVideoOverlayBackgroundRemoval patches
+  // in the real matteAssetId once VEED's job completes, same staging as
+  // the Cutaway path. Unlike SequenceEntry, only ever set at add-time --
+  // there's no dialog to flip it on afterward for an already-placed overlay.
+  backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
 }
 
 /**

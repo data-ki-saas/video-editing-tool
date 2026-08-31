@@ -120,6 +120,63 @@ export function drawImageFlipped(
   ctx.restore();
 }
 
+/** Same composite as drawImageFlipped above, but keys `source` down to
+ * `matte`'s alpha first via a scratch canvas -- the video-overlay
+ * equivalent of CanvasPlayer's own base-clip "destination-in" masked
+ * composite (see its drawFrameAt), generalized to a caller-supplied dest
+ * rect/flip instead of the base clip's own crop rect, so it works for a
+ * Full-Screen OR Picture-in-Picture overlay box alike. `source` and `matte`
+ * are drawn through the IDENTICAL flip transform (each wrapped in its own
+ * save/translate/scale/restore) so the cutout still lines up pixel-for-pixel
+ * with its mask even when mirrored -- `matte`'s own pixel dimensions need
+ * not match `source`'s; matteSx/Sy/SWidth/SHeight are computed by the
+ * caller from PROPORTIONAL source coordinates against matte.width/height
+ * (mirroring the base-clip path's own crop-fraction-of-matte-dimensions
+ * approach), not assumed identical. `maskCanvas` is a scratch canvas the
+ * SAME size as the real canvas -- reused across frames by the caller rather
+ * than reallocated here. */
+export function drawImageFlippedMasked(
+  ctx: CanvasRenderingContext2D,
+  maskCanvas: HTMLCanvasElement,
+  source: CanvasImageSource,
+  matte: CanvasImageSource,
+  sx: number,
+  sy: number,
+  sWidth: number,
+  sHeight: number,
+  matteSx: number,
+  matteSy: number,
+  matteSWidth: number,
+  matteSHeight: number,
+  destX: number,
+  destY: number,
+  destWidth: number,
+  destHeight: number,
+  flipHorizontal: boolean,
+  flipVertical: boolean
+) {
+  const maskCtx = maskCanvas.getContext("2d");
+  if (!maskCtx) return;
+  maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+
+  maskCtx.globalCompositeOperation = "source-over";
+  maskCtx.save();
+  maskCtx.translate(flipHorizontal ? destX + destWidth : destX, flipVertical ? destY + destHeight : destY);
+  maskCtx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
+  maskCtx.drawImage(source, sx, sy, sWidth, sHeight, 0, 0, destWidth, destHeight);
+  maskCtx.restore();
+
+  maskCtx.globalCompositeOperation = "destination-in";
+  maskCtx.save();
+  maskCtx.translate(flipHorizontal ? destX + destWidth : destX, flipVertical ? destY + destHeight : destY);
+  maskCtx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
+  maskCtx.drawImage(matte, matteSx, matteSy, matteSWidth, matteSHeight, 0, 0, destWidth, destHeight);
+  maskCtx.restore();
+
+  maskCtx.globalCompositeOperation = "source-over";
+  ctx.drawImage(maskCanvas, 0, 0);
+}
+
 /** Extracts frames at a fixed interval, at a given thumbnail width, sharing
  * the load/seek/capture machinery between extractThumbnails and
  * extractPreviewFrames below (they only differ in interval and size). */

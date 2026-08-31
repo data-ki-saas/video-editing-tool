@@ -11,6 +11,7 @@
  * there's nothing else to configure here, everything else (layout, framing)
  * happens afterward on the rail itself.
  */
+import { useState } from "react";
 import type { Asset } from "@/lib/api";
 
 export function VideoOverlayPickerDialog({
@@ -25,10 +26,15 @@ export function VideoOverlayPickerDialog({
   // this is what actually renders in each tile (see ThreePaneEditor's own
   // videoThumbnailUrlByAssetId state comment).
   videoThumbnailUrlByAssetId: Record<string, string>;
-  onPick: (asset: Asset) => void;
+  onPick: (asset: Asset, options?: { removeBackground?: boolean }) => void;
   onClose: () => void;
 }) {
   const videoAssets = assets.filter((asset) => asset.kind === "video");
+  // Applies to whichever tile is clicked next, rather than a per-tile
+  // selection step -- keeps the single-click "pick a tile, it's placed"
+  // flow intact (this app's driving vision favors that over an extra
+  // select-then-confirm step like CutawayDialog's own two-step flow).
+  const [removeBackground, setRemoveBackground] = useState(false);
 
   return (
     <div
@@ -57,7 +63,7 @@ export function VideoOverlayPickerDialog({
                 key={asset.id}
                 type="button"
                 title={asset.filename}
-                onClick={() => onPick(asset)}
+                onClick={() => onPick(asset, { removeBackground })}
                 className="aspect-square overflow-hidden rounded-md border-2 border-transparent bg-neutral-800 hover:border-amber-500"
               >
                 {videoThumbnailUrlByAssetId[asset.id] ? (
@@ -70,6 +76,20 @@ export function VideoOverlayPickerDialog({
             ))}
           </div>
         )}
+        {/* AI background removal -- same one-shot toggle as CutawayDialog's
+            own "Remove background" checkbox, see that component's comment.
+            Applied to whichever tile gets clicked next since this picker has
+            no separate select/confirm step (see this component's own module
+            comment). */}
+        <label className="mt-3 flex items-center gap-1.5 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={removeBackground}
+            onChange={(e) => setRemoveBackground(e.target.checked)}
+            className="h-3.5 w-3.5"
+          />
+          Remove background (e.g. green screen)
+        </label>
       </div>
     </div>
   );

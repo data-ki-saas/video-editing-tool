@@ -95,7 +95,7 @@ export function AssetGallery({
   onDeleted: (assetId: string) => void;
   onAddImageOverlay: (asset: Asset) => void;
   onAddToSequence: (asset: Asset) => void;
-  onAddVideoOverlay: (asset: Asset) => void;
+  onAddVideoOverlay: (asset: Asset, options?: { removeBackground?: boolean }) => void;
   onAddToBackgroundSequence: (asset: Asset) => void;
   onOpenCutawayDialogForAsset: (asset: Asset) => void;
   usedAssetIds: Set<string>;

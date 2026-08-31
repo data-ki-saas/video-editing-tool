@@ -44,7 +44,7 @@ import {
   type VideoCodec,
   type AudioCodec,
 } from "mediabunny";
-import { loadVideoElement, seekVideoTo, drawImageFlipped } from "@/lib/video/video";
+import { loadVideoElement, seekVideoTo, drawImageFlipped, drawImageFlippedMasked } from "@/lib/video/video";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
 import {
   buildRenderSegments,
@@ -553,6 +553,21 @@ export async function exportVideoLocally(
       { mode: getCanvasFillMode(entry.canvasFillMode), color: entry.canvasFillColor, gradientColor: entry.canvasFillGradientColor },
     ])
   );
+  // AI background removal -- same per-entryId matteAssetId lookup as
+  // compileCreatomateTimeline.ts's own backgroundRemovalMatteByEntryId.
+  // Only a REAL, already-completed matte is ever used here (never
+  // CanvasPlayer's own MediaPipe approximate-cutout fallback) -- same
+  // "final render only trusts a real matte" policy compileCreatomateTimeline.ts
+  // already established (its own comment: "Only reachable once matteAssetId
+  // is populated... falls back to whatever its canvasFillMode/crop would
+  // already render as"). Running MediaPipe segmentation against every real
+  // seeked export frame (unlike the preview's once-per-clip pre-extracted
+  // frames) would be prohibitively slow for no better-than-preview result,
+  // so a still-processing job (matteAssetId null) or a matte asset that
+  // fails to load just renders this clip unmasked, exactly like today.
+  const backgroundRemovalMatteByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [entry.id, entry.backgroundRemoval?.enabled ? entry.backgroundRemoval.matteAssetId : null])
+  );
   // Same cut-transition lookup compileCreatomateTimeline.ts builds -- see
   // that file's own cutTransitionByEntryId comment.
   const cutTransitionByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.cutTransitionInId ?? null]));
@@ -575,6 +590,21 @@ export async function exportVideoLocally(
   // as videoElementsByAssetId above, so each output frame samples an actual
   // decoded frame rather than a pre-extracted preview one.
   const videoOverlayElementsByAssetId = new Map<string, HTMLVideoElement>();
+  // AI background removal -- VIDEO mattes (VEED's luma-matte output, shared
+  // shape whether the clip they key out is a base sequence clip or a video
+  // overlay -- both are just "a real seekable video sharing its source
+  // clip's own timeline exactly", see backgroundRemovalMatteByEntryId's own
+  // comment) keyed by matteAssetId, NOT by the clip/overlay that references
+  // it -- matting/repository.get_by_source_asset dedupes by source asset,
+  // so more than one entry can point at the same matte.
+  const matteVideoElementsByAssetId = new Map<string, HTMLVideoElement>();
+  // AI background removal -- IMAGE mattes (a Ken Burns cutaway's own rembg
+  // cutout, a full already-transparent PNG that REPLACES the original photo
+  // outright rather than a separate mask -- see
+  // compileCreatomateTimeline.ts's buildBackgroundRemovedImageSegment's own
+  // comment) keyed by matteAssetId, same sharing convention as
+  // matteVideoElementsByAssetId above.
+  const matteImageElementsByAssetId = new Map<string, HTMLImageElement>();
   const overlayBlobUrls: string[] = [];
   const warnings: string[] = [];
 
@@ -647,11 +677,79 @@ export async function exportVideoLocally(
       }
     }
 
+    // AI background removal -- collects every matteAssetId actually needed
+    // (a completed job's real matte only, see backgroundRemovalMatteByEntryId's
+    // own comment) across BOTH the base sequence and video overlays, split
+    // by which kind of matte it is (video-kind entries and every video
+    // overlay use a luma-matte video; image-kind entries use a full
+    // cutout PNG). A still-processing job (matteAssetId null) contributes
+    // nothing here -- that clip/overlay just renders unmasked below, same
+    // as it does in the live preview while waiting.
+    const matteVideoAssetIds = new Set<string>();
+    const matteImageAssetIds = new Set<string>();
+    for (const entry of selections.sequenceClips) {
+      const matteAssetId = entry.backgroundRemoval?.enabled ? entry.backgroundRemoval.matteAssetId : null;
+      if (!matteAssetId) continue;
+      (entry.kind === "video" ? matteVideoAssetIds : matteImageAssetIds).add(matteAssetId);
+    }
+    for (const overlay of selections.videoOverlays) {
+      const matteAssetId = overlay.backgroundRemoval?.enabled ? overlay.backgroundRemoval.matteAssetId : null;
+      if (matteAssetId) matteVideoAssetIds.add(matteAssetId);
+    }
+    for (const matteAssetId of matteVideoAssetIds) {
+      const url = assetUrlById[matteAssetId];
+      if (!url) {
+        const message = `A background-removal matte (assetId ${matteAssetId}) has no resolved URL -- that clip/overlay renders unmasked in this render.`;
+        console.warn(`Edge Render: ${message}`);
+        warnings.push(message);
+        continue;
+      }
+      try {
+        matteVideoElementsByAssetId.set(matteAssetId, await loadVideoElement(url, "auto"));
+      } catch (err) {
+        // Skipped -- graceful degrade to unmasked, same policy as every other optional asset above.
+        const reason = err instanceof Error ? err.message : String(err);
+        const message = `A background-removal matte (assetId ${matteAssetId}) couldn't be loaded for this render: ${reason}`;
+        console.warn(`Edge Render: ${message}`);
+        warnings.push(message);
+      }
+    }
+    for (const matteAssetId of matteImageAssetIds) {
+      const url = assetUrlById[matteAssetId];
+      if (!url) {
+        const message = `A background-removal cutout (assetId ${matteAssetId}) has no resolved URL -- that clip renders unmasked in this render.`;
+        console.warn(`Edge Render: ${message}`);
+        warnings.push(message);
+        continue;
+      }
+      try {
+        const { image, blobUrl } = await loadOverlayImage(url, { assetId: matteAssetId, refreshUrl: refreshAssetUrl });
+        matteImageElementsByAssetId.set(matteAssetId, image);
+        overlayBlobUrls.push(blobUrl);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        const message = `A background-removal cutout (assetId ${matteAssetId}) couldn't be loaded for this render: ${reason}`;
+        console.warn(`Edge Render: ${message}`);
+        warnings.push(message);
+      }
+    }
+
     const canvas = document.createElement("canvas");
     canvas.width = outputWidth;
     canvas.height = outputHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Canvas 2D context unavailable");
+
+    // Scratch canvas for the background-removal masked composite (a base
+    // clip's own "destination-in" branch below, and a video overlay's own),
+    // same fixed-size-for-the-whole-export reuse as CanvasPlayer's own
+    // maskCompositeCanvasRef -- this canvas never changes size mid-export
+    // (unlike the live preview, whose canvas can resize), so it's allocated
+    // once here rather than re-checked every frame.
+    const maskCanvas = document.createElement("canvas");
+    maskCanvas.width = outputWidth;
+    maskCanvas.height = outputHeight;
+    const maskCtx = maskCanvas.getContext("2d");
 
     const target = new BufferTarget();
     const output = new Output({ format, target });
@@ -675,13 +773,34 @@ export async function exportVideoLocally(
 
       const sourceTimeSeconds = segment.sourceStartSeconds + (outputTimeSeconds - segment.outputStartSeconds);
       const localSeconds = segment.clipLocalStartSeconds + (outputTimeSeconds - segment.outputStartSeconds);
+      // AI background removal -- a real, already-loaded matte only (see
+      // backgroundRemovalMatteByEntryId's own comment). An IMAGE-kind
+      // cutout REPLACES `source` outright right here (it's a full
+      // already-transparent PNG, not a separate mask -- see
+      // matteImageElementsByAssetId's own comment), so every crop/dimension
+      // computation below naturally operates against the cutout's own
+      // pixel size with no further special-casing. A VIDEO-kind matte is
+      // NOT swapped in here -- it's a separate luma-matte video composited
+      // alongside `source` in the new backgroundRemoval branch further
+      // below (see `videoMatte`), since masking (unlike a plain
+      // replacement) needs both the original frame AND the matte frame at
+      // once.
+      const matteAssetId = segment.entryId ? backgroundRemovalMatteByEntryId.get(segment.entryId) : null;
+      const imageMatte = matteAssetId && segment.kind === "image" ? matteImageElementsByAssetId.get(matteAssetId) : undefined;
+      const videoMatte = matteAssetId && segment.kind === "video" ? matteVideoElementsByAssetId.get(matteAssetId) : undefined;
       const source: HTMLVideoElement | HTMLImageElement | null =
         segment.kind === "image"
-          ? (imageClipElementsByAssetId.get(segment.assetId) ?? null)
+          ? (imageMatte ?? imageClipElementsByAssetId.get(segment.assetId) ?? null)
           : (videoElementsByAssetId.get(segment.assetId) ?? null);
 
       if (source instanceof HTMLVideoElement) {
         await seekVideoTo(source, localSeconds);
+      }
+      if (videoMatte) {
+        // Shares `source`'s own local timeline exactly (see
+        // matteVideoElementsByAssetId's own comment) -- seeked to the SAME
+        // localSeconds, not a separately-computed time.
+        await seekVideoTo(videoMatte, localSeconds);
       }
 
       // At most one of these is active at a time PER ARRAY (Full-Screen and
@@ -740,6 +859,76 @@ export async function exportVideoLocally(
             sWidth, sHeight, baseDestWidth, baseDestHeight, panX, panY, baseZoom
           );
           drawImageFlipped(ctx, source, sx + bsx, sy + bsy, bsw, bsh, baseDestX, baseDestY, baseDestWidth, baseDestHeight, baseFlipH, baseFlipV);
+        } else if (baseRect && matteAssetId && (imageMatte || videoMatte)) {
+          // AI background removal -- masked cutout over a new backdrop,
+          // same priority CanvasPlayer's own drawFrameAt gives this over the
+          // letterbox/plain-crop branches below (see that file's own
+          // comment). No canvasFillMode of "crop" makes sense once the
+          // subject is cut out -- falls back to solid DEFAULT_CANVAS_FILL_COLOR,
+          // same default compileCreatomateTimeline.ts's
+          // buildBackgroundRemovedSegment and CanvasPlayer both already use,
+          // so every render path agrees on it.
+          const rawFill = segment.entryId ? (canvasFillByEntryId.get(segment.entryId) ?? { mode: "crop" as const }) : { mode: "crop" as const };
+          const fill = rawFill.mode === "crop" ? { mode: "solid" as const, color: DEFAULT_CANVAS_FILL_COLOR, gradientColor: undefined as string | undefined } : rawFill;
+          const canvasAspectRatio = canvas.width / canvas.height;
+          const baseCssFilter = ctx.filter;
+          if (fill.mode === "blur") {
+            const bgCrop = computeMaxCoverageCropRect(sourceWidth, sourceHeight, canvasAspectRatio);
+            const blurRadiusPx = CANVAS_FILL_BLUR_RADIUS_FRACTION * Math.max(canvas.width, canvas.height);
+            ctx.filter = `${baseCssFilter === "none" ? "" : baseCssFilter} blur(${blurRadiusPx}px)`.trim();
+            ctx.drawImage(source, bgCrop.x, bgCrop.y, bgCrop.width, bgCrop.height, 0, 0, canvas.width, canvas.height);
+            ctx.filter = baseCssFilter;
+          } else {
+            ctx.filter = "none";
+            if (fill.mode === "solid") {
+              ctx.fillStyle = fill.color ?? DEFAULT_CANVAS_FILL_COLOR;
+            } else {
+              const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+              gradient.addColorStop(0, fill.color ?? DEFAULT_CANVAS_FILL_COLOR);
+              gradient.addColorStop(1, fill.gradientColor ?? DEFAULT_CANVAS_FILL_GRADIENT_COLOR);
+              ctx.fillStyle = gradient;
+            }
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.filter = baseCssFilter;
+          }
+
+          const destX = baseRect.x * canvas.width;
+          const destY = baseRect.y * canvas.height;
+          const destWidth = baseRect.width * canvas.width;
+          const destHeight = baseRect.height * canvas.height;
+
+          if (videoMatte && maskCtx) {
+            // VIDEO path: draw the cropped subject onto the scratch canvas,
+            // then punch it down to just the matte's alpha via
+            // "destination-in" before compositing that onto the real
+            // canvas (still inside the still-active flip transform above),
+            // on top of the backdrop just drawn -- same technique as
+            // CanvasPlayer's own base-clip masked branch. `crop` is a
+            // FRACTION (0..1), reapplied against the matte's own
+            // videoWidth/videoHeight, not source's sx/sy/sWidth/sHeight
+            // verbatim, since VEED's matte output isn't guaranteed to share
+            // the source video's exact pixel dimensions.
+            const matteSx = crop.x * videoMatte.videoWidth;
+            const matteSy = crop.y * videoMatte.videoHeight;
+            const matteSWidth = crop.width * videoMatte.videoWidth;
+            const matteSHeight = crop.height * videoMatte.videoHeight;
+            maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+            maskCtx.globalCompositeOperation = "source-over";
+            maskCtx.drawImage(source, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight);
+            maskCtx.globalCompositeOperation = "destination-in";
+            maskCtx.drawImage(videoMatte, matteSx, matteSy, matteSWidth, matteSHeight, destX, destY, destWidth, destHeight);
+            ctx.drawImage(maskCanvas, 0, 0);
+          } else {
+            // IMAGE path (Ken Burns cutaway): `source` was already swapped
+            // to the transparent cutout itself above -- a plain drawImage
+            // on top of the backdrop just drawn lets its own per-pixel
+            // alpha show that backdrop through natively, no scratch canvas
+            // needed. Also the fallback if a video matte failed to load
+            // (maskCtx null) -- draws the ORIGINAL unmasked frame rather
+            // than nothing, same "looks normal, not broken" fallback spirit
+            // as every other optional asset in this file.
+            ctx.drawImage(source, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight);
+          }
         } else if (baseRect && (segment.entryId ? (canvasFillByEntryId.get(segment.entryId)?.mode ?? "crop") : "crop") !== "crop") {
           // Letterboxed/pillarboxed instead of cropped -- mirrors
           // CanvasPlayer's identical branch exactly (same
@@ -890,10 +1079,30 @@ export async function exportVideoLocally(
             activeExclusiveVideoOverlay.framing.panX, activeExclusiveVideoOverlay.framing.panY, activeExclusiveVideoOverlay.framing.zoom
           );
           ctx.filter = cssFilterFor(activeExclusiveVideoOverlay.colorFilterId);
-          drawImageFlipped(
-            ctx, overlayVideo, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
-            activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
-          );
+          // AI background removal -- a real, already-loaded matte only (see
+          // matteVideoElementsByAssetId's own comment); a still-processing
+          // job just draws this overlay unmasked, same graceful degrade as
+          // the base clip's own branch above.
+          const overlayMatteAssetId = activeExclusiveVideoOverlay.backgroundRemoval?.enabled
+            ? activeExclusiveVideoOverlay.backgroundRemoval.matteAssetId
+            : null;
+          const overlayMatte = overlayMatteAssetId ? matteVideoElementsByAssetId.get(overlayMatteAssetId) : undefined;
+          if (overlayMatte && maskCtx) {
+            await seekVideoTo(overlayMatte, loopedOffsetSeconds);
+            drawImageFlippedMasked(
+              ctx, maskCanvas, overlayVideo, overlayMatte,
+              osx, osy, osw, osh,
+              (osx / overlayVideo.videoWidth) * overlayMatte.videoWidth, (osy / overlayVideo.videoHeight) * overlayMatte.videoHeight,
+              (osw / overlayVideo.videoWidth) * overlayMatte.videoWidth, (osh / overlayVideo.videoHeight) * overlayMatte.videoHeight,
+              destX, destY, destWidth, destHeight,
+              activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
+            );
+          } else {
+            drawImageFlipped(
+              ctx, overlayVideo, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+              activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
+            );
+          }
           ctx.filter = "none";
         }
       }
@@ -916,7 +1125,21 @@ export async function exportVideoLocally(
           overlayVideo.videoWidth, overlayVideo.videoHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
         );
         ctx.filter = cssFilterFor(pip.colorFilterId);
-        drawImageFlipped(ctx, overlayVideo, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+        const pipMatteAssetId = pip.backgroundRemoval?.enabled ? pip.backgroundRemoval.matteAssetId : null;
+        const pipMatte = pipMatteAssetId ? matteVideoElementsByAssetId.get(pipMatteAssetId) : undefined;
+        if (pipMatte && maskCtx) {
+          await seekVideoTo(pipMatte, loopedOffsetSeconds);
+          drawImageFlippedMasked(
+            ctx, maskCanvas, overlayVideo, pipMatte,
+            psx, psy, psw, psh,
+            (psx / overlayVideo.videoWidth) * pipMatte.videoWidth, (psy / overlayVideo.videoHeight) * pipMatte.videoHeight,
+            (psw / overlayVideo.videoWidth) * pipMatte.videoWidth, (psh / overlayVideo.videoHeight) * pipMatte.videoHeight,
+            destX, destY, destWidth, destHeight,
+            pip.framing.flipHorizontal, pip.framing.flipVertical
+          );
+        } else {
+          drawImageFlipped(ctx, overlayVideo, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+        }
         ctx.filter = "none";
       }
 
