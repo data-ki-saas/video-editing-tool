@@ -17,7 +17,7 @@
  * so they need to read as two different kinds of box.
  */
 import { useRef, type ReactNode } from "react";
-import type { CropRect } from "@/lib/video/video_math";
+import type { CropRect, OverlayFraming } from "@/lib/video/video_math";
 
 const MIN_SIZE_FRACTION = 0.05;
 
@@ -25,6 +25,7 @@ export function OverlayRectOverlay({
   rect,
   imageUrl,
   cssFilter,
+  framing,
   renderInner,
   onChange,
   onCommit,
@@ -38,6 +39,19 @@ export function OverlayRectOverlay({
    * so this PiP thumbnail matches the live preview. Ignored when
    * renderInner is given (text overlays have no filter of their own). */
   cssFilter?: string;
+  /** This overlay's own pan/zoom/flip (see video_math.ts's OverlayFraming) --
+   * applied to `imageUrl` the same way VideoOverlayFramingDialog/
+   * ImageOverlayFramingDialog's own CoverFramingRegion renders it (a
+   * zoom-scaled wrapper anchored at the pan point, object-position for the
+   * pan itself, a separate flip transform on the <img>), so this rail tile
+   * shows the same crop the live CanvasPlayer preview does instead of
+   * always a plain, un-panned/un-zoomed `object-cover` of the raw asset.
+   * Only ever given (and only ever meaningful) for a Picture-in-Picture box
+   * -- FrameStrip.tsx never renders a Full-Screen/Split-Screen overlay
+   * through this component. Undefined falls back to the old plain
+   * `object-cover` rendering (text overlays don't pass imageUrl at all, so
+   * this only actually matters when imageUrl is also given). */
+  framing?: OverlayFraming;
   /** Replaces the default `<img>` content -- used for text overlays,
    * which have no imageUrl at all. */
   renderInner?: ReactNode;
@@ -118,10 +132,28 @@ export function OverlayRectOverlay({
           height: `${rect.height * 100}%`,
         }}
       >
-        {renderInner ?? (
-          // eslint-disable-next-line @next/next/no-img-element -- a presigned R2 asset URL, not a Next-optimizable static asset
-          <img src={imageUrl} alt="" className="h-full w-full object-cover" style={{ filter: cssFilter }} />
-        )}
+        {renderInner ??
+          (framing ? (
+            <div
+              className="pointer-events-none absolute inset-0 overflow-hidden"
+              style={{ transform: `scale(${framing.zoom})`, transformOrigin: `${framing.panX * 100}% ${framing.panY * 100}%` }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element -- a presigned R2 asset URL, not a Next-optimizable static asset */}
+              <img
+                src={imageUrl}
+                alt=""
+                className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+                style={{
+                  objectPosition: `${framing.panX * 100}% ${framing.panY * 100}%`,
+                  filter: cssFilter,
+                  transform: `scale(${framing.flipHorizontal ? -1 : 1}, ${framing.flipVertical ? -1 : 1})`,
+                }}
+              />
+            </div>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element -- a presigned R2 asset URL, not a Next-optimizable static asset
+            <img src={imageUrl} alt="" className="h-full w-full object-cover" style={{ filter: cssFilter }} />
+          ))}
 
         {isInteractive && (
           <div

@@ -376,6 +376,7 @@ const FrameTile = memo(function FrameTile({
             rect={overlay.layout.rect}
             imageUrl={overlayThumbnailUrl(overlay)}
             cssFilter={getFilterPresetOption(overlay.colorFilterId ?? null).cssFilter}
+            framing={overlay.framing}
             borderColorClassName="border-violet-400"
             handleColorClassName="bg-violet-400"
             onChange={onVideoOverlayRectChange ? (next) => onVideoOverlayRectChange(overlayIndex, next) : undefined}
@@ -391,6 +392,7 @@ const FrameTile = memo(function FrameTile({
             rect={overlay.layout.rect}
             imageUrl={assetUrlById[overlay.assetId] ?? ""}
             cssFilter={getFilterPresetOption(overlay.colorFilterId ?? null).cssFilter}
+            framing={overlay.framing}
             borderColorClassName="border-fuchsia-400"
             handleColorClassName="bg-fuchsia-400"
             onChange={onImageOverlayRectChange ? (next) => onImageOverlayRectChange(overlayIndex, next) : undefined}
