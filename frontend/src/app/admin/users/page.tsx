@@ -22,9 +22,11 @@ export default function AdminUsersPage() {
   }, [isAdmin, router]);
 
   useEffect(() => {
-    if (isAdmin !== true) return;
+    // Fetched in parallel with the isAdmin check (not gated on it) so this
+    // doesn't wait on a second round trip after permissions/me resolves --
+    // require_feature on the backend is the real gate for a non-admin caller.
     listRoles().catch(() => undefined).then((result) => result && setRoles(result));
-  }, [isAdmin]);
+  }, []);
 
   async function runSearch(e?: React.FormEvent) {
     e?.preventDefault();

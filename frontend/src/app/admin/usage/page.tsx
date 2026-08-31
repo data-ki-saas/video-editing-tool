@@ -25,14 +25,15 @@ export default function AdminUsagePage() {
   }, [isAdmin, router]);
 
   useEffect(() => {
-    if (isAdmin !== true) return;
+    // Fetched in parallel with the isAdmin check (not gated on it) -- see
+    // admin/users/page.tsx's own comment on why.
     getAdminUsageSummary(days)
       .then((result) => {
         setSummary(result);
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load usage summary"));
-  }, [isAdmin, days]);
+  }, [days]);
 
   if (isAdmin !== true) return null;
 

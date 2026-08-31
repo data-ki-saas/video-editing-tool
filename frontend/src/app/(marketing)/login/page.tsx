@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { prefetchPermissions } from "@/lib/usePermissions";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -28,6 +29,11 @@ export default function LoginPage() {
       setError(error.message);
       return;
     }
+
+    // Fire this off now rather than waiting for the dashboard chrome layout
+    // to mount -- by the time it does, usePermissions() often finds this
+    // already resolved instead of starting a fresh round trip.
+    prefetchPermissions();
 
     router.push("/dashboard");
     router.refresh();

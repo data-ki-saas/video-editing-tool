@@ -32,7 +32,8 @@ export default function AdminRoleDetailPage({ params }: { params: Promise<{ role
   }, [isAdmin, router]);
 
   useEffect(() => {
-    if (isAdmin !== true) return;
+    // Fetched in parallel with the isAdmin check (not gated on it) -- see
+    // admin/users/page.tsx's own comment on why.
     Promise.all([listFeatures(), listRoles()])
       .then(([featureList, roles]) => {
         setFeatures(featureList);
@@ -45,7 +46,7 @@ export default function AdminRoleDetailPage({ params }: { params: Promise<{ role
         }
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load role"));
-  }, [isAdmin, roleKey]);
+  }, [roleKey]);
 
   const grouped = useMemo(() => {
     const groups = new Map<string, FeatureInfo[]>();

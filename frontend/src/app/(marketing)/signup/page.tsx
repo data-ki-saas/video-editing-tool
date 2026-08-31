@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { prefetchPermissions } from "@/lib/usePermissions";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -50,6 +51,8 @@ export default function SignupPage() {
       setCheckEmailMessage("Check your email to confirm your account, then sign in.");
       return;
     }
+
+    prefetchPermissions();
 
     router.push("/dashboard");
     router.refresh();

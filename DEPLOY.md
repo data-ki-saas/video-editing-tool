@@ -216,6 +216,7 @@ the next push that touches `supabase/migrations/`.
    |---|---|---|
    | `SUPABASE_URL` | ✅ | `<SUPABASE_URL>` |
    | `SUPABASE_SERVICE_ROLE_KEY` | ✅ | `<SUPABASE_SERVICE_ROLE_KEY>` |
+   | `SUPABASE_JWT_SECRET` | optional (recommended) | Supabase project > **Settings > API > JWT Settings > Legacy JWT Secret** — lets the backend verify access tokens locally instead of a network round trip per request; auth still works without it, just slower |
    | `R2_ACCOUNT_ID` | ✅ | `<R2_ACCOUNT_ID>` |
    | `R2_ACCESS_KEY_ID` | ✅ | `<R2_ACCESS_KEY_ID>` |
    | `R2_SECRET_ACCESS_KEY` | ✅ | `<R2_SECRET_ACCESS_KEY>` |
@@ -426,6 +427,7 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | `CORS_ORIGINS` | `http://localhost:3000` | Your Vercel deployment URL (step 6) — Vercel project > **Settings > Domains**, or just the URL shown after your first deploy. Comma-separate if more than one. |
 | `SUPABASE_URL` | `""` | Supabase project > **Settings > API > Project URL** |
 | `SUPABASE_SERVICE_ROLE_KEY` | `""` | Supabase project > **Settings > API > Project API keys > `service_role`** (click "Reveal") |
+| `SUPABASE_JWT_SECRET` | `""` | Supabase project > **Settings > API > JWT Settings > Legacy JWT Secret**. Optional — left blank, `get_current_user` falls back to a slower `auth.get_user()` network call per request (see `core/auth.py`) |
 | `R2_ACCOUNT_ID` | `""` | Cloudflare dashboard > **R2** — Account ID is in the right sidebar of the R2 overview page |
 | `R2_ACCESS_KEY_ID` | `""` | Cloudflare > **R2 > Manage API Tokens > Create API Token** (scope: uploads bucket, step 2a) — shown after creating the token |
 | `R2_SECRET_ACCESS_KEY` | `""` | Same token-creation screen as above — **shown once only**, copy it immediately |

@@ -24,6 +24,14 @@ export function resetPermissionsCache() {
   cachedPromise = null;
 }
 
+/** Kicks off the permissions fetch immediately (e.g. right after login,
+ * before the first protected page even mounts) so usePermissions() finds a
+ * warm/in-flight cache instead of starting cold. Fire-and-forget -- callers
+ * don't need the result, just the earlier start. */
+export function prefetchPermissions() {
+  fetchPermissions().catch(() => undefined);
+}
+
 export interface UsePermissionsResult {
   loading: boolean;
   role: string | null;

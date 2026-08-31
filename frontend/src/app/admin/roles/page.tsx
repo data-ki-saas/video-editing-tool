@@ -26,11 +26,12 @@ export default function AdminRolesPage() {
   }, [isAdmin, router]);
 
   useEffect(() => {
-    if (isAdmin !== true) return;
+    // Fetched in parallel with the isAdmin check (not gated on it) -- see
+    // admin/users/page.tsx's own comment on why.
     listRoles()
       .then(setRoles)
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load roles"));
-  }, [isAdmin]);
+  }, []);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();

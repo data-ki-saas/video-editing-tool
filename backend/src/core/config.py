@@ -112,6 +112,12 @@ class Settings(BaseSettings):
 
     supabase_url: str = ""
     supabase_service_role_key: str = ""
+    # Project Settings > API > JWT Settings > "Legacy JWT Secret" -- lets
+    # get_current_user verify an access token's signature locally (HS256)
+    # instead of a network round trip to Supabase Auth on every request. Left
+    # unset, auth.py falls back to that slower remote check, so this is safe
+    # to leave blank until you copy the value in (see DEPLOY.md).
+    supabase_jwt_secret: str = ""
 
     r2_account_id: str = ""
     r2_access_key_id: str = ""
