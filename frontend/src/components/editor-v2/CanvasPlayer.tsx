@@ -70,6 +70,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { extractPreviewFrames, getVideoDuration, drawImageFlipped } from "@/lib/video/video";
 import { segmentClipFramesApproximate, lumaFramesToAlphaMasks, segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
+import { drawBrandWatermark } from "@/lib/video/brandWatermark";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
 import {
   frameIndexAtTime,
@@ -967,6 +968,12 @@ export const CanvasPlayer = forwardRef<
         progress: computeProgress(overlay.startTimeSeconds, ttsOverlayEndTimeSeconds(overlay), elapsedSeconds),
       });
     }
+
+    // Automatic branding -- always drawn last, on top of every other
+    // overlay/caption, so nothing else on the timeline can cover it. Not
+    // user-authored (see brandWatermark.ts's own module comment); a no-op
+    // outside the final BRAND_WATERMARK_DURATION_SECONDS of the sequence.
+    drawBrandWatermark(ctx, canvas.width, canvas.height, elapsedSeconds, durationRef.current);
   }
 
   function tick() {

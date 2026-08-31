@@ -63,6 +63,13 @@ import {
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
 import { getTextTemplateFontFraction, getStrokeWidthFontSizeFraction } from "@/lib/video/textTemplates";
+import {
+  BRAND_WATERMARK_TEXT,
+  BRAND_WATERMARK_DURATION_SECONDS,
+  PADDING_FRACTION as BRAND_PADDING_FRACTION,
+  FONT_SIZE_FRACTION as BRAND_FONT_SIZE_FRACTION,
+  FADE_IN_SECONDS as BRAND_FADE_IN_SECONDS,
+} from "@/lib/video/brandWatermark";
 import { getTranscriptCaptionConfig } from "@/lib/video/transcriptCaptionTemplates";
 import { getCreatomateFilterProperties, type FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
@@ -1334,6 +1341,60 @@ function buildTranscriptCaptionElements(
   });
 }
 
+/** Automatic "Made by myreels.in" attribution, burned into every cloud
+ * render's final BRAND_WATERMARK_DURATION_SECONDS -- NOT a user-authored
+ * TextOverlay (no toggle exists to remove it), always present regardless
+ * of what else is on the timeline. Its constants (text, duration, padding/
+ * font-size fractions) are imported from lib/video/brandWatermark.ts, the
+ * SAME module CanvasPlayer's live preview and lib/localRender/
+ * exportTimeline.ts's local render call directly for their own canvas
+ * draw, so all three paths agree on timing/size/padding without hand-
+ * syncing three copies of the same numbers.
+ *
+ * Positioned top-right via xAnchor/yAnchor "100%"/"0%" (the box's own
+ * top-right corner pinned at (x,y), same anchor-corner convention
+ * anchoredRectProperties uses for a center-anchored template) with a
+ * GENEROUS width (90%) -- textWrap: false keeps it one line regardless,
+ * and xAlignment: "100%" right-aligns the text within that box so it
+ * hugs the SAME padded right edge the box itself is pinned to, regardless
+ * of the box's own width. A fixed `fontSize` (not fontSizeMinimum/Maximum
+ * auto-fit) since this is a small constant-size badge, not a
+ * responsive caption. backgroundColor/backgroundXPadding/backgroundYPadding
+ * reuse the exact "solid pill behind text" property set (and the same
+ * padding percentages) minimal-subtitle/highlight-box already rely on
+ * elsewhere in this file, for the identical "must read over arbitrary
+ * busy footage" reason -- verified as real Text element properties there,
+ * not guessed fresh here. */
+function buildBrandWatermarkElement(totalOutputDurationSeconds: number, track: number): Text {
+  const durationSeconds = Math.min(BRAND_WATERMARK_DURATION_SECONDS, totalOutputDurationSeconds);
+  const startSeconds = Math.max(0, totalOutputDurationSeconds - durationSeconds);
+  const fadeInSeconds = Math.min(BRAND_FADE_IN_SECONDS, durationSeconds);
+
+  return new Text({
+    id: nextId("brand-watermark"),
+    track,
+    time: startSeconds,
+    duration: durationSeconds,
+    text: BRAND_WATERMARK_TEXT,
+    textWrap: false,
+    fontWeight: 700,
+    fontSize: `${BRAND_FONT_SIZE_FRACTION * 100}vh`,
+    fillColor: "#ffffff",
+    backgroundColor: "rgba(0, 0, 0, 0.55)",
+    backgroundXPadding: "20%",
+    backgroundYPadding: "15%",
+    backgroundBorderRadius: "30%",
+    xAlignment: "100%",
+    x: pct(1 - BRAND_PADDING_FRACTION),
+    y: pct(BRAND_PADDING_FRACTION),
+    width: pct(0.9),
+    height: pct(BRAND_FONT_SIZE_FRACTION * 3),
+    xAnchor: "100%",
+    yAnchor: "0%",
+    opacity: [new Keyframe(0, 0, CROP_EASING), new Keyframe(1, fadeInSeconds, CROP_EASING)],
+  });
+}
+
 export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline {
   idCounter = 0;
   const {
@@ -1463,6 +1524,14 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     appMeta,
     toVolumePercent(backgroundVolume)
   );
+  // Always the LAST element added and the HIGHEST track number -- must
+  // render on top of every other overlay/caption no matter which of
+  // Creatomate's two possible z-order rules (array order within a
+  // Composition, vs. track number at the root) actually governs here; see
+  // this file's own module comment on that still-open ambiguity elsewhere
+  // (maskMode's track-based masking). Satisfying both at once means it
+  // stays on top regardless.
+  const brandWatermarkElement = buildBrandWatermarkElement(totalOutputDurationSeconds, nextTrack());
 
   const elements: TemplateElement[] = [
     cropViewport.toMap() as TemplateElement,
@@ -1472,6 +1541,7 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     ...ttsOverlayElements.map((el) => el.toMap() as TemplateElement),
     ...transcriptCaptionElements.map((el) => el.toMap() as TemplateElement),
     ...(backgroundAudio ? [backgroundAudio.toMap() as TemplateElement] : []),
+    brandWatermarkElement.toMap() as TemplateElement,
   ];
 
   return {

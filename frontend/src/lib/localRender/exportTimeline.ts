@@ -76,6 +76,7 @@ import {
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
+import { drawBrandWatermark } from "@/lib/video/brandWatermark";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import {
   getCanvasFillMode,
@@ -983,6 +984,16 @@ export async function exportVideoLocally(
           progress: computeProgress(overlay.startTimeSeconds, ttsOverlayEndTimeSeconds(overlay), sourceTimeSeconds),
         });
       }
+
+      // Automatic branding -- always drawn last, on top of every other
+      // overlay/caption, so nothing else on the timeline can cover it. Not
+      // user-authored (see brandWatermark.ts's own module comment); a
+      // no-op outside the final BRAND_WATERMARK_DURATION_SECONDS of the
+      // sequence. Timed against outputTimeSeconds/totalDurationSeconds
+      // (the OUTPUT timeline), not sourceTimeSeconds (a position within
+      // whichever clip is currently playing) -- same distinction
+      // CanvasPlayer's own elapsedSeconds draws against.
+      drawBrandWatermark(ctx, canvas.width, canvas.height, outputTimeSeconds, totalDurationSeconds);
 
       // CanvasSource.add resolves once Mediabunny/the encoder is ready for
       // more -- awaiting it is the backpressure mechanism, no manual
