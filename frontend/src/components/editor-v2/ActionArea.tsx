@@ -771,7 +771,7 @@ export function ActionArea({
           overlay={framingDialogOverlay}
           baseFrameUrl={previewFrameUrl ?? ""}
           overlayFrameUrl={framingDialogOverlayFrameUrl ?? ""}
-          outputAspectRatio={frameAspectRatio}
+          outputAspectRatio={playAreaRatio}
           onSave={onSaveVideoOverlayFraming}
           onClose={onCloseVideoOverlayFramingDialog}
           onDelete={onDeleteFramingDialogOverlay}
@@ -783,7 +783,7 @@ export function ActionArea({
           overlay={imageFramingDialogOverlay}
           baseFrameUrl={previewFrameUrl ?? ""}
           overlayFrameUrl={assetUrlById[imageFramingDialogOverlay.assetId] ?? ""}
-          outputAspectRatio={frameAspectRatio}
+          outputAspectRatio={playAreaRatio}
           onSave={onSaveImageOverlayFraming}
           onClose={onCloseImageOverlayFramingDialog}
           onDelete={onDeleteImageFramingDialogOverlay}
