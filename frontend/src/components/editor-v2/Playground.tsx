@@ -94,8 +94,12 @@ const BACKGROUND_RAIL_HEIGHT_PX = 28;
 const PROXY_SCROLLBAR_HEIGHT_PX = 10;
 
 // Shared time-to-pixel scale for all three strips -- see this file's
-// module comment.
-const PIXELS_PER_SECOND = 60;
+// module comment. 120 (not 60) so a 1-second thumbnail tile on FrameStrip
+// (THUMBNAIL_INTERVAL_SECONDS in ThreePaneEditor.tsx) renders at least
+// 120px wide -- comfortably visible/selectable, not a sliver -- since
+// every other strip is deliberately locked to this same scale, bumping it
+// zooms the whole timeline in together rather than only FrameStrip.
+const PIXELS_PER_SECOND = 120;
 
 const BACKGROUND_STRIP_INDEX = 0;
 const FRAME_STRIP_INDEX = 1;
