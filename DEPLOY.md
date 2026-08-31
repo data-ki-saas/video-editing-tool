@@ -63,6 +63,11 @@ earlier one.
      (or `insert into public.profiles (user_id, role) values ('<uuid>', 'admin') on conflict (user_id) do update set role = 'admin';`
      if that user has no `profiles` row yet). Every other role assignment can
      then be done from `/admin/users`.
+   - `0020_drop_assets_storage_key_unique.sql` — drops the leftover unique
+     constraint on `assets.storage_key` from `0001`, which contradicted
+     `0009`'s content-hash dedup (multiple asset rows are meant to share a
+     storage_key) and caused every cross-project dedup hit to fail the
+     insert with a `23505` duplicate-key error.
 3. **Auth settings** (Authentication > Providers > Email): if you leave
    "Confirm email" ON (the default) and haven't configured SMTP, sign-up
    will silently require a confirmation email that never arrives — either
