@@ -167,6 +167,54 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+// Radians/second the badge below spins at -- fast enough to visibly read as
+// "still working" at a glance, not so fast it looks like a glitch.
+const BACKGROUND_REMOVAL_SPINNER_RADIANS_PER_SECOND = 6;
+
+/** A small spinning-arc badge in an overlay's top-right corner, drawn OVER
+ * whatever's already been composited there -- the live-preview cue that a
+ * video overlay's `backgroundRemoval` is enabled but its real matte
+ * (`matteAssetId`) hasn't come back from the backend's AI matting job yet
+ * (see video_math.ts's VideoOverlayClip.backgroundRemoval doc comment).
+ * Drawn regardless of whether an approximate MediaPipe fallback mask is
+ * already showing underneath (see CanvasPlayer's own videoOverlayMattesByAssetIdRef
+ * loading effect) -- that fallback is a reasonable preview, but this badge
+ * is the definitive "the real cutout isn't final yet" signal, tied only to
+ * matteAssetId, not to whether a preview-quality mask happens to exist.
+ * `elapsedSeconds` drives the spin so it animates during playback; a paused
+ * frame just redraws at whatever angle that instant implies, same as every
+ * other elapsedSeconds-driven visual in this file. Never called from
+ * exportTimeline.ts/compileCreatomateTimeline.ts -- this is a GUI-only
+ * loading cue, not something that should ever bake into rendered output. */
+function drawBackgroundRemovalSpinnerBadge(
+  ctx: CanvasRenderingContext2D,
+  destX: number,
+  destY: number,
+  destWidth: number,
+  destHeight: number,
+  elapsedSeconds: number
+) {
+  const radius = Math.min(16, Math.min(destWidth, destHeight) * 0.18);
+  if (radius < 3) return; // box too small for the badge to read as anything but a smudge
+  const centerX = destX + destWidth - radius - 4;
+  const centerY = destY + radius + 4;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+  ctx.fill();
+
+  const angle = (elapsedSeconds * BACKGROUND_REMOVAL_SPINNER_RADIANS_PER_SECOND) % (Math.PI * 2);
+  ctx.beginPath();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+  ctx.lineWidth = Math.max(1.5, radius * 0.22);
+  ctx.lineCap = "round";
+  ctx.arc(centerX, centerY, radius * 0.55, angle, angle + Math.PI * 1.2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 export const CanvasPlayer = forwardRef<
   CanvasPlayerHandle,
   {
@@ -922,6 +970,9 @@ export const CanvasPlayer = forwardRef<
           );
         }
         ctx.filter = "none";
+        if (activeExclusiveVideoOverlay.backgroundRemoval?.enabled && !activeExclusiveVideoOverlay.backgroundRemoval.matteAssetId) {
+          drawBackgroundRemovalSpinnerBadge(ctx, destX, destY, destWidth, destHeight, elapsedSeconds);
+        }
       }
     }
 
@@ -964,6 +1015,9 @@ export const CanvasPlayer = forwardRef<
         drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
       }
       ctx.filter = "none";
+      if (pip.backgroundRemoval?.enabled && !pip.backgroundRemoval.matteAssetId) {
+        drawBackgroundRemovalSpinnerBadge(ctx, destX, destY, destWidth, destHeight, elapsedSeconds);
+      }
     }
 
     // Picture-in-Picture IMAGE overlays draw AFTER video PiP overlays, so

@@ -132,6 +132,50 @@ import {
   type ZoomEffect,
 } from "@/lib/video/video_math";
 
+// One video-overlay source asset's own thumbnails, extracted at the same
+// THUMBNAIL_INTERVAL_SECONDS cadence as the base track's own `thumbnails`
+// (see ThreePaneEditor.tsx's loadVideoOverlayThumbnailFrames) -- keyed by
+// assetId, shared across every placement reusing that asset, same
+// convention as videoThumbnailUrlByAssetId/videoOverlayStartThumbnailByKey.
+export interface VideoOverlayThumbnailFrames {
+  frames: string[];
+  timestampsSeconds: number[];
+  durationSeconds: number;
+}
+
+/** Which of an overlay's own extracted thumbnails (see
+ * VideoOverlayThumbnailFrames above) is showing at the BASE timeline's
+ * `timestampSeconds` -- converts to the overlay's own LOCAL time
+ * (sourceStartSeconds + elapsed-since-this-placement-started, looped once
+ * past one play-through, same formula CanvasPlayer's own drawFrameAt uses
+ * for the live preview) and picks the closest sampled frame to that local
+ * instant, so scrubbing across this overlay's span on the rail actually
+ * shows what part of ITS footage would be playing there instead of one
+ * static frame reused for the overlay's entire span. Falls back to the
+ * seeded-start-frame-then-generic-per-asset-frame chain (same as before
+ * this per-tile resolution existed) while framesByAssetId doesn't have this
+ * asset yet (still extracting, or failed and never will). */
+function resolveVideoOverlayFrameUrl(
+  overlay: VideoOverlayClip,
+  timestampSeconds: number,
+  framesByAssetId: Record<string, VideoOverlayThumbnailFrames>,
+  startThumbnailByKey: Record<string, string>,
+  genericThumbnailByAssetId: Record<string, string>
+): string {
+  const frames = framesByAssetId[overlay.assetId];
+  if (frames && frames.frames.length > 0) {
+    const localOffsetSeconds = overlay.sourceStartSeconds + (timestampSeconds - overlay.startTimeSeconds);
+    const loopedOffsetSeconds = frames.durationSeconds > 0 ? localOffsetSeconds % frames.durationSeconds : localOffsetSeconds;
+    const frameIndex = findClosestTimestampIndex(frames.timestampsSeconds, loopedOffsetSeconds);
+    if (frameIndex !== -1) return frames.frames[frameIndex];
+  }
+  return (
+    startThumbnailByKey[videoOverlayStartThumbnailKey(overlay.assetId, overlay.sourceStartSeconds)] ??
+    genericThumbnailByAssetId[overlay.assetId] ??
+    ""
+  );
+}
+
 const FrameTile = memo(function FrameTile({
   src,
   index,
@@ -145,10 +189,9 @@ const FrameTile = memo(function FrameTile({
   textOverlays,
   imageOverlayPips,
   videoOverlayPips,
-  videoThumbnailUrlById,
-  videoOverlayStartThumbnailByKey,
   activeExclusiveImageOverlay,
   activeExclusiveVideoOverlay,
+  activeExclusiveVideoOverlayFrameUrl,
   isImageClip,
   colorFilterId,
   onChange,
@@ -182,15 +225,13 @@ const FrameTile = memo(function FrameTile({
   // rendered with the same OverlayRectOverlay component image overlays
   // already use (move/resize drag), just styled violet instead of fuchsia
   // so the two overlay kinds read as visually distinct when both are
-  // present.
-  videoOverlayPips: { overlay: VideoOverlayClip; overlayIndex: number }[];
-  videoThumbnailUrlById: Record<string, string>;
-  // A still frame captured at this overlay placement's own marked start
-  // point (flag icon), keyed by videoOverlayStartThumbnailKey -- preferred
-  // over videoThumbnailUrlById's generic per-asset frame below when present,
-  // so the main track actually shows the overlay starting from that point
-  // rather than always the same frame-0.1s thumbnail.
-  videoOverlayStartThumbnailByKey: Record<string, string>;
+  // present. `frameUrl` is this tile's own instant resolved against the
+  // overlay's OWN footage (see FrameStrip's resolveVideoOverlayFrameUrl) --
+  // NOT a single static thumbnail reused across every tile the overlay
+  // spans, so scrubbing across its span actually shows what part of its
+  // footage would be playing at each point, same as the base track already
+  // does for its own per-second thumbnails.
+  videoOverlayPips: { overlay: VideoOverlayClip; overlayIndex: number; frameUrl: string }[];
   // The Full-Screen or Split-Screen IMAGE overlay active at this tile's
   // instant, if any -- takes priority over activeExclusiveVideoOverlay
   // below when both are present (matches CanvasPlayer's own draw order:
@@ -207,6 +248,11 @@ const FrameTile = memo(function FrameTile({
   // show the base clip's own frame. Only used when no image-exclusive
   // overlay is active at the same instant.
   activeExclusiveVideoOverlay: VideoOverlayClip | null;
+  // This tile's own instant resolved against activeExclusiveVideoOverlay's
+  // OWN footage -- same per-tile resolution as videoOverlayPips' own
+  // frameUrl above, just for the exclusive-layout case (at most one active
+  // overlay, not a list). Null exactly when activeExclusiveVideoOverlay is.
+  activeExclusiveVideoOverlayFrameUrl: string | null;
   // True when this tile's timestamp falls inside an image (cutaway) clip
   // rather than a video one -- its `src` is that cutaway's own photo, held
   // unchanged for the whole clip (see ThreePaneEditor's extractSequence),
@@ -251,17 +297,6 @@ const FrameTile = memo(function FrameTile({
 
   function rectStyle(rect: CropRect): React.CSSProperties {
     return { left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` };
-  }
-
-  // Prefers the frame captured at this placement's own marked start point
-  // (flag icon) over the generic per-asset thumbnail -- see this file's
-  // prop comment on videoOverlayStartThumbnailByKey.
-  function overlayThumbnailUrl(overlay: VideoOverlayClip): string {
-    return (
-      videoOverlayStartThumbnailByKey[videoOverlayStartThumbnailKey(overlay.assetId, overlay.sourceStartSeconds)] ??
-      videoThumbnailUrlById[overlay.assetId] ??
-      ""
-    );
   }
 
   const exclusiveImageOverlayRects =
@@ -326,7 +361,7 @@ const FrameTile = memo(function FrameTile({
         // footage, only the base clip's.
         // eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset
         <img
-          src={overlayThumbnailUrl(activeExclusiveVideoOverlay)}
+          src={activeExclusiveVideoOverlayFrameUrl ?? ""}
           alt={`Frame at ${index}s`}
           className="h-full w-full object-cover"
           style={{ filter: videoOverlayCssFilter }}
@@ -343,7 +378,7 @@ const FrameTile = memo(function FrameTile({
           <div className="absolute overflow-hidden" style={rectStyle(exclusiveVideoOverlayRects.overlayRect)}>
             {/* eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset */}
             <img
-              src={overlayThumbnailUrl(activeExclusiveVideoOverlay)}
+              src={activeExclusiveVideoOverlayFrameUrl ?? ""}
               alt=""
               className="h-full w-full object-cover"
               style={{ filter: videoOverlayCssFilter }}
@@ -368,13 +403,13 @@ const FrameTile = memo(function FrameTile({
           onFlipVertical={onFlipVertical}
         />
       )}
-      {videoOverlayPips.map(({ overlay, overlayIndex }) => {
+      {videoOverlayPips.map(({ overlay, overlayIndex, frameUrl }) => {
         if (overlay.layout.type !== "picture-in-picture") return null;
         return (
           <OverlayRectOverlay
             key={`video-${overlayIndex}`}
             rect={overlay.layout.rect}
-            imageUrl={overlayThumbnailUrl(overlay)}
+            imageUrl={frameUrl}
             cssFilter={getFilterPresetOption(overlay.colorFilterId ?? null).cssFilter}
             framing={overlay.framing}
             borderColorClassName="border-violet-400"
@@ -480,6 +515,7 @@ export function FrameStrip({
   videoOverlays,
   videoThumbnailUrlByAssetId,
   videoOverlayStartThumbnailByKey,
+  videoOverlayThumbnailFramesByAssetId,
   overlaySourceDurationSeconds,
   onChangeVideoOverlayRect,
   onCommitVideoOverlayRect,
@@ -595,8 +631,14 @@ export function FrameStrip({
   onDeleteTtsOverlay: (overlayIndex: number) => void;
   videoOverlays: VideoOverlayClip[];
   videoThumbnailUrlByAssetId: Record<string, string>;
-  // See FrameTile's own prop comment -- passed straight through.
+  // Seeded-start-frame fallback for resolveVideoOverlayFrameUrl above, used
+  // only until videoOverlayThumbnailFramesByAssetId has this overlay's own
+  // asset (or if extraction fails and never does).
   videoOverlayStartThumbnailByKey: Record<string, string>;
+  // Each video-overlay asset's own extracted per-second thumbnails --
+  // see VideoOverlayThumbnailFrames/resolveVideoOverlayFrameUrl above and
+  // ThreePaneEditor.tsx's own extraction effect.
+  videoOverlayThumbnailFramesByAssetId: Record<string, VideoOverlayThumbnailFrames>;
   overlaySourceDurationSeconds: Record<string, number>;
   onChangeVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
   onCommitVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
@@ -780,7 +822,11 @@ export function FrameStrip({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, overlayImages]);
 
-  // Same shape as tileImageOverlayPips above, but for video overlays.
+  // Same shape as tileImageOverlayPips above, but for video overlays --
+  // additionally resolving each active overlay's own `frameUrl` at this
+  // tile's instant (see resolveVideoOverlayFrameUrl above), so a PiP
+  // overlay spanning several tiles shows a different frame of ITS footage
+  // per tile instead of one static frame reused across its whole span.
   const tileVideoOverlayPips = useMemo(() => {
     return thumbnailTimestampsSeconds.map((timestamp) =>
       videoOverlays
@@ -789,9 +835,27 @@ export function FrameStrip({
           ({ overlay }) =>
             overlay.layout.type === "picture-in-picture" && timestamp >= overlay.startTimeSeconds && timestamp < overlay.endTimeSeconds
         )
+        .map(({ overlay, overlayIndex }) => ({
+          overlay,
+          overlayIndex,
+          frameUrl: resolveVideoOverlayFrameUrl(
+            overlay,
+            timestamp,
+            videoOverlayThumbnailFramesByAssetId,
+            videoOverlayStartThumbnailByKey,
+            videoThumbnailUrlByAssetId
+          ),
+        }))
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
-  }, [thumbnails.length, thumbnailTimestampsSeconds, videoOverlays]);
+  }, [
+    thumbnails.length,
+    thumbnailTimestampsSeconds,
+    videoOverlays,
+    videoOverlayThumbnailFramesByAssetId,
+    videoOverlayStartThumbnailByKey,
+    videoThumbnailUrlByAssetId,
+  ]);
 
   // Every meaningful time reference on this strip, combined into one list
   // for VideoOverlayTrack/ImageOverlayTrack's drag-to-snap (see its own
@@ -844,6 +908,30 @@ export function FrameStrip({
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, videoOverlays]);
+
+  // This tile's own instant resolved against tileActiveExclusiveVideoOverlay
+  // (above)'s own footage -- same per-tile resolution as tileVideoOverlayPips'
+  // own frameUrl, just for the exclusive-layout (Full-Screen/Split-Screen)
+  // case, where at most one overlay is ever active per tile.
+  const tileActiveExclusiveVideoOverlayFrameUrl = useMemo(() => {
+    return tileActiveExclusiveVideoOverlay.map((overlay, index) =>
+      overlay
+        ? resolveVideoOverlayFrameUrl(
+            overlay,
+            thumbnailTimestampsSeconds[index],
+            videoOverlayThumbnailFramesByAssetId,
+            videoOverlayStartThumbnailByKey,
+            videoThumbnailUrlByAssetId
+          )
+        : null
+    );
+  }, [
+    tileActiveExclusiveVideoOverlay,
+    thumbnailTimestampsSeconds,
+    videoOverlayThumbnailFramesByAssetId,
+    videoOverlayStartThumbnailByKey,
+    videoThumbnailUrlByAssetId,
+  ]);
 
   // One segment per base-sequence clip (video or image), for the Cutaways
   // rail (CutawayTrack) -- start/end time come from the same
@@ -1089,10 +1177,9 @@ export function FrameStrip({
               textOverlays={tileTextOverlays[index]}
               imageOverlayPips={tileImageOverlayPips[index]}
               videoOverlayPips={tileVideoOverlayPips[index]}
-              videoThumbnailUrlById={videoThumbnailUrlByAssetId}
-              videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}
               activeExclusiveImageOverlay={tileActiveExclusiveImageOverlay[index]}
               activeExclusiveVideoOverlay={tileActiveExclusiveVideoOverlay[index]}
+              activeExclusiveVideoOverlayFrameUrl={tileActiveExclusiveVideoOverlayFrameUrl[index]}
               isImageClip={tileIsImageClip[index] ?? false}
               colorFilterId={tileColorFilterId[index] ?? null}
               onChange={index === activeTileIndex ? onCropRectChange : undefined}

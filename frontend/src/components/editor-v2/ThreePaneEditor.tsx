@@ -144,6 +144,7 @@ import { DEFAULT_MARKER_LABEL } from "./MarkerTrack";
 import { ActionArea } from "./ActionArea";
 import { TopMenuBar } from "./TopMenuBar";
 import { Playground } from "./Playground";
+import type { VideoOverlayThumbnailFrames } from "./FrameStrip";
 import type { CutawaySegment } from "./CutawayTrack";
 import { FeedbackArea } from "./FeedbackArea";
 import type { CanvasPlayerHandle } from "./CanvasPlayer";
@@ -301,6 +302,18 @@ export function ThreePaneEditor({
   // from its marked start point, instead of the one generic per-asset
   // thumbnail (always frame ~0.1s) videoThumbnailUrlByAssetId above provides.
   const [videoOverlayStartThumbnailByKey, setVideoOverlayStartThumbnailByKey] = useState<Record<string, string>>({});
+  // Each video-overlay source asset's own thumbnails, extracted at the same
+  // THUMBNAIL_INTERVAL_SECONDS cadence as the base track's own `thumbnails`
+  // -- lets FrameStrip's rail show a DIFFERENT frame of the overlay's own
+  // footage per tile across its span (see FrameStrip.tsx's
+  // resolveVideoOverlayFrameUrl), instead of one static frame reused for
+  // every tile the overlay covers. Keyed by assetId (not by placement, like
+  // videoOverlayStartThumbnailByKey above) since the full extracted array
+  // already covers every possible local offset a placement's own
+  // sourceStartSeconds could need.
+  const [videoOverlayThumbnailFramesByAssetId, setVideoOverlayThumbnailFramesByAssetId] = useState<
+    Record<string, VideoOverlayThumbnailFrames>
+  >({});
 
   // TextOverlayDialog's open/edit-target state -- null editingTextOverlayIndex
   // means "Add" (a fresh overlay); otherwise it's pre-filled for editing
@@ -721,6 +734,42 @@ export function ThreePaneEditor({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- selections.videoOverlays/assetUrlById are fresh objects every render; videoOverlayStartThumbnailKeys (memoized) is what actually gates this
   }, [videoOverlayStartThumbnailKeys]);
+
+  // Extracts each video-overlay asset's own thumbnails at the same cadence
+  // as the base track's own `thumbnails` (THUMBNAIL_INTERVAL_SECONDS) --
+  // see FrameStrip.tsx's resolveVideoOverlayFrameUrl for why this full
+  // array (not just the one seeded start-frame above) is what lets the
+  // rail show a different frame of the overlay's own footage per tile
+  // across its span, instead of one static frame reused for the whole
+  // span. Waits on overlaySourceDurationSeconds (already probed above, by
+  // the same videoOverlayAssetIds) rather than re-probing duration itself.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadFrames() {
+      for (const assetId of videoOverlayAssetIds) {
+        if (cancelled) return;
+        if (videoOverlayThumbnailFramesByAssetId[assetId]) continue;
+        const durationSeconds = overlaySourceDurationSeconds[assetId];
+        if (durationSeconds === undefined) continue;
+        const url = assetUrlById[assetId];
+        if (!url) continue;
+        try {
+          const frames = await extractThumbnails(url, THUMBNAIL_INTERVAL_SECONDS);
+          if (cancelled) return;
+          const timestampsSeconds = generateSampleTimestamps(durationSeconds, THUMBNAIL_INTERVAL_SECONDS);
+          setVideoOverlayThumbnailFramesByAssetId((prev) => ({ ...prev, [assetId]: { frames, timestampsSeconds, durationSeconds } }));
+        } catch {
+          // Leaves this asset on the seeded-start-frame/generic-per-asset
+          // fallback -- see FrameStrip.tsx's resolveVideoOverlayFrameUrl.
+        }
+      }
+    }
+    void loadFrames();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- assetUrlById/videoOverlayThumbnailFramesByAssetId are fresh objects every render; videoOverlayAssetIds (memoized) + overlaySourceDurationSeconds gate this
+  }, [videoOverlayAssetIds, overlaySourceDurationSeconds]);
 
   // The sequence to actually play: persisted sequenceClips, filtered to
   // entries whose asset still resolves (so a deleted asset silently drops
@@ -2380,6 +2429,7 @@ export function ThreePaneEditor({
           videoOverlays={displayedVideoOverlays}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
           videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}
+          videoOverlayThumbnailFramesByAssetId={videoOverlayThumbnailFramesByAssetId}
           overlaySourceDurationSeconds={overlaySourceDurationSeconds}
           onChangeVideoOverlayRect={handleChangeVideoOverlayRect}
           onCommitVideoOverlayRect={handleCommitVideoOverlayRect}

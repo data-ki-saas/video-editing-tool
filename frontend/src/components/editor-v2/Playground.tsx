@@ -60,7 +60,7 @@
  * panel" apart.
  */
 import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
-import { FrameStrip } from "./FrameStrip";
+import { FrameStrip, type VideoOverlayThumbnailFrames } from "./FrameStrip";
 import { MainAudioTrackStrip } from "./MainAudioTrackStrip";
 import { VolumeBadge } from "./VolumeBadge";
 import { MicrophoneIcon, MusicNoteIcon } from "@/components/icons/UIIcons";
@@ -177,6 +177,7 @@ export function Playground({
   videoOverlays,
   videoThumbnailUrlByAssetId,
   videoOverlayStartThumbnailByKey,
+  videoOverlayThumbnailFramesByAssetId,
   overlaySourceDurationSeconds,
   onChangeVideoOverlayRect,
   onCommitVideoOverlayRect,
@@ -284,6 +285,10 @@ export function Playground({
   // present so the main track shows the overlay starting from its marked
   // point. See ThreePaneEditor.tsx's own comment on the state this reads.
   videoOverlayStartThumbnailByKey: Record<string, string>;
+  // Each video-overlay asset's own extracted per-second thumbnails -- see
+  // FrameStrip.tsx's VideoOverlayThumbnailFrames/resolveVideoOverlayFrameUrl
+  // and ThreePaneEditor.tsx's own extraction effect.
+  videoOverlayThumbnailFramesByAssetId: Record<string, VideoOverlayThumbnailFrames>;
   overlaySourceDurationSeconds: Record<string, number>;
   onChangeVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
   onCommitVideoOverlayRect: (overlayIndex: number, next: CropRect) => void;
@@ -396,6 +401,7 @@ export function Playground({
             videoOverlays={videoOverlays}
             videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
             videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}
+            videoOverlayThumbnailFramesByAssetId={videoOverlayThumbnailFramesByAssetId}
             overlaySourceDurationSeconds={overlaySourceDurationSeconds}
             onChangeVideoOverlayRect={onChangeVideoOverlayRect}
             onCommitVideoOverlayRect={onCommitVideoOverlayRect}

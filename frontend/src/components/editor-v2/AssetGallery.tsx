@@ -19,7 +19,11 @@
  *  - "Overlay" (either kind) places it on its own rail at the current
  *    playhead with a switchable Full-Screen/Picture-in-Picture/Split Screen
  *    layout (handleAddVideoOverlay / handleAddImageOverlay -- see
- *    VideoOverlayTrack.tsx/ImageOverlayTrack.tsx).
+ *    VideoOverlayTrack.tsx/ImageOverlayTrack.tsx). Video also gets a second
+ *    "Overlay (remove background)" entry, since background removal can only
+ *    ever be requested at add-time and this quick path bypasses the "Video
+ *    Overlay" tab's own picker dialog (which has the same option as a
+ *    checkbox instead).
  * For music, "Add" appends it to the background-music sequence
  * (handleAddToBackgroundSequence -- multiple appended tracks concatenate,
  * then loop as a whole across the video's duration). A small "+" badge
@@ -232,6 +236,18 @@ export function AssetGallery({
                 ? [
                     { label: "Cutaway", onSelect: () => onAddToSequence(asset) },
                     { label: "Overlay", onSelect: () => onAddVideoOverlay(asset) },
+                    // Same one-shot AI matting as the "Video Overlay" tab's
+                    // own picker dialog checkbox (VideoOverlayPickerDialog.tsx)
+                    // -- offered here too since this quick right-click path
+                    // places the overlay WITHOUT going through that dialog at
+                    // all, so it'd otherwise have no way to request removal
+                    // (background removal can only ever be requested at
+                    // add-time, see VideoOverlayClip.backgroundRemoval's own
+                    // doc comment).
+                    {
+                      label: "Overlay (remove background)",
+                      onSelect: () => onAddVideoOverlay(asset, { removeBackground: true }),
+                    },
                   ]
                 : asset.kind === "audio"
                   ? [{ label: "Add", onSelect: () => onAddToBackgroundSequence(asset) }]
