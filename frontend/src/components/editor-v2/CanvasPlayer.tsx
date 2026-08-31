@@ -84,6 +84,7 @@ import {
   findActivePictureInPictureOverlays,
   computeOverlayRects,
   computeCoverFitSourceRect,
+  MIN_PICTURE_IN_PICTURE_ZOOM,
   computeProgress,
   computeAudioMixBreakpoints,
   sampleAudioMixAt,
@@ -944,7 +945,7 @@ export const CanvasPlayer = forwardRef<
       const destWidth = pip.layout.rect.width * canvas.width;
       const destHeight = pip.layout.rect.height * canvas.height;
       const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
-        pipImage.width, pipImage.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
+        pipImage.width, pipImage.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom, MIN_PICTURE_IN_PICTURE_ZOOM
       );
       ctx.filter = getFilterPresetOption(pip.colorFilterId ?? null).cssFilter;
       const pipMattes = pip.backgroundRemoval?.enabled ? videoOverlayMattesByAssetIdRef.current[pip.assetId] : undefined;
@@ -977,7 +978,7 @@ export const CanvasPlayer = forwardRef<
       const destWidth = pip.layout.rect.width * canvas.width;
       const destHeight = pip.layout.rect.height * canvas.height;
       const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
-        overlayImage.width, overlayImage.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
+        overlayImage.width, overlayImage.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom, MIN_PICTURE_IN_PICTURE_ZOOM
       );
       ctx.filter = getFilterPresetOption(pip.colorFilterId ?? null).cssFilter;
       drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);

@@ -218,6 +218,7 @@ export function ActionArea({
   usedAssetIds,
   videoThumbnailUrlByAssetId,
   framingDialogOverlay,
+  framingDialogOverlayFrameUrl,
   onSaveVideoOverlayFraming,
   onCloseVideoOverlayFramingDialog,
   onDeleteFramingDialogOverlay,
@@ -330,6 +331,12 @@ export function ActionArea({
   // The overlay currently open in VideoOverlayFramingDialog, if any --
   // null means closed.
   framingDialogOverlay: VideoOverlayClip | null;
+  // The frame seeded at framingDialogOverlay's OWN marked start point
+  // (falling back to videoThumbnailUrlByAssetId's generic per-asset frame
+  // when none's been captured yet) -- ThreePaneEditor computes this since
+  // it alone holds videoOverlayStartThumbnailByKey; null while no dialog
+  // is open.
+  framingDialogOverlayFrameUrl: string | null;
   onSaveVideoOverlayFraming: (
     framing: OverlayFraming,
     options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
@@ -763,7 +770,7 @@ export function ActionArea({
         <VideoOverlayFramingDialog
           overlay={framingDialogOverlay}
           baseFrameUrl={previewFrameUrl ?? ""}
-          overlayFrameUrl={videoThumbnailUrlByAssetId[framingDialogOverlay.assetId] ?? ""}
+          overlayFrameUrl={framingDialogOverlayFrameUrl ?? ""}
           outputAspectRatio={frameAspectRatio}
           onSave={onSaveVideoOverlayFraming}
           onClose={onCloseVideoOverlayFramingDialog}

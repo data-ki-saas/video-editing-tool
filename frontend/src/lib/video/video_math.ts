@@ -590,18 +590,41 @@ export interface OverlayFraming {
   panX: number;
   panY: number;
   // How far to crop in past the natural "cover" fit (1 = exactly cover,
-  // matching every framing persisted before this field existed -- never
-  // below 1, since that's already the minimum scale that fully covers the
-  // box with no letterboxing). Adjusted via VideoOverlayFramingDialog's own
-  // Zoom slider; panX/panY still choose WHERE within the zoomed-in window
-  // sits, over a correspondingly smaller range of slack -- see
-  // computeCoverFitSourceRect below for how the two combine.
+  // matching every framing persisted before this field existed). Adjusted
+  // via VideoOverlayFramingDialog's own Zoom slider; panX/panY still choose
+  // WHERE within the zoomed-in window sits, over a correspondingly smaller
+  // range of slack -- see computeCoverFitSourceRect below for how the two
+  // combine.
+  //
+  // Below 1 ("zoom out") is only meaningful for a Picture-in-Picture box --
+  // Full-Screen/Split-Screen have nothing behind them to reveal, so every
+  // OTHER render call site still floors this at 1 via
+  // computeCoverFitSourceRect's own default `minZoom` (a stray <1 value
+  // left over from a since-switched-away-from PiP layout -- see
+  // VideoOverlayLayout's own doc comment on framing surviving a layout
+  // switch -- is therefore automatically inert the moment it's not PiP
+  // anymore, with no separate migration needed). Only the PiP draw/render
+  // call sites (CanvasPlayer.tsx, exportTimeline.ts) pass the lower
+  // MIN_PICTURE_IN_PICTURE_ZOOM floor, and only the Zoom slider's own `min`
+  // in VideoOverlayFramingDialog/ImageOverlayFramingDialog relaxes to match
+  // when editing a PiP overlay.
   zoom: number;
   flipHorizontal: boolean;
   flipVertical: boolean;
 }
 
 export const DEFAULT_OVERLAY_FRAMING: OverlayFraming = { panX: 0.5, panY: 0.5, zoom: 1, flipHorizontal: false, flipVertical: false };
+
+// How far a Picture-in-Picture overlay's own footage is allowed to "zoom
+// out" past its natural cover fit -- see OverlayFraming.zoom's doc comment
+// above for why this floor only ever applies to PiP. 0.3 comfortably
+// reveals the full source (letterboxed within the box, the box's OWN
+// backdrop showing through the gap -- see computeCoverFitSourceRect's own
+// doc comment on how going past "fully revealed" then just shrinks the
+// visible footage further) for every aspect-ratio mismatch this app's
+// output ratios + source footage realistically produce, without the
+// footage shrinking to an unusably tiny speck.
+export const MIN_PICTURE_IN_PICTURE_ZOOM = 0.3;
 
 // An even split -- what every Split-Screen overlay starts with, and what a
 // pre-`ratio` persisted layout (see the `?? DEFAULT_SPLIT_SCREEN_RATIO`
@@ -857,12 +880,27 @@ export function computeOverlayRects(layout: VideoOverlayLayout): { baseRect: Cro
  * live preview and the real render agree on how footage of a different
  * aspect ratio than its destination box gets cropped.
  *
- * `zoom` (>= 1, default 1 -- see OverlayFraming) crops in past the natural
- * cover fit: the sampled window's size shrinks by 1/zoom on both axes
- * (same aspect ratio throughout, so it still exactly covers the target box
- * once scaled up), and panX/panY then place that smaller window within the
- * FULL source's slack, same formula as the zoom=1 case -- this is exactly
- * why zoom=1 reproduces the original behavior unchanged. */
+ * `zoom` (default 1 -- see OverlayFraming) crops in past the natural cover
+ * fit: the sampled window's size shrinks by 1/zoom on both axes (same
+ * aspect ratio throughout, so it still exactly covers the target box once
+ * scaled up), and panX/panY then place that smaller window within the FULL
+ * source's slack, same formula as the zoom=1 case -- this is exactly why
+ * zoom=1 reproduces the original behavior unchanged.
+ *
+ * `minZoom` (default 1, the original floor) lets a caller allow `zoom`
+ * below 1 -- i.e. "zoom OUT" past cover, sampling a LARGER window than
+ * cover needs. Growing sWidth/sHeight past what the caller's own
+ * drawImage-style consumer then does with sx/sy/sWidth/sHeight is what
+ * actually produces the zoomed-out look: once the requested window exceeds
+ * the source's own bounds (sx/sy go negative, or sx+sWidth/sy+sHeight
+ * exceed sourceWidth/sourceHeight), a canvas drawImage clips the source
+ * rect to the source's real bounds and shrinks the destination rect by the
+ * same proportion -- so the footage progressively shrinks within its own
+ * destination box (revealing whatever's already drawn behind it) the
+ * further `zoom` drops below 1, with no separate letterboxing logic needed
+ * at the call site. Only ever pass a `minZoom` below 1 for a
+ * Picture-in-Picture box, which has a backdrop behind it worth revealing --
+ * see OverlayFraming.zoom's own doc comment. */
 export function computeCoverFitSourceRect(
   sourceWidth: number,
   sourceHeight: number,
@@ -870,14 +908,15 @@ export function computeCoverFitSourceRect(
   targetHeight: number,
   panX: number = 0.5,
   panY: number = 0.5,
-  zoom: number = 1
+  zoom: number = 1,
+  minZoom: number = 1
 ): { sx: number; sy: number; sWidth: number; sHeight: number } {
   if (sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0) {
     return { sx: 0, sy: 0, sWidth: sourceWidth, sHeight: sourceHeight };
   }
   const clampedPanX = Math.min(Math.max(panX, 0), 1);
   const clampedPanY = Math.min(Math.max(panY, 0), 1);
-  const clampedZoom = Math.max(zoom, 1);
+  const clampedZoom = Math.max(zoom, minZoom);
   const sourceRatio = sourceWidth / sourceHeight;
   const targetRatio = targetWidth / targetHeight;
   const { coverWidth, coverHeight } =

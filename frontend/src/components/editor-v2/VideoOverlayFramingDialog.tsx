@@ -42,6 +42,7 @@ import {
   computeCoverFitSourceRect,
   DEFAULT_OVERLAY_FRAMING,
   DEFAULT_SPLIT_SCREEN_RATIO,
+  MIN_PICTURE_IN_PICTURE_ZOOM,
   type CropRect,
   type OverlayFraming,
   type VideoOverlayClip,
@@ -73,7 +74,8 @@ function computeCoverPanDelta(
   panY: number,
   zoom: number,
   dxPx: number,
-  dyPx: number
+  dyPx: number,
+  minZoom: number = 1
 ): { panX: number; panY: number } {
   if (naturalWidth <= 0 || naturalHeight <= 0 || boxWidth <= 0 || boxHeight <= 0) {
     return {
@@ -84,8 +86,12 @@ function computeCoverPanDelta(
   // Zoom shrinks the sampled window (sWidth/sHeight below), which shrinks
   // denomX/denomY (the pannable slack) to match -- passing it through here
   // is what keeps a drag's pixel-to-pan-fraction conversion correct at any
-  // zoom level, not just 1x.
-  const { sx, sy, sWidth, sHeight } = computeCoverFitSourceRect(naturalWidth, naturalHeight, boxWidth, boxHeight, panX, panY, zoom);
+  // zoom level, not just 1x. `minZoom` matches whatever floor the caller's
+  // own render/draw path uses (see computeCoverFitSourceRect's own doc
+  // comment) so a PiP box zoomed below 1 still drags/pans consistently
+  // with what's actually drawn, instead of this helper silently clamping
+  // back up to a plain cover fit.
+  const { sx, sy, sWidth, sHeight } = computeCoverFitSourceRect(naturalWidth, naturalHeight, boxWidth, boxHeight, panX, panY, zoom, minZoom);
   const denomX = naturalWidth - sWidth;
   const denomY = naturalHeight - sHeight;
   const nextSx = sx - dxPx * (sWidth / boxWidth);
@@ -108,6 +114,7 @@ function CoverFramingRegion({
   highlighted,
   borderColorClassName,
   label,
+  minZoom = 1,
 }: {
   styleRect: CSSProperties;
   frameUrl: string;
@@ -117,6 +124,10 @@ function CoverFramingRegion({
   highlighted: boolean;
   borderColorClassName: string;
   label: string;
+  // See computeCoverFitSourceRect's own doc comment -- only ever below 1
+  // for a Picture-in-Picture box, whose own render path (CanvasPlayer.tsx/
+  // exportTimeline.ts) allows the matching MIN_PICTURE_IN_PICTURE_ZOOM.
+  minZoom?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -142,7 +153,7 @@ function CoverFramingRegion({
       const effectiveDx = startFraming.flipHorizontal ? -dx : dx;
       const effectiveDy = startFraming.flipVertical ? -dy : dy;
       const next = computeCoverPanDelta(
-        naturalWidth, naturalHeight, rect.width, rect.height, startFraming.panX, startFraming.panY, startFraming.zoom, effectiveDx, effectiveDy
+        naturalWidth, naturalHeight, rect.width, rect.height, startFraming.panX, startFraming.panY, startFraming.zoom, effectiveDx, effectiveDy, minZoom
       );
       return { ...startFraming, ...next };
     }
@@ -512,6 +523,7 @@ export function VideoOverlayFramingDialog({
                       highlighted={false}
                       borderColorClassName={overlayBorderColorClassName}
                       label="Overlay video"
+                      minZoom={MIN_PICTURE_IN_PICTURE_ZOOM}
                     />
                   </PipFrame>
                 </>
@@ -578,12 +590,12 @@ export function VideoOverlayFramingDialog({
               <span className="text-[11px] font-medium text-muted">Zoom</span>
               <input
                 type="range"
-                min={1}
+                min={isPictureInPicture ? MIN_PICTURE_IN_PICTURE_ZOOM : 1}
                 max={3}
                 step={0.05}
                 value={activeFraming.zoom}
                 onChange={(e) => setActiveFraming({ ...activeFraming, zoom: Number(e.target.value) })}
-                title="Zoom into the footage"
+                title="Zoom into (or out of) the footage"
                 className="h-1.5 w-full cursor-ew-resize accent-accent"
               />
               <span className="text-[10px] text-muted">{activeFraming.zoom.toFixed(2)}x</span>

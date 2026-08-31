@@ -60,6 +60,7 @@ import {
   findActivePictureInPictureOverlays,
   computeOverlayRects,
   computeCoverFitSourceRect,
+  MIN_PICTURE_IN_PICTURE_ZOOM,
   computeAudioMixBreakpoints,
   mapSourceRangeToOutputRanges,
   totalSequenceDuration,
@@ -1122,7 +1123,7 @@ export async function exportVideoLocally(
         const destWidth = pip.layout.rect.width * canvas.width;
         const destHeight = pip.layout.rect.height * canvas.height;
         const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
-          overlayVideo.videoWidth, overlayVideo.videoHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
+          overlayVideo.videoWidth, overlayVideo.videoHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom, MIN_PICTURE_IN_PICTURE_ZOOM
         );
         ctx.filter = cssFilterFor(pip.colorFilterId);
         const pipMatteAssetId = pip.backgroundRemoval?.enabled ? pip.backgroundRemoval.matteAssetId : null;
@@ -1155,7 +1156,7 @@ export async function exportVideoLocally(
         const destWidth = pip.layout.rect.width * canvas.width;
         const destHeight = pip.layout.rect.height * canvas.height;
         const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
-          overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom
+          overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom, MIN_PICTURE_IN_PICTURE_ZOOM
         );
         ctx.filter = cssFilterFor(pip.colorFilterId);
         drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);

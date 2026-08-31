@@ -2133,6 +2133,18 @@ export function ThreePaneEditor({
   }
 
   const framingDialogOverlay = framingDialogOverlayIndex !== null ? displayedVideoOverlays[framingDialogOverlayIndex] ?? null : null;
+  // Same seeded-frame-over-generic-fallback preference as
+  // filterDialogVideoOverlayPreviewFrameUrl above -- without this, the
+  // dialog always showed videoThumbnailUrlByAssetId's generic frame-0.1s
+  // thumbnail for every placement of a given asset, instead of the frame
+  // actually captured at THIS placement's own marked start point.
+  const framingDialogOverlayFrameUrl = framingDialogOverlay
+    ? (videoOverlayStartThumbnailByKey[
+        videoOverlayStartThumbnailKey(framingDialogOverlay.assetId, framingDialogOverlay.sourceStartSeconds)
+      ] ??
+      videoThumbnailUrlByAssetId[framingDialogOverlay.assetId] ??
+      null)
+    : null;
   const imageFramingDialogOverlay =
     imageFramingDialogOverlayIndex !== null ? displayedOverlayImages[imageFramingDialogOverlayIndex] ?? null : null;
   const sourceStartDialogOverlay =
@@ -2189,6 +2201,7 @@ export function ThreePaneEditor({
           usedAssetIds={usedAssetIds}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
           framingDialogOverlay={framingDialogOverlay}
+          framingDialogOverlayFrameUrl={framingDialogOverlayFrameUrl}
           onSaveVideoOverlayFraming={handleSaveVideoOverlayFraming}
           onCloseVideoOverlayFramingDialog={handleCloseVideoOverlayFramingDialog}
           onDeleteFramingDialogOverlay={handleDeleteFramingDialogOverlay}
