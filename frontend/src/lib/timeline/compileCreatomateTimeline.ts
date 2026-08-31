@@ -62,7 +62,7 @@ import {
   type TranscriptCaption,
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
-import { getTextTemplateFontFraction } from "@/lib/video/textTemplates";
+import { getTextTemplateFontFraction, getStrokeWidthFontSizeFraction } from "@/lib/video/textTemplates";
 import { getTranscriptCaptionConfig } from "@/lib/video/transcriptCaptionTemplates";
 import { getCreatomateFilterProperties, type FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
@@ -1036,6 +1036,38 @@ function getTextTemplateAnchorFraction(templateId: string): { x: number; y: numb
   return CENTER_ANCHORED_TEXT_TEMPLATES.has(templateId) ? { x: 0.5, y: 0.5 } : { x: 0, y: 0 };
 }
 
+/** Bold Pop/Bounce In/Word Pop/Typewriter's stroke, in "vh" (a percentage
+ * of the OUTPUT's height) -- derived from the SAME fontSize fraction the
+ * canvas preview uses (textTemplates.ts's STROKE_WIDTH_FONT_SIZE_FRACTIONS,
+ * via getStrokeWidthFontSizeFraction), multiplied by this template's own
+ * fontSizeMaximum fraction (getTextTemplateFontFraction -- also "vh", see
+ * buildTextElements' own comment on why: "vh-of-output" is the only pixel-
+ * free concept Creatomate has, since it never sees this app's own per-rect
+ * pixel dimensions). Both factors share the same "vh" axis so the ratio
+ * between stroke and font size holds regardless of the (fixed, 9:16)
+ * output aspect ratio.
+ *
+ * Previously this was a flat, hand-picked "2%"/"1%" string with no
+ * relationship to either the preview's own fraction OR Creatomate's real
+ * measurement basis for strokeWidth -- which rendered visibly thinner
+ * (roughly 4-8x) in the actual cloud output than in preview. "vh" is used
+ * here (not a bare "%") because it's the one unit this codebase has
+ * ALREADY verified Creatomate honors for a text-adjacent size property --
+ * fontSizeMaximum above and neon-glow's own shadowBlur ("3vh") both already
+ * rely on it. strokeWidth's OWN measurement basis is still UNVERIFIED
+ * against a live render, though: Creatomate's public docs example for this
+ * exact property uses "vmin" (percentage of min(width,height)) rather than
+ * "vh" specifically -- for this app's fixed 9:16 output those two axes
+ * differ by a constant ~1.78x factor, so if a real test render shows "vh"
+ * isn't honored the same way here, swap this to "vmin" (and rescale the
+ * STROKE_WIDTH_FONT_SIZE_FRACTIONS constants by that same fixed factor,
+ * since they were tuned against vh) rather than re-deriving from scratch. */
+function computeStrokeWidthVh(templateId: string): string | undefined {
+  const strokeFraction = getStrokeWidthFontSizeFraction(templateId);
+  if (strokeFraction === null) return undefined;
+  return `${getTextTemplateFontFraction(templateId) * strokeFraction * 100}vh`;
+}
+
 /** Per-template style + entrance animation. DIY scale-in entrances
  * (Bold Pop, Bounce In) use property keyframes directly on xScale/yScale
  * rather than Creatomate's canned Bounce/TextScale animation classes,
@@ -1051,7 +1083,7 @@ function buildTextTemplateStyle(templateId: string, durationSeconds: number): Re
         fontWeight: 700,
         fillColor: "#ffffff",
         strokeColor: "#000000",
-        strokeWidth: "2%",
+        strokeWidth: computeStrokeWidthVh(templateId),
         xScale: [new Keyframe("80%", 0, CROP_EASING), new Keyframe("100%", durationSeconds * 0.2, CROP_EASING)],
         yScale: [new Keyframe("80%", 0, CROP_EASING), new Keyframe("100%", durationSeconds * 0.2, CROP_EASING)],
       };
@@ -1068,7 +1100,7 @@ function buildTextTemplateStyle(templateId: string, durationSeconds: number): Re
         fontFamily: "Roboto Mono",
         fillColor: "#ffffff",
         strokeColor: "#000000",
-        strokeWidth: "1%",
+        strokeWidth: computeStrokeWidthVh(templateId),
         xAlignment: "0%",
         enter: new TextTypewriter({ typingStart: 0, typingDuration: durationSeconds }),
       };
@@ -1077,7 +1109,7 @@ function buildTextTemplateStyle(templateId: string, durationSeconds: number): Re
         fontWeight: 700,
         fillColor: "#ffffff",
         strokeColor: "#000000",
-        strokeWidth: "2%",
+        strokeWidth: computeStrokeWidthVh(templateId),
         xScale: [new Keyframe("50%", 0, "back-out"), new Keyframe("100%", durationSeconds * 0.35, "back-out")],
         yScale: [new Keyframe("50%", 0, "back-out"), new Keyframe("100%", durationSeconds * 0.35, "back-out")],
       };
@@ -1104,7 +1136,7 @@ function buildTextTemplateStyle(templateId: string, durationSeconds: number): Re
         fontWeight: 700,
         fillColor: "#ffffff",
         strokeColor: "#000000",
-        strokeWidth: "2%",
+        strokeWidth: computeStrokeWidthVh(templateId),
         enter: new TextAppearWordByWord({ duration: durationSeconds, fade: true, easing: CROP_EASING }),
       };
     default:

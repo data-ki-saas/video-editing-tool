@@ -89,6 +89,36 @@ export function getTextTemplateFontFraction(templateId: string): number {
   return (TEXT_TEMPLATE_FONT_FRACTIONS as Record<string, number>)[templateId] ?? 0.4;
 }
 
+// The four templates whose look depends on a thick black outline for
+// legibility over busy footage (Bold Pop, Bounce In, Word Pop, Typewriter --
+// the others either have no stroke at all or draw their own backing shape
+// instead, e.g. Highlight Box's pill). Each renderer below multiplies its
+// OWN computed font size by this fraction for ctx.lineWidth -- shared here,
+// same "one source of truth" reasoning as TEXT_TEMPLATE_FONT_FRACTIONS
+// above, so compileCreatomateTimeline.ts's own strokeWidth can be derived
+// from the identical fraction instead of a separately hand-tuned number
+// that can silently drift out of sync with what the preview actually draws
+// (which is exactly what had happened before this constant existed -- the
+// compiled strokeWidth was a flat "2%"/"1%" string bearing no relationship
+// to either this fraction or Creatomate's own real measurement basis for
+// the property, rendering visibly thinner in the cloud output than in
+// preview).
+const STROKE_WIDTH_FONT_SIZE_FRACTIONS: Partial<Record<TextTemplateId, number>> = {
+  "bold-pop": 0.12,
+  "bounce-in": 0.12,
+  "word-pop": 0.08,
+  typewriter: 0.08,
+};
+
+/** Same fallback reasoning as getTextTemplateFontFraction above. null for a
+ * template with no stroke at all (getCreatomateTextStyle's own switch skips
+ * strokeColor/strokeWidth entirely for those, so this is never actually
+ * multiplied into anything for them) rather than defaulting to some
+ * fraction that would silently draw a stroke nothing asked for. */
+export function getStrokeWidthFontSizeFraction(templateId: string): number | null {
+  return (STROKE_WIDTH_FONT_SIZE_FRACTIONS as Record<string, number | undefined>)[templateId] ?? null;
+}
+
 /** A brief overshoot/elastic-feeling ease for entrances that should read
  * as a "bounce" rather than a smooth glide -- distinct from video_math.ts's
  * easeInOut, which is used where a plain smooth curve is wanted instead. */
@@ -212,7 +242,7 @@ const boldPop: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   ctx.font = fontSpec(layout.fontSize);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.lineWidth = layout.fontSize * 0.12;
+  ctx.lineWidth = layout.fontSize * STROKE_WIDTH_FONT_SIZE_FRACTIONS["bold-pop"]!;
   ctx.strokeStyle = "black";
   ctx.fillStyle = "white";
   forEachCenteredLine(layout, 0, 0, (line, x, y) => {
@@ -272,7 +302,7 @@ const typewriter: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   ctx.textBaseline = "middle";
   ctx.fillStyle = "white";
   ctx.strokeStyle = "black";
-  ctx.lineWidth = layout.fontSize * 0.08;
+  ctx.lineWidth = layout.fontSize * STROKE_WIDTH_FONT_SIZE_FRACTIONS["typewriter"]!;
 
   const totalHeight = layout.lines.length * layout.lineHeightPx;
   const startY = rectPx.y + rectPx.height / 2 - totalHeight / 2 + layout.lineHeightPx / 2;
@@ -306,7 +336,7 @@ const bounceIn: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
   ctx.font = fontSpec(layout.fontSize);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.lineWidth = layout.fontSize * 0.12;
+  ctx.lineWidth = layout.fontSize * STROKE_WIDTH_FONT_SIZE_FRACTIONS["bounce-in"]!;
   ctx.strokeStyle = "black";
   ctx.fillStyle = "white";
   forEachCenteredLine(layout, 0, 0, (line, x, y) => {
@@ -416,7 +446,7 @@ const wordPop: TextTemplateRenderer = ({ ctx, text, rectPx, progress }) => {
       ctx.textAlign = "center";
       ctx.fillStyle = "white";
       ctx.strokeStyle = "black";
-      ctx.lineWidth = layout.fontSize * 0.08;
+      ctx.lineWidth = layout.fontSize * STROKE_WIDTH_FONT_SIZE_FRACTIONS["word-pop"]!;
       ctx.strokeText(word, 0, 0);
       ctx.fillText(word, 0, 0);
       ctx.restore();
