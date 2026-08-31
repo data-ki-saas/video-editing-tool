@@ -37,6 +37,7 @@
 import { useRef } from "react";
 import { ContextMenu, useContextMenu, type ContextMenuAction } from "./ContextMenu";
 import { VolumeBadge } from "./VolumeBadge";
+import { MattingProgressBadge } from "./MattingProgressBadge";
 import {
   SplitScreenOrientationIcon,
   SwapIcon,
@@ -314,21 +315,13 @@ function VideoOverlaySegment({
       {overlay.backgroundRemoval?.enabled && !overlay.backgroundRemoval.matteAssetId && (
         // The AI matting job (VEED, requested at add-time -- see
         // ThreePaneEditor's requestAndPollVideoOverlayBackgroundRemoval)
-        // hasn't come back yet. Same spinner markup as AssetGallery's own
-        // "deleting" spinner, just badge-sized -- this is the ONLY always-
-        // visible cue that removal is still in flight (CanvasPlayer's own
-        // preview already shows a quick local approximate cutout in the
-        // meantime, so this rail badge is what actually says "not final
-        // yet" independent of how good that approximation looks).
-        <span
-          title="Removing background…"
-          className="pointer-events-none z-10 flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-black/30 text-white"
-        >
-          <svg viewBox="0 0 24 24" className="h-2 w-2 animate-spin" fill="none" stroke="currentColor" strokeWidth={3}>
-            <circle cx="12" cy="12" r="9" strokeOpacity={0.3} />
-            <path d="M21 12a9 9 0 0 0-9-9" strokeLinecap="round" />
-          </svg>
-        </span>
+        // hasn't come back yet -- this is the ONLY always-visible cue that
+        // removal is still in flight (CanvasPlayer's own preview already
+        // shows a quick local approximate cutout in the meantime, so this
+        // rail badge is what actually says "not final yet" independent of
+        // how good that approximation looks). Same MattingProgressBadge as
+        // CutawayTrack's own equivalent, so both rails read the same way.
+        <MattingProgressBadge progress={overlay.backgroundRemoval.progress ?? 0} />
       )}
       <VolumeBadge
         value={overlay.audioBalance}

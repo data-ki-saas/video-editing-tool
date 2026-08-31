@@ -15,8 +15,9 @@
  * rail at the very bottom (concatenates every track in the sequence and
  * loops the whole thing across the video's duration, see
  * BackgroundTrackStrip) -- furthest from the main video content it plays
- * under. Both audio rails are FIXED height -- just another rail, same as
- * every other track in the strip -- with a rail-identity icon (MicrophoneIcon
+ * under. Both audio rails share the SAME fixed height (RAIL_HEIGHT_PX) --
+ * just another rail, same tier as every other track in the strip -- with a
+ * rail-identity icon (MicrophoneIcon
  * for MainAudioTrackStrip, MusicNoteIcon for BackgroundTrackStrip -- see
  * @/components/icons/UIIcons) followed by a VolumeBadge (see
  * ./VolumeBadge.tsx) overlaid on their own left edge, in that order, for
@@ -79,15 +80,18 @@ import type {
 } from "@/lib/video/video_math";
 import type { TimelineMarker } from "@/lib/projects";
 
-// Fixed height for the main audio rail -- same tier as every other rail in
-// the strip (TrimTrack's h-4, VideoOverlayTrack's h-5, ...), not resizable.
-const AUDIO_RAIL_HEIGHT_PX = 16;
-// The background rail is taller than that -- unlike every other rail, its
-// segments need to show the track's own name and a remove button directly
-// on the segment (see BackgroundTrackStrip's own comment on why that's the
-// only real way to swap background music, since Add always appends to a
-// queue rather than replacing).
-const BACKGROUND_RAIL_HEIGHT_PX = 28;
+// Fixed height shared by BOTH audio rails -- same tier as every other rail
+// in the strip (TrimTrack's h-4, VideoOverlayTrack's h-5, ...), not
+// resizable. One constant instead of a separate value per rail is
+// deliberate -- the two previously drifted (the background rail used to
+// render taller, to fit its segment's name + remove button), which read as
+// a layout bug rather than an intentional size difference; tweak this one
+// value to resize both in lockstep instead.
+const RAIL_HEIGHT_PX = 16;
+// Vertical gap between each rail in the group (FrameStrip -> main audio ->
+// background music) -- keeps them visually distinct rows instead of flush
+// against each other.
+const RAIL_GAP_PX = 8;
 // Height of the proxy scrollbar row below BackgroundTrackStrip -- just
 // enough for a comfortable drag target for the thin themed scrollbar
 // (globals.css's own `* { scrollbar-width: thin }`), not a full rail tier.
@@ -325,12 +329,10 @@ export function Playground({
       {/* One shared panel (shared bg-neutral-950) -- the frame strip and the
           two audio rails all represent one continuous timeline (see this
           file's own module comment) and should read as one panel, not
-          three separate floating cards. A small gap sits between the frame
-          strip and the audio rails below (see mt-2 further down) so the
-          video content doesn't visually run into the audio rails -- the
-          two audio rails themselves stay flush against each other, since
-          together they represent one "audio" concept (reel sound, then
-          background music under it). The primary reel audio sits
+          three separate floating cards. RAIL_GAP_PX sits between every
+          rail (frame strip -> main audio -> background music) so each one
+          reads as its own row instead of visually running into its
+          neighbor. The primary reel audio sits
           immediately below the frames it's the sound for; background music
           sits at the very bottom, furthest from the main video content it
           plays under. */}
@@ -430,7 +432,7 @@ export function Playground({
           />
         </div>
 
-        <div className="relative mt-2 shrink-0" style={{ height: AUDIO_RAIL_HEIGHT_PX }}>
+        <div className="relative shrink-0" style={{ height: RAIL_HEIGHT_PX, marginTop: RAIL_GAP_PX }}>
           <div className="absolute left-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
             <span
               title="This reel's own captured sound"
@@ -455,7 +457,7 @@ export function Playground({
           />
         </div>
 
-        <div className="relative shrink-0" style={{ height: BACKGROUND_RAIL_HEIGHT_PX }}>
+        <div className="relative shrink-0" style={{ height: RAIL_HEIGHT_PX, marginTop: RAIL_GAP_PX }}>
           <div className="absolute left-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
             <span
               title="Background music"

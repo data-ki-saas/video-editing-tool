@@ -19,11 +19,12 @@
  * view) actually splices the clip out of the sequence and closes the gap --
  * see transformations.ts's applyDeleteSequenceClip.
  */
-import type { CropRect } from "@/lib/video/video_math";
+import type { BackgroundRemovalState, CropRect } from "@/lib/video/video_math";
 import { getImageTemplateOption } from "@/lib/video/imageTemplates";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { getCanvasFillOption, type CanvasFillMode } from "@/lib/video/canvasFillPresets";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
+import { MattingProgressBadge } from "./MattingProgressBadge";
 
 export type CutawaySegment =
   | {
@@ -48,7 +49,7 @@ export type CutawaySegment =
       // photo's own job (rembg, synchronous) usually resolves fast enough
       // that this state is barely visible; a video's (VEED, async) can sit
       // here for a while.
-      backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
+      backgroundRemoval?: BackgroundRemovalState | null;
     }
   | {
       kind: "video";
@@ -61,7 +62,7 @@ export type CutawaySegment =
       canvasFillColor?: string;
       canvasFillGradientColor?: string;
       // Same AI background removal as the "image" variant above.
-      backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
+      backgroundRemoval?: BackgroundRemovalState | null;
     };
 
 function CutawaySegmentButton({
@@ -132,12 +133,16 @@ function CutawaySegmentButton({
           </span>
         )}
         {segment.backgroundRemoval?.enabled && (
-          <span
-            className="pointer-events-none shrink-0 truncate rounded-full bg-black/30 px-1 pr-1"
-            title={segment.backgroundRemoval.matteAssetId ? "Background removed" : "Removing background…"}
-          >
-            {segment.backgroundRemoval.matteAssetId ? "✂️" : "…"}
-          </span>
+          segment.backgroundRemoval.matteAssetId ? (
+            <span
+              className="pointer-events-none shrink-0 truncate rounded-full bg-black/30 px-1 pr-1"
+              title="Background removed"
+            >
+              ✂️
+            </span>
+          ) : (
+            <MattingProgressBadge progress={segment.backgroundRemoval.progress ?? 0} />
+          )
         )}
       </button>
       <ContextMenu state={contextMenuState} onClose={closeContextMenu} />

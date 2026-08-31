@@ -639,6 +639,18 @@ export const DEFAULT_SPLIT_SCREEN_RATIO = 0.5;
 // later end-edge drag to still find a valid range.
 export const MIN_VIDEO_OVERLAY_DURATION_SECONDS = 0.2;
 
+/** Shared shape for an AI background-removal job, carried on VideoOverlayClip
+ * and both SequenceEntry variants (video/image) below, and mirrored on
+ * CutawayTrack.tsx's own CutawaySegment view-model. `progress` is a
+ * transient, ESTIMATED 0..1 fraction of how far along the job is (see
+ * lib/backgroundRemoval.ts's own comment on why this can only ever be an
+ * estimate -- fal.ai's VEED integration is webhook-only, with no interim
+ * status the provider actually reports) -- never persisted, only ever
+ * spliced in for display by ThreePaneEditor while a job is in flight, same
+ * reason it's optional here as `matteAssetId` (absent once the job resolves
+ * one way or the other). */
+export type BackgroundRemovalState = { enabled: boolean; matteAssetId?: string | null; progress?: number };
+
 export interface VideoOverlayClip {
   assetId: string;
   startTimeSeconds: number;
@@ -674,7 +686,7 @@ export interface VideoOverlayClip {
   // in the real matteAssetId once VEED's job completes, same staging as
   // the Cutaway path. Unlike SequenceEntry, only ever set at add-time --
   // there's no dialog to flip it on afterward for an already-placed overlay.
-  backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
+  backgroundRemoval?: BackgroundRemovalState | null;
 }
 
 /**
@@ -1211,7 +1223,7 @@ export type SequenceEntry =
       // -- compileCreatomateTimeline.ts falls back to a plain (non-masked)
       // segment until it's populated (see buildBackgroundRemovedSegment's
       // own comment).
-      backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
+      backgroundRemoval?: BackgroundRemovalState | null;
     }
   | {
       id: string;
@@ -1244,7 +1256,7 @@ export type SequenceEntry =
       // after a real poll loop -- but the field shape, and how
       // compileCreatomateTimeline.ts/CanvasPlayer consume it, is identical
       // either way.
-      backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
+      backgroundRemoval?: BackgroundRemovalState | null;
     };
 
 // Both SequenceEntry variants above carry a `cutTransitionInId` -- which

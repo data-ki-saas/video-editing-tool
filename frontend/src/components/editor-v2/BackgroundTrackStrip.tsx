@@ -33,7 +33,7 @@
  * file's own module comment.)
  *
  * `hide-scrollbar`, same as FrameStrip/MainAudioTrackStrip -- a native
- * scrollbar here ate into this rail's own fixed AUDIO_RAIL_HEIGHT_PX height
+ * scrollbar here ate into this rail's own fixed RAIL_HEIGHT_PX height
  * (Playground.tsx), squeezing it shorter than every other rail.
  * Playground.tsx's own proxy scrollbar row, at the very bottom of the whole
  * synced group (below both audio rails), is the one discoverable,

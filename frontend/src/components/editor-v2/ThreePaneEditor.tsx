@@ -292,6 +292,18 @@ export function ThreePaneEditor({
   // Full-Screen/Split-Screen overlay's window so it never asks to play
   // more of the source than exists (its in-point is fixed at 0 for v1).
   const [overlaySourceDurationSeconds, setOverlaySourceDurationSeconds] = useState<Record<string, number>>({});
+  // Transient, ESTIMATED 0..1 progress for an in-flight background-removal
+  // job (see lib/backgroundRemoval.ts's pollBackgroundRemoval), spliced into
+  // the matching entry's/overlay's own `backgroundRemoval.progress` just
+  // before render (see effectiveSequenceEntries/displayedVideoOverlays
+  // below) -- deliberately NOT part of `selections`/pushChange, since it's
+  // re-derived every poll tick and has no business in undo history. Keyed by
+  // entryId (stable across the sequence) for cutaways, by array index for
+  // video overlays -- same "not stale-safe against edits made during the
+  // wait" accepted risk requestAndPollVideoOverlayBackgroundRemoval's own
+  // comment already carries for that index.
+  const [cutawayMattingProgress, setCutawayMattingProgress] = useState<Record<string, number>>({});
+  const [videoOverlayMattingProgress, setVideoOverlayMattingProgress] = useState<Record<number, number>>({});
   // Each background-music track's own probed duration, by assetId --
   // handleAddToBackgroundSequence uses this to warn before adding a track
   // that can never actually be heard (see that handler's own comment).
@@ -783,12 +795,21 @@ export function ThreePaneEditor({
   // still absent (probed below) for a video one.
   const resolvedSequenceEntries = sequenceClips.filter((entry) => assetUrlById[entry.assetId]);
   const fallbackVideoAsset = assets.find((asset) => asset.kind === "video") ?? null;
-  const effectiveSequenceEntries: SequenceEntry[] =
+  const baseSequenceEntries: SequenceEntry[] =
     resolvedSequenceEntries.length > 0
       ? resolvedSequenceEntries
       : fallbackVideoAsset
         ? [{ id: fallbackVideoAsset.id, kind: "video", assetId: fallbackVideoAsset.id }]
         : [];
+  // Splices in this entry's own live matting progress (see
+  // cutawayMattingProgress's own comment above) for CutawayTrack's badge --
+  // never persisted, so this stays a display-only overlay on top of the
+  // real entries rather than folded into resolvedSequenceEntries itself.
+  const effectiveSequenceEntries: SequenceEntry[] = baseSequenceEntries.map((entry) => {
+    const progress = cutawayMattingProgress[entry.id];
+    if (progress === undefined || !entry.backgroundRemoval?.enabled || entry.backgroundRemoval.matteAssetId) return entry;
+    return { ...entry, backgroundRemoval: { ...entry.backgroundRemoval, progress } };
+  });
   const playbackClips = effectiveSequenceEntries.map((entry) => ({ ...entry, url: assetUrlById[entry.assetId] }));
   // Includes each clip's own `url` (not just its assetId) -- CutawayDialog's
   // "Save changes" on an existing Ken Burns cutaway can point the SAME
@@ -1141,7 +1162,12 @@ export function ThreePaneEditor({
       // path) is synchronous -- already "completed" right here, skipping
       // pollBackgroundRemoval's own first GET entirely, which a video's
       // async job could never satisfy this early.
-      const result = initial.status === "waiting" ? await pollBackgroundRemoval(sourceAssetId) : initial;
+      const result =
+        initial.status === "waiting"
+          ? await pollBackgroundRemoval(sourceAssetId, (fraction) =>
+              setCutawayMattingProgress((prev) => ({ ...prev, [entryId]: fraction }))
+            )
+          : initial;
       if (result.status !== "completed" || !result.matteAssetId) return;
       // The matte is a normal project asset the backend created out-of-band
       // (the matting webhook's own store_asset_bytes call) -- this
@@ -1159,6 +1185,13 @@ export function ThreePaneEditor({
       pushChange(label, state);
     } catch (err) {
       console.error("background removal failed for asset=%s", sourceAssetId, err);
+    } finally {
+      setCutawayMattingProgress((prev) => {
+        if (!(entryId in prev)) return prev;
+        const next = { ...prev };
+        delete next[entryId];
+        return next;
+      });
     }
   }
 
@@ -1207,7 +1240,12 @@ export function ThreePaneEditor({
   async function requestAndPollVideoOverlayBackgroundRemoval(sourceAssetId: string, overlayIndex: number) {
     try {
       const initial = await requestBackgroundRemoval(projectId, sourceAssetId);
-      const result = initial.status === "waiting" ? await pollBackgroundRemoval(sourceAssetId) : initial;
+      const result =
+        initial.status === "waiting"
+          ? await pollBackgroundRemoval(sourceAssetId, (fraction) =>
+              setVideoOverlayMattingProgress((prev) => ({ ...prev, [overlayIndex]: fraction }))
+            )
+          : initial;
       if (result.status !== "completed" || !result.matteAssetId) return;
       await refreshAssets();
       const { label, state } = applySetVideoOverlayBackgroundRemoval(selections, overlayIndex, {
@@ -1217,6 +1255,13 @@ export function ThreePaneEditor({
       pushChange(label, state);
     } catch (err) {
       console.error("background removal failed for video overlay asset=%s", sourceAssetId, err);
+    } finally {
+      setVideoOverlayMattingProgress((prev) => {
+        if (!(overlayIndex in prev)) return prev;
+        const next = { ...prev };
+        delete next[overlayIndex];
+        return next;
+      });
     }
   }
 
@@ -2031,22 +2076,29 @@ export function ThreePaneEditor({
   // array at its own index, same pattern as displayedOverlayImages above --
   // a rect edit only ever applies to a Picture-in-Picture layout (the only
   // one with a rect), checked defensively even though the UI never offers
-  // one for any other layout.
+  // one for any other layout. Also splices in this overlay's own live
+  // matting progress (see videoOverlayMattingProgress's own comment above)
+  // for VideoOverlayTrack's badge, layered on top of whichever (mutually
+  // exclusive -- only one drag gesture is ever active at a time) live edit
+  // above applied, since a drag and an in-flight matting job aren't
+  // mutually exclusive with each other.
   const displayedVideoOverlays: VideoOverlayClip[] = selections.videoOverlays.map((overlay, index) => {
+    let next = overlay;
     if (liveVideoOverlayRangeEdit?.index === index) {
-      return { ...overlay, startTimeSeconds: liveVideoOverlayRangeEdit.startTimeSeconds, endTimeSeconds: liveVideoOverlayRangeEdit.endTimeSeconds };
-    }
-    if (liveVideoOverlayPositionEdit?.index === index) {
+      next = { ...next, startTimeSeconds: liveVideoOverlayRangeEdit.startTimeSeconds, endTimeSeconds: liveVideoOverlayRangeEdit.endTimeSeconds };
+    } else if (liveVideoOverlayPositionEdit?.index === index) {
       const duration = overlay.endTimeSeconds - overlay.startTimeSeconds;
-      return { ...overlay, startTimeSeconds: liveVideoOverlayPositionEdit.startTimeSeconds, endTimeSeconds: liveVideoOverlayPositionEdit.startTimeSeconds + duration };
+      next = { ...next, startTimeSeconds: liveVideoOverlayPositionEdit.startTimeSeconds, endTimeSeconds: liveVideoOverlayPositionEdit.startTimeSeconds + duration };
+    } else if (liveVideoOverlayRectEdit?.index === index && overlay.layout.type === "picture-in-picture") {
+      next = { ...next, layout: { ...overlay.layout, rect: liveVideoOverlayRectEdit.rect } };
+    } else if (liveOverlayAudioBalanceEdit?.index === index) {
+      next = { ...next, audioBalance: liveOverlayAudioBalanceEdit.balance };
     }
-    if (liveVideoOverlayRectEdit?.index === index && overlay.layout.type === "picture-in-picture") {
-      return { ...overlay, layout: { ...overlay.layout, rect: liveVideoOverlayRectEdit.rect } };
+    const progress = videoOverlayMattingProgress[index];
+    if (progress !== undefined && next.backgroundRemoval?.enabled && !next.backgroundRemoval.matteAssetId) {
+      next = { ...next, backgroundRemoval: { ...next.backgroundRemoval, progress } };
     }
-    if (liveOverlayAudioBalanceEdit?.index === index) {
-      return { ...overlay, audioBalance: liveOverlayAudioBalanceEdit.balance };
-    }
-    return overlay;
+    return next;
   });
 
   // Splices any in-progress TtsOverlayTrack drag/volume edit into the
