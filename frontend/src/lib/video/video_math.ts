@@ -1149,6 +1149,20 @@ export type SequenceEntry =
       canvasFillMode?: CanvasFillMode | null;
       canvasFillColor?: string;
       canvasFillGradientColor?: string;
+      // AI background removal (see CutawayDialog.tsx's "Remove background"
+      // toggle) -- also present on the "image" variant below for a Ken
+      // Burns cutaway (a still photo's own matting job is synchronous, a
+      // different provider path server-side, but the same field shape).
+      // Keyed
+      // by the SAME assetId this entry already carries: matteAssetId's
+      // owning background_removals row is looked up server-side by
+      // source_asset_id (= this entry's assetId), not by entry id, so the
+      // same clip reused across multiple cutaways shares one matting job.
+      // `matteAssetId` is null while the async job is still running/queued
+      // -- compileCreatomateTimeline.ts falls back to a plain (non-masked)
+      // segment until it's populated (see buildBackgroundRemovedSegment's
+      // own comment).
+      backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
     }
   | {
       id: string;
@@ -1173,6 +1187,15 @@ export type SequenceEntry =
       canvasFillMode?: CanvasFillMode | null;
       canvasFillColor?: string;
       canvasFillGradientColor?: string;
+      // Same AI background removal as the "video" variant above -- see its
+      // own doc comment. A photo's own matting job (backend/src/matting/
+      // service.py's image-kind path) calls a synchronous image-matting
+      // provider (rembg via fal.ai) rather than VEED's async video job, so
+      // matteAssetId is often populated almost immediately rather than
+      // after a real poll loop -- but the field shape, and how
+      // compileCreatomateTimeline.ts/CanvasPlayer consume it, is identical
+      // either way.
+      backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
     };
 
 // Both SequenceEntry variants above carry a `cutTransitionInId` -- which

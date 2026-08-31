@@ -315,6 +315,159 @@ function buildCanvasFillBackground(
   return new Video({ ...common, trimStart: segment.clipLocalStartSeconds, trimDuration: segment.durationSeconds, volume: "0%" });
 }
 
+/** AI background removal (see CutawayDialog.tsx's "Remove background"
+ * toggle) -- a small Composition, same shape as buildCanvasFillBackground's
+ * canvas-fill wrapper, but THREE elements deep instead of two: a full-bleed
+ * backdrop (track 1), the original clip as foreground (track 2), and the
+ * matte video (track 3) with `maskMode: "luma"`, which masks "the element
+ * one track below it" per Creatomate's own docs -- i.e. it cuts the
+ * foreground down to just its subject, revealing the backdrop underneath.
+ * Verified against node_modules/creatomate/src/elements/ElementBase.ts's
+ * real `maskMode?: ValueOrKeyframes<MaskMode>` and
+ * properties/MaskMode.ts's `'alpha' | 'alpha-inverted' | 'luma' |
+ * 'luma-inverted'`, not guessed.
+ *
+ * The foreground and matte MUST carry the identical crop transform (same
+ * `buildCropProperties` result) -- they're two videos of the same original
+ * clip (see this feature's own plan doc on why the matte is generated over
+ * the whole source clip, sharing its timeline exactly), and the mask only
+ * lines up pixel-for-pixel if both are cropped/positioned identically.
+ *
+ * No canvasFillMode of "crop" (the default, meaning "no backdrop") makes
+ * sense once the subject is cut out -- there must be SOME backdrop behind
+ * it -- so a `fill.mode` of "crop" here falls back to solid
+ * DEFAULT_CANVAS_FILL_COLOR rather than passing "crop" through. */
+function buildBackgroundRemovedSegment(
+  segment: RenderSegment,
+  matteAssetId: string,
+  crop: ReturnType<typeof buildCropProperties>,
+  fill: CanvasFillInfo,
+  filter: ReturnType<typeof getCreatomateFilterProperties>,
+  cutTransition: Record<string, unknown>,
+  overlapSeconds: number,
+  mainVolumePercent: string,
+  appMeta: Record<string, AppMetaEntry>,
+  blurRadiusPx: number
+): { composition: Composition; foreground: Video } {
+  const effectiveFill = fill.mode === "crop" ? { mode: "solid" as const, color: DEFAULT_CANVAS_FILL_COLOR } : fill;
+  const background = buildCanvasFillBackground(segment, effectiveFill, filter, appMeta, blurRadiusPx);
+
+  const foregroundId = nextId("clip");
+  appMeta[foregroundId] = { role: "clip", assetId: segment.assetId };
+  const foreground = new Video({
+    id: foregroundId,
+    track: 2,
+    time: segment.outputStartSeconds,
+    duration: segment.durationSeconds,
+    trimStart: segment.clipLocalStartSeconds,
+    trimDuration: segment.durationSeconds,
+    fit: "fill",
+    xAnchor: "0%",
+    yAnchor: "0%",
+    volume: mainVolumePercent,
+    ...(overlapSeconds > 0 ? { audioFadeIn: overlapSeconds } : {}),
+    ...crop,
+    ...filter,
+    ...cutTransition,
+    source: "",
+  });
+
+  const matteId = nextId("clip-matte");
+  appMeta[matteId] = { role: "clip", assetId: matteAssetId };
+  const matte = new Video({
+    id: matteId,
+    track: 3,
+    time: segment.outputStartSeconds,
+    duration: segment.durationSeconds,
+    trimStart: segment.clipLocalStartSeconds,
+    trimDuration: segment.durationSeconds,
+    fit: "fill",
+    xAnchor: "0%",
+    yAnchor: "0%",
+    maskMode: "luma",
+    volume: "0%",
+    ...crop,
+    source: "",
+  });
+
+  const composition = new Composition({
+    id: nextId("bg-removed"),
+    track: 1,
+    time: segment.outputStartSeconds,
+    duration: segment.durationSeconds,
+    x: "0%",
+    y: "0%",
+    width: "100%",
+    height: "100%",
+    elements: [background, foreground, matte],
+  });
+
+  return { composition, foreground };
+}
+
+/** AI background removal for a Ken Burns (image) cutaway -- much simpler
+ * than buildBackgroundRemovedSegment above: a photo's own matting job
+ * (backend/src/matting/service.py's image-kind path, via fal-ai/imageutils/
+ * rembg) returns a real-alpha PNG cutout directly, not a separate luma
+ * matte -- so there's no third "mask" element/track needed at all. The
+ * `matteAssetId` here just points at a DIFFERENT image asset (the cutout)
+ * that REPLACES the original photo as this element's own source, with the
+ * exact same Ken Burns crop transform applied -- Creatomate honors that
+ * PNG's own transparency natively when compositing it over the backdrop
+ * beneath it in the same two-element Composition shape
+ * buildCanvasFillBackground's own canvas-fill wrapper already uses.
+ *
+ * Same "crop" fallback to solid DEFAULT_CANVAS_FILL_COLOR as
+ * buildBackgroundRemovedSegment -- there must be SOME backdrop once the
+ * subject is cut out. */
+function buildBackgroundRemovedImageSegment(
+  segment: RenderSegment,
+  matteAssetId: string,
+  crop: ReturnType<typeof buildCropProperties>,
+  fill: CanvasFillInfo,
+  filter: ReturnType<typeof getCreatomateFilterProperties>,
+  cutTransition: Record<string, unknown>,
+  appMeta: Record<string, AppMetaEntry>,
+  blurRadiusPx: number
+): { composition: Composition; foreground: Image } {
+  const effectiveFill = fill.mode === "crop" ? { mode: "solid" as const, color: DEFAULT_CANVAS_FILL_COLOR } : fill;
+  const background = buildCanvasFillBackground(segment, effectiveFill, filter, appMeta, blurRadiusPx);
+
+  const foregroundId = nextId("clip");
+  // Points at the CUTOUT asset, not segment.assetId -- the original photo
+  // never appears in the render at all once background removal is on, only
+  // its already-transparent replacement (see this function's own module
+  // comment).
+  appMeta[foregroundId] = { role: "clip", assetId: matteAssetId };
+  const foreground = new Image({
+    id: foregroundId,
+    track: 2,
+    time: segment.outputStartSeconds,
+    duration: segment.durationSeconds,
+    fit: "fill",
+    xAnchor: "0%",
+    yAnchor: "0%",
+    ...crop,
+    ...filter,
+    ...cutTransition,
+    source: "",
+  });
+
+  const composition = new Composition({
+    id: nextId("bg-removed-img"),
+    track: 1,
+    time: segment.outputStartSeconds,
+    duration: segment.durationSeconds,
+    x: "0%",
+    y: "0%",
+    width: "100%",
+    height: "100%",
+    elements: [background, foreground],
+  });
+
+  return { composition, foreground };
+}
+
 /** One Video or Image element per RenderSegment (or, for a segment whose
  * own canvasFillMode isn't "crop", a small Composition wrapping a full-bleed
  * backdrop plus that same foreground -- see buildCanvasFillBackground
@@ -344,6 +497,7 @@ function buildMediaSegments(
   mainVolumePercent: string,
   cutawayFilterByEntryId: Map<string, FilterPresetId | null>,
   canvasFillByEntryId: Map<string, CanvasFillInfo>,
+  backgroundRemovalMatteByEntryId: Map<string, string | null | undefined>,
   referenceAspectRatio: number | null,
   outputWidth: number,
   outputHeight: number
@@ -377,6 +531,60 @@ function buildMediaSegments(
     // rather than hand-rolled Keyframe volume automation -- same "trust the
     // real SDK properties" philosophy this file's own module comment states.
     const overlapSeconds = segment.cutTransitionOverlapSeconds ?? 0;
+
+    // Takes priority over both the canvas-fill and plain-crop paths below --
+    // once a matte/cutout is ready, this segment's whole compositing is
+    // different in kind (a masked/transparent subject over a new backdrop),
+    // not just a variation on either. Both SequenceEntry variants carry
+    // backgroundRemoval (see video_math.ts's own doc comment) -- a video
+    // uses VEED's async luma-matte path (buildBackgroundRemovedSegment), an
+    // image uses rembg's synchronous real-alpha-cutout path
+    // (buildBackgroundRemovedImageSegment), branched below by segment.kind.
+    // Only reachable once matteAssetId is populated -- while the matting
+    // job is still running, this map entry is null/undefined and the
+    // segment falls back to whatever its canvasFillMode/crop would already
+    // render as, matching the live preview's own "instant approximate, then
+    // swap to the real matte" staging (see CanvasPlayer.tsx).
+    const matteAssetId = segment.entryId ? backgroundRemovalMatteByEntryId.get(segment.entryId) : null;
+    if (matteAssetId && segment.kind === "video") {
+      const crop = buildCropProperties(segment, baseCropRect, zoomEffects, referenceAspectRatio);
+      const { composition, foreground } = buildBackgroundRemovedSegment(
+        segment,
+        matteAssetId,
+        crop,
+        fill,
+        filter,
+        cutTransition,
+        overlapSeconds,
+        mainVolumePercent,
+        appMeta,
+        blurRadiusPx
+      );
+      wrapperChildren.push(composition);
+      foregroundBySegment.push(foreground);
+
+      const previousBg = index > 0 ? foregroundBySegment[foregroundBySegment.length - 2] : undefined;
+      if (overlapSeconds > 0 && previousBg instanceof Video) {
+        previousBg.properties.audioFadeOut = overlapSeconds;
+      }
+      return;
+    }
+    if (matteAssetId && segment.kind === "image") {
+      const crop = buildCropProperties(segment, baseCropRect, zoomEffects, referenceAspectRatio);
+      const { composition, foreground } = buildBackgroundRemovedImageSegment(
+        segment,
+        matteAssetId,
+        crop,
+        fill,
+        filter,
+        cutTransition,
+        appMeta,
+        blurRadiusPx
+      );
+      wrapperChildren.push(composition);
+      foregroundBySegment.push(foreground);
+      return;
+    }
 
     if (fill.mode !== "crop") {
       // Letterboxed/pillarboxed instead of cropped -- bypasses
@@ -1123,6 +1331,14 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
       { mode: getCanvasFillMode(entry.canvasFillMode), color: entry.canvasFillColor, gradientColor: entry.canvasFillGradientColor },
     ])
   );
+  // Per-cutaway matte/cutout lookup for AI background removal -- both
+  // SequenceEntry variants carry backgroundRemoval (see its own doc
+  // comment); buildMediaSegments branches on segment.kind to build the
+  // right shape (video's masked-matte Composition vs. an image's simpler
+  // transparent-cutout swap).
+  const backgroundRemovalMatteByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [entry.id, entry.backgroundRemoval?.enabled ? entry.backgroundRemoval.matteAssetId : null])
+  );
   // `selections.cropRect`/a user-dragged pan-zoom ZoomEffect are always
   // authored against the sequence's REFERENCE clip -- the first one (see
   // CanvasPlayer's referenceFrameSizeRef) -- and need re-projecting onto
@@ -1139,6 +1355,7 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     toVolumePercent(mainAudioVolume),
     cutawayFilterByEntryId,
     canvasFillByEntryId,
+    backgroundRemovalMatteByEntryId,
     referenceAspectRatio,
     outputWidth,
     outputHeight

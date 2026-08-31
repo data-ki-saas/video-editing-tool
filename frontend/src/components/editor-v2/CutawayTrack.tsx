@@ -41,6 +41,14 @@ export type CutawaySegment =
       canvasFillMode: CanvasFillMode | null;
       canvasFillColor?: string;
       canvasFillGradientColor?: string;
+      // AI background removal (see CutawayDialog.tsx's "Remove background"
+      // toggle) -- enabled but matteAssetId still null means the matting
+      // job is still processing (CutawaySegmentButton shows a small
+      // "Processing…" badge for that state, see its own code below). A
+      // photo's own job (rembg, synchronous) usually resolves fast enough
+      // that this state is barely visible; a video's (VEED, async) can sit
+      // here for a while.
+      backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
     }
   | {
       kind: "video";
@@ -52,6 +60,8 @@ export type CutawaySegment =
       canvasFillMode: CanvasFillMode | null;
       canvasFillColor?: string;
       canvasFillGradientColor?: string;
+      // Same AI background removal as the "image" variant above.
+      backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
     };
 
 function CutawaySegmentButton({
@@ -119,6 +129,14 @@ function CutawaySegmentButton({
         {canvasFillOption && (
           <span className="pointer-events-none shrink-0 truncate rounded-full bg-black/30 px-1 pr-1" title={canvasFillOption.name}>
             {canvasFillOption.name}
+          </span>
+        )}
+        {segment.backgroundRemoval?.enabled && (
+          <span
+            className="pointer-events-none shrink-0 truncate rounded-full bg-black/30 px-1 pr-1"
+            title={segment.backgroundRemoval.matteAssetId ? "Background removed" : "Removing background…"}
+          >
+            {segment.backgroundRemoval.matteAssetId ? "✂️" : "…"}
           </span>
         )}
       </button>

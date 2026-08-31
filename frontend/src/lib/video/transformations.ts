@@ -557,12 +557,46 @@ export function applyDeleteImageOverlay(
  * what starts rendering frames at all; every later one plays right after
  * whatever's already in the sequence. Duplicates are allowed (the same
  * clip can appear twice), same policy as image overlays. */
-export function applyAddSequenceClip(selections: EditSelectionsSnapshot, assetId: string): TransformationResult {
-  const newEntry: SequenceEntry = { id: crypto.randomUUID(), kind: "video", assetId };
+export function applyAddSequenceClip(
+  selections: EditSelectionsSnapshot,
+  assetId: string,
+  removeBackground?: boolean
+): TransformationResult {
+  const newEntry: SequenceEntry = {
+    id: crypto.randomUUID(),
+    kind: "video",
+    assetId,
+    // matteAssetId starts null -- the caller (ThreePaneEditor's
+    // handleAddToSequence) kicks off the actual matting job right after
+    // this and patches it in later via applySetBackgroundRemoval once the
+    // async job completes, same "waiting" staging as avatar generation.
+    ...(removeBackground ? { backgroundRemoval: { enabled: true, matteAssetId: null } } : {}),
+  };
   return {
     label: "Added clip to sequence",
     state: { ...selections, sequenceClips: [...selections.sequenceClips, newEntry] },
   };
+}
+
+/** Patches one cutaway's backgroundRemoval field in place -- used both by
+ * ThreePaneEditor's request/poll flow to silently write in the real
+ * matteAssetId once a matting job completes (no new undo step for that --
+ * see pushChange callers' own comments on background-completion updates
+ * not needing one), for either a video (VEED, async) or image (rembg,
+ * synchronous) cutaway -- both SequenceEntry variants carry
+ * backgroundRemoval (see video_math.ts's own doc comment). */
+export function applySetBackgroundRemoval(
+  selections: EditSelectionsSnapshot,
+  entryId: string,
+  backgroundRemoval: { enabled: boolean; matteAssetId?: string | null } | null
+): TransformationResult {
+  const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
+  const entry = selections.sequenceClips[entryIndex];
+  const label = backgroundRemoval?.enabled ? "Remove background" : "Restore background";
+  if (!entry) return { label, state: selections };
+  const nextEntries = [...selections.sequenceClips];
+  nextEntries[entryIndex] = { ...entry, backgroundRemoval };
+  return { label, state: { ...selections, sequenceClips: nextEntries } };
 }
 
 // A freshly-added image clip defaults to this long -- long enough to read
@@ -593,9 +627,24 @@ export function applyAddImageSequenceClip(
   durationSeconds: number,
   templateIds: string[],
   cropRect: CropRect,
-  startTimeSeconds: number
+  startTimeSeconds: number,
+  removeBackground?: boolean
 ): TransformationResult {
-  const newEntry: SequenceEntry = { id: crypto.randomUUID(), kind: "image", assetId, durationSeconds, templateIds, cropRect };
+  const newEntry: SequenceEntry = {
+    id: crypto.randomUUID(),
+    kind: "image",
+    assetId,
+    durationSeconds,
+    templateIds,
+    cropRect,
+    // matteAssetId starts null -- same "instant add, patch in the real
+    // result once the job completes" staging as applyAddSequenceClip's own
+    // video-kind backgroundRemoval, except a photo's own matting job
+    // (backend/src/matting/service.py's image-kind path) is synchronous,
+    // so the caller (ThreePaneEditor) may patch this in almost immediately
+    // rather than after a real poll loop.
+    ...(removeBackground ? { backgroundRemoval: { enabled: true, matteAssetId: null } } : {}),
+  };
   const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, startTimeSeconds, durationSeconds);
   return {
     label: "Added image clip",
@@ -702,7 +751,8 @@ export function applyEditImageSequenceClip(
   durationSeconds: number,
   templateIds: string[],
   cropRect: CropRect,
-  clipStartSeconds: number
+  clipStartSeconds: number,
+  removeBackground?: boolean
 ): TransformationResult {
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
   const entry = selections.sequenceClips[entryIndex];
@@ -728,6 +778,11 @@ export function applyEditImageSequenceClip(
     templateIds,
     cropRect,
     colorFilterId: entry.colorFilterId,
+    // Preserves an already-completed matteAssetId when the toggle is left
+    // on unchanged (re-editing crop/duration/templates shouldn't re-run a
+    // paid matting job) -- only starts fresh (null, patched in by the
+    // caller) when the toggle is newly turned on this save.
+    backgroundRemoval: removeBackground ? { enabled: true, matteAssetId: entry.backgroundRemoval?.matteAssetId ?? null } : null,
   };
 
   const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, clipStartSeconds, clampedDuration);

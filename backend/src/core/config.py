@@ -68,6 +68,23 @@ class Settings(BaseSettings):
     # ceiling on how much this feature can spend per user per day.
     avatar_daily_cap: int = 3
 
+    # Which MattingProvider src.matting.client.get_matting_provider()
+    # returns. Only "fal_veed" exists today (VEED's fast/no-refine video
+    # background removal, called via fal.ai's queue API) -- same
+    # switch-pattern precedent as avatar_provider above.
+    matting_provider: str = "fal_veed"
+    fal_api_key: str = ""
+    # Our own shared secret, appended as a query param on the callback_url
+    # handed to fal AND checked against fal's own signed-webhook headers
+    # when present -- see FalVeedProvider.verify_webhook's own comment on
+    # why both checks exist.
+    fal_webhook_secret: str = ""
+    # Real cost is a few cents/clip ($0.008/sec at VEED's fast/no-refine
+    # tier) -- generous relative to avatar_daily_cap since a miss here is
+    # much cheaper, but still a hard ceiling per CLAUDE.md's
+    # abuse-rate-limiting scope, not billing.
+    matting_daily_cap: int = 20
+
     # Estimated external costs backing usage_ledger.cost_estimate_cents (see
     # backend/src/metering/pricing.py) -- hand-maintained placeholders, not
     # live provider rates. Cross-reference frontend/src/app/admin/integrations
@@ -78,6 +95,16 @@ class Settings(BaseSettings):
     # yet and are rough placeholders pending real invoices.
     creatomate_cost_cents_per_second: float = 2.5
     heygen_cost_cents_per_second: float = 5.0
+    # VEED's fast/no-refine tier, per fal.ai's published per-30-frames rate
+    # at 30fps ($0.008/30 frames = $0.008/sec) -- an actual published rate,
+    # unlike most of this block's placeholders.
+    veed_cost_cents_per_second: float = 0.8
+    # fal-ai/imageutils/rembg (a photo's own background-removal path, see
+    # matting/service.py's image-kind branch) bills by compute-second
+    # ($0.00111/compute-second per fal's published rate) rather than a flat
+    # per-image price -- this is a rough placeholder flat estimate (a
+    # typical single-image inference), not a real per-request measurement.
+    rembg_cost_cents_per_image: float = 0.15
     tts_cost_cents_per_second: float = 0.0  # edge-tts is free
     deepseek_cost_cents_per_1k_tokens: float = 0.14
     anthropic_cost_cents_per_1k_input_tokens: float = 0.3

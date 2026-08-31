@@ -141,13 +141,28 @@ export function CutawayDialog({
    * relabels the primary button, forces Image kind, and hides the kind
    * switch entirely (a video segment never reopens this dialog -- see
    * CutawayTrack.tsx). */
-  editing?: { assetId: string; templateIds: string[]; durationSeconds: number; cropRect: CropRect | null } | null;
+  editing?: {
+    assetId: string;
+    templateIds: string[];
+    durationSeconds: number;
+    cropRect: CropRect | null;
+    // AI background removal (see this feature's own plan doc) -- pre-checks
+    // the "Remove background" toggle when reopening a cutaway that already
+    // has it on, so Save doesn't silently drop it.
+    backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
+  } | null;
   /** Non-null when opened via AssetGallery's right-click "Cutaway" on a
    * specific IMAGE asset -- an ADD, not an edit, just pre-selects that
    * photo instead of defaulting to the first one in the project. */
   preselectedAssetId?: string | null;
-  onAddImage: (assetId: string, durationSeconds: number, templateIds: string[], cropRect: CropRect) => void;
-  onAddVideo: (assetId: string) => void;
+  onAddImage: (
+    assetId: string,
+    durationSeconds: number,
+    templateIds: string[],
+    cropRect: CropRect,
+    options?: { removeBackground?: boolean }
+  ) => void;
+  onAddVideo: (assetId: string, options?: { removeBackground?: boolean }) => void;
   onClose: () => void;
   // Only ever passed (and only ever shown) in edit mode -- there's no
   // existing cutaway to remove yet while adding a fresh one.
@@ -156,6 +171,10 @@ export function CutawayDialog({
   // Edit mode is image-only (see the `editing` prop's own comment) -- the
   // kind switch below only ever renders, and only ever matters, in add mode.
   const [kind, setKind] = useState<"video" | "image">("image");
+  // Shared between the Video and Image panels -- only one is ever visible
+  // at a time (the kind switch above), so one toggle covers both, same
+  // "Remove background" checkbox either way.
+  const [removeBackground, setRemoveBackground] = useState(Boolean(editing?.backgroundRemoval?.enabled));
   const isEditing = Boolean(editing);
 
   const imageAssets = assets.filter((asset) => asset.kind === "image");
@@ -419,6 +438,22 @@ export function CutawayDialog({
 
         {kind === "video" && (
           <div className="flex items-center gap-2">
+            {/* AI background removal (see this feature's own plan doc) --
+                one direct toggle, no separate dialog/menu, matching this
+                app's driving-vision preference for simple controls over a
+                casual creator faking a green-screen effect. Processing
+                happens after "Add cutaway" (ThreePaneEditor.handleAddToSequence
+                kicks off the actual matting job and polls it), not here --
+                this checkbox only records the creator's intent. */}
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={removeBackground}
+                onChange={(e) => setRemoveBackground(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Remove background
+            </label>
             <div className="ml-auto flex gap-2">
               <button
                 type="button"
@@ -430,7 +465,7 @@ export function CutawayDialog({
               <button
                 type="button"
                 disabled={!selectedVideoAssetId}
-                onClick={() => selectedVideoAssetId && onAddVideo(selectedVideoAssetId)}
+                onClick={() => selectedVideoAssetId && onAddVideo(selectedVideoAssetId, { removeBackground })}
                 className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
               >
                 Add cutaway
@@ -565,6 +600,20 @@ export function CutawayDialog({
                 Remove Cutaway
               </button>
             )}
+            {/* AI background removal, same toggle as the Video panel's own
+                (see its own comment) -- for a photo this runs a synchronous
+                image-matting job (backend/src/matting/service.py's
+                image-kind path) rather than VEED's async video job, but the
+                creator-facing control is identical either way. */}
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={removeBackground}
+                onChange={(e) => setRemoveBackground(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Remove background
+            </label>
             <div className="ml-auto flex gap-2">
               <button
                 type="button"
@@ -576,7 +625,11 @@ export function CutawayDialog({
               <button
                 type="button"
                 disabled={!selectedAsset || !photoCropRect}
-                onClick={() => selectedAsset && photoCropRect && onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect)}
+                onClick={() =>
+                  selectedAsset &&
+                  photoCropRect &&
+                  onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect, { removeBackground })
+                }
                 className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
               >
                 {isEditing ? "Save changes" : "Add cutaway"}

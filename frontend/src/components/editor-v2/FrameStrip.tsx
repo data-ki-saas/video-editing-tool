@@ -865,6 +865,7 @@ export function FrameStrip({
           canvasFillMode: entry.canvasFillMode ?? null,
           canvasFillColor: entry.canvasFillColor,
           canvasFillGradientColor: entry.canvasFillGradientColor,
+          backgroundRemoval: entry.backgroundRemoval,
         };
       }
       return {
@@ -877,6 +878,7 @@ export function FrameStrip({
         canvasFillMode: entry.canvasFillMode ?? null,
         canvasFillColor: entry.canvasFillColor,
         canvasFillGradientColor: entry.canvasFillGradientColor,
+        backgroundRemoval: entry.backgroundRemoval,
       };
     });
   }, [sequenceEntries, clipBoundarySeconds, durationSeconds]);

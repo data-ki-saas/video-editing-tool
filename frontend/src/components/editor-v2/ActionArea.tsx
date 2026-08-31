@@ -416,7 +416,7 @@ export function ActionArea({
   // `preselectedAssetId` prop.
   cutawayDialogPreselectedAssetId: string | null;
   onAddImageSequenceClip: (assetId: string, durationSeconds: number, templateIds: string[], cropRect: CropRect) => void;
-  onAddVideoSequenceClip: (asset: Asset) => void;
+  onAddVideoSequenceClip: (asset: Asset, options?: { removeBackground?: boolean }) => void;
   onCloseCutawayDialog: () => void;
   onDeleteCutaway: (segment: CutawaySegment) => void;
   isVideoOverlayPickerOpen: boolean;
@@ -664,14 +664,15 @@ export function ActionArea({
                   templateIds: editingCutaway.templateIds,
                   durationSeconds: editingCutaway.durationSeconds,
                   cropRect: editingCutaway.cropRect,
+                  backgroundRemoval: editingCutaway.backgroundRemoval,
                 }
               : null
           }
           preselectedAssetId={cutawayDialogPreselectedAssetId}
           onAddImage={onAddImageSequenceClip}
-          onAddVideo={(assetId) => {
+          onAddVideo={(assetId, options) => {
             const asset = assets.find((a) => a.id === assetId);
-            if (asset) onAddVideoSequenceClip(asset);
+            if (asset) onAddVideoSequenceClip(asset, options);
           }}
           onClose={onCloseCutawayDialog}
           onDelete={editingCutaway ? () => onDeleteCutaway(editingCutaway) : undefined}

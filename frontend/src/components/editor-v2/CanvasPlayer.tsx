@@ -69,6 +69,7 @@
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { extractPreviewFrames, getVideoDuration, drawImageFlipped } from "@/lib/video/video";
+import { segmentClipFramesApproximate, lumaFramesToAlphaMasks, segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
 import {
   frameIndexAtTime,
@@ -288,6 +289,15 @@ export const CanvasPlayer = forwardRef<
   const cutTransitionById: Map<string, CutTransitionId | null | undefined> = new Map(
     clips.map((clip) => [clip.id, clip.cutTransitionInId ?? null])
   );
+  // AI background removal for a Ken Burns (image) cutaway -- true means
+  // "draw a backdrop first, then this clip's own (already-transparent)
+  // frame on top, no separate matte compositing needed" (see drawFrameAt's
+  // own masked-composite branch, which this shares with the video path's
+  // `matte` signal). A VIDEO clip's equivalent signal is `matte` itself
+  // (an actual per-frame alpha carrier, see clipMattesRef) -- images don't
+  // populate that ref at all, since the cutout is baked directly into the
+  // single loaded frame (see the loading effect's own image branch).
+  const clipBackgroundRemovalById = new Map(clips.map((clip) => [clip.id, clip.kind === "image" && Boolean(clip.backgroundRemoval?.enabled)]));
   // Per-clip decoded preview frames + frame rate, indexed the same as
   // loadedClipsRef below (NOT necessarily the same as the `clips` prop --
   // a clip that failed to load is excluded from all three in lockstep). A
@@ -297,6 +307,15 @@ export const CanvasPlayer = forwardRef<
   // this file needs, so they're used interchangeably below.
   const clipImagesRef = useRef<(HTMLImageElement | ImageBitmap)[][]>([]);
   const frameRatesRef = useRef<number[]>([]);
+  // AI background removal (see this feature's own plan doc) -- one alpha
+  // mask per frame, same index alignment as clipImagesRef, or null for a
+  // clip with no backgroundRemoval active. Populated by the SAME loading
+  // effect as clipImagesRef, from whichever source is ready:
+  // lumaFramesToAlphaMasks (VEED's real matte, once
+  // clip.backgroundRemoval.matteAssetId resolves) or
+  // segmentClipFramesApproximate (an instant MediaPipe cutout, while that's
+  // still null) -- see backgroundSegmentation.ts's own module comment.
+  const clipMattesRef = useRef<(ImageBitmap[] | null)[]>([]);
   // Which clips actually loaded, with cumulative start times -- what
   // resolveSequencePosition resolves elapsedSeconds against, and what
   // durationRef.current is derived from (their total).
@@ -359,6 +378,10 @@ export const CanvasPlayer = forwardRef<
   // absent, checked at play/seek time rather than gating isReady on it.
   const backgroundAudioBufferRef = useRef<AudioBuffer | null>(null);
   const backgroundSourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  // Scratch canvas reused across frames for the background-removal masked
+  // composite (see drawFrameAt's own "destination-in" branch) -- resized in
+  // place rather than reallocated every frame.
+  const maskCompositeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationFrameIdRef = useRef<number | null>(null);
   // Wall-clock bookkeeping for the AudioContext-driven playback clock:
   // elapsed = pausedAtSeconds while stopped, or
@@ -555,6 +578,12 @@ export const CanvasPlayer = forwardRef<
     // destination, restored via ctx.restore() so it never leaks into the
     // next draw (this canvas is reused every frame).
     const currentEntryId = loadedClipsRef.current[position.clipIndex]?.id;
+    // AI background removal (see this feature's own plan doc) -- present
+    // once either the real matte or the instant MediaPipe approximation has
+    // resolved for this exact frame (see the loading effect's own
+    // clipMattesRef assignment); undefined for every other clip/frame,
+    // which every branch below just treats as "no masking".
+    const matte = clipMattesRef.current[position.clipIndex]?.[frameIndex];
     ctx.save();
     ctx.filter = getFilterPresetOption(currentEntryId ? (clipFilterById.get(currentEntryId) ?? null) : null).cssFilter;
     ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
@@ -585,6 +614,96 @@ export const CanvasPlayer = forwardRef<
       // around its own frame of reference, so both apply correctly
       // together rather than one overriding the other.
       drawImageFlipped(ctx, image, sx + bsx, sy + bsy, bsw, bsh, baseDestX, baseDestY, baseDestWidth, baseDestHeight, baseFlipH, baseFlipV);
+    } else if (baseRect && currentEntryId && (matte || clipBackgroundRemovalById.get(currentEntryId))) {
+      // Masked cutout over a new backdrop -- takes priority over both the
+      // letterbox (next branch) and plain-crop (last branch) paths below,
+      // same priority compileCreatomateTimeline.ts's buildMediaSegments
+      // gives its own equivalent check, EXCEPT it defers to an active
+      // Split-Screen layout (handled above) -- an orthogonal overlay
+      // concept the backend never combines with canvasFillMode either, so
+      // there's no real conflict to resolve there, only here in the
+      // preview's own branch ordering.
+      //
+      // No canvasFillMode of "crop" makes sense once the subject is cut
+      // out (there must be SOME backdrop) -- defaults to solid
+      // DEFAULT_CANVAS_FILL_COLOR, same fallback
+      // compileCreatomateTimeline.ts's buildBackgroundRemovedSegment uses,
+      // so the preview and the real render agree on the default backdrop.
+      const rawFill = clipCanvasFillById.get(currentEntryId) ?? { mode: "crop" as const };
+      const fill = rawFill.mode === "crop" ? { mode: "solid" as const, color: DEFAULT_CANVAS_FILL_COLOR, gradientColor: undefined as string | undefined } : rawFill;
+      const canvasAspectRatio = canvas.width / canvas.height;
+      const baseCssFilter = ctx.filter;
+      if (fill.mode === "blur") {
+        const bgCrop = computeMaxCoverageCropRect(image.width, image.height, canvasAspectRatio);
+        const blurRadiusPx = CANVAS_FILL_BLUR_RADIUS_FRACTION * Math.max(canvas.width, canvas.height);
+        ctx.filter = `${baseCssFilter === "none" ? "" : baseCssFilter} blur(${blurRadiusPx}px)`.trim();
+        ctx.drawImage(image, bgCrop.x, bgCrop.y, bgCrop.width, bgCrop.height, 0, 0, canvas.width, canvas.height);
+        ctx.filter = baseCssFilter;
+      } else {
+        ctx.filter = "none";
+        if (fill.mode === "solid") {
+          ctx.fillStyle = fill.color ?? DEFAULT_CANVAS_FILL_COLOR;
+        } else {
+          const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+          gradient.addColorStop(0, fill.color ?? DEFAULT_CANVAS_FILL_COLOR);
+          gradient.addColorStop(1, fill.gradientColor ?? DEFAULT_CANVAS_FILL_GRADIENT_COLOR);
+          ctx.fillStyle = gradient;
+        }
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.filter = baseCssFilter;
+      }
+
+      const destX = baseRect.x * canvas.width;
+      const destY = baseRect.y * canvas.height;
+      const destWidth = baseRect.width * canvas.width;
+      const destHeight = baseRect.height * canvas.height;
+
+      if (matte) {
+        // VIDEO path: draw the cropped subject onto a scratch canvas, then
+        // punch it down to just the matte's alpha via "destination-in"
+        // (Porter-Duff DestIn -- keeps the destination scaled by the
+        // SOURCE's alpha only, its own RGB is never read, see
+        // backgroundSegmentation.ts's own module comment) before
+        // compositing that onto the real canvas, on top of the backdrop
+        // just drawn -- the client-side equivalent of Creatomate's real
+        // maskMode: "luma".
+        if (
+          maskCompositeCanvasRef.current === null ||
+          maskCompositeCanvasRef.current.width !== canvas.width ||
+          maskCompositeCanvasRef.current.height !== canvas.height
+        ) {
+          maskCompositeCanvasRef.current = document.createElement("canvas");
+          maskCompositeCanvasRef.current.width = canvas.width;
+          maskCompositeCanvasRef.current.height = canvas.height;
+        }
+        const maskCanvas = maskCompositeCanvasRef.current;
+        const maskCtx = maskCanvas.getContext("2d");
+        if (maskCtx) {
+          // `crop` is a FRACTION of the frame (0..1) -- reapplied against
+          // the matte's own width/height, not image's sx/sy/sWidth/sHeight
+          // verbatim, since the matte (a MediaPipe mask or VEED's own
+          // output) isn't guaranteed to share the source video's exact
+          // pixel dimensions.
+          const matteSx = crop.x * matte.width;
+          const matteSy = crop.y * matte.height;
+          const matteSWidth = crop.width * matte.width;
+          const matteSHeight = crop.height * matte.height;
+          maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+          maskCtx.globalCompositeOperation = "source-over";
+          maskCtx.drawImage(image, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight);
+          maskCtx.globalCompositeOperation = "destination-in";
+          maskCtx.drawImage(matte, matteSx, matteSy, matteSWidth, matteSHeight, destX, destY, destWidth, destHeight);
+          ctx.drawImage(maskCanvas, 0, 0);
+        }
+      } else {
+        // IMAGE path (Ken Burns cutaway): no separate mask element needed
+        // at all -- `image` here is already the transparent cutout itself
+        // (real rembg alpha, or MediaPipe's approximate one, see the
+        // loading effect's own image branch), so a plain drawImage on top
+        // of the backdrop just drawn above lets its own per-pixel alpha
+        // show that backdrop through natively, no scratch canvas required.
+        ctx.drawImage(image, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight);
+      }
     } else if (baseRect && currentEntryId && (clipCanvasFillById.get(currentEntryId)?.mode ?? "crop") !== "crop") {
       // Letterboxed/pillarboxed instead of cropped -- the clip's full,
       // uncropped frame shown centered (computeContainFitRect), with the
@@ -1219,6 +1338,7 @@ export const CanvasPlayer = forwardRef<
     setIsPlaying(false);
     clipImagesRef.current = [];
     frameRatesRef.current = [];
+    clipMattesRef.current = [];
     loadedClipsRef.current = [];
     audioBufferRef.current = null;
     pausedAtSecondsRef.current = 0;
@@ -1230,7 +1350,7 @@ export const CanvasPlayer = forwardRef<
 
       type LoadedClipMeta = { id: string; assetId: string; url: string; durationSeconds: number; kind: "video" | "image" };
       type ClipLoadResult =
-        | { ok: true; images: (HTMLImageElement | ImageBitmap)[]; frameRate: number; audioBuffer: AudioBuffer; meta: LoadedClipMeta }
+        | { ok: true; images: (HTMLImageElement | ImageBitmap)[]; frameRate: number; audioBuffer: AudioBuffer; meta: LoadedClipMeta; mattes: ImageBitmap[] | null }
         | { ok: false; message: string };
 
       // Fraction (0..1) each clip has progressed -- driven by
@@ -1261,7 +1381,30 @@ export const CanvasPlayer = forwardRef<
             // frameCount - 1, so a single-frame array naturally holds that
             // one frame for the whole clip with no other changes needed.
             const duration = clip.durationSeconds;
-            const image = await loadImage(clip.url);
+
+            // AI background removal for a Ken Burns cutaway -- unlike the
+            // video path (a separate per-frame matte, see below), the
+            // single "frame" here is REPLACED outright by an already-
+            // transparent cutout, since a still image's own alpha channel
+            // needs no separate mask element at all (see
+            // compileCreatomateTimeline.ts's buildBackgroundRemovedImageSegment
+            // and backgroundSegmentation.ts's own module comment). The real
+            // rembg cutout once ready, else an instant approximate one --
+            // same two-stage staging as the video path, just producing a
+            // full RGBA image instead of a bare alpha mask.
+            let image: HTMLImageElement | ImageBitmap;
+            if (clip.backgroundRemoval?.enabled) {
+              const matteUrl = clip.backgroundRemoval.matteAssetId ? assetUrlById[clip.backgroundRemoval.matteAssetId] : undefined;
+              try {
+                image = matteUrl ? await loadImage(matteUrl) : await segmentImageApproximate(await loadImage(clip.url));
+              } catch (err) {
+                console.error("background-removal cutout failed for clip=%s", clip.id, err);
+                image = await loadImage(clip.url);
+              }
+            } else {
+              image = await loadImage(clip.url);
+            }
+
             const silentAudioBuffer = audioContext.createBuffer(1, Math.max(1, Math.round(duration * audioContext.sampleRate)), audioContext.sampleRate);
             clipProgress[index] = 1;
             reportProgress();
@@ -1271,6 +1414,7 @@ export const CanvasPlayer = forwardRef<
               frameRate: 1,
               audioBuffer: silentAudioBuffer,
               meta: { id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "image" },
+              mattes: null,
             };
           }
 
@@ -1285,12 +1429,35 @@ export const CanvasPlayer = forwardRef<
           ]);
           clipProgress[index] = 1;
           reportProgress();
+
+          // AI background removal -- real matte (extracted at the SAME
+          // frameRate, so it lines up frame-for-frame with `images`) once
+          // ready, else an instant approximate cutout straight off the
+          // frames just extracted above. Failures here don't fail the clip
+          // itself -- backgroundSegmentation.ts's own helpers already fall
+          // back to "fully opaque" (draws as a normal, unmasked clip) on
+          // error, same "a clip that fails to load is skipped, everything
+          // else plays" spirit this file's module comment already states
+          // for the clip-load loop as a whole.
+          let mattes: ImageBitmap[] | null = null;
+          if (clip.kind === "video" && clip.backgroundRemoval?.enabled) {
+            const matteUrl = clip.backgroundRemoval.matteAssetId ? assetUrlById[clip.backgroundRemoval.matteAssetId] : undefined;
+            try {
+              mattes = matteUrl
+                ? await lumaFramesToAlphaMasks(await extractPreviewFrames(matteUrl, frameRate))
+                : await segmentClipFramesApproximate(images);
+            } catch (err) {
+              console.error("background-removal mask extraction failed for clip=%s", clip.id, err);
+            }
+          }
+
           return {
             ok: true,
             images,
             frameRate,
             audioBuffer,
             meta: { id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "video" },
+            mattes,
           };
         } catch (err) {
           return { ok: false, message: err instanceof Error ? err.message : "Failed to load this clip" };
@@ -1314,6 +1481,7 @@ export const CanvasPlayer = forwardRef<
       const loadedFrameRates: number[] = [];
       const loadedAudioBuffers: AudioBuffer[] = [];
       const loadedClipMeta: LoadedClipMeta[] = [];
+      const loadedMattes: (ImageBitmap[] | null)[] = [];
       let failureCount = 0;
       let lastFailureMessage = "";
       for (const result of results) {
@@ -1322,6 +1490,7 @@ export const CanvasPlayer = forwardRef<
           loadedFrameRates.push(result.frameRate);
           loadedAudioBuffers.push(result.audioBuffer);
           loadedClipMeta.push(result.meta);
+          loadedMattes.push(result.mattes);
         } else {
           failureCount += 1;
           lastFailureMessage = result.message;
@@ -1334,6 +1503,7 @@ export const CanvasPlayer = forwardRef<
 
       clipImagesRef.current = loadedImages;
       frameRatesRef.current = loadedFrameRates;
+      clipMattesRef.current = loadedMattes;
       loadedClipsRef.current = buildSequenceClipInfos(loadedClipMeta);
       durationRef.current = totalSequenceDuration(loadedClipsRef.current);
       audioBufferRef.current = concatenateAudioBuffers(audioContext, loadedAudioBuffers);

@@ -233,6 +233,9 @@ the next push that touches `supabase/migrations/`.
    | `HEYGEN_DEFAULT_AVATAR_ID` | required for the avatar-video feature | the `avatar_id` of one avatar you create in HeyGen's dashboard — there's no in-app avatar picker yet, every generation uses this one |
    | `HEYGEN_WEBHOOK_SECRET` | required for the avatar-video feature | any long random string you generate — appended as a query param on the callback URL HeyGen POSTs back to; see `avatar/providers/heygen_provider.py`'s own comment for why this (not HeyGen's signature header) is the real verification boundary here |
    | `AVATAR_DAILY_CAP` | optional | `3` — keep this small; unlike TTS this has a real per-generation cost (~$0.02-0.07/sec of avatar video) |
+   | `FAL_API_KEY` | required for the background-removal feature (video AND photo cutaways) | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) — pay-per-use, calls both VEED's video background removal model and fal-ai/imageutils/rembg (photos) |
+   | `FAL_WEBHOOK_SECRET` | required for VIDEO cutaway background removal only | any long random string you generate — appended as a query param on the callback URL handed to fal, and checked against fal's own signed-webhook headers when present; see `matting/providers/fal_veed_provider.py`'s own comment. A photo cutaway's own job is synchronous (no webhook), so this isn't needed for that path |
+   | `MATTING_DAILY_CAP` | optional | `20` — real cost is a few cents/clip, so this can stay generous relative to `AVATAR_DAILY_CAP` |
 
    The avatar-video feature (a talking avatar delivering the AI-generated
    narration, via HeyGen) is entirely optional — without the four `HEYGEN_*`/
@@ -240,6 +243,14 @@ the next push that touches `supabase/migrations/`.
    works, just without the "Deliver as a talking avatar video" checkbox
    doing anything (`POST /api/avatar/generate` 500s with a clear "not
    configured" message instead).
+
+   The background-removal feature (cutting a cutaway's subject out to
+   composite over a new backdrop, via fal.ai/VEED for video, fal.ai/rembg
+   for a Ken Burns photo cutaway) is likewise optional -- without
+   `FAL_API_KEY` (both kinds) or `FAL_WEBHOOK_SECRET`/`BACKEND_PUBLIC_URL`
+   (video only), the editor's "Remove background" toggle 500s with a clear
+   "not configured"
+   message instead of starting a job.
 
    Do **not** set `R2_ENDPOINT_OVERRIDE` — it exists only for the test
    suite (pointing at a local moto server).

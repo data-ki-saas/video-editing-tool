@@ -418,6 +418,58 @@ export async function getAvatarGeneration(id: string): Promise<AvatarGeneration>
   return { id: body.id, status: body.status, assetId: body.asset_id, url: body.url, error: body.error };
 }
 
+export type BackgroundRemovalStatus = "waiting" | "completed" | "failed";
+
+export interface BackgroundRemoval {
+  status: BackgroundRemovalStatus;
+  matteAssetId: string | null;
+  matteUrl: string | null;
+  error: string | null;
+}
+
+/** POST /api/matting/request -- kicks off (or, if one already exists for
+ * this exact clip/photo, simply returns) an AI background-removal job for
+ * an already-uploaded asset. Keyed by sourceAssetId, not by cutaway/
+ * segment: the same clip/photo reused across multiple cutaways shares one
+ * job instead of paying for it again (see backend/src/matting/service.py's
+ * own comment). A VIDEO job is async (returns "waiting" -- poll
+ * getBackgroundRemoval below until terminal); a PHOTO job is synchronous
+ * (backend/src/matting/service.py's image-kind path calls rembg directly),
+ * so this often already returns "completed" with matteAssetId/matteUrl
+ * populated -- callers should check for that before bothering to poll (see
+ * lib/backgroundRemoval.ts's pollBackgroundRemoval, which already no-ops
+ * immediately for a non-"waiting" status). */
+export async function requestBackgroundRemoval(projectId: string, sourceAssetId: string): Promise<BackgroundRemoval> {
+  const response = await apiFetch(`${API_BASE_URL}/api/matting/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ project_id: projectId, source_asset_id: sourceAssetId }),
+  });
+  const body = await handleResponse<{
+    status: BackgroundRemovalStatus;
+    matte_asset_id: string | null;
+    matte_url: string | null;
+    error: string | null;
+  }>(response);
+  return { status: body.status, matteAssetId: body.matte_asset_id, matteUrl: body.matte_url, error: body.error };
+}
+
+/** GET /api/matting/status/{sourceAssetId} -- poll until status is
+ * "completed" or "failed" (see lib/backgroundRemoval.ts's
+ * pollBackgroundRemoval). */
+export async function getBackgroundRemoval(sourceAssetId: string): Promise<BackgroundRemoval> {
+  const response = await apiFetch(`${API_BASE_URL}/api/matting/status/${encodeURIComponent(sourceAssetId)}`, {
+    headers: await authHeader(),
+  });
+  const body = await handleResponse<{
+    status: BackgroundRemovalStatus;
+    matte_asset_id: string | null;
+    matte_url: string | null;
+    error: string | null;
+  }>(response);
+  return { status: body.status, matteAssetId: body.matte_asset_id, matteUrl: body.matte_url, error: body.error };
+}
+
 export interface UsageSummaryItem {
   eventType: string;
   label: string;

@@ -17,6 +17,7 @@ FEATURES: list[Feature] = [
     Feature("render_generate", "Cloud render", "Rendering & AI"),
     Feature("tts_synthesize", "AI voiceover", "Rendering & AI"),
     Feature("avatar_generate", "AI avatar video", "Rendering & AI"),
+    Feature("matting_generate", "AI background removal", "Rendering & AI"),
     Feature("assets_manage", "Upload & manage media", "Media"),
     Feature("stock_media_use", "Stock photo/video/music library", "Media"),
     Feature("projects_manage", "Create/delete/reset projects", "Projects"),

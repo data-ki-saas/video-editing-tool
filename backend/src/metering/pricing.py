@@ -9,6 +9,14 @@ def avatar_cost_cents(duration_seconds: float) -> float:
     return duration_seconds * settings.heygen_cost_cents_per_second
 
 
+def matting_cost_cents(duration_seconds: float) -> float:
+    return duration_seconds * settings.veed_cost_cents_per_second
+
+
+def matting_image_cost_cents() -> float:
+    return settings.rembg_cost_cents_per_image
+
+
 def voiceover_cost_cents(duration_seconds: float) -> float:
     return duration_seconds * settings.tts_cost_cents_per_second
 

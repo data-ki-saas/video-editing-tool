@@ -45,7 +45,8 @@
  * authored duration, with silent audio").
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listAssets, deleteAsset, type Asset } from "@/lib/api";
+import { listAssets, deleteAsset, requestBackgroundRemoval, type Asset } from "@/lib/api";
+import { pollBackgroundRemoval } from "@/lib/backgroundRemoval";
 import { extractThumbnails, getVideoDuration, captureSingleFrame } from "@/lib/video/video";
 import { getAudioDuration } from "@/lib/video/audio";
 import {
@@ -119,6 +120,7 @@ import {
   applySelectVideoOverlayFilterPreset,
   applySelectClipTransition,
   applySelectCanvasFillMode,
+  applySetBackgroundRemoval,
 } from "@/lib/video/transformations";
 import type { FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
@@ -1049,12 +1051,58 @@ export function ThreePaneEditor({
   // Right-click "Cutaway" on a video asset in AssetGallery -- appends it to
   // the concatenated sequence. The first one is what starts rendering
   // frames at all; every later one plays right after whatever's already
-  // there. Also what CutawayDialog's video-kind "Add cutaway" calls.
-  function handleAddToSequence(asset: Asset) {
-    const { label, state } = applyAddSequenceClip(selections, asset.id);
+  // there. Also what CutawayDialog's video-kind "Add cutaway" calls, now
+  // optionally with AI background removal (see this feature's own plan
+  // doc). The clip is added instantly either way -- the toggle must feel
+  // instant, per this app's driving vision -- with backgroundRemoval.
+  // matteAssetId starting null; requestBackgroundRemoval/
+  // pollBackgroundRemoval run in the background and a second pushChange
+  // patches the real matteAssetId in once VEED's job completes (or leaves
+  // it null on failure/timeout, which compileCreatomateTimeline.ts and
+  // CanvasPlayer both already treat as "not ready yet, render/preview
+  // as a normal clip"). NOT stale-safe against edits made during that wait
+  // (`selections` here is the closure's value at poll-completion time, not
+  // necessarily current) -- same accepted risk handleAddVideoOverlay's own
+  // getVideoDuration await already carries, just over a much longer window;
+  // worth a real ref if this turns out to matter in practice.
+  function handleAddToSequence(asset: Asset, options?: { removeBackground?: boolean }) {
+    const { label, state } = applyAddSequenceClip(selections, asset.id, options?.removeBackground);
     pushChange(label, state);
     setIsCutawayDialogOpen(false);
     setCutawayDialogPreselectedAssetId(null);
+
+    if (options?.removeBackground) {
+      const newEntryId = state.sequenceClips[state.sequenceClips.length - 1]?.id;
+      if (newEntryId) void requestAndPollBackgroundRemoval(asset.id, newEntryId);
+    }
+  }
+
+  async function requestAndPollBackgroundRemoval(sourceAssetId: string, entryId: string) {
+    try {
+      const initial = await requestBackgroundRemoval(projectId, sourceAssetId);
+      // A photo's own job (backend/src/matting/service.py's image-kind
+      // path) is synchronous -- already "completed" right here, skipping
+      // pollBackgroundRemoval's own first GET entirely, which a video's
+      // async job could never satisfy this early.
+      const result = initial.status === "waiting" ? await pollBackgroundRemoval(sourceAssetId) : initial;
+      if (result.status !== "completed" || !result.matteAssetId) return;
+      // The matte is a normal project asset the backend created out-of-band
+      // (the matting webhook's own store_asset_bytes call) -- this
+      // component's `assets` state (and the assetUrlById map CanvasPlayer
+      // resolves clip.backgroundRemoval.matteAssetId against) doesn't know
+      // about it yet, same reason handleUploaded merges a fresh asset in
+      // rather than assuming state already has it. refreshAssets() (not a
+      // synthetic merge) since the matting endpoints only return the matte's
+      // id/URL, not the full Asset shape uploadAsset's response carries.
+      await refreshAssets();
+      const { label, state } = applySetBackgroundRemoval(selections, entryId, {
+        enabled: true,
+        matteAssetId: result.matteAssetId,
+      });
+      pushChange(label, state);
+    } catch (err) {
+      console.error("background removal failed for asset=%s", sourceAssetId, err);
+    }
   }
 
   // Right-click "Overlay" on a video asset in AssetGallery, or a tile
@@ -1394,7 +1442,13 @@ export function ThreePaneEditor({
   // length, i.e. exactly where a freshly-added clip starts. `cropRect` is
   // the clip rectangle the dialog's own preview positioned for this
   // specific photo, not the project's video-frame cropRect.
-  function handleAddImageSequenceClip(assetId: string, durationSeconds: number, templateIds: string[], cropRect: CropRect) {
+  function handleAddImageSequenceClip(
+    assetId: string,
+    durationSeconds: number,
+    templateIds: string[],
+    cropRect: CropRect,
+    options?: { removeBackground?: boolean }
+  ) {
     const replacedAssetId =
       editingCutaway && editingCutaway.kind === "image" && editingCutaway.assetId !== assetId
         ? editingCutaway.assetId
@@ -1409,13 +1463,41 @@ export function ThreePaneEditor({
             durationSeconds,
             templateIds,
             cropRect,
-            editingCutaway.startTimeSeconds
+            editingCutaway.startTimeSeconds,
+            options?.removeBackground
           )
-        : applyAddImageSequenceClip(selections, assetId, durationSeconds, templateIds, cropRect, videoDurationSeconds);
+        : applyAddImageSequenceClip(
+            selections,
+            assetId,
+            durationSeconds,
+            templateIds,
+            cropRect,
+            videoDurationSeconds,
+            options?.removeBackground
+          );
     pushChange(label, state);
     setIsCutawayDialogOpen(false);
     setEditingCutaway(null);
     setCutawayDialogPreselectedAssetId(null);
+
+    // Same "add instantly, patch matteAssetId in once the job completes" as
+    // handleAddToSequence's own video-kind flow -- a photo's own matting job
+    // (backend/src/matting/service.py's image-kind path) is synchronous, so
+    // this often resolves almost immediately, but still goes through the
+    // same request/poll/patch shape rather than a special-cased "wait for
+    // it right here" path, so a slow provider response doesn't block the
+    // dialog from closing. Only fires when this save just turned the toggle
+    // on with no matteAssetId yet -- re-saving with an already-completed
+    // one left unchanged doesn't re-trigger (see applyEditImageSequenceClip's
+    // own preservation logic), and a duplicate fire while one's already in
+    // flight is harmless (matting/repository.get_by_source_asset dedupes
+    // server-side).
+    if (options?.removeBackground) {
+      const editedEntry = state.sequenceClips.find((entry) => entry.id === (editingCutaway?.entryId ?? state.sequenceClips[state.sequenceClips.length - 1]?.id));
+      if (editedEntry?.kind === "image" && editedEntry.backgroundRemoval?.enabled && !editedEntry.backgroundRemoval.matteAssetId) {
+        void requestAndPollBackgroundRemoval(assetId, editedEntry.id);
+      }
+    }
 
     // Swapping a cutaway's photo leaves the OLD asset row/R2 object
     // orphaned unless something cleans it up -- nothing else in this app
