@@ -740,11 +740,18 @@ export function ThreePaneEditor({
         ? [{ id: fallbackVideoAsset.id, kind: "video", assetId: fallbackVideoAsset.id }]
         : [];
   const playbackClips = effectiveSequenceEntries.map((entry) => ({ ...entry, url: assetUrlById[entry.assetId] }));
-  // Includes each image entry's own durationSeconds -- a duration edit
-  // (FrameStrip's post-add resize handle) must re-trigger extraction, not
-  // just an id/kind change.
+  // Includes each clip's own `url` (not just its assetId) -- CutawayDialog's
+  // "Save changes" on an existing Ken Burns cutaway can point the SAME
+  // entry id at a DIFFERENT photo (applyEditImageSequenceClip), which a key
+  // built only from id/duration would miss entirely (same id, often the
+  // same authored duration too), leaving FrameStrip's thumbnail rail on the
+  // old photo even though CanvasPlayer/the real render already reflect the
+  // new one correctly -- CanvasPlayer's own clipsKey already includes `url`
+  // for this exact reason, mirrored here. Also includes each image entry's
+  // own durationSeconds -- a duration edit (FrameStrip's post-add resize
+  // handle) must re-trigger extraction too, not just an id/url/kind change.
   const sequenceClipsKey = playbackClips
-    .map((clip) => `${clip.id}:${clip.kind === "image" ? clip.durationSeconds : ""}`)
+    .map((clip) => `${clip.id}:${clip.url}:${clip.kind === "image" ? clip.durationSeconds : ""}`)
     .join(",");
 
   // Unfolds the video sequence into a per-second thumbnail strip + duration,
