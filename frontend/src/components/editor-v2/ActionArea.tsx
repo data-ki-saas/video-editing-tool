@@ -40,8 +40,10 @@ import { CutawayDialog } from "./CutawayDialog";
 import type { CutawaySegment } from "./CutawayTrack";
 import { ClipRectangleDialog } from "./ClipRectangleDialog";
 import { FilterPresetDialog } from "./FilterPresetDialog";
+import { CanvasFillDialog } from "./CanvasFillDialog";
 import { CutTransitionDialog } from "./CutTransitionDialog";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
+import type { CanvasFillMode } from "@/lib/video/canvasFillPresets";
 import { VideoOverlayFramingDialog } from "./VideoOverlayFramingDialog";
 import { ImageOverlayFramingDialog } from "./ImageOverlayFramingDialog";
 import { VideoOverlayPickerDialog } from "./VideoOverlayPickerDialog";
@@ -241,6 +243,10 @@ export function ActionArea({
   onSelectVideoOverlayFilter,
   onSelectImageOverlayFilter,
   onCloseFilterDialog,
+  canvasFillDialogCutaway,
+  canvasFillDialogCutawayPreviewFrameUrl,
+  onSelectCanvasFill,
+  onCloseCanvasFillDialog,
   transitionDialogEntry,
   transitionDialogOutgoingFrameUrl,
   transitionDialogIncomingFrameUrl,
@@ -364,6 +370,13 @@ export function ActionArea({
   onSelectVideoOverlayFilter: (id: FilterPresetId) => void;
   onSelectImageOverlayFilter: (id: FilterPresetId) => void;
   onCloseFilterDialog: () => void;
+  // CanvasFillDialog's own currently-open target -- same one-state-per-
+  // dialog-target convention as filterDialogCutaway above, opened by that
+  // clip's own right-click "Canvas fill…" (CutawayTrack.tsx's onOpenCanvasFill).
+  canvasFillDialogCutaway: CutawaySegment | null;
+  canvasFillDialogCutawayPreviewFrameUrl: string | null;
+  onSelectCanvasFill: (mode: CanvasFillMode, colors?: { color?: string; gradientColor?: string }) => void;
+  onCloseCanvasFillDialog: () => void;
   // CutTransitionDialog's own currently-open target -- see
   // ThreePaneEditor.tsx's own transitionDialogEntry state comment.
   transitionDialogEntry: SequenceEntry | null;
@@ -461,6 +474,9 @@ export function ActionArea({
   // currently open (at most one of the three ever is).
   const filterDialogCutawayEntry = filterDialogCutaway
     ? (sequenceClips.find((entry) => entry.id === filterDialogCutaway.entryId) ?? null)
+    : null;
+  const canvasFillDialogCutawayEntry = canvasFillDialogCutaway
+    ? (sequenceClips.find((entry) => entry.id === canvasFillDialogCutaway.entryId) ?? null)
     : null;
   const filterDialogVideoOverlay =
     filterDialogVideoOverlayIndex !== null ? (videoOverlays[filterDialogVideoOverlayIndex] ?? null) : null;
@@ -679,6 +695,19 @@ export function ActionArea({
           onClose={onCloseFilterDialog}
           previewFrameUrl={filterDialogCutawayPreviewFrameUrl ?? previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
+          scopeLabel="this cutaway"
+        />
+      )}
+
+      {canvasFillDialogCutawayEntry && (
+        <CanvasFillDialog
+          selectedMode={canvasFillDialogCutawayEntry.canvasFillMode ?? null}
+          selectedColor={canvasFillDialogCutawayEntry.canvasFillColor}
+          selectedGradientColor={canvasFillDialogCutawayEntry.canvasFillGradientColor}
+          onSelect={onSelectCanvasFill}
+          onClose={onCloseCanvasFillDialog}
+          previewFrameUrl={canvasFillDialogCutawayPreviewFrameUrl ?? previewFrameUrl}
+          outputAspectRatio={playAreaRatio}
           scopeLabel="this cutaway"
         />
       )}

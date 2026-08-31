@@ -118,9 +118,11 @@ import {
   applySelectImageOverlayFilterPreset,
   applySelectVideoOverlayFilterPreset,
   applySelectClipTransition,
+  applySelectCanvasFillMode,
 } from "@/lib/video/transformations";
 import type { FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
+import type { CanvasFillMode } from "@/lib/video/canvasFillPresets";
 import {
   DEFAULT_EDIT_SELECTIONS,
   type Timeline,
@@ -337,6 +339,10 @@ export function ThreePaneEditor({
   // SequenceEntry/VideoOverlayClip/ImageOverlayClip). At most one is
   // non-null at a time -- opened from that clip's own right-click "Filter".
   const [filterDialogCutaway, setFilterDialogCutaway] = useState<CutawaySegment | null>(null);
+  // CanvasFillDialog's own currently-open target -- same one-state-per-
+  // dialog-target shape as filterDialogCutaway immediately above, opened
+  // from that clip's own right-click "Canvas fill".
+  const [canvasFillDialogCutaway, setCanvasFillDialogCutaway] = useState<CutawaySegment | null>(null);
   // CutTransitionDialog's own currently-open target -- the INCOMING clip of
   // whichever boundary badge was clicked on FrameStrip (cutTransitionInId
   // lives on this entry, never on the one before it -- see
@@ -918,6 +924,12 @@ export function ThreePaneEditor({
     setFilterDialogCutaway(segment);
   }
 
+  // Opens CanvasFillDialog scoped to one cutaway -- mirrors
+  // handleOpenCutawayFilter immediately above.
+  function handleOpenCutawayCanvasFill(segment: CutawaySegment) {
+    setCanvasFillDialogCutaway(segment);
+  }
+
   function handleOpenImageOverlayFilter(overlayIndex: number) {
     setFilterDialogImageOverlayIndex(overlayIndex);
   }
@@ -929,6 +941,12 @@ export function ThreePaneEditor({
   function handleSelectCutawayFilter(id: FilterPresetId) {
     if (!filterDialogCutaway) return;
     const { label, state } = applySelectCutawayFilterPreset(selections, filterDialogCutaway.entryId, id);
+    pushChange(label, state);
+  }
+
+  function handleSelectCanvasFillMode(mode: CanvasFillMode, colors?: { color?: string; gradientColor?: string }) {
+    if (!canvasFillDialogCutaway) return;
+    const { label, state } = applySelectCanvasFillMode(selections, canvasFillDialogCutaway.entryId, mode, colors);
     pushChange(label, state);
   }
 
@@ -1743,6 +1761,19 @@ export function ThreePaneEditor({
         })()
     : null;
 
+  // CanvasFillDialog's own preview frame -- same "this clip's own frame,
+  // not whatever the playhead is on" reasoning as
+  // filterDialogCutawayPreviewFrameUrl immediately above.
+  const canvasFillDialogCutawayPreviewFrameUrl = canvasFillDialogCutaway
+    ? canvasFillDialogCutaway.kind === "image"
+      ? (assetUrlById[canvasFillDialogCutaway.assetId] ?? null)
+      : (() => {
+          const midpoint = canvasFillDialogCutaway.startTimeSeconds + canvasFillDialogCutaway.durationSeconds / 2;
+          const index = findClosestTimestampIndex(thumbnailTimestampsSeconds, midpoint);
+          return index >= 0 ? thumbnails[index] : null;
+        })()
+    : null;
+
   // CutTransitionDialog's own two preview frames -- the outgoing clip's TAIL
   // (near its own end) and the incoming clip's HEAD (near its own start),
   // rather than either clip's midpoint, so the preview shows something
@@ -2062,6 +2093,10 @@ export function ThreePaneEditor({
             setFilterDialogVideoOverlayIndex(null);
             setFilterDialogImageOverlayIndex(null);
           }}
+          canvasFillDialogCutaway={canvasFillDialogCutaway}
+          canvasFillDialogCutawayPreviewFrameUrl={canvasFillDialogCutawayPreviewFrameUrl}
+          onSelectCanvasFill={handleSelectCanvasFillMode}
+          onCloseCanvasFillDialog={() => setCanvasFillDialogCutaway(null)}
           transitionDialogEntry={transitionDialogEntry}
           transitionDialogOutgoingFrameUrl={transitionDialogOutgoingFrameUrl}
           transitionDialogIncomingFrameUrl={transitionDialogIncomingFrameUrl}
@@ -2148,6 +2183,7 @@ export function ThreePaneEditor({
           onEditCutaway={handleEditCutaway}
           onDeleteCutaway={handleDeleteCutaway}
           onOpenCutawayFilter={handleOpenCutawayFilter}
+          onOpenCutawayCanvasFill={handleOpenCutawayCanvasFill}
           onOpenClipTransition={handleOpenClipTransition}
           mainAudioVolume={mainAudioVolume}
           onChangeMainAudioVolume={setMainAudioVolume}

@@ -68,6 +68,8 @@ import {
   AUDIO_TRANSITION_RAMP_SECONDS,
   DEFAULT_OVERLAY_FRAMING,
   FULL_FRAME_CROP_RECT,
+  computeMaxCoverageCropRect,
+  computeContainFitRect,
   type RenderSegment,
   type SequenceClipInfo,
   type TtsOverlay,
@@ -75,6 +77,12 @@ import {
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
+import {
+  getCanvasFillMode,
+  CANVAS_FILL_BLUR_RADIUS_FRACTION,
+  DEFAULT_CANVAS_FILL_COLOR,
+  DEFAULT_CANVAS_FILL_GRADIENT_COLOR,
+} from "@/lib/video/canvasFillPresets";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
 
 const OUTPUT_FPS = 30;
@@ -536,6 +544,14 @@ export async function exportVideoLocally(
   // colorFilterId" model as compileCreatomateTimeline.ts's identical map --
   // see that file's own comment on cutawayFilterByEntryId.
   const cutawayFilterByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.colorFilterId ?? null]));
+  // Per-cutaway canvas fill (see canvasFillPresets.ts) -- same "each clip
+  // carries its own" shape as cutawayFilterByEntryId above.
+  const canvasFillByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [
+      entry.id,
+      { mode: getCanvasFillMode(entry.canvasFillMode), color: entry.canvasFillColor, gradientColor: entry.canvasFillGradientColor },
+    ])
+  );
   // Same cut-transition lookup compileCreatomateTimeline.ts builds -- see
   // that file's own cutTransitionByEntryId comment.
   const cutTransitionByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.cutTransitionInId ?? null]));
@@ -723,6 +739,37 @@ export async function exportVideoLocally(
             sWidth, sHeight, baseDestWidth, baseDestHeight, panX, panY, baseZoom
           );
           drawImageFlipped(ctx, source, sx + bsx, sy + bsy, bsw, bsh, baseDestX, baseDestY, baseDestWidth, baseDestHeight, baseFlipH, baseFlipV);
+        } else if (baseRect && (segment.entryId ? (canvasFillByEntryId.get(segment.entryId)?.mode ?? "crop") : "crop") !== "crop") {
+          // Letterboxed/pillarboxed instead of cropped -- mirrors
+          // CanvasPlayer's identical branch exactly (same
+          // computeContainFitRect/computeMaxCoverageCropRect helpers), so
+          // a local export matches the live preview frame-for-frame.
+          const fill = canvasFillByEntryId.get(segment.entryId!)!;
+          const canvasAspectRatio = canvas.width / canvas.height;
+          const baseCssFilter = ctx.filter; // already this clip's own color filter, set above
+          if (fill.mode === "blur") {
+            const bgCrop = computeMaxCoverageCropRect(sourceWidth, sourceHeight, canvasAspectRatio);
+            const blurRadiusPx = CANVAS_FILL_BLUR_RADIUS_FRACTION * Math.max(canvas.width, canvas.height);
+            ctx.filter = `${baseCssFilter === "none" ? "" : baseCssFilter} blur(${blurRadiusPx}px)`.trim();
+            ctx.drawImage(source, bgCrop.x, bgCrop.y, bgCrop.width, bgCrop.height, 0, 0, canvas.width, canvas.height);
+          } else {
+            ctx.filter = "none";
+            if (fill.mode === "solid") {
+              ctx.fillStyle = fill.color ?? DEFAULT_CANVAS_FILL_COLOR;
+            } else {
+              const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+              gradient.addColorStop(0, fill.color ?? DEFAULT_CANVAS_FILL_COLOR);
+              gradient.addColorStop(1, fill.gradientColor ?? DEFAULT_CANVAS_FILL_GRADIENT_COLOR);
+              ctx.fillStyle = gradient;
+            }
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+          }
+          ctx.filter = baseCssFilter;
+          const containRect = computeContainFitRect(sourceWidth / sourceHeight, canvasAspectRatio);
+          ctx.drawImage(
+            source, 0, 0, sourceWidth, sourceHeight,
+            containRect.x * canvas.width, containRect.y * canvas.height, containRect.width * canvas.width, containRect.height * canvas.height
+          );
         } else if (baseRect) {
           // null only for an active Full-Screen overlay -- its own draw
           // below fully covers the canvas regardless, so skipping this is a

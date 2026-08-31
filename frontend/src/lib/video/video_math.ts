@@ -10,6 +10,7 @@
  */
 import type { FilterPresetId } from "./filterPresets";
 import { CUT_TRANSITION_DURATION_SECONDS, type CutTransitionId } from "./cutTransitionPresets";
+import type { CanvasFillMode } from "./canvasFillPresets";
 
 /**
  * Timestamps (seconds) to sample a clip of the given duration at a fixed
@@ -160,6 +161,32 @@ export function computeMaxCoverageCropRect(sourceWidth: number, sourceHeight: nu
 export function computeMaxCoverageCropFraction(sourceAspectRatio: number, targetRatio: number): CropRect {
   const rect = computeMaxCoverageCropRect(sourceAspectRatio, 1, targetRatio);
   return { x: rect.x / sourceAspectRatio, y: rect.y, width: rect.width / sourceAspectRatio, height: rect.height };
+}
+
+/**
+ * The destination rect (fractions of the CANVAS) that shows a source frame
+ * of `sourceAspectRatio` in full, letterboxed/pillarboxed to fit inside a
+ * `canvasAspectRatio` frame with no cropping -- the inverse problem to
+ * computeMaxCoverageCropFraction above (which crops the SOURCE to fill the
+ * canvas; this instead shrinks the DESTINATION box to fit the source in
+ * full, centered). Only used by a clip whose own canvasFillMode isn't "crop"
+ * (see canvasFillPresets.ts) -- letterboxed empty space is filled by a
+ * blurred cover-fit duplicate, a solid color, or a gradient rather than left
+ * black. Only meaningful for the two canvas-based draw paths (CanvasPlayer,
+ * lib/localRender/exportTimeline.ts): compileCreatomateTimeline.ts never
+ * calls this -- Creatomate's own `fit: "contain"` does the identical math
+ * natively.
+ */
+export function computeContainFitRect(sourceAspectRatio: number, canvasAspectRatio: number): CropRect {
+  if (!(sourceAspectRatio > 0) || !(canvasAspectRatio > 0)) return FULL_FRAME_CROP_RECT;
+  if (sourceAspectRatio > canvasAspectRatio) {
+    // Source relatively wider than the canvas -- full width, letterboxed top/bottom.
+    const height = canvasAspectRatio / sourceAspectRatio;
+    return { x: 0, y: (1 - height) / 2, width: 1, height };
+  }
+  // Source relatively taller/narrower than the canvas -- full height, pillarboxed left/right.
+  const width = sourceAspectRatio / canvasAspectRatio;
+  return { x: (1 - width) / 2, y: 0, width, height: 1 };
 }
 
 /**
@@ -1113,7 +1140,16 @@ export function buildSequenceClipInfos(
  * extraction, live preview, the per-clip duration drag on FrameStrip).
  */
 export type SequenceEntry =
-  | { id: string; kind: "video"; assetId: string; colorFilterId?: FilterPresetId | null; cutTransitionInId?: CutTransitionId | null }
+  | {
+      id: string;
+      kind: "video";
+      assetId: string;
+      colorFilterId?: FilterPresetId | null;
+      cutTransitionInId?: CutTransitionId | null;
+      canvasFillMode?: CanvasFillMode | null;
+      canvasFillColor?: string;
+      canvasFillGradientColor?: string;
+    }
   | {
       id: string;
       kind: "image";
@@ -1130,6 +1166,13 @@ export type SequenceEntry =
       // VideoOverlayClip.colorFilterId's doc comment.
       colorFilterId?: FilterPresetId | null;
       cutTransitionInId?: CutTransitionId | null;
+      // Same per-clip canvas fill as the "video" variant above -- see
+      // canvasFillPresets.ts's own doc comment. Absent/null means "crop"
+      // (today's only behavior, unchanged for every reel saved before this
+      // existed).
+      canvasFillMode?: CanvasFillMode | null;
+      canvasFillColor?: string;
+      canvasFillGradientColor?: string;
     };
 
 // Both SequenceEntry variants above carry a `cutTransitionInId` -- which

@@ -22,6 +22,7 @@
 import type { CropRect } from "@/lib/video/video_math";
 import { getImageTemplateOption } from "@/lib/video/imageTemplates";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
+import { getCanvasFillOption, type CanvasFillMode } from "@/lib/video/canvasFillPresets";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 
 export type CutawaySegment =
@@ -37,6 +38,9 @@ export type CutawaySegment =
       startTimeSeconds: number;
       durationSeconds: number;
       colorFilterId: FilterPresetId | null;
+      canvasFillMode: CanvasFillMode | null;
+      canvasFillColor?: string;
+      canvasFillGradientColor?: string;
     }
   | {
       kind: "video";
@@ -45,6 +49,9 @@ export type CutawaySegment =
       startTimeSeconds: number;
       durationSeconds: number;
       colorFilterId: FilterPresetId | null;
+      canvasFillMode: CanvasFillMode | null;
+      canvasFillColor?: string;
+      canvasFillGradientColor?: string;
     };
 
 function CutawaySegmentButton({
@@ -53,16 +60,19 @@ function CutawaySegmentButton({
   onEdit,
   onDelete,
   onOpenFilter,
+  onOpenCanvasFill,
 }: {
   segment: CutawaySegment;
   toPercent: (seconds: number) => number;
   onEdit: () => void;
   onDelete: () => void;
   onOpenFilter: () => void;
+  onOpenCanvasFill: () => void;
 }) {
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
   const isImage = segment.kind === "image";
   const filterOption = segment.colorFilterId ? getFilterPresetOption(segment.colorFilterId) : null;
+  const canvasFillOption = segment.canvasFillMode ? getCanvasFillOption(segment.canvasFillMode) : null;
 
   return (
     <>
@@ -79,6 +89,7 @@ function CutawaySegmentButton({
         onContextMenu={(e) =>
           openContextMenu(e, [
             { label: "Filter…", onSelect: onOpenFilter },
+            { label: "Canvas fill…", onSelect: onOpenCanvasFill },
             { label: "Remove Cutaway", danger: true, onSelect: onDelete },
           ])
         }
@@ -105,6 +116,11 @@ function CutawaySegmentButton({
             {filterOption.name}
           </span>
         )}
+        {canvasFillOption && (
+          <span className="pointer-events-none shrink-0 truncate rounded-full bg-black/30 px-1 pr-1" title={canvasFillOption.name}>
+            {canvasFillOption.name}
+          </span>
+        )}
       </button>
       <ContextMenu state={contextMenuState} onClose={closeContextMenu} />
     </>
@@ -117,12 +133,14 @@ export function CutawayTrack({
   onEdit,
   onDelete,
   onOpenFilter,
+  onOpenCanvasFill,
 }: {
   segments: CutawaySegment[];
   videoDurationSeconds: number;
   onEdit: (segment: CutawaySegment) => void;
   onDelete: (segment: CutawaySegment) => void;
   onOpenFilter: (segment: CutawaySegment) => void;
+  onOpenCanvasFill: (segment: CutawaySegment) => void;
 }) {
   if (segments.length === 0) return null;
 
@@ -138,6 +156,7 @@ export function CutawayTrack({
           onEdit={() => onEdit(segment)}
           onDelete={() => onDelete(segment)}
           onOpenFilter={() => onOpenFilter(segment)}
+          onOpenCanvasFill={() => onOpenCanvasFill(segment)}
         />
       ))}
     </div>

@@ -97,6 +97,8 @@ import {
   ttsOverlayEndTimeSeconds,
   findActiveWordIndex,
   computeOutputDimensions,
+  computeMaxCoverageCropRect,
+  computeContainFitRect,
   FULL_FRAME_CROP_RECT,
   type CropRect,
   type ImageOverlayClip,
@@ -110,6 +112,12 @@ import {
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
 import { getFilterPresetOption } from "@/lib/video/filterPresets";
+import {
+  getCanvasFillMode,
+  CANVAS_FILL_BLUR_RADIUS_FRACTION,
+  DEFAULT_CANVAS_FILL_COLOR,
+  DEFAULT_CANVAS_FILL_GRADIENT_COLOR,
+} from "@/lib/video/canvasFillPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { ReelLoader } from "@/components/ReelLoader";
@@ -264,6 +272,14 @@ export const CanvasPlayer = forwardRef<
   // position, since a clip that failed to load shifts every later index out
   // of alignment with the `clips` prop.
   const clipFilterById = new Map(clips.map((clip) => [clip.id, clip.colorFilterId ?? null]));
+  // Each clip's own canvas fill (see canvasFillPresets.ts) -- same id-keyed
+  // lookup shape as clipFilterById above.
+  const clipCanvasFillById = new Map(
+    clips.map((clip) => [
+      clip.id,
+      { mode: getCanvasFillMode(clip.canvasFillMode), color: clip.canvasFillColor, gradientColor: clip.canvasFillGradientColor },
+    ])
+  );
   // Which cut-transition (see cutTransitionPresets.ts) plays INTO each clip
   // from whichever clip precedes it -- same id-keyed lookup shape as
   // clipFilterById above. Distinct from this codebase's OTHER "transition"
@@ -569,6 +585,42 @@ export const CanvasPlayer = forwardRef<
       // around its own frame of reference, so both apply correctly
       // together rather than one overriding the other.
       drawImageFlipped(ctx, image, sx + bsx, sy + bsy, bsw, bsh, baseDestX, baseDestY, baseDestWidth, baseDestHeight, baseFlipH, baseFlipV);
+    } else if (baseRect && currentEntryId && (clipCanvasFillById.get(currentEntryId)?.mode ?? "crop") !== "crop") {
+      // Letterboxed/pillarboxed instead of cropped -- the clip's full,
+      // uncropped frame shown centered (computeContainFitRect), with the
+      // empty bars filled by a blurred cover-fit duplicate / solid color /
+      // gradient behind it (see canvasFillPresets.ts). Only reachable here,
+      // never in the Split-Screen branch above -- same scope limit as this
+      // file's own module comment on other compound edge cases.
+      const fill = clipCanvasFillById.get(currentEntryId)!;
+      const canvasAspectRatio = canvas.width / canvas.height;
+      const baseCssFilter = ctx.filter; // already this clip's own color filter, set above
+      if (fill.mode === "blur") {
+        // Cover-fit of the FULL native frame (not the authored crop -- the
+        // backdrop is always full-bleed decoration, independent of any
+        // crop/zoom this clip's own canvasFillMode already bypasses).
+        const bgCrop = computeMaxCoverageCropRect(image.width, image.height, canvasAspectRatio);
+        const blurRadiusPx = CANVAS_FILL_BLUR_RADIUS_FRACTION * Math.max(canvas.width, canvas.height);
+        ctx.filter = `${baseCssFilter === "none" ? "" : baseCssFilter} blur(${blurRadiusPx}px)`.trim();
+        ctx.drawImage(image, bgCrop.x, bgCrop.y, bgCrop.width, bgCrop.height, 0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.filter = "none";
+        if (fill.mode === "solid") {
+          ctx.fillStyle = fill.color ?? DEFAULT_CANVAS_FILL_COLOR;
+        } else {
+          const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+          gradient.addColorStop(0, fill.color ?? DEFAULT_CANVAS_FILL_COLOR);
+          gradient.addColorStop(1, fill.gradientColor ?? DEFAULT_CANVAS_FILL_GRADIENT_COLOR);
+          ctx.fillStyle = gradient;
+        }
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      ctx.filter = baseCssFilter;
+      const containRect = computeContainFitRect(clipAspectRatio, canvasAspectRatio);
+      ctx.drawImage(
+        image, 0, 0, image.width, image.height,
+        containRect.x * canvas.width, containRect.y * canvas.height, containRect.width * canvas.width, containRect.height * canvas.height
+      );
     } else if (baseRect) {
       // null only for an active Full-Screen video overlay -- the overlay's
       // own draw below fully covers the canvas at full opacity regardless,

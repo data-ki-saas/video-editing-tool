@@ -45,6 +45,7 @@ import {
 import { buildKenBurnsEffect } from "./imageTemplates";
 import { getFilterPresetOption, type FilterPresetId } from "./filterPresets";
 import { getCutTransitionOption, type CutTransitionId } from "./cutTransitionPresets";
+import { getCanvasFillOption, type CanvasFillMode } from "./canvasFillPresets";
 
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
@@ -189,6 +190,37 @@ export function applySelectCutawayFilterPreset(
   if (!entry) return { label, state: selections };
   const nextEntries = [...selections.sequenceClips];
   nextEntries[entryIndex] = { ...entry, colorFilterId: filterId === "none" ? null : filterId };
+  return { label, state: { ...selections, sequenceClips: nextEntries } };
+}
+
+/** Picking a canvas fill mode (Blur/Solid Color/Gradient/Crop to Fill) for
+ * one specific cutaway from CanvasFillDialog -- same id-based
+ * selections.sequenceClips.findIndex(...) lookup as
+ * applySelectCutawayFilterPreset immediately above. `colors` is only ever
+ * passed for "solid"/"gradient" (the color picker(s) that mode's own
+ * dialog panel reveals) and left undefined otherwise, so picking Blur/Crop
+ * after previously picking Solid/Gradient doesn't need its own separate
+ * "clear the color" action -- the color fields simply go unused again
+ * whenever mode isn't "solid"/"gradient" (see canvasFillPresets.ts/
+ * compileCreatomateTimeline.ts, which both only ever read them in that
+ * case). */
+export function applySelectCanvasFillMode(
+  selections: EditSelectionsSnapshot,
+  entryId: string,
+  mode: CanvasFillMode,
+  colors?: { color?: string; gradientColor?: string }
+): TransformationResult {
+  const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
+  const entry = selections.sequenceClips[entryIndex];
+  const label = `Canvas fill: ${getCanvasFillOption(mode).name}`;
+  if (!entry) return { label, state: selections };
+  const nextEntries = [...selections.sequenceClips];
+  nextEntries[entryIndex] = {
+    ...entry,
+    canvasFillMode: mode === "crop" ? null : mode,
+    ...(colors?.color !== undefined ? { canvasFillColor: colors.color } : {}),
+    ...(colors?.gradientColor !== undefined ? { canvasFillGradientColor: colors.gradientColor } : {}),
+  };
   return { label, state: { ...selections, sequenceClips: nextEntries } };
 }
 

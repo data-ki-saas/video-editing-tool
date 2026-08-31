@@ -422,6 +422,7 @@ export function FrameStrip({
   onEditCutaway,
   onDeleteCutaway,
   onOpenCutawayFilter,
+  onOpenCutawayCanvasFill,
   onOpenClipTransition,
   isLoading,
   durationSeconds,
@@ -523,6 +524,10 @@ export function FrameStrip({
   // The Cutaways rail's own right-click "Filter" -- opens FilterPresetDialog
   // scoped to just this cutaway (see applySelectCutawayFilterPreset).
   onOpenCutawayFilter: (segment: CutawaySegment) => void;
+  // The Cutaways rail's own right-click "Canvas fill" -- opens
+  // CanvasFillDialog scoped to just this cutaway (see
+  // applySelectCanvasFillMode).
+  onOpenCutawayCanvasFill: (segment: CutawaySegment) => void;
   // The clip-boundary transition badge's own click (see clipBoundarySeconds'
   // own render block below) -- opens CutTransitionDialog scoped to the
   // INCOMING clip of that boundary (whichever sequenceEntries[index+1] is),
@@ -857,6 +862,9 @@ export function FrameStrip({
           startTimeSeconds,
           durationSeconds: endTimeSeconds - startTimeSeconds,
           colorFilterId: entry.colorFilterId ?? null,
+          canvasFillMode: entry.canvasFillMode ?? null,
+          canvasFillColor: entry.canvasFillColor,
+          canvasFillGradientColor: entry.canvasFillGradientColor,
         };
       }
       return {
@@ -866,6 +874,9 @@ export function FrameStrip({
         startTimeSeconds,
         durationSeconds: endTimeSeconds - startTimeSeconds,
         colorFilterId: entry.colorFilterId ?? null,
+        canvasFillMode: entry.canvasFillMode ?? null,
+        canvasFillColor: entry.canvasFillColor,
+        canvasFillGradientColor: entry.canvasFillGradientColor,
       };
     });
   }, [sequenceEntries, clipBoundarySeconds, durationSeconds]);
@@ -940,6 +951,7 @@ export function FrameStrip({
           onEdit={onEditCutaway}
           onDelete={onDeleteCutaway}
           onOpenFilter={onOpenCutawayFilter}
+          onOpenCanvasFill={onOpenCutawayCanvasFill}
         />
 
         <TrimTrack

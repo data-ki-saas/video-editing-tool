@@ -114,6 +114,7 @@ export function Playground({
   onEditCutaway,
   onDeleteCutaway,
   onOpenCutawayFilter,
+  onOpenCutawayCanvasFill,
   onOpenClipTransition,
   mainAudioVolume,
   onChangeMainAudioVolume,
@@ -211,6 +212,7 @@ export function Playground({
   onEditCutaway: (segment: CutawaySegment) => void;
   onDeleteCutaway: (segment: CutawaySegment) => void;
   onOpenCutawayFilter: (segment: CutawaySegment) => void;
+  onOpenCutawayCanvasFill: (segment: CutawaySegment) => void;
   onOpenClipTransition: (entry: SequenceEntry) => void;
   mainAudioVolume: number;
   onChangeMainAudioVolume: (level: number) => void;
@@ -333,6 +335,7 @@ export function Playground({
             onResizeImageClip={onResizeImageClip}
             onEditCutaway={onEditCutaway}
             onOpenCutawayFilter={onOpenCutawayFilter}
+            onOpenCutawayCanvasFill={onOpenCutawayCanvasFill}
             onOpenClipTransition={onOpenClipTransition}
             onDeleteCutaway={onDeleteCutaway}
             isLoading={isAnalyzing}

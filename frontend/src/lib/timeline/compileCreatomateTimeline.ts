@@ -36,6 +36,7 @@ import {
   Text,
   Image,
   Composition,
+  Rectangle,
   Keyframe,
   TextTypewriter,
   TextAppearWordByWord,
@@ -65,6 +66,13 @@ import { getTextTemplateFontFraction } from "@/lib/video/textTemplates";
 import { getTranscriptCaptionConfig } from "@/lib/video/transcriptCaptionTemplates";
 import { getCreatomateFilterProperties, type FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
+import {
+  getCanvasFillMode,
+  CANVAS_FILL_BLUR_RADIUS_FRACTION,
+  DEFAULT_CANVAS_FILL_COLOR,
+  DEFAULT_CANVAS_FILL_GRADIENT_COLOR,
+  type CanvasFillMode,
+} from "@/lib/video/canvasFillPresets";
 
 export interface CompileTimelineInput {
   selections: EditSelectionsSnapshot;
@@ -226,17 +234,108 @@ function buildCropProperties(
   return { width, height, x, y };
 }
 
-/** One Video or Image element per RenderSegment, each with its own
- * crop/zoom keyframes, all on track 1 of their shared parent (sequenced
- * back-to-back, same convention as the README's multi-clip example). An
- * image segment gets no trimStart/trimDuration (meaningless for a still
- * image -- it has no timeline of its own to trim into), but otherwise
- * reuses buildCropProperties verbatim: Image's x/y/width/height/xAnchor/
- * yAnchor are the same ValueOrKeyframes-typed properties Video's are
- * (both extend the SDK's shared ElementBase/ElementProperties -- verified
- * directly against node_modules/creatomate/src/elements/{Image,
- * ElementBase}.ts), so the exact same keyframed crop transform applies to
- * either element type unchanged. */
+interface CanvasFillInfo {
+  mode: CanvasFillMode;
+  color?: string;
+  gradientColor?: string;
+}
+
+/** The full-bleed backdrop for a "blur"/"solid"/"gradient" canvas-fill
+ * segment -- always sized to fill the whole 100%x100% viewport, drawn
+ * FIRST inside the wrapping Composition this function's caller builds (see
+ * buildMediaSegments' own doc comment on why array order, not `track`,
+ * decides which layer is on top here). "solid"/"gradient" use a Rectangle
+ * (Shape) -- no asset/appMeta entry needed, it's a plain fill, not footage.
+ * "blur" duplicates the same clip (own id + own appMeta entry pointing at
+ * the SAME assetId, same "one asset, multiple elements" pattern this file
+ * already uses for a cut-transition's overlap pair) at `fit: "cover"`, with
+ * `blurRadius` set -- a first-class Creatomate element property, verified
+ * against node_modules/creatomate/src/elements/ElementBase.ts, not a hack.
+ * Always muted (Video only -- an Image has no audio to mute) so a clip
+ * never plays its own audio twice through two elements at once. */
+function buildCanvasFillBackground(
+  segment: RenderSegment,
+  fill: CanvasFillInfo,
+  filter: ReturnType<typeof getCreatomateFilterProperties>,
+  appMeta: Record<string, AppMetaEntry>,
+  blurRadiusPx: number
+): Video | Image | Rectangle {
+  if (fill.mode === "solid") {
+    return new Rectangle({
+      id: nextId("clip-bg"),
+      time: segment.outputStartSeconds,
+      duration: segment.durationSeconds,
+      fillMode: "solid",
+      fillColor: fill.color ?? DEFAULT_CANVAS_FILL_COLOR,
+    });
+  }
+  if (fill.mode === "gradient") {
+    return new Rectangle({
+      id: nextId("clip-bg"),
+      time: segment.outputStartSeconds,
+      duration: segment.durationSeconds,
+      fillMode: "linear",
+      // UNVERIFIED ASSUMPTION (this file's own module comment already flags
+      // one of these -- this is the second): ShapeProperties.fillColor's own
+      // doc says an array of color stops is valid for fillMode
+      // "linear"/"radial" but "use the template designer to see how color
+      // stops are formatted" -- no further detail in the installed SDK
+      // source. A plain [start, end] string array is expandProperties'
+      // pass-through case (utility/expandProperties.ts only special-cases
+      // an array of real Keyframe instances), so this at least serializes
+      // as-is rather than being silently mangled -- but if a real test
+      // render shows Creatomate expects a different per-stop shape (e.g.
+      // "0% #rrggbb" strings, or {color,offset} objects), this is the one
+      // line to fix.
+      fillColor: [fill.color ?? DEFAULT_CANVAS_FILL_COLOR, fill.gradientColor ?? DEFAULT_CANVAS_FILL_GRADIENT_COLOR] as unknown as string,
+      fillX0: "50%",
+      fillY0: "0%",
+      fillX1: "50%",
+      fillY1: "100%",
+    });
+  }
+
+  // "blur"
+  const id = nextId("clip-bg");
+  appMeta[id] = { role: "clip", assetId: segment.assetId };
+  const common = {
+    id,
+    time: segment.outputStartSeconds,
+    duration: segment.durationSeconds,
+    fit: "cover" as const,
+    xAnchor: "0%",
+    yAnchor: "0%",
+    blurRadius: blurRadiusPx,
+    ...filter,
+    // Overwritten server-side by resolveAssetSources, same as every other
+    // element's placeholder source below.
+    source: "",
+  };
+  if (segment.kind === "image") return new Image(common);
+  return new Video({ ...common, trimStart: segment.clipLocalStartSeconds, trimDuration: segment.durationSeconds, volume: "0%" });
+}
+
+/** One Video or Image element per RenderSegment (or, for a segment whose
+ * own canvasFillMode isn't "crop", a small Composition wrapping a full-bleed
+ * backdrop plus that same foreground -- see buildCanvasFillBackground
+ * above), all on track 1 of their shared parent (sequenced back-to-back,
+ * same convention as the README's multi-clip example). An image segment
+ * gets no trimStart/trimDuration (meaningless for a still image -- it has no
+ * timeline of its own to trim into), but otherwise reuses buildCropProperties
+ * verbatim: Image's x/y/width/height/xAnchor/yAnchor are the same
+ * ValueOrKeyframes-typed properties Video's are (both extend the SDK's
+ * shared ElementBase/ElementProperties -- verified directly against
+ * node_modules/creatomate/src/elements/{Image, ElementBase}.ts), so the
+ * exact same keyframed crop transform applies to either element type
+ * unchanged.
+ *
+ * Returns TWO parallel arrays, not one: `wrapperChildren` (what
+ * buildFlipWrapper's own `elements` gets -- a Composition for a canvas-fill
+ * segment, the plain Video/Image otherwise) and `foregroundBySegment` (the
+ * REAL per-segment media element either way, same length/order as
+ * `segments`) -- transcript captions (`transcriptSource`) and the
+ * audioFadeOut crossfade mutation below both need the actual foreground
+ * element, never the wrapping Composition, to look it up by segment index. */
 function buildMediaSegments(
   segments: RenderSegment[],
   baseCropRect: CropRect | null,
@@ -244,12 +343,16 @@ function buildMediaSegments(
   appMeta: Record<string, AppMetaEntry>,
   mainVolumePercent: string,
   cutawayFilterByEntryId: Map<string, FilterPresetId | null>,
-  referenceAspectRatio: number | null
-): (Video | Image)[] {
-  const elements: (Video | Image)[] = [];
+  canvasFillByEntryId: Map<string, CanvasFillInfo>,
+  referenceAspectRatio: number | null,
+  outputWidth: number,
+  outputHeight: number
+): { wrapperChildren: (Video | Image | Composition)[]; foregroundBySegment: (Video | Image)[] } {
+  const wrapperChildren: (Video | Image | Composition)[] = [];
+  const foregroundBySegment: (Video | Image)[] = [];
+  const blurRadiusPx = CANVAS_FILL_BLUR_RADIUS_FRACTION * Math.max(outputWidth, outputHeight);
 
   segments.forEach((segment, index) => {
-    const crop = buildCropProperties(segment, baseCropRect, zoomEffects, referenceAspectRatio);
     const filter = getCreatomateFilterProperties(
       segment.entryId ? (cutawayFilterByEntryId.get(segment.entryId) ?? null) : null
     );
@@ -262,30 +365,7 @@ function buildMediaSegments(
       segment.cutTransitionInId && segment.cutTransitionOverlapSeconds
         ? { transition: getCreatomateCutTransitionAnimation(segment.cutTransitionInId, segment.cutTransitionOverlapSeconds) }
         : {};
-
-    if (segment.kind === "image") {
-      const id = nextId("clip");
-      appMeta[id] = { role: "clip", assetId: segment.assetId };
-      elements.push(
-        new Image({
-          id,
-          track: 1,
-          time: segment.outputStartSeconds,
-          duration: segment.durationSeconds,
-          fit: "fill",
-          xAnchor: "0%",
-          yAnchor: "0%",
-          ...crop,
-          ...filter,
-          ...cutTransition,
-          // Overwritten server-side by resolveAssetSources (api/render/route.ts)
-          // from _appMeta[id].assetId -- never a real playable URL by itself.
-          source: "",
-        })
-      );
-      return;
-    }
-
+    const fill = (segment.entryId ? canvasFillByEntryId.get(segment.entryId) : undefined) ?? { mode: "crop" as const };
     // Audio crossfade companion to the video blend above -- the incoming
     // clip's own volume ramps up from silence across the overlap instead of
     // starting at full volume mid-blend (an anchor keyframe at t=0 is
@@ -297,6 +377,85 @@ function buildMediaSegments(
     // rather than hand-rolled Keyframe volume automation -- same "trust the
     // real SDK properties" philosophy this file's own module comment states.
     const overlapSeconds = segment.cutTransitionOverlapSeconds ?? 0;
+
+    if (fill.mode !== "crop") {
+      // Letterboxed/pillarboxed instead of cropped -- bypasses
+      // buildCropProperties/zoomEffects entirely for this segment (a
+      // specific authored crop-and-zoom and full-frame letterboxing are
+      // conflicting goals; honoring the letterbox is what turning this on
+      // means). `fit: "contain"` lets Creatomate do the letterbox math
+      // itself -- no manual crop transform needed, unlike the "crop" case
+      // below.
+      const id = nextId("clip");
+      appMeta[id] = { role: "clip", assetId: segment.assetId };
+      const foregroundCommon = {
+        id,
+        time: segment.outputStartSeconds,
+        duration: segment.durationSeconds,
+        fit: "contain" as const,
+        xAnchor: "0%",
+        yAnchor: "0%",
+        ...filter,
+        ...cutTransition,
+        source: "",
+      };
+      const foreground =
+        segment.kind === "image"
+          ? new Image(foregroundCommon)
+          : new Video({
+              ...foregroundCommon,
+              trimStart: segment.clipLocalStartSeconds,
+              trimDuration: segment.durationSeconds,
+              volume: mainVolumePercent,
+              ...(overlapSeconds > 0 ? { audioFadeIn: overlapSeconds } : {}),
+            });
+      const background = buildCanvasFillBackground(segment, fill, filter, appMeta, blurRadiusPx);
+      wrapperChildren.push(
+        new Composition({
+          id: nextId("canvas-fill"),
+          track: 1,
+          time: segment.outputStartSeconds,
+          duration: segment.durationSeconds,
+          x: "0%",
+          y: "0%",
+          width: "100%",
+          height: "100%",
+          elements: [background, foreground],
+        })
+      );
+      foregroundBySegment.push(foreground);
+
+      const previous = index > 0 ? foregroundBySegment[foregroundBySegment.length - 2] : undefined;
+      if (overlapSeconds > 0 && previous instanceof Video) {
+        previous.properties.audioFadeOut = overlapSeconds;
+      }
+      return;
+    }
+
+    const crop = buildCropProperties(segment, baseCropRect, zoomEffects, referenceAspectRatio);
+
+    if (segment.kind === "image") {
+      const id = nextId("clip");
+      appMeta[id] = { role: "clip", assetId: segment.assetId };
+      const element = new Image({
+        id,
+        track: 1,
+        time: segment.outputStartSeconds,
+        duration: segment.durationSeconds,
+        fit: "fill",
+        xAnchor: "0%",
+        yAnchor: "0%",
+        ...crop,
+        ...filter,
+        ...cutTransition,
+        // Overwritten server-side by resolveAssetSources (api/render/route.ts)
+        // from _appMeta[id].assetId -- never a real playable URL by itself.
+        source: "",
+      });
+      wrapperChildren.push(element);
+      foregroundBySegment.push(element);
+      return;
+    }
 
     const id = nextId("clip");
     appMeta[id] = { role: "clip", assetId: segment.assetId };
@@ -319,19 +478,20 @@ function buildMediaSegments(
       // from _appMeta[id].assetId -- never a real playable URL by itself.
       source: "",
     });
-    elements.push(element);
+    wrapperChildren.push(element);
+    foregroundBySegment.push(element);
 
     // The OUTGOING side of this same crossfade -- the element immediately
     // preceding this one fades ITS OWN tail out via the same audioFadeOut
     // property. Only when that element is itself a Video (an Image segment
     // has no audio, hence no audioFadeOut, at all).
-    const previous = index > 0 ? elements[elements.length - 2] : undefined;
+    const previous = index > 0 ? foregroundBySegment[foregroundBySegment.length - 2] : undefined;
     if (overlapSeconds > 0 && previous instanceof Video) {
       previous.properties.audioFadeOut = overlapSeconds;
     }
   });
 
-  return elements;
+  return { wrapperChildren, foregroundBySegment };
 }
 
 /** The flip/mirror wrapper -- one composition spanning the WHOLE output
@@ -341,7 +501,7 @@ function buildMediaSegments(
  * Composition (no crop keyframes of its own) when there's nothing to
  * flip on either axis, to avoid emitting pointless static 100% keyframes. */
 function buildFlipWrapper(
-  mediaSegments: (Video | Image)[],
+  mediaSegments: (Video | Image | Composition)[],
   flipHorizontalToggles: number[],
   flipVerticalToggles: number[],
   totalOutputDurationSeconds: number
@@ -955,6 +1115,14 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const totalOutputDurationSeconds = totalRenderOutputDuration(segments);
 
   const cutawayFilterByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.colorFilterId ?? null]));
+  // Per-cutaway canvas-fill lookup, same "each clip carries its own"
+  // shape as cutawayFilterByEntryId above -- see canvasFillPresets.ts.
+  const canvasFillByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [
+      entry.id,
+      { mode: getCanvasFillMode(entry.canvasFillMode), color: entry.canvasFillColor, gradientColor: entry.canvasFillGradientColor },
+    ])
+  );
   // `selections.cropRect`/a user-dragged pan-zoom ZoomEffect are always
   // authored against the sequence's REFERENCE clip -- the first one (see
   // CanvasPlayer's referenceFrameSizeRef) -- and need re-projecting onto
@@ -963,20 +1131,23 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const referenceClip = sequenceClips[0];
   const referenceAspectRatio =
     referenceClip?.width && referenceClip?.height ? referenceClip.width / referenceClip.height : null;
-  const mediaSegments = buildMediaSegments(
+  const { wrapperChildren, foregroundBySegment } = buildMediaSegments(
     segments,
     selections.cropRect,
     selections.zoomEffects,
     appMeta,
     toVolumePercent(mainAudioVolume),
     cutawayFilterByEntryId,
-    referenceAspectRatio
+    canvasFillByEntryId,
+    referenceAspectRatio,
+    outputWidth,
+    outputHeight
   );
   const videoSegmentPairs = segments
-    .map((segment, index) => ({ segment, element: mediaSegments[index] }))
+    .map((segment, index) => ({ segment, element: foregroundBySegment[index] }))
     .filter((pair): pair is { segment: RenderSegment; element: Video } => pair.segment.kind === "video");
   const flipWrapper = buildFlipWrapper(
-    mediaSegments,
+    wrapperChildren,
     selections.flipHorizontalToggles,
     selections.flipVerticalToggles,
     totalOutputDurationSeconds
