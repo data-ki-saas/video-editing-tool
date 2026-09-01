@@ -88,7 +88,9 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
             <li
               key={project.id}
               aria-current={isActive ? "page" : undefined}
-              className={`flex items-center gap-1 rounded-md ${isActive ? "bg-accent/10" : ""}`}
+              className={`flex items-center gap-1 rounded-md border-l-2 ${
+                isActive ? "border-accent bg-accent/10" : "border-transparent"
+              }`}
               onContextMenu={(e) =>
                 openContextMenu(e, [
                   { label: "Reset", onSelect: () => void handleReset(project) },
@@ -102,8 +104,8 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
                     value={project.name}
                     onCommit={(name) => handleRename(project, name)}
                     ariaLabel="Reel name"
-                    className="block w-full truncate rounded-md px-2 py-1 text-sm font-medium text-foreground"
-                    inputClassName="block w-full truncate rounded-md border border-border px-2 py-1 text-sm font-medium text-foreground outline-none"
+                    className="block w-full truncate rounded-md px-2 py-1 text-sm font-medium text-accent"
+                    inputClassName="block w-full truncate rounded-md border border-border px-2 py-1 text-sm font-medium text-accent outline-none"
                   />
                 ) : (
                   <Link
