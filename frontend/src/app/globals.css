@@ -197,3 +197,25 @@ body {
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* FeedbackArea's own activity ticker (see that file's own module comment)
+   -- each new log entry fades/slides in from the right as it mounts, so the
+   strip reads as continuously alive without depending on the container's
+   OWN scroll position animating smoothly (that turned out unreliable --
+   `scrollLeft`/`scrollTo({behavior:"smooth"})` on a flex+overflow-x row
+   sometimes never resolves at all rather than just skipping the animation,
+   so FeedbackArea now snaps its scroll position instantly and leaves the
+   "feels alive" motion to this per-entry animation instead). */
+@keyframes log-entry-enter {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.log-entry-enter {
+  animation: log-entry-enter 220ms ease-out;
+}

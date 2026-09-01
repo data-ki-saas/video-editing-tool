@@ -46,7 +46,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listAssets, deleteAsset, requestBackgroundRemoval, type Asset } from "@/lib/api";
-import { pollBackgroundRemoval } from "@/lib/backgroundRemoval";
+import { pollBackgroundRemoval, describeMattingTick, MAX_POLL_SECONDS } from "@/lib/backgroundRemoval";
 import { extractThumbnails, getVideoDuration, captureSingleFrame } from "@/lib/video/video";
 import { getAudioDuration } from "@/lib/video/audio";
 import {
@@ -147,7 +147,7 @@ import { TopMenuBar } from "./TopMenuBar";
 import { Playground } from "./Playground";
 import type { VideoOverlayThumbnailFrames } from "./FrameStrip";
 import type { CutawaySegment } from "./CutawayTrack";
-import { FeedbackArea } from "./FeedbackArea";
+import { FeedbackArea, type ActivityLogEntry } from "./FeedbackArea";
 import type { CanvasPlayerHandle } from "./CanvasPlayer";
 import { RenderComingSoonPopup } from "./RenderComingSoonPopup";
 import { LocalRenderPopup } from "./LocalRenderPopup";
@@ -305,6 +305,21 @@ export function ThreePaneEditor({
   // comment already carries for that index.
   const [cutawayMattingProgress, setCutawayMattingProgress] = useState<Record<string, number>>({});
   const [videoOverlayMattingProgress, setVideoOverlayMattingProgress] = useState<Record<number, number>>({});
+  // FeedbackArea's own chatty activity ticker -- see that file's own module
+  // comment for why this exists (fal.ai's background-removal integration
+  // gives no real interim progress, so this is the "proof it's still
+  // alive" substitute). A plain incrementing ref rather than array index
+  // for each entry's key, since trimming the array below would otherwise
+  // reassign keys to different entries and confuse React's own reconciler
+  // mid-scroll-animation.
+  const activityLogIdRef = useRef(0);
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+  const MAX_ACTIVITY_LOG_ENTRIES = 30;
+  const logActivity = useCallback((text: string) => {
+    activityLogIdRef.current += 1;
+    const id = activityLogIdRef.current;
+    setActivityLog((prev) => [...prev.slice(-(MAX_ACTIVITY_LOG_ENTRIES - 1)), { id, text }]);
+  }, []);
   // Each background-music track's own probed duration, by assetId --
   // handleAddToBackgroundSequence uses this to warn before adding a track
   // that can never actually be heard (see that handler's own comment).
@@ -1162,6 +1177,8 @@ export function ThreePaneEditor({
   }
 
   async function requestAndPollBackgroundRemoval(sourceAssetId: string, entryId: string) {
+    const assetName = assets.find((asset) => asset.id === sourceAssetId)?.filename ?? "this photo/clip";
+    logActivity(`Asking fal.ai to remove the background from "${assetName}"…`);
     try {
       const initial = await requestBackgroundRemoval(projectId, sourceAssetId);
       // A photo's own job (backend/src/matting/service.py's image-kind
@@ -1170,11 +1187,20 @@ export function ThreePaneEditor({
       // async job could never satisfy this early.
       const result =
         initial.status === "waiting"
-          ? await pollBackgroundRemoval(sourceAssetId, (fraction) =>
-              setCutawayMattingProgress((prev) => ({ ...prev, [entryId]: fraction }))
-            )
+          ? await pollBackgroundRemoval(sourceAssetId, (fraction, elapsedMs, attempt) => {
+              setCutawayMattingProgress((prev) => ({ ...prev, [entryId]: fraction }));
+              logActivity(describeMattingTick(elapsedMs, attempt));
+            })
           : initial;
-      if (result.status !== "completed" || !result.matteAssetId) return;
+      if (result.status === "failed") {
+        logActivity(`fal.ai reported the job failed${result.error ? `: ${result.error}` : ""}`);
+        return;
+      }
+      if (result.status !== "completed" || !result.matteAssetId) {
+        logActivity(`Still hasn't heard back from fal.ai after ${MAX_POLL_SECONDS}s — giving up for now`);
+        return;
+      }
+      logActivity(`fal.ai finished — transparent background is ready for "${assetName}" ✓`);
       // The matte is a normal project asset the backend created out-of-band
       // (the matting webhook's own store_asset_bytes call) -- this
       // component's `assets` state (and the assetUrlById map CanvasPlayer
@@ -1190,6 +1216,7 @@ export function ThreePaneEditor({
       });
       pushChange(label, state);
     } catch (err) {
+      logActivity(`Something went wrong asking fal.ai for background removal: ${err instanceof Error ? err.message : "unknown error"}`);
       console.error("background removal failed for asset=%s", sourceAssetId, err);
     } finally {
       setCutawayMattingProgress((prev) => {
@@ -1244,15 +1271,26 @@ export function ThreePaneEditor({
   // not sequenceClips) instead. Same "not stale-safe against edits made
   // during the wait" accepted risk as that function's own comment.
   async function requestAndPollVideoOverlayBackgroundRemoval(sourceAssetId: string, overlayIndex: number) {
+    const assetName = assets.find((asset) => asset.id === sourceAssetId)?.filename ?? "this video overlay";
+    logActivity(`Asking fal.ai to remove the background from "${assetName}"…`);
     try {
       const initial = await requestBackgroundRemoval(projectId, sourceAssetId);
       const result =
         initial.status === "waiting"
-          ? await pollBackgroundRemoval(sourceAssetId, (fraction) =>
-              setVideoOverlayMattingProgress((prev) => ({ ...prev, [overlayIndex]: fraction }))
-            )
+          ? await pollBackgroundRemoval(sourceAssetId, (fraction, elapsedMs, attempt) => {
+              setVideoOverlayMattingProgress((prev) => ({ ...prev, [overlayIndex]: fraction }));
+              logActivity(describeMattingTick(elapsedMs, attempt));
+            })
           : initial;
-      if (result.status !== "completed" || !result.matteAssetId) return;
+      if (result.status === "failed") {
+        logActivity(`fal.ai reported the job failed${result.error ? `: ${result.error}` : ""}`);
+        return;
+      }
+      if (result.status !== "completed" || !result.matteAssetId) {
+        logActivity(`Still hasn't heard back from fal.ai after ${MAX_POLL_SECONDS}s — giving up for now`);
+        return;
+      }
+      logActivity(`fal.ai finished — transparent background is ready for "${assetName}" ✓`);
       await refreshAssets();
       const { label, state } = applySetVideoOverlayBackgroundRemoval(selections, overlayIndex, {
         enabled: true,
@@ -1260,6 +1298,7 @@ export function ThreePaneEditor({
       });
       pushChange(label, state);
     } catch (err) {
+      logActivity(`Something went wrong asking fal.ai for background removal: ${err instanceof Error ? err.message : "unknown error"}`);
       console.error("background removal failed for video overlay asset=%s", sourceAssetId, err);
     } finally {
       setVideoOverlayMattingProgress((prev) => {
@@ -2542,6 +2581,7 @@ export function ThreePaneEditor({
           renderUrl={renderUrl}
           renderError={renderError}
           isRenderStuck={isRenderStuck}
+          activityLog={activityLog}
         />
       </section>
 
