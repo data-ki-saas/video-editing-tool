@@ -1835,6 +1835,16 @@ export function ThreePaneEditor({
   function handleDeleteTextOverlay(overlayIndex: number) {
     setLiveTextOverlayRectEdit((prev) => (prev?.index === overlayIndex ? null : prev));
     setLiveTextOverlayRangeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    // TextOverlayDialog's own "Already on this reel" list can now delete a
+    // DIFFERENT overlay than the one it's currently editing (its own module
+    // comment) -- keep editingTextOverlayIndex pointed at the same overlay
+    // through the resulting index shift, same as applyDeleteTextOverlay
+    // shifts the array itself: null it out if THIS was the one being
+    // edited (the dialog falls back to "Add" mode), or decrement it past a
+    // deletion earlier in the array.
+    setEditingTextOverlayIndex((prev) =>
+      prev === null ? null : prev === overlayIndex ? null : prev > overlayIndex ? prev - 1 : prev
+    );
     const { label, state } = applyDeleteTextOverlay(selections, overlayIndex);
     pushChange(label, state);
   }
@@ -2352,6 +2362,7 @@ export function ThreePaneEditor({
           editingTextOverlay={editingTextOverlayIndex !== null ? displayedTextOverlays[editingTextOverlayIndex] : null}
           onSaveTextOverlay={handleSaveTextOverlay}
           onRequestEditTextOverlay={handleRequestEditTextOverlay}
+          onDeleteTextOverlay={handleDeleteTextOverlay}
           onCloseTextDialog={handleCloseTextDialog}
           onOpenTtsDialog={handleOpenTtsDialog}
           isTtsDialogOpen={isTtsDialogOpen}
@@ -2381,9 +2392,11 @@ export function ThreePaneEditor({
           isVideoOverlayPickerOpen={isVideoOverlayPickerOpen}
           onOpenVideoOverlayPicker={() => setIsVideoOverlayPickerOpen(true)}
           onCloseVideoOverlayPicker={() => setIsVideoOverlayPickerOpen(false)}
+          onDeleteVideoOverlay={handleDeleteVideoOverlay}
           isImageOverlayPickerOpen={isImageOverlayPickerOpen}
           onOpenImageOverlayPicker={() => setIsImageOverlayPickerOpen(true)}
           onCloseImageOverlayPicker={() => setIsImageOverlayPickerOpen(false)}
+          onDeleteImageOverlay={handleDeleteImageOverlay}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
           baseCropRect={selections.cropRect}

@@ -50,6 +50,7 @@ export function TextOverlayDialog({
   frameAspectRatio,
   onSave,
   onSelectExisting,
+  onDeleteExisting,
   onClose,
 }: {
   editingOverlay: TextOverlay | null;
@@ -62,6 +63,11 @@ export function TextOverlayDialog({
   // A row's own click, in the "Already on this reel" list -- jumps the
   // live preview there and re-points this same dialog at that overlay.
   onSelectExisting: (overlayIndex: number) => void;
+  // A row's own delete (✕) button -- removes that caption outright. Index-
+  // aware on the caller's side (see ThreePaneEditor's own
+  // handleDeleteTextOverlay) so deleting a DIFFERENT caption than the one
+  // currently open here doesn't desync editingOverlay from its own index.
+  onDeleteExisting: (overlayIndex: number) => void;
   onClose: () => void;
 }) {
   const [text, setText] = useState(editingOverlay?.text ?? "");
@@ -193,18 +199,27 @@ export function TextOverlayDialog({
                 <h3 className="mb-1 text-xs font-medium text-foreground">Already on this reel</h3>
                 <ul className="flex max-h-24 flex-col gap-0.5 overflow-y-auto">
                   {textOverlays.map((overlay, index) => (
-                    <li key={index}>
+                    <li
+                      key={index}
+                      className={"flex items-center gap-1 rounded-md hover:bg-background " + (overlay === editingOverlay ? "bg-accent/10" : "")}
+                    >
                       <button
                         type="button"
                         onClick={() => onSelectExisting(index)}
                         title="Jump the preview here and edit this caption"
-                        className={
-                          "flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-background " +
-                          (overlay === editingOverlay ? "bg-accent/10" : "")
-                        }
+                        className="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-1 text-left text-xs"
                       >
                         <span className="min-w-0 flex-1 truncate text-foreground">&quot;{overlay.text}&quot;</span>
                         <span className="shrink-0 text-muted">{formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteExisting(index)}
+                        aria-label="Remove this caption"
+                        title="Remove this caption"
+                        className="shrink-0 rounded-sm p-1 mr-1 text-muted hover:text-red-600"
+                      >
+                        ✕
                       </button>
                     </li>
                   ))}

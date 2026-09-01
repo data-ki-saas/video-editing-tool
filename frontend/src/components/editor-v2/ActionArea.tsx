@@ -247,6 +247,7 @@ export function ActionArea({
   editingTextOverlay,
   onSaveTextOverlay,
   onRequestEditTextOverlay,
+  onDeleteTextOverlay,
   onCloseTextDialog,
   onOpenTtsDialog,
   isTtsDialogOpen,
@@ -276,9 +277,11 @@ export function ActionArea({
   isVideoOverlayPickerOpen,
   onOpenVideoOverlayPicker,
   onCloseVideoOverlayPicker,
+  onDeleteVideoOverlay,
   isImageOverlayPickerOpen,
   onOpenImageOverlayPicker,
   onCloseImageOverlayPicker,
+  onDeleteImageOverlay,
   previewFrameUrl,
   frameAspectRatio,
   baseCropRect,
@@ -390,6 +393,11 @@ export function ActionArea({
   // still-open dialog at a different existing caption (same handler
   // TextOverlayTrack's "Edit text" already uses).
   onRequestEditTextOverlay: (overlayIndex: number) => void;
+  // TextOverlayDialog's own "Already on this reel" list -- deletes a row's
+  // overlay outright (index-aware: keeps editingTextOverlay pointed at the
+  // same overlay through the resulting shift, see ThreePaneEditor's own
+  // handleDeleteTextOverlay).
+  onDeleteTextOverlay: (overlayIndex: number) => void;
   onCloseTextDialog: () => void;
   onOpenTtsDialog: () => void;
   isTtsDialogOpen: boolean;
@@ -424,9 +432,15 @@ export function ActionArea({
   isVideoOverlayPickerOpen: boolean;
   onOpenVideoOverlayPicker: () => void;
   onCloseVideoOverlayPicker: () => void;
+  // VideoOverlayPickerDialog's own "Already on this reel" list -- deletes
+  // a row's overlay outright.
+  onDeleteVideoOverlay: (overlayIndex: number) => void;
   isImageOverlayPickerOpen: boolean;
   onOpenImageOverlayPicker: () => void;
   onCloseImageOverlayPicker: () => void;
+  // ImageOverlayPickerDialog's own "Already on this reel" list -- same as
+  // onDeleteVideoOverlay above.
+  onDeleteImageOverlay: (overlayIndex: number) => void;
   // The actual current frame (closest thumbnail to the playhead) and its
   // aspect ratio, for TextOverlayDialog/TranscriptCaptionDialog's live
   // preview -- see TextOverlayDialog's own comment on why positioning
@@ -632,6 +646,7 @@ export function ActionArea({
             if (overlay) onSeek(overlay.startTimeSeconds);
             onRequestEditTextOverlay(overlayIndex);
           }}
+          onDeleteExisting={onDeleteTextOverlay}
           onClose={onCloseTextDialog}
         />
       )}
@@ -769,6 +784,7 @@ export function ActionArea({
             const overlay = selections.videoOverlays[overlayIndex];
             if (overlay) onSeek(overlay.startTimeSeconds);
           }}
+          onDeleteOverlay={onDeleteVideoOverlay}
           onClose={onCloseVideoOverlayPicker}
         />
       )}
@@ -783,6 +799,7 @@ export function ActionArea({
             const overlay = selections.overlayImages[overlayIndex];
             if (overlay) onSeek(overlay.startTimeSeconds);
           }}
+          onDeleteOverlay={onDeleteImageOverlay}
           onClose={onCloseImageOverlayPicker}
         />
       )}

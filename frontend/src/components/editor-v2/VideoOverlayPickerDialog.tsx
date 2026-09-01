@@ -32,6 +32,7 @@ export function VideoOverlayPickerDialog({
   videoDurationSeconds,
   onPick,
   onLocateOverlay,
+  onDeleteOverlay,
   onClose,
 }: {
   assets: Asset[];
@@ -48,6 +49,11 @@ export function VideoOverlayPickerDialog({
   // A row's own click, in the "Already on this reel" list -- seeks the
   // live preview to that overlay's start and closes this dialog.
   onLocateOverlay: (overlayIndex: number) => void;
+  // A row's own delete (✕) button -- removes that overlay outright,
+  // without locating/closing (same "Remove overlay" the rail's own
+  // right-click menu offers, reachable here too since the rail itself
+  // isn't visible while this modal is open).
+  onDeleteOverlay: (overlayIndex: number) => void;
   onClose: () => void;
 }) {
   const videoAssets = assets.filter((asset) => asset.kind === "video");
@@ -146,7 +152,7 @@ export function VideoOverlayPickerDialog({
               {videoOverlays.map((overlay, index) => {
                 const pastEnd = overlay.endTimeSeconds > videoDurationSeconds;
                 return (
-                  <li key={index}>
+                  <li key={index} className="flex items-center gap-1 rounded-md hover:bg-background">
                     <button
                       type="button"
                       onClick={() => {
@@ -154,7 +160,7 @@ export function VideoOverlayPickerDialog({
                         onClose();
                       }}
                       title="Jump the preview to this overlay"
-                      className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-background"
+                      className="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-1 text-left text-xs"
                     >
                       {videoThumbnailUrlByAssetId[overlay.assetId] ? (
                         // eslint-disable-next-line @next/next/no-img-element -- reuses AssetGallery's own extracted video-tile thumbnail, not a Next-optimizable static asset
@@ -173,6 +179,15 @@ export function VideoOverlayPickerDialog({
                           ⚠ past end
                         </span>
                       )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteOverlay(index)}
+                      aria-label="Remove this overlay"
+                      title="Remove this overlay"
+                      className="shrink-0 rounded-sm p-1 mr-1 text-muted hover:text-red-600"
+                    >
+                      ✕
                     </button>
                   </li>
                 );

@@ -18,6 +18,7 @@ export function ImageOverlayPickerDialog({
   videoDurationSeconds,
   onPick,
   onLocateOverlay,
+  onDeleteOverlay,
   onClose,
 }: {
   assets: Asset[];
@@ -30,6 +31,9 @@ export function ImageOverlayPickerDialog({
   // A row's own click, in the "Already on this reel" list -- seeks the
   // live preview to that overlay's start and closes this dialog.
   onLocateOverlay: (overlayIndex: number) => void;
+  // A row's own delete (✕) button -- removes that overlay outright, same
+  // as VideoOverlayPickerDialog.tsx's own.
+  onDeleteOverlay: (overlayIndex: number) => void;
   onClose: () => void;
 }) {
   const imageAssets = assets.filter((asset) => asset.kind === "image");
@@ -114,7 +118,7 @@ export function ImageOverlayPickerDialog({
               {overlayImages.map((overlay, index) => {
                 const pastEnd = overlay.endTimeSeconds > videoDurationSeconds;
                 return (
-                  <li key={index}>
+                  <li key={index} className="flex items-center gap-1 rounded-md hover:bg-background">
                     <button
                       type="button"
                       onClick={() => {
@@ -122,7 +126,7 @@ export function ImageOverlayPickerDialog({
                         onClose();
                       }}
                       title="Jump the preview to this overlay"
-                      className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-background"
+                      className="flex min-w-0 flex-1 items-center gap-2 px-1.5 py-1 text-left text-xs"
                     >
                       {imageSrcById[overlay.assetId] ? (
                         // eslint-disable-next-line @next/next/no-img-element -- a blob: URL from a safe CORS-mode fetch, not a Next-optimizable static asset
@@ -137,6 +141,15 @@ export function ImageOverlayPickerDialog({
                           ⚠ past end
                         </span>
                       )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteOverlay(index)}
+                      aria-label="Remove this overlay"
+                      title="Remove this overlay"
+                      className="shrink-0 rounded-sm p-1 mr-1 text-muted hover:text-red-600"
+                    >
+                      ✕
                     </button>
                   </li>
                 );
