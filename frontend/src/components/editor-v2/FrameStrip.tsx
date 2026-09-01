@@ -113,6 +113,7 @@ import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPr
 import type { TimelineMarker } from "@/lib/projects";
 import {
   computeEffectiveCropRect,
+  reprojectCropRect,
   computeEffectiveFlip,
   computeFlipSegments,
   computeProgress,
@@ -729,11 +730,36 @@ export function FrameStrip({
 
   // Recomputed only when the crop/zoom actually changes -- NOT on every
   // currentTimeSeconds tick during playback (see FrameTile's memo comment).
+  // baseCropRect/zoomEffects are authored against the REFERENCE clip
+  // (sequenceEntries[0]'s own aspect ratio) -- reprojected here onto each
+  // tile's own clip via reprojectCropRect, same convention CanvasPlayer's
+  // drawFrameAt and exportTimeline.ts already follow (see that function's
+  // own doc comment). Without this, a cutaway shot in a different aspect
+  // ratio than the reference clip shows a wrong-shaped rect -- its resize
+  // handle/edge buttons can even end up positioned outside the tile's own
+  // overflow-hidden bounds, clipped away and effectively un-draggable.
   const tileCropRects = useMemo(() => {
     if (!baseCropRect) return thumbnails.map(() => null);
-    return thumbnailTimestampsSeconds.map((timestamp) => computeEffectiveCropRect(baseCropRect, zoomEffects, timestamp));
+    const referenceEntryId = sequenceEntries[0]?.id;
+    const referenceAspectRatio = referenceEntryId ? entryAspectRatioById[referenceEntryId] : undefined;
+    return thumbnailTimestampsSeconds.map((timestamp) => {
+      const authoredCrop = computeEffectiveCropRect(baseCropRect, zoomEffects, timestamp);
+      const entryIndex = clipBoundarySeconds.findIndex((boundary) => timestamp < boundary);
+      const resolvedIndex = entryIndex === -1 ? sequenceEntries.length - 1 : entryIndex;
+      const entry = sequenceEntries[resolvedIndex];
+      const ownAspectRatio = entry?.id ? entryAspectRatioById[entry.id] : undefined;
+      // Not for an image entry's own self-scoped Ken Burns rect (never
+      // authored in reference-clip space to begin with -- see
+      // reprojectCropRect's own doc comment), and not when either aspect
+      // ratio isn't known yet (still loading) -- falls back to the raw
+      // authored rect in both cases, same as before this fix existed.
+      if (!entry || entry.kind === "image" || referenceAspectRatio === undefined || ownAspectRatio === undefined) {
+        return authoredCrop;
+      }
+      return reprojectCropRect(authoredCrop, referenceAspectRatio, ownAspectRatio);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
-  }, [thumbnails.length, thumbnailTimestampsSeconds, baseCropRect, zoomEffects]);
+  }, [thumbnails.length, thumbnailTimestampsSeconds, baseCropRect, zoomEffects, clipBoundarySeconds, sequenceEntries, entryAspectRatioById]);
 
   // Each tile spans from its own timestamp up to the NEXT tile's timestamp
   // (or, for the very last tile, up to durationSeconds) -- see this file's
