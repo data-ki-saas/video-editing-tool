@@ -134,6 +134,7 @@ export function Playground({
   baseCropRect,
   zoomEffects,
   frameAspectRatio,
+  entryAspectRatioById,
   onChangeZoomRange,
   onCommitZoomRange,
   onChangeZoomEpicenter,
@@ -235,6 +236,11 @@ export function Playground({
   baseCropRect: CropRect | null;
   zoomEffects: ZoomEffect[];
   frameAspectRatio: number | null;
+  // Each sequence entry's own native aspect ratio, keyed by entry id -- see
+  // ThreePaneEditor's clipAspectRatioByEntryId and FrameStrip's own
+  // tileFrameAspectRatio for why this (not the single frameAspectRatio
+  // above) is what boxes each rail tile.
+  entryAspectRatioById: Record<string, number>;
   onChangeZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onChangeZoomEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
@@ -360,6 +366,7 @@ export function Playground({
             baseCropRect={baseCropRect}
             zoomEffects={zoomEffects}
             frameAspectRatio={frameAspectRatio}
+            entryAspectRatioById={entryAspectRatioById}
             onChangeZoomRange={onChangeZoomRange}
             onCommitZoomRange={onCommitZoomRange}
             onChangeZoomEpicenter={onChangeZoomEpicenter}

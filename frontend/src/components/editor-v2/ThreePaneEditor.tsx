@@ -47,8 +47,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listAssets, deleteAsset, requestBackgroundRemoval, type Asset } from "@/lib/api";
 import { pollBackgroundRemoval, describeMattingTick, MAX_POLL_SECONDS } from "@/lib/backgroundRemoval";
-import { extractThumbnails, getVideoDuration, captureSingleFrame } from "@/lib/video/video";
+import { extractThumbnails, getVideoDuration, getVideoDurationAndDimensions, captureSingleFrame } from "@/lib/video/video";
 import { getAudioDuration } from "@/lib/video/audio";
+import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import {
   generateSampleTimestamps,
   findClosestTimestampIndex,
@@ -207,6 +208,16 @@ export function ThreePaneEditor({
   const [videoDurationSeconds, setVideoDurationSeconds] = useState(0);
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
   const [frameDimensions, setFrameDimensions] = useState<{ width: number; height: number } | null>(null);
+  // Each sequence entry's OWN native aspect ratio (width / height), keyed by
+  // entry id -- unlike frameDimensions above (a single value taken from
+  // whichever clip loads first, used as the reference frame for crop
+  // reprojection), this lets FrameStrip box each tile to the shape of the
+  // clip IT actually belongs to, so a cutaway whose source resolution
+  // differs from the base clip's isn't force-fit into the wrong box and
+  // arbitrarily cropped by object-cover. Populated incrementally as
+  // extractSequence below probes each clip; a clip not yet in this map
+  // falls back to frameAspectRatio (see FrameStrip's own tileFrameAspectRatio).
+  const [clipAspectRatioByEntryId, setClipAspectRatioByEntryId] = useState<Record<string, number>>({});
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
 
@@ -862,6 +873,7 @@ export function ThreePaneEditor({
       setVideoDurationSeconds(0);
       setCurrentTimeSeconds(0);
       setFrameDimensions(null);
+      setClipAspectRatioByEntryId({});
       setAnalysisError(null);
       return;
     }
@@ -873,6 +885,7 @@ export function ThreePaneEditor({
     setThumbnailTimestampsSeconds([]);
     setClipBoundarySeconds([]);
     setCurrentTimeSeconds(0);
+    setClipAspectRatioByEntryId({});
 
     function reportFailure(err: unknown) {
       if (cancelled) return;
@@ -908,6 +921,25 @@ export function ThreePaneEditor({
           setThumbnails(accumulatedThumbnails);
           setThumbnailTimestampsSeconds(accumulatedTimestamps);
 
+          // Fire-and-forget: this photo's own aspect ratio, for FrameStrip's
+          // per-tile box (see clipAspectRatioByEntryId's own comment).
+          // Doesn't block the rest of the sequence from extracting -- via
+          // loadCrossOriginImage, never a plain <img>/new Image(), so this
+          // probe can't poison the cache against CanvasPlayer's later
+          // CORS-mode read of the SAME url (see that helper's module
+          // comment for the production incident this avoids).
+          const clipEntryId = clip.id;
+          loadCrossOriginImage(clip.url)
+            .then(({ image, blobUrl }) => {
+              URL.revokeObjectURL(blobUrl);
+              if (cancelled || image.naturalWidth <= 0 || image.naturalHeight <= 0) return;
+              setClipAspectRatioByEntryId((prev) => ({ ...prev, [clipEntryId]: image.naturalWidth / image.naturalHeight }));
+            })
+            .catch(() => {
+              // Leaves this entry out of the map -- FrameStrip falls back to
+              // frameAspectRatio for it, same as before this probe existed.
+            });
+
           cursor += clipDurationSeconds;
           setVideoDurationSeconds(cursor);
           setClipBoundarySeconds([...boundaries]);
@@ -916,7 +948,12 @@ export function ThreePaneEditor({
 
         let clipDurationSeconds: number;
         try {
-          clipDurationSeconds = await getVideoDuration(clip.url);
+          const { durationSeconds, width, height } = await getVideoDurationAndDimensions(clip.url);
+          clipDurationSeconds = durationSeconds;
+          if (width > 0 && height > 0) {
+            const clipEntryId = clip.id;
+            setClipAspectRatioByEntryId((prev) => ({ ...prev, [clipEntryId]: width / height }));
+          }
         } catch (err) {
           reportFailure(err);
           continue;
@@ -2603,6 +2640,7 @@ export function ThreePaneEditor({
           baseCropRect={selections.cropRect}
           zoomEffects={displayedZoomEffects}
           frameAspectRatio={frameAspectRatio}
+          entryAspectRatioById={clipAspectRatioByEntryId}
           onChangeZoomRange={handleChangeZoomRange}
           onCommitZoomRange={handleCommitZoomRange}
           onChangeZoomEpicenter={handleChangeZoomEpicenter}

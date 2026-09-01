@@ -256,16 +256,14 @@ const FrameTile = memo(function FrameTile({
   // True when this tile's timestamp falls inside an image (cutaway) clip
   // rather than a video one -- its `src` is that cutaway's own photo, held
   // unchanged for the whole clip (see ThreePaneEditor's extractSequence),
-  // NOT a video frame captured at this tile's own native resolution. A
-  // video frame's real aspect ratio always equals `frameAspectRatio` (both
-  // come from the same loaded clip), so object-cover never actually crops
-  // it -- box and image already agree. A cutaway photo's own aspect ratio
-  // is unrelated to frameAspectRatio (it comes from whichever VIDEO loaded
-  // first in the sequence), so forcing it into that box with object-cover
-  // crops an arbitrary, uncontrolled slice of it. object-contain instead
-  // (see the default-fill branch below) always shows the whole photo,
-  // undistorted, letterboxed to fit -- this only affects that one fill
-  // mode, not the crop-guide/overlay boxes drawn on top (out of scope here).
+  // NOT a video frame captured at this tile's own native resolution. The
+  // tile's own box is already sized to THIS clip's own aspect ratio (see
+  // FrameStrip's tileFrameAspectRatio), so object-cover on a video tile
+  // never actually crops it -- box and image already agree. Kept as
+  // object-contain for images regardless: an authored Ken Burns cropRect
+  // (baseCropRect) is drawn on TOP of the raw photo at its full, undistorted
+  // extent, matching CanvasPlayer's own draw order -- object-cover here
+  // would silently crop the photo out from under that overlay instead.
   isImageClip: boolean;
   // This tile's own base-clip color filter (from the sequence entry it
   // falls under -- see tileColorFilterId below) -- applied via CSS `filter`
@@ -468,6 +466,7 @@ export function FrameStrip({
   baseCropRect,
   zoomEffects,
   frameAspectRatio,
+  entryAspectRatioById,
   onChangeZoomRange,
   onCommitZoomRange,
   onChangeZoomEpicenter,
@@ -581,6 +580,12 @@ export function FrameStrip({
   baseCropRect: CropRect | null;
   zoomEffects: ZoomEffect[];
   frameAspectRatio: number | null;
+  // Each sequence entry's own native aspect ratio, keyed by entry id -- see
+  // ThreePaneEditor's clipAspectRatioByEntryId. Resolved per tile below
+  // (tileFrameAspectRatio) so a cutaway whose source resolution differs
+  // from frameAspectRatio's own clip gets its OWN box shape instead of
+  // being force-fit into a mismatched one and arbitrarily cropped.
+  entryAspectRatioById: Record<string, number>;
   onChangeZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onChangeZoomEpicenter: (effectIndex: number, epicenterTimeSeconds: number) => void;
@@ -780,6 +785,26 @@ export function FrameStrip({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, clipBoundarySeconds, sequenceEntries]);
+
+  // Same resolution as tileIsImageClip above, but for the resolved clip's
+  // OWN aspect ratio (entryAspectRatioById), falling back to the single
+  // frameAspectRatio prop when that clip's own ratio hasn't been probed yet
+  // (still loading) or is a fallback/synthetic entry never captured there.
+  // Without this, every tile shared frameAspectRatio -- the ratio of
+  // whichever clip happened to load FIRST in the whole sequence -- so any
+  // OTHER clip (e.g. a cutaway shot in a different orientation/resolution)
+  // got boxed to the wrong shape and had object-cover crop an arbitrary,
+  // uncontrolled slice of it to fill that mismatched box.
+  const tileFrameAspectRatio = useMemo(() => {
+    return thumbnailTimestampsSeconds.map((timestamp) => {
+      const entryIndex = clipBoundarySeconds.findIndex((boundary) => timestamp < boundary);
+      const resolvedIndex = entryIndex === -1 ? sequenceEntries.length - 1 : entryIndex;
+      const entryId = sequenceEntries[resolvedIndex]?.id;
+      const entryRatio = entryId ? entryAspectRatioById[entryId] : undefined;
+      return entryRatio ?? frameAspectRatio;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
+  }, [thumbnails.length, thumbnailTimestampsSeconds, clipBoundarySeconds, sequenceEntries, entryAspectRatioById, frameAspectRatio]);
 
   // Same resolution as tileIsImageClip above, but for the resolved clip's
   // own colorFilterId -- lets each tile paint with the same cssFilter
@@ -1175,7 +1200,7 @@ export function FrameStrip({
               src={src}
               index={index}
               widthPx={tileWidthsPx[index]}
-              frameAspectRatio={frameAspectRatio}
+              frameAspectRatio={tileFrameAspectRatio[index] ?? frameAspectRatio}
               cropRect={tileCropRects[index]}
               flipHorizontal={tileFlips[index].flipHorizontal}
               flipVertical={tileFlips[index].flipVertical}
