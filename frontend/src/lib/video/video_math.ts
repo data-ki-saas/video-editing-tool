@@ -1106,6 +1106,29 @@ export function computeProgress(startTimeSeconds: number, endTimeSeconds: number
   return Math.min(Math.max((timeSeconds - startTimeSeconds) / duration, 0), 1);
 }
 
+/** "1:05–1:42"-style summary of a time range -- shared by ActionArea's own
+ * ActiveTransformationsList and every "existing overlays" list the overlay
+ * picker dialogs show (VideoOverlayPickerDialog/ImageOverlayPickerDialog/
+ * TextOverlayDialog), so the two never drift apart into two different mm:ss
+ * conventions. */
+export function formatTimeRange(startTimeSeconds: number, endTimeSeconds: number): string {
+  const format = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const wholeSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${wholeSeconds.toString().padStart(2, "0")}`;
+  };
+  return `${format(startTimeSeconds)}–${format(endTimeSeconds)}`;
+}
+
+/** "Full-Screen"/"Picture-in-Picture"/"Split Screen" -- same three labels
+ * ActionArea's ActiveTransformationsList and VideoOverlayTrack/
+ * ImageOverlayTrack's own right-click "Switch to X" menu already use,
+ * shared here so a fourth caller (the overlay picker dialogs' own
+ * "existing overlays" list) can't drift from that wording. */
+export function describeOverlayLayout(layout: { type: string }): string {
+  return layout.type === "full-screen" ? "Full-Screen" : layout.type === "picture-in-picture" ? "Picture-in-Picture" : "Split Screen";
+}
+
 /** The index into `timestamps` closest to `targetSeconds` -- e.g. picking
  * which extracted thumbnail best represents the current playhead position.
  * Not an even-spacing formula (see FrameStrip.tsx's own comment on why

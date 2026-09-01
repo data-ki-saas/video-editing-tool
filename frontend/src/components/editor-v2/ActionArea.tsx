@@ -53,7 +53,7 @@ import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS } from "@/lib/video/transcriptCaptionTemplates";
-import { computeFlipSegments, ttsOverlayEndTimeSeconds } from "@/lib/video/video_math";
+import { computeFlipSegments, ttsOverlayEndTimeSeconds, formatTimeRange, describeOverlayLayout } from "@/lib/video/video_math";
 import type { Asset } from "@/lib/api";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
 import type {
@@ -71,15 +71,6 @@ import type {
 import type { TextTemplateId } from "@/lib/video/textTemplates";
 import type { TranscriptCaptionTemplateId } from "@/lib/video/transcriptCaptionTemplates";
 import type { RefObject } from "react";
-
-function formatTimeRange(startTimeSeconds: number, endTimeSeconds: number): string {
-  const format = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60);
-    const wholeSeconds = Math.floor(seconds % 60);
-    return `${minutes}:${wholeSeconds.toString().padStart(2, "0")}`;
-  };
-  return `${format(startTimeSeconds)}–${format(endTimeSeconds)}`;
-}
 
 function ActiveTransformationsList({
   selections,
@@ -121,13 +112,11 @@ function ActiveTransformationsList({
   for (const range of selections.trimRanges) {
     rows.push(`Trimmed ${formatTimeRange(range.startTimeSeconds, range.endTimeSeconds)}`);
   }
-  const layoutLabel = (layout: { type: string }) =>
-    layout.type === "full-screen" ? "Full-Screen" : layout.type === "picture-in-picture" ? "Picture-in-Picture" : "Split Screen";
   const filterSuffix = (colorFilterId: EditSelectionsSnapshot["sequenceClips"][number]["colorFilterId"]) =>
     colorFilterId ? `, ${getFilterPresetOption(colorFilterId).name} filter` : "";
   for (const overlay of selections.overlayImages) {
     rows.push(
-      `Image overlay (${layoutLabel(overlay.layout)}${filterSuffix(overlay.colorFilterId)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`
+      `Image overlay (${describeOverlayLayout(overlay.layout)}${filterSuffix(overlay.colorFilterId)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`
     );
   }
   for (const overlay of selections.textOverlays) {
@@ -135,7 +124,7 @@ function ActiveTransformationsList({
   }
   for (const overlay of selections.videoOverlays) {
     rows.push(
-      `Video overlay (${layoutLabel(overlay.layout)}${filterSuffix(overlay.colorFilterId)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`
+      `Video overlay (${describeOverlayLayout(overlay.layout)}${filterSuffix(overlay.colorFilterId)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`
     );
   }
   if (selections.sequenceClips.length > 1) {
@@ -257,6 +246,7 @@ export function ActionArea({
   isTextDialogOpen,
   editingTextOverlay,
   onSaveTextOverlay,
+  onRequestEditTextOverlay,
   onCloseTextDialog,
   onOpenTtsDialog,
   isTtsDialogOpen,
@@ -312,6 +302,7 @@ export function ActionArea({
   selections,
   videoDurationSeconds,
   currentTimeSeconds,
+  onSeek,
 }: {
   projectId: string;
   assets: Asset[];
@@ -395,6 +386,10 @@ export function ActionArea({
   isTextDialogOpen: boolean;
   editingTextOverlay: TextOverlay | null;
   onSaveTextOverlay: (text: string, templateId: string, rect: CropRect) => void;
+  // TextOverlayDialog's own "Already on this reel" list -- re-points the
+  // still-open dialog at a different existing caption (same handler
+  // TextOverlayTrack's "Edit text" already uses).
+  onRequestEditTextOverlay: (overlayIndex: number) => void;
   onCloseTextDialog: () => void;
   onOpenTtsDialog: () => void;
   isTtsDialogOpen: boolean;
@@ -463,6 +458,10 @@ export function ActionArea({
   // Current playhead position -- TtsOverlayDialog needs this as a freshly-
   // added overlay's own startTimeSeconds (see that dialog's own comment).
   currentTimeSeconds: number;
+  // VideoOverlayPickerDialog/ImageOverlayPickerDialog's own "Already on
+  // this reel" list -- jumps the live preview to an existing overlay's
+  // start time when its row is clicked.
+  onSeek: (seconds: number) => void;
 }) {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
@@ -624,9 +623,15 @@ export function ActionArea({
       {isTextDialogOpen && (
         <TextOverlayDialog
           editingOverlay={editingTextOverlay}
+          textOverlays={selections.textOverlays}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
           onSave={(text, templateId: TextTemplateId, rect) => onSaveTextOverlay(text, templateId, rect)}
+          onSelectExisting={(overlayIndex) => {
+            const overlay = selections.textOverlays[overlayIndex];
+            if (overlay) onSeek(overlay.startTimeSeconds);
+            onRequestEditTextOverlay(overlayIndex);
+          }}
           onClose={onCloseTextDialog}
         />
       )}
@@ -757,13 +762,29 @@ export function ActionArea({
         <VideoOverlayPickerDialog
           assets={assets}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
+          videoOverlays={selections.videoOverlays}
+          videoDurationSeconds={videoDurationSeconds}
           onPick={onAddVideoOverlay}
+          onLocateOverlay={(overlayIndex) => {
+            const overlay = selections.videoOverlays[overlayIndex];
+            if (overlay) onSeek(overlay.startTimeSeconds);
+          }}
           onClose={onCloseVideoOverlayPicker}
         />
       )}
 
       {isImageOverlayPickerOpen && (
-        <ImageOverlayPickerDialog assets={assets} onPick={onAddImageOverlay} onClose={onCloseImageOverlayPicker} />
+        <ImageOverlayPickerDialog
+          assets={assets}
+          overlayImages={selections.overlayImages}
+          videoDurationSeconds={videoDurationSeconds}
+          onPick={onAddImageOverlay}
+          onLocateOverlay={(overlayIndex) => {
+            const overlay = selections.overlayImages[overlayIndex];
+            if (overlay) onSeek(overlay.startTimeSeconds);
+          }}
+          onClose={onCloseImageOverlayPicker}
+        />
       )}
 
       {framingDialogOverlay && (

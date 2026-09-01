@@ -6,7 +6,8 @@
  * lib/video/textTemplates.ts for why). Used both for adding a new overlay
  * (editingOverlay is null, defaults to the first template) and for editing
  * an existing one's text/template/position (pre-filled, reopened via
- * TextOverlayTrack's "Edit text" or a plain click on its segment).
+ * TextOverlayTrack's "Edit text" or a plain click on its segment, or via
+ * this dialog's own "Already on this reel" list below).
  *
  * Split roughly 50/50: the left half is a live preview of the ACTUAL
  * current video frame (previewFrameUrl -- the thumbnail closest to the
@@ -25,27 +26,42 @@
  * lib/video/textTemplates.ts now wraps and auto-shrinks to fit whatever
  * rect it's given, so dragging the rect narrower/shorter here reshapes the
  * text to match, live, in this same preview.
+ *
+ * The "Already on this reel" list (same rationale as
+ * VideoOverlayPickerDialog.tsx's own) is the only way to switch which
+ * caption this dialog is editing without first closing it and hunting for
+ * the right segment on TextOverlayTrack -- clicking a row there both jumps
+ * the live preview to it AND re-points this same open dialog at it
+ * (onSelectExisting), rather than only being reachable pre-open.
  */
 import { useEffect, useState } from "react";
 import { TEXT_TEMPLATE_OPTIONS, type TextTemplateId } from "@/lib/video/textTemplates";
 import { TextOverlayCanvas } from "./TextOverlayCanvas";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
-import { DEFAULT_TEXT_OVERLAY_RECT, type CropRect, type TextOverlay } from "@/lib/video/video_math";
+import { DEFAULT_TEXT_OVERLAY_RECT, formatTimeRange, type CropRect, type TextOverlay } from "@/lib/video/video_math";
 
 const PREVIEW_PROGRESS = 0.6;
 const DEFAULT_PREVIEW_TEXT = "Your text here";
 
 export function TextOverlayDialog({
   editingOverlay,
+  textOverlays,
   previewFrameUrl,
   frameAspectRatio,
   onSave,
+  onSelectExisting,
   onClose,
 }: {
   editingOverlay: TextOverlay | null;
+  // Every text overlay already placed on this reel -- see this file's own
+  // module comment for why they're listed here.
+  textOverlays: TextOverlay[];
   previewFrameUrl: string | null;
   frameAspectRatio: number | null;
   onSave: (text: string, templateId: TextTemplateId, rect: CropRect) => void;
+  // A row's own click, in the "Already on this reel" list -- jumps the
+  // live preview there and re-points this same dialog at that overlay.
+  onSelectExisting: (overlayIndex: number) => void;
   onClose: () => void;
 }) {
   const [text, setText] = useState(editingOverlay?.text ?? "");
@@ -154,14 +170,47 @@ export function TextOverlayDialog({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={!text.trim()}
-              className="mt-3 w-full rounded-md bg-accent py-1.5 text-sm font-medium text-accent-foreground disabled:opacity-50"
-            >
-              {editingOverlay ? "Save" : "Add"}
-            </button>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md border border-border py-1.5 px-3 text-sm font-medium text-foreground hover:bg-background"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!text.trim()}
+                className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
+              >
+                {editingOverlay ? "Save" : "Add"}
+              </button>
+            </div>
+
+            {textOverlays.length > 0 && (
+              <div className="mt-3 min-h-0 border-t border-border pt-2">
+                <h3 className="mb-1 text-xs font-medium text-foreground">Already on this reel</h3>
+                <ul className="flex max-h-24 flex-col gap-0.5 overflow-y-auto">
+                  {textOverlays.map((overlay, index) => (
+                    <li key={index}>
+                      <button
+                        type="button"
+                        onClick={() => onSelectExisting(index)}
+                        title="Jump the preview here and edit this caption"
+                        className={
+                          "flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-background " +
+                          (overlay === editingOverlay ? "bg-accent/10" : "")
+                        }
+                      >
+                        <span className="min-w-0 flex-1 truncate text-foreground">&quot;{overlay.text}&quot;</span>
+                        <span className="shrink-0 text-muted">{formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       </div>

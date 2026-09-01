@@ -744,6 +744,12 @@ export function applyResizeImageClip(
       overlayImages: selections.overlayImages.map(shiftEffectRange),
       textOverlays: selections.textOverlays.map(shiftEffectRange),
       trimRanges: selections.trimRanges.map(shiftEffectRange),
+      videoOverlays: selections.videoOverlays.map(shiftEffectRange),
+      ttsOverlays: selections.ttsOverlays.map((overlay) =>
+        overlay.startTimeSeconds >= clipStartSeconds + entry.durationSeconds
+          ? { ...overlay, startTimeSeconds: overlay.startTimeSeconds + delta }
+          : overlay
+      ),
       flipHorizontalToggles: selections.flipHorizontalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
       flipVerticalToggles: selections.flipVerticalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
     },
@@ -836,6 +842,12 @@ export function applyEditImageSequenceClip(
       overlayImages: selections.overlayImages.map(shiftEffectRange),
       textOverlays: selections.textOverlays.map(shiftEffectRange),
       trimRanges: selections.trimRanges.map(shiftEffectRange),
+      videoOverlays: selections.videoOverlays.map(shiftEffectRange),
+      ttsOverlays: selections.ttsOverlays.map((overlay) =>
+        overlay.startTimeSeconds >= clipStartSeconds + entry.durationSeconds
+          ? { ...overlay, startTimeSeconds: overlay.startTimeSeconds + delta }
+          : overlay
+      ),
       flipHorizontalToggles: selections.flipHorizontalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
       flipVerticalToggles: selections.flipVerticalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
     },
@@ -884,6 +896,10 @@ export function applyDeleteSequenceClip(
       overlayImages: selections.overlayImages.map(shiftEffectRange),
       textOverlays: selections.textOverlays.map(shiftEffectRange),
       trimRanges: selections.trimRanges.map(shiftEffectRange),
+      videoOverlays: selections.videoOverlays.map(shiftEffectRange),
+      ttsOverlays: selections.ttsOverlays.map((overlay) =>
+        overlay.startTimeSeconds >= clipEndSeconds ? { ...overlay, startTimeSeconds: overlay.startTimeSeconds + delta } : overlay
+      ),
       flipHorizontalToggles: selections.flipHorizontalToggles.map((t) => (t >= clipEndSeconds ? t + delta : t)),
       flipVerticalToggles: selections.flipVerticalToggles.map((t) => (t >= clipEndSeconds ? t + delta : t)),
     },

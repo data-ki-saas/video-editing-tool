@@ -2351,6 +2351,7 @@ export function ThreePaneEditor({
           isTextDialogOpen={isTextDialogOpen}
           editingTextOverlay={editingTextOverlayIndex !== null ? displayedTextOverlays[editingTextOverlayIndex] : null}
           onSaveTextOverlay={handleSaveTextOverlay}
+          onRequestEditTextOverlay={handleRequestEditTextOverlay}
           onCloseTextDialog={handleCloseTextDialog}
           onOpenTtsDialog={handleOpenTtsDialog}
           isTtsDialogOpen={isTtsDialogOpen}
@@ -2412,6 +2413,7 @@ export function ThreePaneEditor({
           }}
           videoDurationSeconds={videoDurationSeconds}
           currentTimeSeconds={currentTimeSeconds}
+          onSeek={handleSeek}
         />
       </section>
 
