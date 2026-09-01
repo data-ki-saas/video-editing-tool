@@ -12,6 +12,18 @@ from src.permissions.service import feature_denied_detail
 
 logger = logging.getLogger(__name__)
 
+# Lazily created, then reused for the life of the process -- PyJWKClient
+# caches the fetched key set in-memory internally, so this only round-trips
+# to Supabase's JWKS endpoint once per (rare) key rotation, not per request.
+_jwks_client: jwt.PyJWKClient | None = None
+
+
+def _get_jwks_client() -> jwt.PyJWKClient:
+    global _jwks_client
+    if _jwks_client is None:
+        _jwks_client = jwt.PyJWKClient(f"{settings.supabase_url}/auth/v1/.well-known/jwks.json", cache_keys=True)
+    return _jwks_client
+
 
 @dataclass
 class CurrentUser:
@@ -42,10 +54,24 @@ def _lookup_role(user_id: str) -> tuple[str, str, str, frozenset[str]]:
 def _verify_token(token: str) -> tuple[str, str | None]:
     """Returns (user_id, email) for a valid access token.
 
-    Verifies locally (HS256, no network call) when SUPABASE_JWT_SECRET is
+    Verifies locally (no network call for HS256; one cached JWKS fetch per
+    key rotation for asymmetric algorithms) when SUPABASE_JWT_SECRET is
     configured; falls back to the slower auth.get_user() round trip to
     Supabase Auth otherwise, so this degrades gracefully on a deploy that
     hasn't set the new env var yet (see DEPLOY.md).
+
+    Supabase projects sign access tokens either with a shared HS256 secret
+    (the dashboard's "Legacy JWT Secret") or, on projects that have adopted
+    Supabase's JWT Signing Keys feature, an asymmetric key (ES256 seen in
+    practice; RS256/EdDSA are the other Supabase-supported options) -- there
+    is no shared secret at all in that case, only a public verification key
+    Supabase publishes at /auth/v1/.well-known/jwks.json. The token header's
+    own "alg" says which one applies, so branch on that rather than assuming
+    HS256 -- an asymmetric project's tokens will never verify against
+    SUPABASE_JWT_SECRET no matter how correctly that value is copied.
+    SUPABASE_JWT_SECRET being set is still what turns local verification on
+    at all (its value is simply unused on the JWKS branch); leaving it unset
+    always takes the remote auth.get_user() path below regardless of algorithm.
 
     Trade-off: local verification only checks the token's signature and
     expiry, not live revocation -- a token for a user banned or deleted after
@@ -56,10 +82,31 @@ def _verify_token(token: str) -> tuple[str, str | None]:
     round trip per request.
     """
     if settings.supabase_jwt_secret:
+        alg = "HS256"
         try:
-            claims = jwt.decode(
-                token, settings.supabase_jwt_secret, algorithms=["HS256"], audience="authenticated"
+            alg = jwt.get_unverified_header(token).get("alg", "HS256")
+            if alg == "HS256":
+                key = settings.supabase_jwt_secret
+            else:
+                key = _get_jwks_client().get_signing_key_from_jwt(token).key
+            claims = jwt.decode(token, key, algorithms=[alg], audience="authenticated")
+        except jwt.InvalidSignatureError as exc:
+            # Every token signature failing (as opposed to occasional
+            # ExpiredSignatureError from normal token aging) means either
+            # SUPABASE_JWT_SECRET is stale (rotated in Supabase without
+            # updating this deploy's env var -- only possible on the HS256
+            # branch) or, on the JWKS branch, that something is verifying
+            # against the wrong Supabase project. Logged distinctly so this
+            # shows up as a config problem in Render logs rather than
+            # looking like a wave of individually bad tokens.
+            logger.warning(
+                "JWT signature verification failed (alg=%s) -- if HS256, SUPABASE_JWT_SECRET "
+                "is likely stale (rotated in Supabase?); re-copy it from Supabase Settings > "
+                "API > JWT Settings. If not HS256, double check SUPABASE_URL points at the "
+                "right project",
+                alg,
             )
+            raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
         except jwt.PyJWTError as exc:
             raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
         return claims["sub"], claims.get("email")
