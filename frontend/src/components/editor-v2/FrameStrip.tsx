@@ -745,7 +745,21 @@ export function FrameStrip({
     return thumbnailTimestampsSeconds.map((timestamp) => {
       const authoredCrop = computeEffectiveCropRect(baseCropRect, zoomEffects, timestamp);
       const entryIndex = clipBoundarySeconds.findIndex((boundary) => timestamp < boundary);
-      const resolvedIndex = entryIndex === -1 ? sequenceEntries.length - 1 : entryIndex;
+      // NOT sequenceEntries.length - 1 -- sequenceEntries is the full,
+      // synchronously-known clip list, but clipBoundarySeconds/thumbnails
+      // grow incrementally as ThreePaneEditor's extractSequence works
+      // through the sequence one clip at a time. Mid-extraction,
+      // clipBoundarySeconds.length IS the index of whichever clip is the
+      // current tip (the last one with thumbnails actually in the array) --
+      // sequenceEntries.length - 1 instead names the clip that will END UP
+      // last once everything finishes, which is wrong for every clip still
+      // loading behind it. The two only coincide once extraction completes,
+      // which is why this only ever showed up for a clip FOLLOWING the
+      // first one (the first clip's own boundary appears almost the moment
+      // the next clip starts extracting) and self-corrected a beat later
+      // (once its true own successor clip started extracting in turn) --
+      // easy to read as "just the first frame" glitching.
+      const resolvedIndex = entryIndex === -1 ? clipBoundarySeconds.length : entryIndex;
       const entry = sequenceEntries[resolvedIndex];
       const ownAspectRatio = entry?.id ? entryAspectRatioById[entry.id] : undefined;
       // Not for an image entry's own self-scoped Ken Burns rect (never
@@ -802,11 +816,13 @@ export function FrameStrip({
   // comment for why that tile needs to know. clipBoundarySeconds[i] is the
   // END of sequenceEntries[i] (see this file's own prop comment), so the
   // first boundary a timestamp is still strictly before it names its clip;
-  // past every boundary means the last entry.
+  // past every KNOWN boundary means the current tip of extraction, i.e.
+  // index clipBoundarySeconds.length -- NOT sequenceEntries.length - 1, see
+  // tileCropRects' own comment on this same fallback above.
   const tileIsImageClip = useMemo(() => {
     return thumbnailTimestampsSeconds.map((timestamp) => {
       const entryIndex = clipBoundarySeconds.findIndex((boundary) => timestamp < boundary);
-      const resolvedIndex = entryIndex === -1 ? sequenceEntries.length - 1 : entryIndex;
+      const resolvedIndex = entryIndex === -1 ? clipBoundarySeconds.length : entryIndex;
       return sequenceEntries[resolvedIndex]?.kind === "image";
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
@@ -824,7 +840,7 @@ export function FrameStrip({
   const tileFrameAspectRatio = useMemo(() => {
     return thumbnailTimestampsSeconds.map((timestamp) => {
       const entryIndex = clipBoundarySeconds.findIndex((boundary) => timestamp < boundary);
-      const resolvedIndex = entryIndex === -1 ? sequenceEntries.length - 1 : entryIndex;
+      const resolvedIndex = entryIndex === -1 ? clipBoundarySeconds.length : entryIndex;
       const entryId = sequenceEntries[resolvedIndex]?.id;
       const entryRatio = entryId ? entryAspectRatioById[entryId] : undefined;
       return entryRatio ?? frameAspectRatio;
@@ -839,7 +855,7 @@ export function FrameStrip({
   const tileColorFilterId = useMemo(() => {
     return thumbnailTimestampsSeconds.map((timestamp) => {
       const entryIndex = clipBoundarySeconds.findIndex((boundary) => timestamp < boundary);
-      const resolvedIndex = entryIndex === -1 ? sequenceEntries.length - 1 : entryIndex;
+      const resolvedIndex = entryIndex === -1 ? clipBoundarySeconds.length : entryIndex;
       return sequenceEntries[resolvedIndex]?.colorFilterId ?? null;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
