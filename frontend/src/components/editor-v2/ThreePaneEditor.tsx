@@ -718,6 +718,17 @@ export function ThreePaneEditor({
   // by assetId -- VideoOverlayTrack's edge-drag clamp needs this (see its
   // own comment). Re-runs when a project loads with overlays already
   // referencing assets not yet probed, not only right after adding one.
+  // `assetsLoaded` is also a dep, not just `videoOverlayAssetIds` -- on a
+  // freshly opened project, `selections.videoOverlays` (and so
+  // videoOverlayAssetIds) is typically populated BEFORE the async
+  // listAssets() fetch resolves, so the loop's own `if (!url) continue`
+  // below silently skips every overlay on that first run. Without
+  // `assetsLoaded` flipping true afterward to re-trigger this effect, a
+  // pre-existing overlay's duration (and, downstream, FrameStrip's per-tile
+  // frame extraction below, which is gated on this resolving) never gets a
+  // second chance -- it's stuck on the single generic fallback thumbnail for
+  // the rest of the session, with no error anywhere (every step degrades
+  // silently by design).
   const videoOverlayAssetIds = useMemo(
     () => Array.from(new Set(selections.videoOverlays.map((overlay) => overlay.assetId))),
     [selections.videoOverlays]
@@ -740,8 +751,8 @@ export function ThreePaneEditor({
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- assetUrlById is a fresh object every render; videoOverlayAssetIds (memoized) is what actually gates this
-  }, [videoOverlayAssetIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- assetUrlById is a fresh object every render; videoOverlayAssetIds (memoized) + assetsLoaded is what actually gates this
+  }, [videoOverlayAssetIds, assetsLoaded]);
 
   // Captures one still frame per (assetId, sourceStartSeconds) pair actually
   // in use across the current overlays -- so FrameStrip's main track can show
@@ -775,8 +786,8 @@ export function ThreePaneEditor({
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- selections.videoOverlays/assetUrlById are fresh objects every render; videoOverlayStartThumbnailKeys (memoized) is what actually gates this
-  }, [videoOverlayStartThumbnailKeys]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- selections.videoOverlays/assetUrlById are fresh objects every render; videoOverlayStartThumbnailKeys (memoized) + assetsLoaded is what actually gates this
+  }, [videoOverlayStartThumbnailKeys, assetsLoaded]);
 
   // Extracts each video-overlay asset's own thumbnails at the same cadence
   // as the base track's own `thumbnails` (THUMBNAIL_INTERVAL_SECONDS) --
