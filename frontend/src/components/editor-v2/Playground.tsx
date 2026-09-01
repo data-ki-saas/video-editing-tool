@@ -145,6 +145,8 @@ export function Playground({
   flipVerticalToggles,
   onFlipHorizontal,
   onFlipVertical,
+  onDeleteFlipHorizontalSegment,
+  onDeleteFlipVerticalSegment,
   trimRanges,
   pendingTrimStartSeconds,
   onTrimTrackClick,
@@ -244,6 +246,8 @@ export function Playground({
   flipVerticalToggles: number[];
   onFlipHorizontal: () => void;
   onFlipVertical: () => void;
+  onDeleteFlipHorizontalSegment: (segmentIndex: number) => void;
+  onDeleteFlipVerticalSegment: (segmentIndex: number) => void;
   trimRanges: TrimRange[];
   pendingTrimStartSeconds: number | null;
   onTrimTrackClick: (timeSeconds: number) => void;
@@ -367,6 +371,8 @@ export function Playground({
             flipVerticalToggles={flipVerticalToggles}
             onFlipHorizontal={onFlipHorizontal}
             onFlipVertical={onFlipVertical}
+            onDeleteFlipHorizontalSegment={onDeleteFlipHorizontalSegment}
+            onDeleteFlipVerticalSegment={onDeleteFlipVerticalSegment}
             trimRanges={trimRanges}
             pendingTrimStartSeconds={pendingTrimStartSeconds}
             onTrimTrackClick={onTrimTrackClick}

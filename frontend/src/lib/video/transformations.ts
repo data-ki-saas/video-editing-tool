@@ -174,6 +174,35 @@ export function applyFlipToggle(
   };
 }
 
+/** Deletes one flip segment outright -- from the "Delete flip"/"Delete
+ * mirror" context menu on FlipTrack's colored segment, the direct-
+ * manipulation undo for a flip toggle that's otherwise only reachable by
+ * re-clicking the same crop-rectangle edge handle at the exact frame it was
+ * set on. Removes the pair of toggles that bound the segment (or just its
+ * lone leading toggle, if the segment runs to the clip's end with no
+ * closing toggle yet) -- video_math.ts's computeFlipSegments pairs the same
+ * sorted toggle list into segments in this same order, so segmentIndex here
+ * always lines up with the segment the user right-clicked. */
+export function applyDeleteFlipSegment(
+  selections: EditSelectionsSnapshot,
+  axis: "horizontal" | "vertical",
+  segmentIndex: number
+): TransformationResult {
+  const label = axis === "horizontal" ? "Deleted flip" : "Deleted mirror";
+  const toggles = axis === "horizontal" ? selections.flipHorizontalToggles : selections.flipVerticalToggles;
+  const sorted = [...toggles].sort((a, b) => a - b);
+  const pair = sorted.slice(segmentIndex * 2, segmentIndex * 2 + 2);
+  if (pair.length === 0) return { label, state: selections };
+  const nextToggles = toggles.filter((t) => !pair.includes(t));
+  return {
+    label,
+    state:
+      axis === "horizontal"
+        ? { ...selections, flipHorizontalToggles: nextToggles }
+        : { ...selections, flipVerticalToggles: nextToggles },
+  };
+}
+
 /** Picking a color filter preset (or "none") for one specific cutaway
  * (base-sequence clip, video or image) from FilterPresetDialog -- id-based,
  * same selections.sequenceClips.findIndex(...) lookup as

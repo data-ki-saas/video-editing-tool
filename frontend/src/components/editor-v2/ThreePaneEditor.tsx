@@ -75,6 +75,7 @@ import {
   applyZoomEpicenterChange,
   applyDeleteZoomEffect,
   applyFlipToggle,
+  applyDeleteFlipSegment,
   applyTrimTrackClick,
   applyDeleteTrimRange,
   applyAddImageOverlay,
@@ -993,6 +994,11 @@ export function ThreePaneEditor({
 
   function handleFlip(axis: "horizontal" | "vertical") {
     const { label, state } = applyFlipToggle(selections, axis, currentTimeSeconds);
+    pushChange(label, state);
+  }
+
+  function handleDeleteFlipSegment(axis: "horizontal" | "vertical", segmentIndex: number) {
+    const { label, state } = applyDeleteFlipSegment(selections, axis, segmentIndex);
     pushChange(label, state);
   }
 
@@ -2445,6 +2451,8 @@ export function ThreePaneEditor({
           flipVerticalToggles={selections.flipVerticalToggles}
           onFlipHorizontal={() => handleFlip("horizontal")}
           onFlipVertical={() => handleFlip("vertical")}
+          onDeleteFlipHorizontalSegment={(segmentIndex) => handleDeleteFlipSegment("horizontal", segmentIndex)}
+          onDeleteFlipVerticalSegment={(segmentIndex) => handleDeleteFlipSegment("vertical", segmentIndex)}
           trimRanges={selections.trimRanges}
           pendingTrimStartSeconds={pendingTrimStartSeconds}
           onTrimTrackClick={handleTrimTrackClick}

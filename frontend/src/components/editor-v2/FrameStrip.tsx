@@ -479,6 +479,8 @@ export function FrameStrip({
   flipVerticalToggles,
   onFlipHorizontal,
   onFlipVertical,
+  onDeleteFlipHorizontalSegment,
+  onDeleteFlipVerticalSegment,
   trimRanges,
   pendingTrimStartSeconds,
   onTrimTrackClick,
@@ -590,6 +592,11 @@ export function FrameStrip({
   flipVerticalToggles: number[];
   onFlipHorizontal: () => void;
   onFlipVertical: () => void;
+  // FlipTrack's own right-click "Delete flip"/"Delete mirror" -- removes the
+  // toggle pair (or lone trailing toggle) bounding that segment, see
+  // transformations.ts's applyDeleteFlipSegment.
+  onDeleteFlipHorizontalSegment: (segmentIndex: number) => void;
+  onDeleteFlipVerticalSegment: (segmentIndex: number) => void;
   trimRanges: TrimRange[];
   pendingTrimStartSeconds: number | null;
   onTrimTrackClick: (timeSeconds: number) => void;
@@ -1276,12 +1283,16 @@ export function FrameStrip({
           videoDurationSeconds={durationSeconds}
           colorClassName="bg-red-500/50 border border-red-500"
           title="Flipped"
+          deleteLabel="Delete flip"
+          onDeleteSegment={onDeleteFlipHorizontalSegment}
         />
         <FlipTrack
           segments={flipVerticalSegments}
           videoDurationSeconds={durationSeconds}
           colorClassName="bg-purple-500/50 border border-purple-500"
           title="Mirrored"
+          deleteLabel="Delete mirror"
+          onDeleteSegment={onDeleteFlipVerticalSegment}
         />
       </div>
     </div>
