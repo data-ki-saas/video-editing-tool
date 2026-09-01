@@ -32,6 +32,7 @@ import {
   DEFAULT_OVERLAY_FRAMING,
   DEFAULT_SPLIT_SCREEN_RATIO,
   MIN_VIDEO_OVERLAY_DURATION_SECONDS,
+  type BackgroundRemovalState,
   type CropRect,
   type ImageOverlayClip,
   type OverlayFraming,
@@ -1249,7 +1250,13 @@ export function applyAddVideoOverlay(
   sourceDurationSeconds: number,
   currentTimeSeconds: number,
   videoDurationSeconds: number,
-  removeBackground?: boolean
+  removeBackground?: boolean,
+  // Set (instead of `removeBackground`) for a solid-color screen -- see
+  // video_math.ts's BackgroundRemovalState.mode doc comment. Mutually
+  // exclusive with `removeBackground` in practice (the picker UI only ever
+  // sends one), but if both were somehow set, chroma key wins since it's
+  // checked first below.
+  chromaKeyColor?: string
 ): TransformationResult {
   const overlays = selections.videoOverlays;
   const containing = overlays.find(
@@ -1273,12 +1280,21 @@ export function applyAddVideoOverlay(
     layout: { type: "full-screen" },
     framing: DEFAULT_OVERLAY_FRAMING,
     audioBalance: 0,
-    // matteAssetId starts null -- the caller (ThreePaneEditor's
-    // handleAddVideoOverlay) kicks off the actual matting job right after
-    // this and patches it in later via applySetVideoOverlayBackgroundRemoval
-    // once the async job completes, same staging as applyAddSequenceClip's
-    // own removeBackground handling above.
-    ...(removeBackground ? { backgroundRemoval: { enabled: true, matteAssetId: null } } : {}),
+    // matteAssetId starts null either way. For AI mode, the caller
+    // (ThreePaneEditor's handleAddVideoOverlay) kicks off the actual matting
+    // job right after this and patches it in later via
+    // applySetVideoOverlayBackgroundRemoval once the async job completes,
+    // same staging as applyAddSequenceClip's own removeBackground handling
+    // above. For chroma key, NO job is requested here at all -- the live
+    // preview keys itself out locally (CanvasPlayer.tsx,
+    // lib/video/chromaKey.ts) and matteAssetId only ever gets populated at
+    // render time (ThreePaneEditor's resolveChromaKeyOverlayMattesForRender),
+    // see video_math.ts's BackgroundRemovalState.mode doc comment.
+    ...(chromaKeyColor
+      ? { backgroundRemoval: { enabled: true, matteAssetId: null, mode: "chromaKey" as const, chromaKeyColor } }
+      : removeBackground
+        ? { backgroundRemoval: { enabled: true, matteAssetId: null, mode: "ai" as const } }
+        : {}),
   };
   return { label: "Added overlay", state: { ...selections, videoOverlays: [...overlays, newOverlay] } };
 }
@@ -1294,7 +1310,7 @@ export function applyAddVideoOverlay(
 export function applySetVideoOverlayBackgroundRemoval(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
-  backgroundRemoval: { enabled: boolean; matteAssetId?: string | null } | null
+  backgroundRemoval: BackgroundRemovalState | null
 ): TransformationResult {
   const overlay = selections.videoOverlays[overlayIndex];
   const label = backgroundRemoval?.enabled ? "Remove background" : "Restore background";

@@ -81,7 +81,7 @@ export function AssetGallery({
   onDeleted,
   onAddImageOverlay,
   onAddToSequence,
-  onAddVideoOverlay,
+  onOpenVideoOverlayPickerForAsset,
   onAddToBackgroundSequence,
   onOpenCutawayDialogForAsset,
   usedAssetIds,
@@ -99,7 +99,11 @@ export function AssetGallery({
   onDeleted: (assetId: string) => void;
   onAddImageOverlay: (asset: Asset) => void;
   onAddToSequence: (asset: Asset) => void;
-  onAddVideoOverlay: (asset: Asset, options?: { removeBackground?: boolean }) => void;
+  // Opens VideoOverlayPickerDialog (the same "Video Overlay" tab dialog)
+  // with this asset preselected, instead of adding instantly -- the picker
+  // is where layout/background-removal choices (including chroma key) get
+  // made, see that component's own comment.
+  onOpenVideoOverlayPickerForAsset: (asset: Asset) => void;
   onAddToBackgroundSequence: (asset: Asset) => void;
   onOpenCutawayDialogForAsset: (asset: Asset) => void;
   usedAssetIds: Set<string>;
@@ -235,19 +239,13 @@ export function AssetGallery({
               : asset.kind === "video"
                 ? [
                     { label: "Cutaway", onSelect: () => onAddToSequence(asset) },
-                    { label: "Overlay", onSelect: () => onAddVideoOverlay(asset) },
-                    // Same one-shot AI matting as the "Video Overlay" tab's
-                    // own picker dialog checkbox (VideoOverlayPickerDialog.tsx)
-                    // -- offered here too since this quick right-click path
-                    // places the overlay WITHOUT going through that dialog at
-                    // all, so it'd otherwise have no way to request removal
-                    // (background removal can only ever be requested at
-                    // add-time, see VideoOverlayClip.backgroundRemoval's own
-                    // doc comment).
-                    {
-                      label: "Overlay (remove background)",
-                      onSelect: () => onAddVideoOverlay(asset, { removeBackground: true }),
-                    },
+                    // Opens the "Video Overlay" tab's own picker dialog
+                    // (VideoOverlayPickerDialog.tsx) with this tile
+                    // preselected, rather than adding instantly -- that
+                    // dialog is where background-removal mode (none/chroma
+                    // key/AI) gets chosen, so there's no separate "(remove
+                    // background)" menu entry anymore.
+                    { label: "Overlay", onSelect: () => onOpenVideoOverlayPickerForAsset(asset) },
                   ]
                 : asset.kind === "audio"
                   ? [{ label: "Add", onSelect: () => onAddToBackgroundSequence(asset) }]

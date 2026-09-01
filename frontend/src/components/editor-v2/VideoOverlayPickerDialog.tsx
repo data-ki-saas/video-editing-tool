@@ -24,12 +24,16 @@
 import { useState } from "react";
 import type { Asset } from "@/lib/api";
 import { describeOverlayLayout, formatTimeRange, type VideoOverlayClip } from "@/lib/video/video_math";
+import { CHROMA_KEY_PRESETS, DEFAULT_CHROMA_KEY_COLOR } from "@/lib/video/chromaKey";
+
+type RemovalMode = "none" | "chromaKey" | "ai";
 
 export function VideoOverlayPickerDialog({
   assets,
   videoThumbnailUrlByAssetId,
   videoOverlays,
   videoDurationSeconds,
+  preselectedAssetId,
   onPick,
   onLocateOverlay,
   onDeleteOverlay,
@@ -45,7 +49,12 @@ export function VideoOverlayPickerDialog({
   // module comment for why they're listed here.
   videoOverlays: VideoOverlayClip[];
   videoDurationSeconds: number;
-  onPick: (asset: Asset, options?: { removeBackground?: boolean }) => void;
+  // Set when opened from AssetGallery's right-click "Overlay" on a specific
+  // video tile -- pre-selects that tile instead of requiring a second click
+  // on the same asset. Null/undefined when opened from the "Video Overlay"
+  // tab itself, which has no particular asset in mind.
+  preselectedAssetId?: string | null;
+  onPick: (asset: Asset, options?: { removeBackground?: boolean; chromaKeyColor?: string }) => void;
   // A row's own click, in the "Already on this reel" list -- seeks the
   // live preview to that overlay's start and closes this dialog.
   onLocateOverlay: (overlayIndex: number) => void;
@@ -58,14 +67,21 @@ export function VideoOverlayPickerDialog({
 }) {
   const videoAssets = assets.filter((asset) => asset.kind === "video");
   // Applies to whichever tile ends up confirmed via "Add overlay" below --
-  // a single flag for the whole picker, not per-tile, same as before.
-  const [removeBackground, setRemoveBackground] = useState(false);
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  // a single choice for the whole picker, not per-tile, same as before.
+  // "Chroma key" is an instant, local, solid-color-screen cutout (preview
+  // only -- see lib/video/chromaKey.ts); "AI removal" is the original
+  // fal.ai/VEED job, requested right away, for any other backdrop.
+  const [removalMode, setRemovalMode] = useState<RemovalMode>("none");
+  const [chromaKeyColor, setChromaKeyColor] = useState(DEFAULT_CHROMA_KEY_COLOR);
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(preselectedAssetId ?? null);
 
   function handleConfirm() {
     const asset = videoAssets.find((candidate) => candidate.id === selectedAssetId);
     if (!asset) return;
-    onPick(asset, { removeBackground });
+    onPick(asset, {
+      removeBackground: removalMode === "ai",
+      chromaKeyColor: removalMode === "chromaKey" ? chromaKeyColor : undefined,
+    });
     onClose();
   }
 
@@ -113,19 +129,53 @@ export function VideoOverlayPickerDialog({
           </div>
         )}
 
-        <div className="mt-3 flex items-center justify-between gap-2">
-          {/* AI background removal -- same one-shot toggle as CutawayDialog's
-              own "Remove background" checkbox, see that component's comment.
-              Applied to whichever tile is confirmed via "Add overlay". */}
-          <label className="flex items-center gap-1.5 text-xs text-muted">
-            <input
-              type="checkbox"
-              checked={removeBackground}
-              onChange={(e) => setRemoveBackground(e.target.checked)}
-              className="h-3.5 w-3.5"
-            />
-            Remove background (e.g. green screen)
-          </label>
+        <div className="mt-3 flex flex-col gap-2">
+          {/* Background removal -- applied to whichever tile is confirmed via
+              "Add overlay". Two distinct strategies, not one checkbox:
+              "Chroma key" is instant and local but only works against a real
+              solid-color screen (see lib/video/chromaKey.ts's own module
+              comment on why it's preview-only); "AI removal" is the original
+              fal.ai/VEED job -- same one-shot toggle as CutawayDialog's own
+              "Remove background" checkbox, works against any backdrop but
+              costs real time/money right away. */}
+          <div className="flex items-center gap-3 text-xs text-muted">
+            <span className="font-medium text-foreground">Background:</span>
+            <label className="flex items-center gap-1">
+              <input type="radio" name="video-overlay-removal-mode" checked={removalMode === "none"} onChange={() => setRemovalMode("none")} />
+              None
+            </label>
+            <label className="flex items-center gap-1" title="Instant, free preview -- for a real solid-color green/blue screen. Uses fal.ai for the final render.">
+              <input
+                type="radio"
+                name="video-overlay-removal-mode"
+                checked={removalMode === "chromaKey"}
+                onChange={() => setRemovalMode("chromaKey")}
+              />
+              Chroma key
+            </label>
+            <label className="flex items-center gap-1" title="AI background removal for any backdrop -- calls fal.ai right away.">
+              <input type="radio" name="video-overlay-removal-mode" checked={removalMode === "ai"} onChange={() => setRemovalMode("ai")} />
+              AI removal
+            </label>
+          </div>
+          {removalMode === "chromaKey" && (
+            <div className="flex items-center gap-2 pl-1">
+              <span className="text-[11px] text-muted">Screen color:</span>
+              {CHROMA_KEY_PRESETS.map((preset) => (
+                <button
+                  key={preset.hex}
+                  type="button"
+                  title={preset.label}
+                  onClick={() => setChromaKeyColor(preset.hex)}
+                  className={"h-5 w-5 rounded-full border-2 " + (chromaKeyColor === preset.hex ? "border-accent" : "border-transparent")}
+                  style={{ backgroundColor: preset.hex }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-3 flex items-center justify-end gap-2">
           <div className="flex shrink-0 gap-2">
             <button
               type="button"

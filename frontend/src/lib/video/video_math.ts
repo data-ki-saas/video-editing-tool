@@ -639,7 +639,7 @@ export const DEFAULT_SPLIT_SCREEN_RATIO = 0.5;
 // later end-edge drag to still find a valid range.
 export const MIN_VIDEO_OVERLAY_DURATION_SECONDS = 0.2;
 
-/** Shared shape for an AI background-removal job, carried on VideoOverlayClip
+/** Shared shape for a background-removal job, carried on VideoOverlayClip
  * and both SequenceEntry variants (video/image) below, and mirrored on
  * CutawayTrack.tsx's own CutawaySegment view-model. `progress` is a
  * transient, ESTIMATED 0..1 fraction of how far along the job is (see
@@ -648,8 +648,29 @@ export const MIN_VIDEO_OVERLAY_DURATION_SECONDS = 0.2;
  * status the provider actually reports) -- never persisted, only ever
  * spliced in for display by ThreePaneEditor while a job is in flight, same
  * reason it's optional here as `matteAssetId` (absent once the job resolves
- * one way or the other). */
-export type BackgroundRemovalState = { enabled: boolean; matteAssetId?: string | null; progress?: number };
+ * one way or the other).
+ *
+ * `mode` distinguishes two removal STRATEGIES, currently only meaningful for
+ * a VideoOverlayClip (SequenceEntry's video/image kinds only ever use "ai"):
+ * absent/"ai" is the original fal.ai/VEED (or rembg, for a photo) AI matting
+ * job, requested right away; "chromaKey" is a solid-color (green/blue
+ * screen) cutout, previewed instantly client-side (lib/video/chromaKey.ts's
+ * chromaKeyFramesToAlphaMasks) with NO job requested at add-time -- the real
+ * fal.ai job (which `matteAssetId` still ultimately refers to) is only
+ * requested when the creator actually renders, since a plain color-distance
+ * key is preview-quality only and neither Creatomate nor the local exporter
+ * has any native chroma-key primitive to fall back to (see
+ * ThreePaneEditor.tsx's resolveChromaKeyOverlayMattesForRender). */
+export type BackgroundRemovalMode = "ai" | "chromaKey";
+export type BackgroundRemovalState = {
+  enabled: boolean;
+  matteAssetId?: string | null;
+  progress?: number;
+  mode?: BackgroundRemovalMode;
+  // Only meaningful when mode === "chromaKey" -- a hex color, see
+  // lib/video/chromaKey.ts's CHROMA_KEY_PRESETS.
+  chromaKeyColor?: string;
+};
 
 export interface VideoOverlayClip {
   assetId: string;

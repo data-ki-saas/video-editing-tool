@@ -202,6 +202,7 @@ export function ActionArea({
   onAddImageOverlay,
   onAddToSequence,
   onAddVideoOverlay,
+  onOpenVideoOverlayPickerForAsset,
   onAddToBackgroundSequence,
   onOpenCutawayDialogForAsset,
   usedAssetIds,
@@ -275,6 +276,7 @@ export function ActionArea({
   onCloseCutawayDialog,
   onDeleteCutaway,
   isVideoOverlayPickerOpen,
+  videoOverlayPickerPreselectedAssetId,
   onOpenVideoOverlayPicker,
   onCloseVideoOverlayPicker,
   onDeleteVideoOverlay,
@@ -317,7 +319,8 @@ export function ActionArea({
   onAssetDeleted: (assetId: string) => void;
   onAddImageOverlay: (asset: Asset) => void;
   onAddToSequence: (asset: Asset) => void;
-  onAddVideoOverlay: (asset: Asset, options?: { removeBackground?: boolean }) => void;
+  onAddVideoOverlay: (asset: Asset, options?: { removeBackground?: boolean; chromaKeyColor?: string }) => void;
+  onOpenVideoOverlayPickerForAsset: (asset: Asset) => void;
   onAddToBackgroundSequence: (asset: Asset) => void;
   onOpenCutawayDialogForAsset: (asset: Asset) => void;
   usedAssetIds: Set<string>;
@@ -430,6 +433,9 @@ export function ActionArea({
   onCloseCutawayDialog: () => void;
   onDeleteCutaway: (segment: CutawaySegment) => void;
   isVideoOverlayPickerOpen: boolean;
+  // Set by AssetGallery's right-click "Overlay" on a specific video tile --
+  // see VideoOverlayPickerDialog's own preselectedAssetId prop comment.
+  videoOverlayPickerPreselectedAssetId: string | null;
   onOpenVideoOverlayPicker: () => void;
   onCloseVideoOverlayPicker: () => void;
   // VideoOverlayPickerDialog's own "Already on this reel" list -- deletes
@@ -525,7 +531,7 @@ export function ActionArea({
           onDeleted={onAssetDeleted}
           onAddImageOverlay={onAddImageOverlay}
           onAddToSequence={onAddToSequence}
-          onAddVideoOverlay={onAddVideoOverlay}
+          onOpenVideoOverlayPickerForAsset={onOpenVideoOverlayPickerForAsset}
           onAddToBackgroundSequence={onAddToBackgroundSequence}
           onOpenCutawayDialogForAsset={onOpenCutawayDialogForAsset}
           usedAssetIds={usedAssetIds}
@@ -779,6 +785,7 @@ export function ActionArea({
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
           videoOverlays={selections.videoOverlays}
           videoDurationSeconds={videoDurationSeconds}
+          preselectedAssetId={videoOverlayPickerPreselectedAssetId}
           onPick={onAddVideoOverlay}
           onLocateOverlay={(overlayIndex) => {
             const overlay = selections.videoOverlays[overlayIndex];

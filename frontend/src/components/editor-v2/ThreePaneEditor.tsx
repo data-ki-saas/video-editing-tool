@@ -409,6 +409,10 @@ export function ThreePaneEditor({
   // tile adds that asset instantly (same as AssetGallery's right-click
   // "Overlay") and closes the picker itself.
   const [isVideoOverlayPickerOpen, setIsVideoOverlayPickerOpen] = useState(false);
+  // Set by AssetGallery's right-click "Overlay" on a specific video tile --
+  // same "preselect instead of requiring a second click" pattern as
+  // cutawayDialogPreselectedAssetId below.
+  const [videoOverlayPickerPreselectedAssetId, setVideoOverlayPickerPreselectedAssetId] = useState<string | null>(null);
   const [isImageOverlayPickerOpen, setIsImageOverlayPickerOpen] = useState(false);
 
   // Named points on the main sequence's own timeline (MarkerTrack.tsx) --
@@ -1236,7 +1240,7 @@ export function ThreePaneEditor({
   // size/clamp the default window against -- reuses the cache built by the
   // probing effect above, or probes it fresh (and caches it) if this is the
   // first time this asset's been used this way.
-  async function handleAddVideoOverlay(asset: Asset, options?: { removeBackground?: boolean }) {
+  async function handleAddVideoOverlay(asset: Asset, options?: { removeBackground?: boolean; chromaKeyColor?: string }) {
     let sourceDurationSeconds = overlaySourceDurationSeconds[asset.id];
     if (sourceDurationSeconds === undefined) {
       try {
@@ -1252,12 +1256,18 @@ export function ThreePaneEditor({
       sourceDurationSeconds,
       currentTimeSeconds,
       videoDurationSeconds,
-      options?.removeBackground
+      options?.removeBackground,
+      options?.chromaKeyColor
     );
     pushChange(label, state);
     setIsVideoOverlayPickerOpen(false);
+    setVideoOverlayPickerPreselectedAssetId(null);
 
-    if (options?.removeBackground) {
+    // Chroma key fires NO fal.ai request here -- the live preview keys
+    // itself out locally (CanvasPlayer.tsx/lib/video/chromaKey.ts), and the
+    // real job only ever gets requested at render time (see
+    // resolveChromaKeyOverlayMattesForRender below).
+    if (options?.removeBackground && !options?.chromaKeyColor) {
       const newOverlayIndex = state.videoOverlays.length - 1;
       if (state.videoOverlays[newOverlayIndex]?.assetId === asset.id) {
         void requestAndPollVideoOverlayBackgroundRemoval(asset.id, newOverlayIndex);
@@ -1265,49 +1275,135 @@ export function ThreePaneEditor({
     }
   }
 
-  // Video-overlay equivalent of requestAndPollBackgroundRemoval above --
-  // same request/poll/refreshAssets/patch-in-matteAssetId flow, just landing
-  // via applySetVideoOverlayBackgroundRemoval (indexed into videoOverlays,
-  // not sequenceClips) instead. Same "not stale-safe against edits made
-  // during the wait" accepted risk as that function's own comment.
-  async function requestAndPollVideoOverlayBackgroundRemoval(sourceAssetId: string, overlayIndex: number) {
-    const assetName = assets.find((asset) => asset.id === sourceAssetId)?.filename ?? "this video overlay";
-    logActivity(`Asking fal.ai to remove the background from "${assetName}"…`);
+  // AssetGallery's right-click "Overlay" on a video asset -- opens the same
+  // picker dialog the "Video Overlay" tab uses, with this tile preselected,
+  // instead of adding instantly. (Adding instantly used to be the behavior
+  // here, with a separate "Overlay (remove background)" menu entry for AI
+  // matting -- replaced by always routing through the picker now that it
+  // also offers chroma key, so there's one place to make that choice.)
+  function handleOpenVideoOverlayPickerForAsset(asset: Asset) {
+    setVideoOverlayPickerPreselectedAssetId(asset.id);
+    setIsVideoOverlayPickerOpen(true);
+  }
+
+  // Core request/poll/refresh cycle shared by both the add-time AI flow
+  // (requestAndPollVideoOverlayBackgroundRemoval below) and the render-time
+  // chroma-key gating flow (resolveChromaKeyOverlayMattesForRender) --
+  // deliberately does NOT touch `selections`/pushChange itself, since the
+  // two callers need to merge the result in differently (one against the
+  // live closure's `selections` right away, the other against a locally
+  // threaded snapshot covering possibly-several overlays resolved
+  // concurrently -- see that function's own comment on why).
+  async function requestAndPollMatte(
+    sourceAssetId: string,
+    assetLabel: string,
+    onProgress: (fraction: number) => void
+  ): Promise<{ status: "completed"; matteAssetId: string } | { status: "failed" | "timeout" }> {
+    logActivity(`Asking fal.ai to remove the background from "${assetLabel}"…`);
     try {
       const initial = await requestBackgroundRemoval(projectId, sourceAssetId);
       const result =
         initial.status === "waiting"
           ? await pollBackgroundRemoval(sourceAssetId, (fraction, elapsedMs, attempt) => {
-              setVideoOverlayMattingProgress((prev) => ({ ...prev, [overlayIndex]: fraction }));
+              onProgress(fraction);
               logActivity(describeMattingTick(elapsedMs, attempt));
             })
           : initial;
       if (result.status === "failed") {
         logActivity(`fal.ai reported the job failed${result.error ? `: ${result.error}` : ""}`);
-        return;
+        return { status: "failed" };
       }
       if (result.status !== "completed" || !result.matteAssetId) {
         logActivity(`Still hasn't heard back from fal.ai after ${MAX_POLL_SECONDS}s — giving up for now`);
-        return;
+        return { status: "timeout" };
       }
-      logActivity(`fal.ai finished — transparent background is ready for "${assetName}" ✓`);
+      logActivity(`fal.ai finished — transparent background is ready for "${assetLabel}" ✓`);
       await refreshAssets();
-      const { label, state } = applySetVideoOverlayBackgroundRemoval(selections, overlayIndex, {
-        enabled: true,
-        matteAssetId: result.matteAssetId,
-      });
-      pushChange(label, state);
+      return { status: "completed", matteAssetId: result.matteAssetId };
     } catch (err) {
       logActivity(`Something went wrong asking fal.ai for background removal: ${err instanceof Error ? err.message : "unknown error"}`);
-      console.error("background removal failed for video overlay asset=%s", sourceAssetId, err);
-    } finally {
-      setVideoOverlayMattingProgress((prev) => {
-        if (!(overlayIndex in prev)) return prev;
-        const next = { ...prev };
-        delete next[overlayIndex];
-        return next;
-      });
+      console.error("background removal failed for asset=%s", sourceAssetId, err);
+      return { status: "failed" };
     }
+  }
+
+  // Video-overlay equivalent of requestAndPollBackgroundRemoval above --
+  // same request/poll/refreshAssets/patch-in-matteAssetId flow (now via the
+  // shared requestAndPollMatte), landing via applySetVideoOverlayBackgroundRemoval
+  // (indexed into videoOverlays, not sequenceClips) instead. Same "not
+  // stale-safe against edits made during the wait" accepted risk as that
+  // function's own comment. AI mode only -- chroma key never calls this at
+  // add-time (see handleAddVideoOverlay above).
+  async function requestAndPollVideoOverlayBackgroundRemoval(sourceAssetId: string, overlayIndex: number) {
+    const assetName = assets.find((asset) => asset.id === sourceAssetId)?.filename ?? "this video overlay";
+    const result = await requestAndPollMatte(sourceAssetId, assetName, (fraction) =>
+      setVideoOverlayMattingProgress((prev) => ({ ...prev, [overlayIndex]: fraction }))
+    );
+    setVideoOverlayMattingProgress((prev) => {
+      if (!(overlayIndex in prev)) return prev;
+      const next = { ...prev };
+      delete next[overlayIndex];
+      return next;
+    });
+    if (result.status !== "completed") return;
+    const { label, state } = applySetVideoOverlayBackgroundRemoval(selections, overlayIndex, {
+      enabled: true,
+      matteAssetId: result.matteAssetId,
+      mode: "ai",
+    });
+    pushChange(label, state);
+  }
+
+  // Called right before a render actually starts (handleLocalRenderClick) --
+  // a chroma-keyed overlay never requested fal.ai at add-time (it previews
+  // locally instead, see handleAddVideoOverlay), so this is where that
+  // deferred job finally gets fired for every such overlay that hasn't
+  // resolved a real matte yet. Requests run concurrently (Promise.all,
+  // multiple fal.ai jobs cost/wait the same either way); merging their
+  // results is done sequentially afterward against a single locally-threaded
+  // `working` snapshot (NOT via requestAndPollVideoOverlayBackgroundRemoval's
+  // own selections-closure pushChange) because this can resolve several
+  // overlays in the same render click -- applying each against the
+  // component's live `selections` independently, whenever its own promise
+  // settles, would let a later completion's pushChange clobber an earlier
+  // one's (both built from the same pre-render `selections` snapshot).
+  // Returns the resolved snapshot directly (rather than relying on the
+  // pushChange below having flushed through a re-render yet) so the caller
+  // can pass it straight to startLocalRender without a stale read.
+  async function resolveChromaKeyOverlayMattesForRender(): Promise<EditSelectionsSnapshot> {
+    const pending = selections.videoOverlays
+      .map((overlay, index) => ({ overlay, index }))
+      .filter(({ overlay }) => overlay.backgroundRemoval?.enabled && overlay.backgroundRemoval.mode === "chromaKey" && !overlay.backgroundRemoval.matteAssetId);
+    if (pending.length === 0) return selections;
+
+    const resolved = await Promise.all(
+      pending.map(async ({ overlay, index }) => {
+        const assetName = assets.find((asset) => asset.id === overlay.assetId)?.filename ?? "this video overlay";
+        const result = await requestAndPollMatte(overlay.assetId, assetName, (fraction) =>
+          setVideoOverlayMattingProgress((prev) => ({ ...prev, [index]: fraction }))
+        );
+        setVideoOverlayMattingProgress((prev) => {
+          if (!(index in prev)) return prev;
+          const next = { ...prev };
+          delete next[index];
+          return next;
+        });
+        return { index, chromaKeyColor: overlay.backgroundRemoval?.chromaKeyColor, result };
+      })
+    );
+
+    let working = selections;
+    for (const { index, chromaKeyColor, result } of resolved) {
+      if (result.status !== "completed") continue;
+      working = applySetVideoOverlayBackgroundRemoval(working, index, {
+        enabled: true,
+        matteAssetId: result.matteAssetId,
+        mode: "chromaKey",
+        chromaKeyColor,
+      }).state;
+    }
+    if (working !== selections) pushChange("Prepared background removal for render", working);
+    return working;
   }
 
   // TtsAvatarDialog's own "Generate & add" -- the dialog already generated
@@ -2219,6 +2315,14 @@ export function ThreePaneEditor({
 
     setIsLocalRenderPopupOpen(true);
 
+    // A chroma-keyed overlay only ever previewed locally -- this is where
+    // its real fal.ai job (if any is still outstanding) finally gets fired,
+    // since neither Creatomate nor this local exporter has any native
+    // chroma-key primitive to render with instead (see this function's own
+    // doc comment). Must happen BEFORE freshAssets/gatherLocalSequenceClips
+    // below so a newly-created matte asset is actually in that list.
+    const renderSelections = await resolveChromaKeyOverlayMattesForRender();
+
     // Re-fetches the asset list right before rendering rather than reusing
     // this component's own (possibly long-since-fetched) `assets`/
     // `assetUrlById` -- presigned URLs expire (r2_signed_url_expires_seconds,
@@ -2262,7 +2366,7 @@ export function ThreePaneEditor({
     const { width, height } = computeOutputDimensions(targetRatio);
 
     await startLocalRender({
-      selections,
+      selections: renderSelections,
       sequenceClips: gatheredSequenceClips,
       backgroundClips: gatheredBackgroundClips,
       assetUrlById: freshAssetUrlById,
@@ -2352,6 +2456,7 @@ export function ThreePaneEditor({
           onAddImageOverlay={handleAddImageOverlay}
           onAddToSequence={handleAddToSequence}
           onAddVideoOverlay={handleAddVideoOverlay}
+          onOpenVideoOverlayPickerForAsset={handleOpenVideoOverlayPickerForAsset}
           onAddToBackgroundSequence={handleAddToBackgroundSequence}
           onOpenCutawayDialogForAsset={handleOpenCutawayDialogForAsset}
           usedAssetIds={usedAssetIds}
@@ -2429,8 +2534,12 @@ export function ThreePaneEditor({
           onCloseCutawayDialog={handleCloseCutawayDialog}
           onDeleteCutaway={handleDeleteCutaway}
           isVideoOverlayPickerOpen={isVideoOverlayPickerOpen}
+          videoOverlayPickerPreselectedAssetId={videoOverlayPickerPreselectedAssetId}
           onOpenVideoOverlayPicker={() => setIsVideoOverlayPickerOpen(true)}
-          onCloseVideoOverlayPicker={() => setIsVideoOverlayPickerOpen(false)}
+          onCloseVideoOverlayPicker={() => {
+            setIsVideoOverlayPickerOpen(false);
+            setVideoOverlayPickerPreselectedAssetId(null);
+          }}
           onDeleteVideoOverlay={handleDeleteVideoOverlay}
           isImageOverlayPickerOpen={isImageOverlayPickerOpen}
           onOpenImageOverlayPicker={() => setIsImageOverlayPickerOpen(true)}

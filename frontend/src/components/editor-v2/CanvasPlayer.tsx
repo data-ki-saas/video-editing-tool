@@ -70,6 +70,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { extractPreviewFrames, getVideoDuration, drawImageFlipped, drawImageFlippedMasked } from "@/lib/video/video";
 import { segmentClipFramesApproximate, lumaFramesToAlphaMasks, segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
+import { chromaKeyFramesToAlphaMasks, DEFAULT_CHROMA_KEY_COLOR } from "@/lib/video/chromaKey";
 import { drawBrandWatermark } from "@/lib/video/brandWatermark";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
 import {
@@ -1776,7 +1777,10 @@ export const CanvasPlayer = forwardRef<
       const overlay = videoOverlays.find((o) => o.assetId === assetId && o.backgroundRemoval?.enabled);
       if (!overlay) return "";
       const matteAssetId = overlay.backgroundRemoval?.matteAssetId ?? "";
-      return `${assetId}:${matteAssetId}:${assetUrlById[matteAssetId] ?? ""}`;
+      // mode/chromaKeyColor included even though neither is ever changed
+      // after add-time today (VideoOverlayClip.backgroundRemoval's own doc
+      // comment) -- cheap correctness if that ever stops being true.
+      return `${assetId}:${overlay.backgroundRemoval?.mode ?? "ai"}:${overlay.backgroundRemoval?.chromaKeyColor ?? ""}:${matteAssetId}:${assetUrlById[matteAssetId] ?? ""}`;
     })
     .join(",");
   useEffect(() => {
@@ -1801,16 +1805,28 @@ export const CanvasPlayer = forwardRef<
           // same frames) -- a short bounded wait rather than giving up and
           // leaving this overlay undrawn until some unrelated key change
           // happens to re-run this effect.
+          const isChromaKey = overlay.backgroundRemoval?.mode === "chromaKey";
           let frames = videoOverlayFramesByAssetIdRef.current[assetId];
-          for (let attempt = 0; !frames && !matteUrl && attempt < 25 && !cancelled; attempt++) {
+          // Chroma key never waits on matteUrl (it never gets requested
+          // until render, see ThreePaneEditor's resolveChromaKeyOverlayMattesForRender)
+          // -- only wait here for the frames it keys against locally.
+          for (let attempt = 0; !frames && (isChromaKey || !matteUrl) && attempt < 25 && !cancelled; attempt++) {
             await new Promise((resolve) => setTimeout(resolve, 200));
             frames = videoOverlayFramesByAssetIdRef.current[assetId];
           }
-          const mattes = matteUrl
-            ? await lumaFramesToAlphaMasks(await extractPreviewFrames(matteUrl, frames?.frameRate ?? pickPreviewFrameRate(frames?.durationSeconds ?? 0, navigator.hardwareConcurrency || 4)))
-            : frames
-              ? await segmentClipFramesApproximate(frames.images)
-              : null;
+          // Chroma key ALWAYS keys locally for preview, even once a real
+          // matte exists from a previous render -- see lib/video/chromaKey.ts's
+          // own module comment on why this stays preview-only rather than
+          // ever swapping to the AI matte the way "ai" mode does.
+          const mattes = isChromaKey
+            ? frames
+              ? await chromaKeyFramesToAlphaMasks(frames.images, overlay.backgroundRemoval?.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR)
+              : null
+            : matteUrl
+              ? await lumaFramesToAlphaMasks(await extractPreviewFrames(matteUrl, frames?.frameRate ?? pickPreviewFrameRate(frames?.durationSeconds ?? 0, navigator.hardwareConcurrency || 4)))
+              : frames
+                ? await segmentClipFramesApproximate(frames.images)
+                : null;
           if (cancelled || !mattes) continue;
           videoOverlayMattesByAssetIdRef.current[assetId] = mattes;
           if (isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);

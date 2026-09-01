@@ -35,6 +35,18 @@ _IMAGE_CUTOUT_URL = "https://fal.run/fal-ai/imageutils/rembg"
 _WEBHOOK_QUERY_PARAM = "fal_webhook"
 
 
+def _raise_for_status(response: httpx.Response) -> None:
+    # httpx.HTTPStatusError's own message is just "403 Forbidden for url
+    # ..." -- it never includes the response body, which is exactly where
+    # fal puts the actually-useful reason (e.g. "User is locked. Reason:
+    # Exhausted balance." for a billing issue vs. a bad/revoked key). Logged
+    # here, once, so a failure is diagnosable from the server logs alone
+    # instead of needing to reproduce the request by hand.
+    if response.is_error:
+        logger.error("fal.ai request to %s failed: %s %s -- %s", response.url, response.status_code, response.reason_phrase, response.text[:2000])
+    response.raise_for_status()
+
+
 class FalVeedProvider(MattingProvider):
     def __init__(self, *, api_key: str, webhook_secret: str):
         self._api_key = api_key
@@ -71,7 +83,7 @@ class FalVeedProvider(MattingProvider):
                     "webhookUrl": callback_url,
                 },
             )
-        response.raise_for_status()
+        _raise_for_status(response)
         job_id = response.json().get("request_id")
         if not isinstance(job_id, str) or not job_id:
             raise ValueError(f"fal queue response had no request_id: {response.json()!r}")
@@ -85,7 +97,7 @@ class FalVeedProvider(MattingProvider):
                 headers={"Authorization": f"Key {self._api_key}", "Content-Type": "application/json"},
                 json={"image_url": image_url},
             )
-        response.raise_for_status()
+        _raise_for_status(response)
         # https://fal.ai/models/fal-ai/imageutils/rembg/api's own documented
         # response shape: {"image": {"url": ..., "content_type": "image/png", ...}}
         # -- a real PNG with genuine alpha transparency, not a separate mask.

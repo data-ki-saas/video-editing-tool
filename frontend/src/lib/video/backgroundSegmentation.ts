@@ -74,7 +74,10 @@ function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-async function alphaMaskFromValues(values: Float32Array | Uint8Array, width: number, height: number, scale: number): Promise<ImageBitmap> {
+// Exported for lib/video/chromaKey.ts -- same "an array of 0..1-scaled
+// values IN, an alpha-carrying ImageBitmap OUT" contract, just fed by a
+// color-distance computation instead of a segmentation model.
+export async function alphaMaskFromValues(values: Float32Array | Uint8Array, width: number, height: number, scale: number): Promise<ImageBitmap> {
   const imageData = new ImageData(width, height);
   for (let i = 0; i < values.length; i++) {
     const alpha = Math.round(clamp01(values[i] * scale) * 255);
