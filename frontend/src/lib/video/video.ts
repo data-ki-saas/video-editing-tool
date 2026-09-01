@@ -15,6 +15,7 @@
  * pixels back out via canvas is not).
  */
 import { generateSampleTimestamps } from "./video_math";
+import { applyChromaKeyAlpha } from "./chromaKey";
 
 const THUMBNAIL_WIDTH_PX = 160;
 const PREVIEW_FRAME_WIDTH_PX = 480;
@@ -174,6 +175,61 @@ export function drawImageFlippedMasked(
   maskCtx.restore();
 
   maskCtx.globalCompositeOperation = "source-over";
+  ctx.drawImage(maskCanvas, 0, 0);
+}
+
+/** The chroma-key counterpart to drawImageFlippedMasked above -- for a video
+ * overlay in "chromaKey" mode, exportTimeline.ts's actual Edge Render
+ * output, not just CanvasPlayer's preview (see chromaKey.ts's own module
+ * comment on why chroma key never depends on a real fal.ai matte at all).
+ * Unlike the two-source "destination-in" trick above, there's only ONE
+ * draw here: `source`'s own pixels, once drawn, already carry everything
+ * needed to key it out (its own colors), so lib/video/chromaKey.ts's
+ * applyChromaKeyAlpha mutates that same drawn region's alpha in place
+ * instead of compositing a second source. `keyColor` is pre-parsed by the
+ * caller (chromaKey.ts's hexToRgb) rather than a hex string, so a per-frame
+ * export loop doesn't reparse it every call. */
+export function drawImageFlippedChromaKeyed(
+  ctx: CanvasRenderingContext2D,
+  maskCanvas: HTMLCanvasElement,
+  source: CanvasImageSource,
+  keyColor: { r: number; g: number; b: number },
+  sx: number,
+  sy: number,
+  sWidth: number,
+  sHeight: number,
+  destX: number,
+  destY: number,
+  destWidth: number,
+  destHeight: number,
+  flipHorizontal: boolean,
+  flipVertical: boolean
+) {
+  const maskCtx = maskCanvas.getContext("2d", { willReadFrequently: true });
+  if (!maskCtx) return;
+  maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+
+  maskCtx.save();
+  maskCtx.translate(flipHorizontal ? destX + destWidth : destX, flipVertical ? destY + destHeight : destY);
+  maskCtx.scale(flipHorizontal ? -1 : 1, flipVertical ? -1 : 1);
+  maskCtx.drawImage(source, sx, sy, sWidth, sHeight, 0, 0, destWidth, destHeight);
+  maskCtx.restore();
+
+  // Clamped to maskCanvas's own bounds -- destX/destY/destWidth/destHeight
+  // are trusted caller-computed rects, but a getImageData call with an
+  // out-of-bounds region throws rather than clamping itself.
+  const left = Math.max(0, Math.floor(destX));
+  const top = Math.max(0, Math.floor(destY));
+  const right = Math.min(maskCanvas.width, Math.ceil(destX + destWidth));
+  const bottom = Math.min(maskCanvas.height, Math.ceil(destY + destHeight));
+  const regionWidth = right - left;
+  const regionHeight = bottom - top;
+  if (regionWidth > 0 && regionHeight > 0) {
+    const imageData = maskCtx.getImageData(left, top, regionWidth, regionHeight);
+    applyChromaKeyAlpha(imageData, keyColor);
+    maskCtx.putImageData(imageData, left, top);
+  }
+
   ctx.drawImage(maskCanvas, 0, 0);
 }
 

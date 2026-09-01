@@ -312,7 +312,7 @@ function VideoOverlaySegment({
           {getFilterPresetOption(overlay.colorFilterId).name}
         </span>
       )}
-      {overlay.backgroundRemoval?.enabled && !overlay.backgroundRemoval.matteAssetId && (
+      {overlay.backgroundRemoval?.enabled && overlay.backgroundRemoval.mode !== "chromaKey" && !overlay.backgroundRemoval.matteAssetId && (
         // The AI matting job (VEED, requested at add-time -- see
         // ThreePaneEditor's requestAndPollVideoOverlayBackgroundRemoval)
         // hasn't come back yet -- this is the ONLY always-visible cue that
@@ -321,6 +321,10 @@ function VideoOverlaySegment({
         // rail badge is what actually says "not final yet" independent of
         // how good that approximation looks). Same MattingProgressBadge as
         // CutawayTrack's own equivalent, so both rails read the same way.
+        // "ai" mode only -- chroma key's matteAssetId is permanently null
+        // (see chromaKey.ts's own module comment), so without this guard
+        // the badge would show forever on an overlay that's already fully,
+        // correctly keyed.
         <MattingProgressBadge progress={overlay.backgroundRemoval.progress ?? 0} />
       )}
       <VolumeBadge

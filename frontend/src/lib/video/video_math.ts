@@ -648,19 +648,20 @@ export const MIN_VIDEO_OVERLAY_DURATION_SECONDS = 0.2;
  * status the provider actually reports) -- never persisted, only ever
  * spliced in for display by ThreePaneEditor while a job is in flight, same
  * reason it's optional here as `matteAssetId` (absent once the job resolves
- * one way or the other).
+ * one way or the other). Neither field is ever meaningful for "chromaKey"
+ * mode -- see that mode's own doc below.
  *
  * `mode` distinguishes two removal STRATEGIES, currently only meaningful for
  * a VideoOverlayClip (SequenceEntry's video/image kinds only ever use "ai"):
  * absent/"ai" is the original fal.ai/VEED (or rembg, for a photo) AI matting
- * job, requested right away; "chromaKey" is a solid-color (green/blue
- * screen) cutout, previewed instantly client-side (lib/video/chromaKey.ts's
- * chromaKeyFramesToAlphaMasks) with NO job requested at add-time -- the real
- * fal.ai job (which `matteAssetId` still ultimately refers to) is only
- * requested when the creator actually renders, since a plain color-distance
- * key is preview-quality only and neither Creatomate nor the local exporter
- * has any native chroma-key primitive to fall back to (see
- * ThreePaneEditor.tsx's resolveChromaKeyOverlayMattesForRender). */
+ * job -- requested right away, `matteAssetId`/`progress` populated once it
+ * resolves. "chromaKey" is a solid-color (green/blue screen) cutout, keyed
+ * out entirely client-side (lib/video/chromaKey.ts) -- for BOTH live preview
+ * (chromaKeyFramesToAlphaMasks, against pre-extracted preview frames) AND
+ * Edge Render's actual output (applyChromaKeyAlpha, against real seeked
+ * export frames in lib/localRender/exportTimeline.ts) -- by design, never
+ * requests a fal.ai job at all, at add-time OR render-time, so
+ * `matteAssetId`/`progress` stay permanently absent/null for this mode. */
 export type BackgroundRemovalMode = "ai" | "chromaKey";
 export type BackgroundRemovalState = {
   enabled: boolean;

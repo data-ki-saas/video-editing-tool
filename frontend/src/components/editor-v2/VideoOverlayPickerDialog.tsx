@@ -68,9 +68,10 @@ export function VideoOverlayPickerDialog({
   const videoAssets = assets.filter((asset) => asset.kind === "video");
   // Applies to whichever tile ends up confirmed via "Add overlay" below --
   // a single choice for the whole picker, not per-tile, same as before.
-  // "Chroma key" is an instant, local, solid-color-screen cutout (preview
-  // only -- see lib/video/chromaKey.ts); "AI removal" is the original
-  // fal.ai/VEED job, requested right away, for any other backdrop.
+  // "Chroma key" is an instant, local, solid-color-screen cutout -- never
+  // calls fal.ai, for preview OR the final Edge Render output (see
+  // lib/video/chromaKey.ts); "AI removal" is the original fal.ai/VEED job,
+  // requested right away, for any other backdrop.
   const [removalMode, setRemovalMode] = useState<RemovalMode>("none");
   const [chromaKeyColor, setChromaKeyColor] = useState(DEFAULT_CHROMA_KEY_COLOR);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(preselectedAssetId ?? null);
@@ -132,19 +133,20 @@ export function VideoOverlayPickerDialog({
         <div className="mt-3 flex flex-col gap-2">
           {/* Background removal -- applied to whichever tile is confirmed via
               "Add overlay". Two distinct strategies, not one checkbox:
-              "Chroma key" is instant and local but only works against a real
-              solid-color screen (see lib/video/chromaKey.ts's own module
-              comment on why it's preview-only); "AI removal" is the original
-              fal.ai/VEED job -- same one-shot toggle as CutawayDialog's own
-              "Remove background" checkbox, works against any backdrop but
-              costs real time/money right away. */}
+              "Chroma key" is instant, free, and entirely local -- for both
+              preview and the actual Edge Render output -- but only works
+              against a real solid-color screen (see lib/video/chromaKey.ts's
+              own module comment); "AI removal" is the original fal.ai/VEED
+              job -- same one-shot toggle as CutawayDialog's own "Remove
+              background" checkbox, works against any backdrop but costs
+              real time/money right away. */}
           <div className="flex items-center gap-3 text-xs text-muted">
             <span className="font-medium text-foreground">Background:</span>
             <label className="flex items-center gap-1">
               <input type="radio" name="video-overlay-removal-mode" checked={removalMode === "none"} onChange={() => setRemovalMode("none")} />
               None
             </label>
-            <label className="flex items-center gap-1" title="Instant, free preview -- for a real solid-color green/blue screen. Uses fal.ai for the final render.">
+            <label className="flex items-center gap-1" title="Instant and free, entirely on your device -- for a real solid-color green/blue screen.">
               <input
                 type="radio"
                 name="video-overlay-removal-mode"

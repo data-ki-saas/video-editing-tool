@@ -6,13 +6,17 @@
  * alphaMaskFromValues) so CanvasPlayer's compositing code doesn't need to
  * know which algorithm produced a given frame's mask.
  *
- * PREVIEW ONLY. A plain color-distance threshold has none of a real AI
- * matting model's edge/spill handling, so this is never used for the actual
- * rendered/exported video -- the final render always goes through fal.ai
- * instead (see ThreePaneEditor.tsx's resolveChromaKeyOverlayMattesForRender),
- * exactly mirroring how CanvasPlayer's own MediaPipe approximation for "ai"
- * mode is preview-only there too (exportTimeline.ts's own module comment:
- * "final render only trusts a real matte").
+ * Used for BOTH live preview (chromaKeyFramesToAlphaMasks below, against
+ * CanvasPlayer's pre-extracted preview frames) AND the actual Edge Render
+ * output (applyChromaKeyAlpha below, against exportTimeline.ts's real seeked
+ * frames via lib/video/video.ts's drawImageFlippedChromaKeyed) -- unlike
+ * "ai" mode's real fal.ai/VEED matting job, chroma key never talks to any
+ * backend at all, by design: Edge Render is the free/local render path and
+ * must not depend on a paid third-party API to produce its output. A plain
+ * color-distance threshold has none of a real AI matting model's edge/spill
+ * handling, so this is deliberately lower quality than "ai" mode -- that's
+ * the tradeoff for a real green/blue screen never needing a network round
+ * trip either to preview or to render.
  */
 import { alphaMaskFromValues } from "./backgroundSegmentation";
 
@@ -31,7 +35,7 @@ export const CHROMA_KEY_PRESETS: ChromaKeyPreset[] = [
 ];
 export const DEFAULT_CHROMA_KEY_COLOR = CHROMA_KEY_PRESETS[0].hex;
 
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
+export function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const normalized = hex.replace("#", "");
   const expanded =
     normalized.length === 3
@@ -60,8 +64,25 @@ function smoothstep(low: number, high: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/** Mutates `imageData`'s own alpha channel in place from its RGB distance to
+ * `key` -- the single-frame core this file's two consumers both key off of:
+ * chromaKeyFramesToAlphaMasks below (preview, building a standalone mask
+ * bitmap per pre-extracted frame) and video.ts's drawImageFlippedChromaKeyed
+ * (Edge Render, mutating the exact pixels already drawn for a real seeked
+ * output frame, no separate mask bitmap needed there). RGB is left
+ * untouched -- harmless, since every caller only ever composites this
+ * through a "destination-in"-style operation that reads alpha alone. */
+export function applyChromaKeyAlpha(imageData: ImageData, key: { r: number; g: number; b: number }): void {
+  const { data } = imageData;
+  for (let i = 0; i < data.length; i += 4) {
+    const distance =
+      Math.sqrt((data[i] - key.r) ** 2 + (data[i + 1] - key.g) ** 2 + (data[i + 2] - key.b) ** 2) / MAX_RGB_DISTANCE;
+    data[i + 3] = Math.round(data[i + 3] * smoothstep(KEY_DISTANCE_LOW, KEY_DISTANCE_HIGH, distance));
+  }
+}
+
 export async function chromaKeyFramesToAlphaMasks(frames: ImageBitmap[], keyColorHex: string): Promise<ImageBitmap[]> {
-  const { r: kr, g: kg, b: kb } = hexToRgb(keyColorHex);
+  const key = hexToRgb(keyColorHex);
   const canvas = new OffscreenCanvas(1, 1);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) {
@@ -78,15 +99,9 @@ export async function chromaKeyFramesToAlphaMasks(frames: ImageBitmap[], keyColo
     canvas.width = frame.width;
     canvas.height = frame.height;
     ctx.drawImage(frame, 0, 0);
-    const { data } = ctx.getImageData(0, 0, frame.width, frame.height);
-    const alpha = new Float32Array(frame.width * frame.height);
-    for (let i = 0; i < alpha.length; i++) {
-      const offset = i * 4;
-      const distance =
-        Math.sqrt((data[offset] - kr) ** 2 + (data[offset + 1] - kg) ** 2 + (data[offset + 2] - kb) ** 2) / MAX_RGB_DISTANCE;
-      alpha[i] = smoothstep(KEY_DISTANCE_LOW, KEY_DISTANCE_HIGH, distance);
-    }
-    masks.push(await alphaMaskFromValues(alpha, frame.width, frame.height, 1));
+    const imageData = ctx.getImageData(0, 0, frame.width, frame.height);
+    applyChromaKeyAlpha(imageData, key);
+    masks.push(await createImageBitmap(imageData));
   }
   return masks;
 }

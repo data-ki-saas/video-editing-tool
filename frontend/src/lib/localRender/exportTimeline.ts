@@ -44,7 +44,8 @@ import {
   type VideoCodec,
   type AudioCodec,
 } from "mediabunny";
-import { loadVideoElement, seekVideoTo, drawImageFlipped, drawImageFlippedMasked } from "@/lib/video/video";
+import { loadVideoElement, seekVideoTo, drawImageFlipped, drawImageFlippedMasked, drawImageFlippedChromaKeyed } from "@/lib/video/video";
+import { DEFAULT_CHROMA_KEY_COLOR, hexToRgb } from "@/lib/video/chromaKey";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
 import {
   buildRenderSegments,
@@ -694,6 +695,11 @@ export async function exportVideoLocally(
       (entry.kind === "video" ? matteVideoAssetIds : matteImageAssetIds).add(matteAssetId);
     }
     for (const overlay of selections.videoOverlays) {
+      // "chromaKey" mode never uses a matte, even if one happens to be
+      // stashed on a project saved before this file's own chroma-key
+      // support existed -- see the loop's own draw branch below, which
+      // routes "chromaKey" to drawImageFlippedChromaKeyed unconditionally.
+      if (overlay.backgroundRemoval?.mode === "chromaKey") continue;
       const matteAssetId = overlay.backgroundRemoval?.enabled ? overlay.backgroundRemoval.matteAssetId : null;
       if (matteAssetId) matteVideoAssetIds.add(matteAssetId);
     }
@@ -1080,29 +1086,41 @@ export async function exportVideoLocally(
             activeExclusiveVideoOverlay.framing.panX, activeExclusiveVideoOverlay.framing.panY, activeExclusiveVideoOverlay.framing.zoom
           );
           ctx.filter = cssFilterFor(activeExclusiveVideoOverlay.colorFilterId);
-          // AI background removal -- a real, already-loaded matte only (see
-          // matteVideoElementsByAssetId's own comment); a still-processing
-          // job just draws this overlay unmasked, same graceful degrade as
-          // the base clip's own branch above.
-          const overlayMatteAssetId = activeExclusiveVideoOverlay.backgroundRemoval?.enabled
-            ? activeExclusiveVideoOverlay.backgroundRemoval.matteAssetId
+          const overlayBackgroundRemoval = activeExclusiveVideoOverlay.backgroundRemoval?.enabled
+            ? activeExclusiveVideoOverlay.backgroundRemoval
             : null;
-          const overlayMatte = overlayMatteAssetId ? matteVideoElementsByAssetId.get(overlayMatteAssetId) : undefined;
-          if (overlayMatte && maskCtx) {
-            await seekVideoTo(overlayMatte, loopedOffsetSeconds);
-            drawImageFlippedMasked(
-              ctx, maskCanvas, overlayVideo, overlayMatte,
-              osx, osy, osw, osh,
-              (osx / overlayVideo.videoWidth) * overlayMatte.videoWidth, (osy / overlayVideo.videoHeight) * overlayMatte.videoHeight,
-              (osw / overlayVideo.videoWidth) * overlayMatte.videoWidth, (osh / overlayVideo.videoHeight) * overlayMatte.videoHeight,
-              destX, destY, destWidth, destHeight,
+          if (overlayBackgroundRemoval?.mode === "chromaKey") {
+            // Chroma key never depends on fal.ai, not even at render time --
+            // see chromaKey.ts's own module comment. Keyed live, right here,
+            // from this exact seeked frame.
+            drawImageFlippedChromaKeyed(
+              ctx, maskCanvas, overlayVideo, hexToRgb(overlayBackgroundRemoval.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR),
+              osx, osy, osw, osh, destX, destY, destWidth, destHeight,
               activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
             );
           } else {
-            drawImageFlipped(
-              ctx, overlayVideo, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
-              activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
-            );
+            // AI background removal -- a real, already-loaded matte only (see
+            // matteVideoElementsByAssetId's own comment); a still-processing
+            // job just draws this overlay unmasked, same graceful degrade as
+            // the base clip's own branch above.
+            const overlayMatteAssetId = overlayBackgroundRemoval?.matteAssetId ?? null;
+            const overlayMatte = overlayMatteAssetId ? matteVideoElementsByAssetId.get(overlayMatteAssetId) : undefined;
+            if (overlayMatte && maskCtx) {
+              await seekVideoTo(overlayMatte, loopedOffsetSeconds);
+              drawImageFlippedMasked(
+                ctx, maskCanvas, overlayVideo, overlayMatte,
+                osx, osy, osw, osh,
+                (osx / overlayVideo.videoWidth) * overlayMatte.videoWidth, (osy / overlayVideo.videoHeight) * overlayMatte.videoHeight,
+                (osw / overlayVideo.videoWidth) * overlayMatte.videoWidth, (osh / overlayVideo.videoHeight) * overlayMatte.videoHeight,
+                destX, destY, destWidth, destHeight,
+                activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
+              );
+            } else {
+              drawImageFlipped(
+                ctx, overlayVideo, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+                activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
+              );
+            }
           }
           ctx.filter = "none";
         }
@@ -1126,20 +1144,29 @@ export async function exportVideoLocally(
           overlayVideo.videoWidth, overlayVideo.videoHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom, MIN_PICTURE_IN_PICTURE_ZOOM
         );
         ctx.filter = cssFilterFor(pip.colorFilterId);
-        const pipMatteAssetId = pip.backgroundRemoval?.enabled ? pip.backgroundRemoval.matteAssetId : null;
-        const pipMatte = pipMatteAssetId ? matteVideoElementsByAssetId.get(pipMatteAssetId) : undefined;
-        if (pipMatte && maskCtx) {
-          await seekVideoTo(pipMatte, loopedOffsetSeconds);
-          drawImageFlippedMasked(
-            ctx, maskCanvas, overlayVideo, pipMatte,
-            psx, psy, psw, psh,
-            (psx / overlayVideo.videoWidth) * pipMatte.videoWidth, (psy / overlayVideo.videoHeight) * pipMatte.videoHeight,
-            (psw / overlayVideo.videoWidth) * pipMatte.videoWidth, (psh / overlayVideo.videoHeight) * pipMatte.videoHeight,
-            destX, destY, destWidth, destHeight,
+        const pipBackgroundRemoval = pip.backgroundRemoval?.enabled ? pip.backgroundRemoval : null;
+        if (pipBackgroundRemoval?.mode === "chromaKey") {
+          drawImageFlippedChromaKeyed(
+            ctx, maskCanvas, overlayVideo, hexToRgb(pipBackgroundRemoval.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR),
+            psx, psy, psw, psh, destX, destY, destWidth, destHeight,
             pip.framing.flipHorizontal, pip.framing.flipVertical
           );
         } else {
-          drawImageFlipped(ctx, overlayVideo, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+          const pipMatteAssetId = pipBackgroundRemoval?.matteAssetId ?? null;
+          const pipMatte = pipMatteAssetId ? matteVideoElementsByAssetId.get(pipMatteAssetId) : undefined;
+          if (pipMatte && maskCtx) {
+            await seekVideoTo(pipMatte, loopedOffsetSeconds);
+            drawImageFlippedMasked(
+              ctx, maskCanvas, overlayVideo, pipMatte,
+              psx, psy, psw, psh,
+              (psx / overlayVideo.videoWidth) * pipMatte.videoWidth, (psy / overlayVideo.videoHeight) * pipMatte.videoHeight,
+              (psw / overlayVideo.videoWidth) * pipMatte.videoWidth, (psh / overlayVideo.videoHeight) * pipMatte.videoHeight,
+              destX, destY, destWidth, destHeight,
+              pip.framing.flipHorizontal, pip.framing.flipVertical
+            );
+          } else {
+            drawImageFlipped(ctx, overlayVideo, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+          }
         }
         ctx.filter = "none";
       }

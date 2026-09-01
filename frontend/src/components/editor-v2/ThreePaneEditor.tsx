@@ -1300,10 +1300,11 @@ export function ThreePaneEditor({
     setIsVideoOverlayPickerOpen(false);
     setVideoOverlayPickerPreselectedAssetId(null);
 
-    // Chroma key fires NO fal.ai request here -- the live preview keys
-    // itself out locally (CanvasPlayer.tsx/lib/video/chromaKey.ts), and the
-    // real job only ever gets requested at render time (see
-    // resolveChromaKeyOverlayMattesForRender below).
+    // Chroma key never fires a fal.ai request, here or anywhere else -- it
+    // keys itself out locally, both in the live preview
+    // (CanvasPlayer.tsx/lib/video/chromaKey.ts) and in Edge Render's actual
+    // output (lib/localRender/exportTimeline.ts) -- see chromaKey.ts's own
+    // module comment.
     if (options?.removeBackground && !options?.chromaKeyColor) {
       const newOverlayIndex = state.videoOverlays.length - 1;
       if (state.videoOverlays[newOverlayIndex]?.assetId === asset.id) {
@@ -1323,14 +1324,12 @@ export function ThreePaneEditor({
     setIsVideoOverlayPickerOpen(true);
   }
 
-  // Core request/poll/refresh cycle shared by both the add-time AI flow
-  // (requestAndPollVideoOverlayBackgroundRemoval below) and the render-time
-  // chroma-key gating flow (resolveChromaKeyOverlayMattesForRender) --
-  // deliberately does NOT touch `selections`/pushChange itself, since the
-  // two callers need to merge the result in differently (one against the
-  // live closure's `selections` right away, the other against a locally
-  // threaded snapshot covering possibly-several overlays resolved
-  // concurrently -- see that function's own comment on why).
+  // Request/poll/refresh cycle for a real fal.ai/VEED matting job -- "ai"
+  // mode only (requestAndPollVideoOverlayBackgroundRemoval below is its only
+  // caller; chroma key never requests a job at all, see
+  // handleAddVideoOverlay's own comment above). Deliberately does NOT touch
+  // `selections`/pushChange itself -- that's left to the caller, which
+  // merges the result in against its own live `selections` closure.
   async function requestAndPollMatte(
     sourceAssetId: string,
     assetLabel: string,
@@ -1389,58 +1388,6 @@ export function ThreePaneEditor({
       mode: "ai",
     });
     pushChange(label, state);
-  }
-
-  // Called right before a render actually starts (handleLocalRenderClick) --
-  // a chroma-keyed overlay never requested fal.ai at add-time (it previews
-  // locally instead, see handleAddVideoOverlay), so this is where that
-  // deferred job finally gets fired for every such overlay that hasn't
-  // resolved a real matte yet. Requests run concurrently (Promise.all,
-  // multiple fal.ai jobs cost/wait the same either way); merging their
-  // results is done sequentially afterward against a single locally-threaded
-  // `working` snapshot (NOT via requestAndPollVideoOverlayBackgroundRemoval's
-  // own selections-closure pushChange) because this can resolve several
-  // overlays in the same render click -- applying each against the
-  // component's live `selections` independently, whenever its own promise
-  // settles, would let a later completion's pushChange clobber an earlier
-  // one's (both built from the same pre-render `selections` snapshot).
-  // Returns the resolved snapshot directly (rather than relying on the
-  // pushChange below having flushed through a re-render yet) so the caller
-  // can pass it straight to startLocalRender without a stale read.
-  async function resolveChromaKeyOverlayMattesForRender(): Promise<EditSelectionsSnapshot> {
-    const pending = selections.videoOverlays
-      .map((overlay, index) => ({ overlay, index }))
-      .filter(({ overlay }) => overlay.backgroundRemoval?.enabled && overlay.backgroundRemoval.mode === "chromaKey" && !overlay.backgroundRemoval.matteAssetId);
-    if (pending.length === 0) return selections;
-
-    const resolved = await Promise.all(
-      pending.map(async ({ overlay, index }) => {
-        const assetName = assets.find((asset) => asset.id === overlay.assetId)?.filename ?? "this video overlay";
-        const result = await requestAndPollMatte(overlay.assetId, assetName, (fraction) =>
-          setVideoOverlayMattingProgress((prev) => ({ ...prev, [index]: fraction }))
-        );
-        setVideoOverlayMattingProgress((prev) => {
-          if (!(index in prev)) return prev;
-          const next = { ...prev };
-          delete next[index];
-          return next;
-        });
-        return { index, chromaKeyColor: overlay.backgroundRemoval?.chromaKeyColor, result };
-      })
-    );
-
-    let working = selections;
-    for (const { index, chromaKeyColor, result } of resolved) {
-      if (result.status !== "completed") continue;
-      working = applySetVideoOverlayBackgroundRemoval(working, index, {
-        enabled: true,
-        matteAssetId: result.matteAssetId,
-        mode: "chromaKey",
-        chromaKeyColor,
-      }).state;
-    }
-    if (working !== selections) pushChange("Prepared background removal for render", working);
-    return working;
   }
 
   // TtsAvatarDialog's own "Generate & add" -- the dialog already generated
@@ -2350,15 +2297,12 @@ export function ThreePaneEditor({
   async function handleLocalRenderClick() {
     if (effectiveSequenceEntries.length === 0 || isLocalRendering) return;
 
-    setIsLocalRenderPopupOpen(true);
+    // A live preview competes with the export for the same decode/audio
+    // resources (and would otherwise keep playing, unseen, behind the
+    // render popup) -- stop it before anything else starts.
+    canvasPlayerRef.current?.pause();
 
-    // A chroma-keyed overlay only ever previewed locally -- this is where
-    // its real fal.ai job (if any is still outstanding) finally gets fired,
-    // since neither Creatomate nor this local exporter has any native
-    // chroma-key primitive to render with instead (see this function's own
-    // doc comment). Must happen BEFORE freshAssets/gatherLocalSequenceClips
-    // below so a newly-created matte asset is actually in that list.
-    const renderSelections = await resolveChromaKeyOverlayMattesForRender();
+    setIsLocalRenderPopupOpen(true);
 
     // Re-fetches the asset list right before rendering rather than reusing
     // this component's own (possibly long-since-fetched) `assets`/
@@ -2403,7 +2347,7 @@ export function ThreePaneEditor({
     const { width, height } = computeOutputDimensions(targetRatio);
 
     await startLocalRender({
-      selections: renderSelections,
+      selections,
       sequenceClips: gatheredSequenceClips,
       backgroundClips: gatheredBackgroundClips,
       assetUrlById: freshAssetUrlById,

@@ -138,6 +138,12 @@ export interface CanvasPlayerHandle {
   // here. Resolves null if nothing has been drawn yet (isReady false) or
   // the browser's toBlob fails.
   captureFrame(): Promise<Blob | null>;
+  // Stops live playback if it's currently running (no-op otherwise) --
+  // ThreePaneEditor.tsx's handleLocalRenderClick calls this right before
+  // Edge Render starts, since a still-running preview competes with the
+  // export for the same decode/audio resources and would otherwise keep
+  // playing behind the render popup.
+  pause(): void;
 }
 
 /** Loads `src` via fetch()+blob URL rather than a plain `<img>` (or one with
@@ -177,16 +183,21 @@ const BACKGROUND_REMOVAL_SPINNER_RADIANS_PER_SECOND = 6;
  * video overlay's `backgroundRemoval` is enabled but its real matte
  * (`matteAssetId`) hasn't come back from the backend's AI matting job yet
  * (see video_math.ts's VideoOverlayClip.backgroundRemoval doc comment).
- * Drawn regardless of whether an approximate MediaPipe fallback mask is
- * already showing underneath (see CanvasPlayer's own videoOverlayMattesByAssetIdRef
- * loading effect) -- that fallback is a reasonable preview, but this badge
- * is the definitive "the real cutout isn't final yet" signal, tied only to
- * matteAssetId, not to whether a preview-quality mask happens to exist.
- * `elapsedSeconds` drives the spin so it animates during playback; a paused
- * frame just redraws at whatever angle that instant implies, same as every
- * other elapsedSeconds-driven visual in this file. Never called from
- * exportTimeline.ts/compileCreatomateTimeline.ts -- this is a GUI-only
- * loading cue, not something that should ever bake into rendered output. */
+ * "ai" mode only -- callers must gate on `mode !== "chromaKey"` before ever
+ * drawing this: chroma key's `matteAssetId` is permanently null (it never
+ * requests a fal.ai job at all), so this badge would otherwise show
+ * indefinitely for a chroma-keyed overlay that's already fully, correctly
+ * keyed. Drawn regardless of whether an approximate MediaPipe fallback mask
+ * is already showing underneath (see CanvasPlayer's own
+ * videoOverlayMattesByAssetIdRef loading effect) -- that fallback is a
+ * reasonable preview, but this badge is the definitive "the real cutout
+ * isn't final yet" signal, tied only to matteAssetId, not to whether a
+ * preview-quality mask happens to exist. `elapsedSeconds` drives the spin so
+ * it animates during playback; a paused frame just redraws at whatever angle
+ * that instant implies, same as every other elapsedSeconds-driven visual in
+ * this file. Never called from exportTimeline.ts/compileCreatomateTimeline.ts
+ * -- this is a GUI-only loading cue, not something that should ever bake
+ * into rendered output. */
 function drawBackgroundRemovalSpinnerBadge(
   ctx: CanvasRenderingContext2D,
   destX: number,
@@ -971,7 +982,11 @@ export const CanvasPlayer = forwardRef<
           );
         }
         ctx.filter = "none";
-        if (activeExclusiveVideoOverlay.backgroundRemoval?.enabled && !activeExclusiveVideoOverlay.backgroundRemoval.matteAssetId) {
+        if (
+          activeExclusiveVideoOverlay.backgroundRemoval?.enabled &&
+          activeExclusiveVideoOverlay.backgroundRemoval.mode !== "chromaKey" &&
+          !activeExclusiveVideoOverlay.backgroundRemoval.matteAssetId
+        ) {
           drawBackgroundRemovalSpinnerBadge(ctx, destX, destY, destWidth, destHeight, elapsedSeconds);
         }
       }
@@ -1016,7 +1031,7 @@ export const CanvasPlayer = forwardRef<
         drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
       }
       ctx.filter = "none";
-      if (pip.backgroundRemoval?.enabled && !pip.backgroundRemoval.matteAssetId) {
+      if (pip.backgroundRemoval?.enabled && pip.backgroundRemoval.mode !== "chromaKey" && !pip.backgroundRemoval.matteAssetId) {
         drawBackgroundRemovalSpinnerBadge(ctx, destX, destY, destWidth, destHeight, elapsedSeconds);
       }
     }
@@ -1392,17 +1407,22 @@ export const CanvasPlayer = forwardRef<
     animationFrameIdRef.current = requestAnimationFrame(tick);
   }
 
+  function pausePlayback() {
+    if (!isPlaying) return;
+    const audioContext = audioContextRef.current;
+    if (audioContext) {
+      pausedAtSecondsRef.current += audioContext.currentTime - playStartedAtCtxTimeRef.current;
+    }
+    stopPlaybackLoop();
+    setIsPlaying(false);
+    onTimeUpdate?.(pausedAtSecondsRef.current);
+  }
+
   function handlePlayPause() {
     if (!isReady) return;
 
     if (isPlaying) {
-      const audioContext = audioContextRef.current;
-      if (audioContext) {
-        pausedAtSecondsRef.current += audioContext.currentTime - playStartedAtCtxTimeRef.current;
-      }
-      stopPlaybackLoop();
-      setIsPlaying(false);
-      onTimeUpdate?.(pausedAtSecondsRef.current);
+      pausePlayback();
       return;
     }
 
@@ -1436,6 +1456,7 @@ export const CanvasPlayer = forwardRef<
       const canvas = canvasRef.current;
       return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92));
     },
+    pause: pausePlayback,
   }));
 
   // Extracts every clip's preview frames + decodes every clip's audio,
@@ -1807,17 +1828,17 @@ export const CanvasPlayer = forwardRef<
           // happens to re-run this effect.
           const isChromaKey = overlay.backgroundRemoval?.mode === "chromaKey";
           let frames = videoOverlayFramesByAssetIdRef.current[assetId];
-          // Chroma key never waits on matteUrl (it never gets requested
-          // until render, see ThreePaneEditor's resolveChromaKeyOverlayMattesForRender)
-          // -- only wait here for the frames it keys against locally.
+          // Chroma key never waits on matteUrl -- it never requests a fal.ai
+          // job at all (see chromaKey.ts's own module comment) -- only wait
+          // here for the frames it keys against locally.
           for (let attempt = 0; !frames && (isChromaKey || !matteUrl) && attempt < 25 && !cancelled; attempt++) {
             await new Promise((resolve) => setTimeout(resolve, 200));
             frames = videoOverlayFramesByAssetIdRef.current[assetId];
           }
-          // Chroma key ALWAYS keys locally for preview, even once a real
-          // matte exists from a previous render -- see lib/video/chromaKey.ts's
-          // own module comment on why this stays preview-only rather than
-          // ever swapping to the AI matte the way "ai" mode does.
+          // Chroma key ALWAYS keys locally, for both preview and the actual
+          // Edge Render output -- see lib/video/chromaKey.ts's own module
+          // comment on why it never swaps to a real fal.ai matte the way
+          // "ai" mode does.
           const mattes = isChromaKey
             ? frames
               ? await chromaKeyFramesToAlphaMasks(frames.images, overlay.backgroundRemoval?.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR)

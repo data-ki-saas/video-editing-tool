@@ -1285,11 +1285,11 @@ export function applyAddVideoOverlay(
     // job right after this and patches it in later via
     // applySetVideoOverlayBackgroundRemoval once the async job completes,
     // same staging as applyAddSequenceClip's own removeBackground handling
-    // above. For chroma key, NO job is requested here at all -- the live
-    // preview keys itself out locally (CanvasPlayer.tsx,
-    // lib/video/chromaKey.ts) and matteAssetId only ever gets populated at
-    // render time (ThreePaneEditor's resolveChromaKeyOverlayMattesForRender),
-    // see video_math.ts's BackgroundRemovalState.mode doc comment.
+    // above. For chroma key, NO job is EVER requested, here or at render
+    // time -- matteAssetId stays permanently null, since both the live
+    // preview and Edge Render's actual output key this out entirely
+    // client-side (lib/video/chromaKey.ts) -- see video_math.ts's
+    // BackgroundRemovalState.mode doc comment.
     ...(chromaKeyColor
       ? { backgroundRemoval: { enabled: true, matteAssetId: null, mode: "chromaKey" as const, chromaKeyColor } }
       : removeBackground
