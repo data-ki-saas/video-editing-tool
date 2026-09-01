@@ -111,6 +111,7 @@ import {
   type TextOverlay,
   type TtsOverlay,
   type VideoOverlayClip,
+  type BackgroundRemovalState,
   type TrimRange,
   type ZoomEffect,
 } from "@/lib/video/video_math";
@@ -180,19 +181,13 @@ const BACKGROUND_REMOVAL_SPINNER_RADIANS_PER_SECOND = 6;
 
 /** A small spinning-arc badge in an overlay's top-right corner, drawn OVER
  * whatever's already been composited there -- the live-preview cue that a
- * video overlay's `backgroundRemoval` is enabled but its real matte
- * (`matteAssetId`) hasn't come back from the backend's AI matting job yet
- * (see video_math.ts's VideoOverlayClip.backgroundRemoval doc comment).
- * "ai" mode only -- callers must gate on `mode !== "chromaKey"` before ever
- * drawing this: chroma key's `matteAssetId` is permanently null (it never
- * requests a fal.ai job at all), so this badge would otherwise show
- * indefinitely for a chroma-keyed overlay that's already fully, correctly
- * keyed. Drawn regardless of whether an approximate MediaPipe fallback mask
- * is already showing underneath (see CanvasPlayer's own
- * videoOverlayMattesByAssetIdRef loading effect) -- that fallback is a
- * reasonable preview, but this badge is the definitive "the real cutout
- * isn't final yet" signal, tied only to matteAssetId, not to whether a
- * preview-quality mask happens to exist. `elapsedSeconds` drives the spin so
+ * video overlay's cutout isn't ready yet. See isVideoOverlayMattePending
+ * below for the two things this covers ("ai" mode's backend job, chroma
+ * key's local computation). Drawn regardless of whether an approximate
+ * MediaPipe fallback mask is already showing underneath in "ai" mode (see
+ * CanvasPlayer's own videoOverlayMattesByAssetIdRef loading effect) -- that
+ * fallback is a reasonable preview, but this badge is the definitive "the
+ * real cutout isn't final yet" signal. `elapsedSeconds` drives the spin so
  * it animates during playback; a paused frame just redraws at whatever angle
  * that instant implies, same as every other elapsedSeconds-driven visual in
  * this file. Never called from exportTimeline.ts/compileCreatomateTimeline.ts
@@ -225,6 +220,37 @@ function drawBackgroundRemovalSpinnerBadge(
   ctx.arc(centerX, centerY, radius * 0.55, angle, angle + Math.PI * 1.2);
   ctx.stroke();
   ctx.restore();
+}
+
+/** Whether a video overlay's cutout is still pending -- the two modes signal
+ * "not ready" completely differently, so this is the one place that knows
+ * how to ask either one. "ai" mode is pending until the backend's real
+ * `matteAssetId` arrives (see video_math.ts's BackgroundRemovalState doc
+ * comment) -- an approximate MediaPipe mask may already be drawn underneath,
+ * but that's a preview, not the signal this tracks. Chroma key never has a
+ * `matteAssetId` at all (it's computed locally, see chromaKey.ts's own
+ * module comment) -- pending there means its own `mattes` array (passed in
+ * by the caller, from videoOverlayMattesByAssetIdRef) hasn't landed yet. */
+function isVideoOverlayMattePending(backgroundRemoval: BackgroundRemovalState | null | undefined, mattes: ImageBitmap[] | undefined): boolean {
+  if (!backgroundRemoval?.enabled) return false;
+  if (backgroundRemoval.mode === "chromaKey") return !mattes || mattes.length === 0;
+  return !backgroundRemoval.matteAssetId;
+}
+
+/** The pip-loading placeholder for a resource that hasn't produced its first
+ * frame at all yet (source frames not extracted) -- distinct from the
+ * spinner badge above, which overlays already-visible (if not yet keyed)
+ * footage. Without this, a pip whose source is still being fetched/decoded
+ * is simply invisible (see the `!frames` branch in the pip draw loop below),
+ * which reads as broken rather than loading -- this fills the pip's own
+ * rect with a dark scrim so the spinner badge drawn on top of it has
+ * something to visually anchor to. */
+function drawPipLoadingPlaceholder(ctx: CanvasRenderingContext2D, destX: number, destY: number, destWidth: number, destHeight: number, elapsedSeconds: number) {
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+  ctx.fillRect(destX, destY, destWidth, destHeight);
+  ctx.restore();
+  drawBackgroundRemovalSpinnerBadge(ctx, destX, destY, destWidth, destHeight, elapsedSeconds);
 }
 
 export const CanvasPlayer = forwardRef<
@@ -982,11 +1008,7 @@ export const CanvasPlayer = forwardRef<
           );
         }
         ctx.filter = "none";
-        if (
-          activeExclusiveVideoOverlay.backgroundRemoval?.enabled &&
-          activeExclusiveVideoOverlay.backgroundRemoval.mode !== "chromaKey" &&
-          !activeExclusiveVideoOverlay.backgroundRemoval.matteAssetId
-        ) {
+        if (isVideoOverlayMattePending(activeExclusiveVideoOverlay.backgroundRemoval, overlayMattes)) {
           drawBackgroundRemovalSpinnerBadge(ctx, destX, destY, destWidth, destHeight, elapsedSeconds);
         }
       }
@@ -998,7 +1020,17 @@ export const CanvasPlayer = forwardRef<
     for (const pip of findActivePictureInPictureOverlays(videoOverlays, elapsedSeconds)) {
       if (pip.layout.type !== "picture-in-picture") continue; // narrows the type for pip.layout.rect below
       const frames = videoOverlayFramesByAssetIdRef.current[pip.assetId];
-      if (!frames) continue;
+      if (!frames) {
+        // Source frames haven't been extracted yet -- without this the pip
+        // is simply invisible (see drawPipLoadingPlaceholder's own comment).
+        drawPipLoadingPlaceholder(
+          ctx,
+          pip.layout.rect.x * canvas.width, pip.layout.rect.y * canvas.height,
+          pip.layout.rect.width * canvas.width, pip.layout.rect.height * canvas.height,
+          elapsedSeconds
+        );
+        continue;
+      }
       const localOffsetSeconds = pip.sourceStartSeconds + (elapsedSeconds - pip.startTimeSeconds);
       // See the exclusive-overlay branch above for why this prefers the
       // canonical (audio-derived, when available) duration over the video's
@@ -1031,7 +1063,7 @@ export const CanvasPlayer = forwardRef<
         drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
       }
       ctx.filter = "none";
-      if (pip.backgroundRemoval?.enabled && pip.backgroundRemoval.mode !== "chromaKey" && !pip.backgroundRemoval.matteAssetId) {
+      if (isVideoOverlayMattePending(pip.backgroundRemoval, pipMattes)) {
         drawBackgroundRemovalSpinnerBadge(ctx, destX, destY, destWidth, destHeight, elapsedSeconds);
       }
     }
