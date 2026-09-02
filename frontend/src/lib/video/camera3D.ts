@@ -12,52 +12,56 @@
  *
  * The "dolly" is never authored here directly -- it rides whichever
  * pan/zoom motion (a ZoomEffect, or an overlay's own start->end window) the
- * caller is already animating; this module only adds the tilt/roll/push
+ * caller is already animating; this module only adds the camera push/pan
  * that makes that existing motion read as a real camera move instead of a
  * flat crop-rect slide. One fixed "cinematic" amplitude, no exposed knobs,
  * per this app's driving vision (smart defaults over pro-NLE controls).
+ *
+ * The camera actually MOVES (translates toward/across a static, unrotated
+ * plane, always re-aimed at the plane's center via lookAt) rather than the
+ * plane rotating in front of a fixed camera -- same technique as
+ * `test/test.html`'s reference walkthrough. An earlier version rotated the
+ * plane on two axes while sweeping the FOV wide to sell the depth; that
+ * combination pushes the plane's trailing edge toward a grazing viewing
+ * angle, and grazing angles minify a texture far more in one direction than
+ * the other, which no mipmap level represents well -- it reads as a blurred
+ * edge (worst for overlays, whose fixed "roll-right" direction always
+ * foreshortens the RIGHT edge). Moving the camera with a constant, moderate
+ * FOV keeps the plane close to face-on throughout, so there's no grazing
+ * angle to blur.
  */
 import * as THREE from "three";
 import { drawImageFlipped } from "./video";
 import { easeInOut, type ZoomEffect } from "./video_math";
 
 export interface Camera3DPose {
-  xRotationDegrees: number; // tilt
-  zRotationDegrees: number; // roll
-  perspective: number; // smaller = stronger 3D depth (see fovForPerspective below)
-  extraScale: number; // subtle push-in multiplier, layered on the caller's own dest rect
+  panXFraction: number; // horizontal camera dolly-pan, as a fraction of the frame's rest half-width
+  panYFraction: number; // vertical camera dolly-pan, as a fraction of the frame's rest half-height
+  pushFraction: number; // 0..1, how far the camera has dollied in toward the plane (0 = resting, 1 = peak)
 }
 
 // Amplitude constants -- visibly "cinematic" without being disorienting:
-// verified against a real live preview that anything much subtler (an
-// earlier pass tried 6deg/4deg/1.08x) reads as barely-there at normal
-// viewing size, while these values clearly foreshorten/shift the frame
-// without the plane's edges pulling in far enough to reveal much of
-// whatever's behind it (see Camera3DRenderer's own comment on why that
-// reveal is still a graceful fallback, not a bug, when it does happen at
-// the extremes).
-const MAX_TILT_DEGREES = 16;
-const MAX_ROLL_DEGREES = 10;
-const MAX_PUSH_SCALE = 1.15;
-// perspective=1 is "resting" (weakest depth); perspective=0 is the peak
-// (strongest). Kept 0..1 rather than mirroring Creatomate's raw-distance
-// convention, since this module never talks to Creatomate -- see this
-// file's own module comment.
-const BASE_FOV_DEGREES = 25;
-const PEAK_FOV_DEGREES = 50;
+// verified against a real live preview that anything much subtler reads as
+// barely-there at normal viewing size, while these values clearly shift/
+// magnify the frame without the plane's edges pulling in far enough to
+// reveal much of whatever's behind it (see Camera3DRenderer's own comment
+// on why that reveal is still a graceful fallback, not a bug, when it does
+// happen at the extremes).
+const MAX_PAN_X_FRACTION = 0.22;
+const MAX_PAN_Y_FRACTION = 0.14;
+const MAX_PUSH_FRACTION = 0.45;
+// Constant throughout the move (mirrors test/test.html) -- a moderate,
+// fixed FOV rather than a wide sweep is what keeps the plane close to
+// face-on to the camera, avoiding the grazing-angle blur described above.
+const FOV_DEGREES = 45;
 const CAMERA_DISTANCE = 10;
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
 
 function poseAtProgress(t: number, tiltSign: number, rollSign: number): Camera3DPose {
   const eased = easeInOut(t);
   return {
-    xRotationDegrees: tiltSign * MAX_TILT_DEGREES * eased,
-    zRotationDegrees: rollSign * MAX_ROLL_DEGREES * eased,
-    perspective: 1 - eased,
-    extraScale: lerp(1, MAX_PUSH_SCALE, eased),
+    panXFraction: rollSign * MAX_PAN_X_FRACTION * eased,
+    panYFraction: -tiltSign * MAX_PAN_Y_FRACTION * eased,
+    pushFraction: MAX_PUSH_FRACTION * eased,
   };
 }
 
@@ -115,10 +119,6 @@ export function computeCamera3DPoseForOverlay(startTimeSeconds: number, endTimeS
   return poseAtProgress(Math.min(Math.max(t, 0), 1), 1, 1);
 }
 
-function fovForPerspective(perspective: number): number {
-  return lerp(BASE_FOV_DEGREES, PEAK_FOV_DEGREES, 1 - Math.min(Math.max(perspective, 0), 1));
-}
-
 /**
  * One reusable three.js render target: a WebGLRenderer on an offscreen
  * canvas, one PerspectiveCamera, one textured plane. Reused SEQUENTIALLY
@@ -131,14 +131,16 @@ function fovForPerspective(perspective: number): number {
  * run).
  *
  * The plane is sized every draw call so it exactly fills the destination
- * rect AT REST (pose.xRotationDegrees/zRotationDegrees both 0,
- * extraScale 1) -- rotating it away from rest is what reveals a sliver of
- * transparent background at the plane's foreshortened edge; the renderer's
+ * rect AT REST (camera at (0,0,CAMERA_DISTANCE), FOV_DEGREES, looking
+ * straight down -Z) -- panning the CAMERA away from rest is what can reveal
+ * a sliver of transparent background at the plane's edge; the renderer's
  * own background is left transparent (alpha:true, clear color alpha 0) so
  * that sliver shows whatever the caller already painted on `ctx` beneath
  * this element, same draw-order dependency the existing backdrop-then-clip
  * call sites already rely on -- not a bug, reads as the photo genuinely
- * floating in front of its backdrop.
+ * floating in front of its backdrop. In practice the simultaneous push-in
+ * (the camera also moves closer, magnifying the plane) keeps this from
+ * happening across the amplitude range tuned above.
  *
  * `antialias: false` -- this renders continuously (a live preview loop, or
  * one call per exported frame), and MSAA on a single quad buys little
@@ -160,7 +162,7 @@ export class Camera3DRenderer {
     this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: false, powerPreference: "low-power" });
     this.renderer.setClearColor(0x000000, 0);
 
-    this.camera = new THREE.PerspectiveCamera(BASE_FOV_DEGREES, 1, 0.1, CAMERA_DISTANCE * 4);
+    this.camera = new THREE.PerspectiveCamera(FOV_DEGREES, 1, 0.1, CAMERA_DISTANCE * 4);
     this.camera.position.set(0, 0, CAMERA_DISTANCE);
 
     this.scratchCanvas = document.createElement("canvas");
@@ -169,8 +171,15 @@ export class Camera3DRenderer {
     this.scratchCtx = scratchCtx;
 
     this.texture = new THREE.CanvasTexture(this.scratchCanvas);
+    // Anisotropic filtering: even face-on, the push-in dolly minifies the
+    // texture more along one screen-space direction than the other once the
+    // camera has panned off-center -- without this, mip selection alone
+    // blurs that direction. Cheap, and the standard fix for any obliquely
+    // viewed texture.
+    this.texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     const material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true });
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+    this.mesh.position.set(0, 0, 0);
 
     this.scene = new THREE.Scene();
     this.scene.add(this.mesh);
@@ -218,17 +227,23 @@ export class Camera3DRenderer {
       this.renderer.setSize(destWidth, destHeight, false);
     }
 
-    const fovDegrees = fovForPerspective(pose.perspective);
-    this.camera.fov = fovDegrees;
+    this.camera.fov = FOV_DEGREES;
     this.camera.aspect = destWidth / destHeight;
     this.camera.updateProjectionMatrix();
 
-    const fovRad = THREE.MathUtils.degToRad(fovDegrees);
+    // Plane stays flat and unrotated, sized to exactly fill the frame at
+    // the camera's REST position/FOV -- only the camera moves (translates
+    // toward and across the plane, always re-aimed via lookAt), same
+    // technique as test/test.html. See this class's own doc comment for why
+    // that avoids the grazing-angle blur a rotating plane produced.
+    const fovRad = THREE.MathUtils.degToRad(FOV_DEGREES);
     const visibleHeight = 2 * CAMERA_DISTANCE * Math.tan(fovRad / 2);
     const visibleWidth = visibleHeight * (destWidth / destHeight);
-    this.mesh.scale.set(visibleWidth * pose.extraScale, visibleHeight * pose.extraScale, 1);
-    this.mesh.rotation.x = THREE.MathUtils.degToRad(pose.xRotationDegrees);
-    this.mesh.rotation.z = THREE.MathUtils.degToRad(pose.zRotationDegrees);
+    this.mesh.scale.set(visibleWidth, visibleHeight, 1);
+
+    const dollyDistance = CAMERA_DISTANCE * (1 - pose.pushFraction);
+    this.camera.position.set(pose.panXFraction * (visibleWidth / 2), pose.panYFraction * (visibleHeight / 2), dollyDistance);
+    this.camera.lookAt(0, 0, 0);
 
     this.renderer.render(this.scene, this.camera);
     ctx.drawImage(canvas, destX, destY, destWidth, destHeight);
