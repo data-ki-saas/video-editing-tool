@@ -298,13 +298,28 @@ export async function createProject(input: NewProjectInput): Promise<Project> {
   return data;
 }
 
+// lib/supabase/client.ts's shared 20s default is tuned for auth requests
+// (fail fast on a stalled login/session check) -- a timeline save carries a
+// much larger JSON payload (the whole undo history, see useEditHistory.ts's
+// own cap comment) that can legitimately need more time to upload/write,
+// especially on a slower connection. Overridden per-call via
+// .abortSignal() (which the shared fetchWithTimeout wrapper already
+// defers to when a caller supplies its own signal) rather than raising the
+// shared default, so auth still fails fast.
+const SAVE_TIMELINE_TIMEOUT_MS = 45000;
+
 export async function saveTimeline(projectId: string, timeline: Timeline): Promise<void> {
   const supabase = createClient();
   // .select("id") forces PostgREST to return the updated row(s) -- without
   // it, an update that matches zero rows (e.g. the session was cleared by a
   // sign-out racing this call, so RLS filters the write to nothing) still
   // reports success with no `error`, and the save would silently no-op.
-  const { data, error } = await supabase.from("projects").update({ timeline }).eq("id", projectId).select("id");
+  const { data, error } = await supabase
+    .from("projects")
+    .update({ timeline })
+    .eq("id", projectId)
+    .select("id")
+    .abortSignal(AbortSignal.timeout(SAVE_TIMELINE_TIMEOUT_MS));
   if (error) throw new Error(error.message);
   if (!data || data.length === 0) {
     throw new Error("Save didn't apply -- your session may have expired");

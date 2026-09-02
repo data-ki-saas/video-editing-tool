@@ -21,10 +21,32 @@
  */
 import { useCallback, useState } from "react";
 
+// Every entry is a FULL copy of the editor's state (see EditSelectionsSnapshot
+// in lib/projects.ts), and useAutosaveTimeline re-uploads the WHOLE array on
+// every debounced save -- left uncapped, a long editing session's history
+// grows without bound until the save payload gets big enough to blow past
+// the save client's own timeout (see lib/supabase/client.ts's
+// fetchWithTimeout) and every autosave starts failing with a plain
+// TimeoutError. Capped at a depth generous enough that no normal editing
+// session should ever notice it (most editors cap undo somewhere in the
+// 30-100 range) while bounding the worst case.
+const MAX_HISTORY_ENTRIES = 50;
+
 export interface EditHistoryEntry<T> {
   label: string;
   state: T;
   at: number;
+}
+
+/** Drops the OLDEST entries once `entries` exceeds MAX_HISTORY_ENTRIES,
+ * shifting `index` down by the same count so it keeps pointing at the same
+ * logical entry -- shared by the initial-seed path (a previously-saved,
+ * already-bloated timeline) and pushChange (growing live) so both self-heal
+ * to the same cap rather than only capping one of the two. */
+function capHistory<T>(entries: EditHistoryEntry<T>[], index: number): { entries: EditHistoryEntry<T>[]; index: number } {
+  if (entries.length <= MAX_HISTORY_ENTRIES) return { entries, index };
+  const overflow = entries.length - MAX_HISTORY_ENTRIES;
+  return { entries: entries.slice(overflow), index: Math.max(0, index - overflow) };
 }
 
 export interface UseEditHistoryResult<T> {
@@ -51,7 +73,13 @@ export function useEditHistory<T>(
           ? initialEntries
           : [{ label: "Initial state", state: initialState, at: Date.now() }];
       const seededIndex = initialIndex !== undefined ? Math.min(Math.max(initialIndex, 0), seededEntries.length - 1) : 0;
-      return { entries: seededEntries, currentIndex: seededIndex };
+      // Caps even on load -- a timeline saved before this cap existed (or
+      // from a session that hit it before the next autosave could shrink
+      // it) could already be oversized; trimming here means the very next
+      // autosave persists the smaller, capped set instead of perpetuating
+      // the bloat.
+      const capped = capHistory(seededEntries, seededIndex);
+      return { entries: capped.entries, currentIndex: capped.index };
     }
   );
 
@@ -59,7 +87,8 @@ export function useEditHistory<T>(
     setHistoryState((prev) => {
       const truncated = prev.entries.slice(0, prev.currentIndex + 1);
       const nextEntries = [...truncated, { label, state: nextState, at: Date.now() }];
-      return { entries: nextEntries, currentIndex: nextEntries.length - 1 };
+      const capped = capHistory(nextEntries, nextEntries.length - 1);
+      return { entries: capped.entries, currentIndex: capped.index };
     });
   }, []);
 
