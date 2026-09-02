@@ -32,6 +32,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listAssets, type Asset } from "@/lib/api";
 import { captureSingleFrame, getVideoDuration } from "@/lib/video/video";
+import { ReelLoader } from "@/components/ReelLoader";
 import {
   DEFAULT_MAIN_AUDIO_VOLUME,
   DEFAULT_BACKGROUND_VOLUME,
@@ -92,6 +93,12 @@ export function MobileEditor({
 }) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [assetsError, setAssetsError] = useState<string | null>(null);
+  // Gates the preview's empty-state message below: without this, the
+  // fetch-on-mount in the effect further down leaves `assets` at its
+  // initial [] for a beat, which made the "Add a video or photo" message
+  // flash even when the reel already has clips (same isLoading pattern
+  // AssetGallery uses for its own list).
+  const [assetsLoading, setAssetsLoading] = useState(true);
   const [videoThumbnailUrlByAssetId, setVideoThumbnailUrlByAssetId] = useState<Record<string, string>>({});
   const [videoDurationByAssetId, setVideoDurationByAssetId] = useState<Record<string, number>>({});
   const [frameDimensions, setFrameDimensions] = useState<{ width: number; height: number } | null>(null);
@@ -216,6 +223,8 @@ export function MobileEditor({
       setAssetsError(null);
     } catch (err) {
       setAssetsError(err instanceof Error ? err.message : "Failed to load assets");
+    } finally {
+      setAssetsLoading(false);
     }
   }, [projectId]);
 
@@ -513,6 +522,13 @@ export function MobileEditor({
               onFrameDimensions={setFrameDimensions}
               onTimeUpdate={setCurrentTimeSeconds}
             />
+          </div>
+        ) : assetsLoading ? (
+          <div
+            className="flex items-center justify-center rounded-md border border-dashed border-border bg-surface p-4"
+            style={{ aspectRatio: 9 / 16 }}
+          >
+            <ReelLoader stage="Loading your reel…" className="p-0" />
           </div>
         ) : (
           <div
