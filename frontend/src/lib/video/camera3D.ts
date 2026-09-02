@@ -40,16 +40,21 @@ export interface Camera3DPose {
   pushFraction: number; // 0..1, how far the camera has dollied in toward the plane (0 = resting, 1 = peak)
 }
 
-// Amplitude constants -- visibly "cinematic" without being disorienting:
-// verified against a real live preview that anything much subtler reads as
-// barely-there at normal viewing size, while these values clearly shift/
-// magnify the frame without the plane's edges pulling in far enough to
-// reveal much of whatever's behind it (see Camera3DRenderer's own comment
-// on why that reveal is still a graceful fallback, not a bug, when it does
-// happen at the extremes).
-const MAX_PAN_X_FRACTION = 0.22;
-const MAX_PAN_Y_FRACTION = 0.14;
-const MAX_PUSH_FRACTION = 0.45;
+// Amplitude constants -- visibly "cinematic" without being disorienting.
+// pushFraction is a DISTANCE ratio, not a size ratio: apparent magnification
+// is roughly 1/(1-pushFraction), so an earlier pass at 0.45/0.22/0.14 (which
+// only re-derived a plausible-looking magnitude from test/test.html's own
+// example values, not from this app's actual tuned feel) was an ~1.8x
+// zoom-in-then-back-out -- dramatic enough that several cutaways in a row
+// each snapping back to their exact starting frame read as the same photo
+// "repeating". These values keep the SAME ratio between push and pan (the
+// ratio, not the absolute size, is what keeps the plane covering the frame
+// -- see Camera3DRenderer's own comment) scaled down to roughly match the
+// original rotate-the-plane version's subtler ~1.15x-equivalent intensity,
+// verified against a real live preview.
+const MAX_PAN_X_FRACTION = 0.06;
+const MAX_PAN_Y_FRACTION = 0.04;
+const MAX_PUSH_FRACTION = 0.13;
 // Constant throughout the move (mirrors test/test.html) -- a moderate,
 // fixed FOV rather than a wide sweep is what keeps the plane close to
 // face-on to the camera, avoiding the grazing-angle blur described above.
