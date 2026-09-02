@@ -1541,7 +1541,7 @@ export function ThreePaneEditor({
   // halves and their divider.
   function handleSaveVideoOverlayFraming(
     framing: OverlayFraming,
-    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
+    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect; camera3D?: boolean }
   ) {
     if (framingDialogOverlayIndex === null) return;
     const { label, state } = applyChangeOverlayFraming(selections, framingDialogOverlayIndex, framing, options);
@@ -1618,7 +1618,7 @@ export function ThreePaneEditor({
 
   function handleSaveImageOverlayFraming(
     framing: OverlayFraming,
-    options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect }
+    options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect; camera3D?: boolean }
   ) {
     if (imageFramingDialogOverlayIndex === null) return;
     const { label, state } = applyChangeImageOverlayFraming(selections, imageFramingDialogOverlayIndex, framing, options);
@@ -1720,7 +1720,7 @@ export function ThreePaneEditor({
     durationSeconds: number,
     templateIds: string[],
     cropRect: CropRect,
-    options?: { removeBackground?: boolean }
+    options?: { removeBackground?: boolean; camera3D?: boolean }
   ) {
     const replacedAssetId =
       editingCutaway && editingCutaway.kind === "image" && editingCutaway.assetId !== assetId
@@ -1737,7 +1737,8 @@ export function ThreePaneEditor({
             templateIds,
             cropRect,
             editingCutaway.startTimeSeconds,
-            options?.removeBackground
+            options?.removeBackground,
+            options?.camera3D
           )
         : applyAddImageSequenceClip(
             selections,
@@ -1746,7 +1747,8 @@ export function ThreePaneEditor({
             templateIds,
             cropRect,
             videoDurationSeconds,
-            options?.removeBackground
+            options?.removeBackground,
+            options?.camera3D
           );
     pushChange(label, state);
     setIsCutawayDialogOpen(false);

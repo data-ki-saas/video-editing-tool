@@ -69,6 +69,8 @@
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { extractPreviewFrames, getVideoDuration, drawImageFlipped, drawImageFlippedMasked } from "@/lib/video/video";
+import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay } from "@/lib/video/camera3D";
+import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { segmentClipFramesApproximate, lumaFramesToAlphaMasks, segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { chromaKeyFramesToAlphaMasks, DEFAULT_CHROMA_KEY_COLOR } from "@/lib/video/chromaKey";
 import { drawBrandWatermark } from "@/lib/video/brandWatermark";
@@ -77,6 +79,7 @@ import {
   frameIndexAtTime,
   pickPreviewFrameRate,
   computeEffectiveCropRect,
+  findActiveZoomEffectIndex,
   reprojectCropRect,
   computeEffectiveFlip,
   skipTrimmedRanges,
@@ -386,6 +389,14 @@ export const CanvasPlayer = forwardRef<
   // populate that ref at all, since the cutout is baked directly into the
   // single loaded frame (see the loading effect's own image branch).
   const clipBackgroundRemovalById = new Map(clips.map((clip) => [clip.id, clip.kind === "image" && Boolean(clip.backgroundRemoval?.enabled)]));
+  // "Make it 3D" (lib/video/camera3D.ts) -- true only for an image clip
+  // (a Ken Burns cutaway) with the toggle on; a plain video clip has no
+  // pan/zoom motion to attach a dolly to, same scope as this feature's own
+  // plan doc. templateIds is looked up alongside it (not derived at draw
+  // time) since computeCamera3DPoseForZoomEffect needs it to pick a tilt/
+  // roll direction -- same id-keyed lookup shape as clipFilterById above.
+  const clipCamera3DById = new Map(clips.map((clip) => [clip.id, clip.kind === "image" && Boolean(clip.camera3D)]));
+  const clipTemplateIdsById = new Map(clips.map((clip) => [clip.id, clip.kind === "image" ? normalizeImageTemplateIds(clip) : []]));
   // Per-clip decoded preview frames + frame rate, indexed the same as
   // loadedClipsRef below (NOT necessarily the same as the `clips` prop --
   // a clip that failed to load is excluded from all three in lockstep). A
@@ -491,6 +502,15 @@ export const CanvasPlayer = forwardRef<
       maskCompositeCanvasRef.current.height = height;
     }
     return maskCompositeCanvasRef.current;
+  }
+  // Camera3DRenderer (camera3D.ts) -- one shared WebGL context, created on
+  // first use rather than on mount, since most projects never touch the
+  // "Make it 3D" toggle and shouldn't pay for a WebGL context they don't
+  // need. Disposed in this component's own unmount effect below.
+  const camera3DRendererRef = useRef<Camera3DRenderer | null>(null);
+  function getCamera3DRenderer(): Camera3DRenderer {
+    if (!camera3DRendererRef.current) camera3DRendererRef.current = new Camera3DRenderer();
+    return camera3DRendererRef.current;
   }
   const animationFrameIdRef = useRef<number | null>(null);
   // Wall-clock bookkeeping for the AudioContext-driven playback clock:
@@ -857,10 +877,24 @@ export const CanvasPlayer = forwardRef<
       // correctness (see video_math.ts's computeOverlayRects doc comment).
       // Not Split-Screen here, so baseRect always matches crop's own
       // aspect (the full canvas) -- no further cover-fit needed.
-      ctx.drawImage(
-        image, sx, sy, sWidth, sHeight,
-        baseRect.x * canvas.width, baseRect.y * canvas.height, baseRect.width * canvas.width, baseRect.height * canvas.height
-      );
+      const destX = baseRect.x * canvas.width;
+      const destY = baseRect.y * canvas.height;
+      const destWidth = baseRect.width * canvas.width;
+      const destHeight = baseRect.height * canvas.height;
+      // "Make it 3D" (camera3D.ts) -- only for a Ken Burns image cutaway
+      // with an active ZoomEffect at this instant (the effect IS the dolly
+      // this rides -- see applyAddImageSequenceClip, which bakes a Ken
+      // Burns motion straight into the shared zoomEffects array). Flip is
+      // already applied via the outer ctx.translate/scale above, so both
+      // flip args here are false -- passing the real toggles too would
+      // flip it twice.
+      const activeZoomEffectIndex = currentEntryId && clipCamera3DById.get(currentEntryId) ? findActiveZoomEffectIndex(zoomEffects, elapsedSeconds) : -1;
+      if (activeZoomEffectIndex !== -1) {
+        const pose = computeCamera3DPoseForZoomEffect(zoomEffects[activeZoomEffectIndex], clipTemplateIdsById.get(currentEntryId!) ?? [], elapsedSeconds);
+        getCamera3DRenderer().drawImage3D(ctx, image, pose, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight, false, false);
+      } else {
+        ctx.drawImage(image, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight);
+      }
     }
     ctx.restore();
 
@@ -952,10 +986,23 @@ export const CanvasPlayer = forwardRef<
           activeExclusiveImageOverlay.framing.panX, activeExclusiveImageOverlay.framing.panY, activeExclusiveImageOverlay.framing.zoom
         );
         ctx.filter = getFilterPresetOption(activeExclusiveImageOverlay.colorFilterId ?? null).cssFilter;
-        drawImageFlipped(
-          ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
-          activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
-        );
+        if (activeExclusiveImageOverlay.camera3D) {
+          // Same synthesized-dolly "Make it 3D" as the PiP overlay loops
+          // below -- a Split-Screen half tilting in 3D can reveal a sliver
+          // of whatever's behind it at its foreshortened edge (there's
+          // nothing else in that half to show through to), same graceful
+          // "floating card" fallback camera3D.ts's own renderer documents.
+          const pose = computeCamera3DPoseForOverlay(activeExclusiveImageOverlay.startTimeSeconds, activeExclusiveImageOverlay.endTimeSeconds, elapsedSeconds);
+          getCamera3DRenderer().drawImage3D(
+            ctx, overlayImage, pose, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+            activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
+          );
+        } else {
+          drawImageFlipped(
+            ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+            activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
+          );
+        }
         ctx.filter = "none";
       }
     } else if (activeExclusiveVideoOverlay && overlayRect) {
@@ -999,6 +1046,12 @@ export const CanvasPlayer = forwardRef<
             (osx / overlayImage.width) * matte.width, (osy / overlayImage.height) * matte.height,
             (osw / overlayImage.width) * matte.width, (osh / overlayImage.height) * matte.height,
             destX, destY, destWidth, destHeight,
+            activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
+          );
+        } else if (activeExclusiveVideoOverlay.camera3D) {
+          const pose = computeCamera3DPoseForOverlay(activeExclusiveVideoOverlay.startTimeSeconds, activeExclusiveVideoOverlay.endTimeSeconds, elapsedSeconds);
+          getCamera3DRenderer().drawImage3D(
+            ctx, overlayImage, pose, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
             activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
           );
         } else {
@@ -1059,6 +1112,13 @@ export const CanvasPlayer = forwardRef<
           destX, destY, destWidth, destHeight,
           pip.framing.flipHorizontal, pip.framing.flipVertical
         );
+      } else if (pip.camera3D) {
+        // "Make it 3D" (camera3D.ts) -- an overlay has no keyframed pan/zoom
+        // timeline to ride (see OverlayFraming's own doc comment), so the
+        // dolly is synthesized as one fixed push across the overlay's own
+        // start->end window rather than riding an existing effect.
+        const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, elapsedSeconds);
+        getCamera3DRenderer().drawImage3D(ctx, pipImage, pose, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
       } else {
         drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
       }
@@ -1083,7 +1143,14 @@ export const CanvasPlayer = forwardRef<
         overlayImage.width, overlayImage.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom, MIN_PICTURE_IN_PICTURE_ZOOM
       );
       ctx.filter = getFilterPresetOption(pip.colorFilterId ?? null).cssFilter;
-      drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+      if (pip.camera3D) {
+        // Same "Make it 3D" synthesized dolly as the video-overlay PiP loop
+        // above.
+        const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, elapsedSeconds);
+        getCamera3DRenderer().drawImage3D(ctx, overlayImage, pose, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+      } else {
+        drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+      }
       ctx.filter = "none";
     }
 
@@ -2013,6 +2080,8 @@ export const CanvasPlayer = forwardRef<
     return () => {
       stopPlaybackLoop();
       audioContextRef.current?.close();
+      camera3DRendererRef.current?.dispose();
+      camera3DRendererRef.current = null;
     };
   }, []);
 

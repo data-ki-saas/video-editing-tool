@@ -48,6 +48,7 @@ import { computeContainRect, computeEffectiveCropRect, computeMaxCoverageCropFra
 import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { IMAGE_TEMPLATE_AXES, IMAGE_TEMPLATE_OPTIONS, buildKenBurnsEffect, type ImageTemplateId } from "@/lib/video/imageTemplates";
+import { Camera3DRenderer, computeCamera3DPoseForZoomEffect } from "@/lib/video/camera3D";
 import { CropRectOverlay } from "./CropRectOverlay";
 import {
   DEFAULT_IMAGE_CLIP_DURATION_SECONDS,
@@ -150,6 +151,10 @@ export function CutawayDialog({
     // the "Remove background" toggle when reopening a cutaway that already
     // has it on, so Save doesn't silently drop it.
     backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
+    // "Make it 3D" (lib/video/camera3D.ts) -- pre-checks the toggle when
+    // reopening a cutaway that already has it on, same staging as
+    // backgroundRemoval above.
+    camera3D?: boolean;
   } | null;
   /** Non-null when opened via AssetGallery's right-click "Cutaway" on a
    * specific IMAGE asset -- an ADD, not an edit, just pre-selects that
@@ -160,7 +165,7 @@ export function CutawayDialog({
     durationSeconds: number,
     templateIds: string[],
     cropRect: CropRect,
-    options?: { removeBackground?: boolean }
+    options?: { removeBackground?: boolean; camera3D?: boolean }
   ) => void;
   onAddVideo: (assetId: string, options?: { removeBackground?: boolean }) => void;
   onClose: () => void;
@@ -175,6 +180,10 @@ export function CutawayDialog({
   // at a time (the kind switch above), so one toggle covers both, same
   // "Remove background" checkbox either way.
   const [removeBackground, setRemoveBackground] = useState(Boolean(editing?.backgroundRemoval?.enabled));
+  // "Make it 3D" (camera3D.ts) -- image-only, same shared-across-panels
+  // reasoning doesn't apply here (video kind has nothing to attach a Ken
+  // Burns dolly to), so this is only ever read/shown in the image panel.
+  const [camera3D, setCamera3D] = useState(Boolean(editing?.camera3D));
   const isEditing = Boolean(editing);
 
   const imageAssets = assets.filter((asset) => asset.kind === "image");
@@ -197,6 +206,20 @@ export function CutawayDialog({
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [loadedImage, setLoadedImage] = useState<HTMLImageElement | null>(null);
+  // Camera3DRenderer (camera3D.ts) -- created lazily (most photos never
+  // toggle "Make it 3D"), disposed when this dialog unmounts (it always
+  // fully remounts on reopen -- see this file's own module comment).
+  const camera3DRendererRef = useRef<Camera3DRenderer | null>(null);
+  function getCamera3DRenderer(): Camera3DRenderer {
+    if (!camera3DRendererRef.current) camera3DRendererRef.current = new Camera3DRenderer();
+    return camera3DRendererRef.current;
+  }
+  useEffect(() => {
+    return () => {
+      camera3DRendererRef.current?.dispose();
+      camera3DRendererRef.current = null;
+    };
+  }, []);
   // The clip rectangle positioned for THIS photo, as fractions (0..1) of
   // the photo's own naturalWidth/naturalHeight -- null until the photo has
   // loaded and a default (or the persisted rect) has been seeded, see the
@@ -290,13 +313,23 @@ export function CutawayDialog({
       const sh = crop.height * img.naturalHeight;
       const dest = computeContainRect(canvas!.width, canvas!.height, crop.width / crop.height);
       ctx!.clearRect(0, 0, canvas!.width, canvas!.height);
-      ctx!.drawImage(img, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height);
+      // "Make it 3D" -- same computeCamera3DPoseForZoomEffect this photo's
+      // real committed cutaway will use (CanvasPlayer.tsx/exportTimeline.ts),
+      // so this popup's own preview can't drift from the real effect either,
+      // same principle buildKenBurnsEffect's own module comment already
+      // states for the 2D case.
+      if (camera3D) {
+        const pose = computeCamera3DPoseForZoomEffect(zoomEffect, templateIds, elapsed);
+        getCamera3DRenderer().drawImage3D(ctx!, img, pose, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height, false, false);
+      } else {
+        ctx!.drawImage(img, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height);
+      }
 
       rafId = requestAnimationFrame(draw);
     }
     rafId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafId);
-  }, [loadedImage, templateIds, durationSeconds, photoCropRect]);
+  }, [loadedImage, templateIds, durationSeconds, photoCropRect, camera3D]);
 
   // Toggles one template id, one pick per axis (zoom / horizontal pan /
   // vertical pan) -- picking a second id from the SAME axis as an existing
@@ -614,6 +647,20 @@ export function CutawayDialog({
               />
               Remove background
             </label>
+            {/* "Make it 3D" (camera3D.ts) -- real dolly + tilt + roll camera
+                motion layered on top of whichever motion(s) are picked
+                above, rather than a separate effect with its own controls
+                (see this app's driving-vision preference for smart
+                defaults over exposed knobs). */}
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={camera3D}
+                onChange={(e) => setCamera3D(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Make it 3D
+            </label>
             <div className="ml-auto flex gap-2">
               <button
                 type="button"
@@ -628,7 +675,7 @@ export function CutawayDialog({
                 onClick={() =>
                   selectedAsset &&
                   photoCropRect &&
-                  onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect, { removeBackground })
+                  onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect, { removeBackground, camera3D })
                 }
                 className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
               >

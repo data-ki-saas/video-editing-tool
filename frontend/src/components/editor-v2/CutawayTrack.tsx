@@ -50,6 +50,9 @@ export type CutawaySegment =
       // that this state is barely visible; a video's (VEED, async) can sit
       // here for a while.
       backgroundRemoval?: BackgroundRemovalState | null;
+      // "Make it 3D" (lib/video/camera3D.ts) -- see CutawayDialog.tsx's own
+      // toggle.
+      camera3D?: boolean;
     }
   | {
       kind: "video";

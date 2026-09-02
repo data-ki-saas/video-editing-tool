@@ -379,7 +379,7 @@ export function VideoOverlayFramingDialog({
   outputAspectRatio: number | null;
   onSave: (
     framing: OverlayFraming,
-    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
+    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect; camera3D?: boolean }
   ) => void;
   onClose: () => void;
   onDelete: () => void;
@@ -404,6 +404,11 @@ export function VideoOverlayFramingDialog({
   // precisely inside this larger popup.
   const [pipRect, setPipRect] = useState(overlay.layout.type === "picture-in-picture" ? overlay.layout.rect : DEFAULT_PIP_RECT);
   const [audioBalance, setAudioBalance] = useState(overlay.audioBalance);
+  // "Make it 3D" (lib/video/camera3D.ts) -- real dolly + tilt + roll camera
+  // motion, a synthesized push across this overlay's own start->end window
+  // (an overlay has no keyframed pan/zoom timeline of its own -- see
+  // computeCamera3DPoseForOverlay's own doc comment).
+  const [camera3D, setCamera3D] = useState(Boolean(overlay.camera3D));
   // Which half the right-hand actions apply to -- only meaningful (and only
   // ever shown) for Split Screen, where there genuinely are two frameable
   // halves; Full-Screen/Picture-in-Picture only ever have the overlay's own
@@ -420,6 +425,7 @@ export function VideoOverlayFramingDialog({
     setRatio(overlay.layout.type === "split-screen" ? overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO : DEFAULT_SPLIT_SCREEN_RATIO);
     setPipRect(overlay.layout.type === "picture-in-picture" ? overlay.layout.rect : DEFAULT_PIP_RECT);
     setAudioBalance(overlay.audioBalance);
+    setCamera3D(Boolean(overlay.camera3D));
     setSelectedSide("overlay");
   }, [overlay]);
 
@@ -435,6 +441,7 @@ export function VideoOverlayFramingDialog({
       ratio: isSplitScreen ? ratio : undefined,
       audioBalance,
       rect: isPictureInPicture ? pipRect : undefined,
+      camera3D,
     });
   }
 
@@ -610,6 +617,16 @@ export function VideoOverlayFramingDialog({
                 className="h-4 w-full"
               />
             </div>
+
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={camera3D}
+                onChange={(e) => setCamera3D(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Make it 3D
+            </label>
           </div>
         </div>
 

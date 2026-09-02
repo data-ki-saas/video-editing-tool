@@ -1030,6 +1030,7 @@ export function FrameStrip({
           canvasFillColor: entry.canvasFillColor,
           canvasFillGradientColor: entry.canvasFillGradientColor,
           backgroundRemoval: entry.backgroundRemoval,
+          camera3D: entry.camera3D,
         };
       }
       return {

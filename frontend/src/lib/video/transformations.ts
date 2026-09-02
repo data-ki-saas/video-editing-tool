@@ -550,7 +550,7 @@ export function applyChangeImageOverlayFraming(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   framing: OverlayFraming,
-  options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect }
+  options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect; camera3D?: boolean }
 ): TransformationResult {
   const overlay = selections.overlayImages[overlayIndex];
   if (!overlay) return { label: "Adjusted overlay framing", state: selections };
@@ -565,7 +565,7 @@ export function applyChangeImageOverlayFraming(
         ? { ...overlay.layout, rect: options?.rect ?? overlay.layout.rect }
         : overlay.layout;
   const nextOverlays = [...selections.overlayImages];
-  nextOverlays[overlayIndex] = { ...overlay, framing, layout: nextLayout };
+  nextOverlays[overlayIndex] = { ...overlay, framing, layout: nextLayout, camera3D: options?.camera3D ?? overlay.camera3D };
   return { label: "Adjusted overlay framing", state: { ...selections, overlayImages: nextOverlays } };
 }
 
@@ -658,7 +658,8 @@ export function applyAddImageSequenceClip(
   templateIds: string[],
   cropRect: CropRect,
   startTimeSeconds: number,
-  removeBackground?: boolean
+  removeBackground?: boolean,
+  camera3D?: boolean
 ): TransformationResult {
   const newEntry: SequenceEntry = {
     id: crypto.randomUUID(),
@@ -674,6 +675,7 @@ export function applyAddImageSequenceClip(
     // so the caller (ThreePaneEditor) may patch this in almost immediately
     // rather than after a real poll loop.
     ...(removeBackground ? { backgroundRemoval: { enabled: true, matteAssetId: null } } : {}),
+    camera3D,
   };
   const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, startTimeSeconds, durationSeconds);
   return {
@@ -788,7 +790,8 @@ export function applyEditImageSequenceClip(
   templateIds: string[],
   cropRect: CropRect,
   clipStartSeconds: number,
-  removeBackground?: boolean
+  removeBackground?: boolean,
+  camera3D?: boolean
 ): TransformationResult {
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
   const entry = selections.sequenceClips[entryIndex];
@@ -819,6 +822,7 @@ export function applyEditImageSequenceClip(
     // paid matting job) -- only starts fresh (null, patched in by the
     // caller) when the toggle is newly turned on this save.
     backgroundRemoval: removeBackground ? { enabled: true, matteAssetId: entry.backgroundRemoval?.matteAssetId ?? null } : null,
+    camera3D,
   };
 
   const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, clipStartSeconds, clampedDuration);
@@ -1447,7 +1451,7 @@ export function applyChangeOverlayFraming(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   framing: OverlayFraming,
-  options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
+  options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect; camera3D?: boolean }
 ): TransformationResult {
   const overlay = selections.videoOverlays[overlayIndex];
   if (!overlay) return { label: "Adjusted overlay framing", state: selections };
@@ -1467,6 +1471,7 @@ export function applyChangeOverlayFraming(
     framing,
     layout: nextLayout,
     audioBalance: options?.audioBalance ?? overlay.audioBalance,
+    camera3D: options?.camera3D ?? overlay.camera3D,
   };
   return { label: "Adjusted overlay framing", state: { ...selections, videoOverlays: nextOverlays } };
 }

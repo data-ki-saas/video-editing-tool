@@ -709,6 +709,12 @@ export interface VideoOverlayClip {
   // the Cutaway path. Unlike SequenceEntry, only ever set at add-time --
   // there's no dialog to flip it on afterward for an already-placed overlay.
   backgroundRemoval?: BackgroundRemovalState | null;
+  // Same "Make it 3D" toggle as SequenceEntry's image variant (see its own
+  // doc comment) -- since an overlay has only a static `framing` (no
+  // keyframed pan/zoom timeline), the dolly is synthesized as one fixed
+  // subtle push over the overlay's own start->end window rather than riding
+  // an existing effect -- see camera3D.ts's computeCamera3DPoseForOverlay.
+  camera3D?: boolean;
 }
 
 /**
@@ -734,6 +740,8 @@ export interface ImageOverlayClip {
   framing: OverlayFraming;
   // Same per-clip color filter as VideoOverlayClip.colorFilterId above.
   colorFilterId?: FilterPresetId | null;
+  // Same "Make it 3D" toggle as VideoOverlayClip.camera3D above.
+  camera3D?: boolean;
 }
 
 /** Cache key for a still frame captured at one overlay placement's own
@@ -1302,6 +1310,13 @@ export type SequenceEntry =
       // compileCreatomateTimeline.ts/CanvasPlayer consume it, is identical
       // either way.
       backgroundRemoval?: BackgroundRemovalState | null;
+      // "Make it 3D" toggle (lib/video/camera3D.ts) -- layers auto-derived
+      // tilt/roll/perspective on top of whatever templateIds motion is
+      // already authored (the dolly), rather than being its own effect with
+      // its own timing. Absent/false means today's flat 2D Ken Burns,
+      // unchanged. Only meaningful on the image variant -- a plain video
+      // cutaway has no pan/zoom motion to attach a dolly to.
+      camera3D?: boolean;
     };
 
 // Both SequenceEntry variants above carry a `cutTransitionInId` -- which

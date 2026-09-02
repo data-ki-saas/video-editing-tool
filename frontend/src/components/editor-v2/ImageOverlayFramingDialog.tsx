@@ -315,7 +315,7 @@ export function ImageOverlayFramingDialog({
   // overlay's captured source frame.
   overlayFrameUrl: string;
   outputAspectRatio: number | null;
-  onSave: (framing: OverlayFraming, options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect }) => void;
+  onSave: (framing: OverlayFraming, options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect; camera3D?: boolean }) => void;
   onClose: () => void;
   onDelete: () => void;
 }) {
@@ -331,6 +331,9 @@ export function ImageOverlayFramingDialog({
   );
   const [pipRect, setPipRect] = useState(overlay.layout.type === "picture-in-picture" ? overlay.layout.rect : DEFAULT_PIP_RECT);
   const [selectedSide, setSelectedSide] = useState<SelectedSide>("overlay");
+  // "Make it 3D" (lib/video/camera3D.ts) -- same synthesized-dolly toggle as
+  // VideoOverlayFramingDialog's own.
+  const [camera3D, setCamera3D] = useState(Boolean(overlay.camera3D));
 
   // Re-syncs if a different overlay's framing dialog is opened while this
   // one is already mounted (same reasoning as TextOverlayDialog's own
@@ -341,6 +344,7 @@ export function ImageOverlayFramingDialog({
     setBaseFraming(overlay.layout.type === "split-screen" ? overlay.layout.baseFraming ?? DEFAULT_OVERLAY_FRAMING : DEFAULT_OVERLAY_FRAMING);
     setRatio(overlay.layout.type === "split-screen" ? overlay.layout.ratio ?? DEFAULT_SPLIT_SCREEN_RATIO : DEFAULT_SPLIT_SCREEN_RATIO);
     setPipRect(overlay.layout.type === "picture-in-picture" ? overlay.layout.rect : DEFAULT_PIP_RECT);
+    setCamera3D(Boolean(overlay.camera3D));
     setSelectedSide("overlay");
   }, [overlay]);
 
@@ -355,6 +359,7 @@ export function ImageOverlayFramingDialog({
       baseFraming: isSplitScreen ? baseFraming : undefined,
       ratio: isSplitScreen ? ratio : undefined,
       rect: isPictureInPicture ? pipRect : undefined,
+      camera3D,
     });
   }
 
@@ -512,6 +517,16 @@ export function ImageOverlayFramingDialog({
               />
               <span className="text-[10px] text-muted">{activeFraming.zoom.toFixed(2)}x</span>
             </div>
+
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={camera3D}
+                onChange={(e) => setCamera3D(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Make it 3D
+            </label>
           </div>
         </div>
 

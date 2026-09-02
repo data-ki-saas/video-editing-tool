@@ -45,11 +45,14 @@ import {
   type AudioCodec,
 } from "mediabunny";
 import { loadVideoElement, seekVideoTo, drawImageFlipped, drawImageFlippedMasked, drawImageFlippedChromaKeyed } from "@/lib/video/video";
+import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay } from "@/lib/video/camera3D";
+import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { DEFAULT_CHROMA_KEY_COLOR, hexToRgb } from "@/lib/video/chromaKey";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
 import {
   buildRenderSegments,
   computeEffectiveCropRect,
+  findActiveZoomEffectIndex,
   reprojectCropRect,
   computeEffectiveFlip,
   computeProgress,
@@ -573,6 +576,16 @@ export async function exportVideoLocally(
   // Same cut-transition lookup compileCreatomateTimeline.ts builds -- see
   // that file's own cutTransitionByEntryId comment.
   const cutTransitionByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.cutTransitionInId ?? null]));
+  // "Make it 3D" (lib/video/camera3D.ts) -- same per-entryId lookup shape as
+  // cutawayFilterByEntryId above, mirroring CanvasPlayer.tsx's identical
+  // clipCamera3DById/clipTemplateIdsById maps so both render paths agree on
+  // which cutaway gets the effect.
+  const cutawayCamera3DByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [entry.id, entry.kind === "image" && Boolean(entry.camera3D)])
+  );
+  const cutawayTemplateIdsByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [entry.id, entry.kind === "image" ? normalizeImageTemplateIds(entry) : []])
+  );
   const cssFilterFor = (colorFilterId: FilterPresetId | null | undefined) => getFilterPresetOption(colorFilterId ?? null).cssFilter;
   const segments = buildRenderSegments(sequenceClips, selections.trimRanges, cutTransitionByEntryId);
   // Overlapping segments overcount a naive sum -- see totalRenderOutputDuration's own doc comment.
@@ -609,6 +622,12 @@ export async function exportVideoLocally(
   const matteImageElementsByAssetId = new Map<string, HTMLImageElement>();
   const overlayBlobUrls: string[] = [];
   const warnings: string[] = [];
+  // "Make it 3D" (camera3D.ts) -- one shared WebGL context for the whole
+  // export run, same reuse-across-frames reasoning as CanvasPlayer's own
+  // camera3DRendererRef. Declared here (not inside the try block below) so
+  // the `finally` clause can reach it to dispose, same pattern every other
+  // cleanup-needing resource on this page already follows.
+  const camera3DRenderer = new Camera3DRenderer();
 
   try {
     for (const clip of sequenceClips) {
@@ -971,10 +990,26 @@ export async function exportVideoLocally(
           // null only for an active Full-Screen overlay -- its own draw
           // below fully covers the canvas regardless, so skipping this is a
           // pure optimization, never load-bearing for correctness.
-          ctx.drawImage(
-            source, sx, sy, sWidth, sHeight,
-            baseRect.x * canvas.width, baseRect.y * canvas.height, baseRect.width * canvas.width, baseRect.height * canvas.height
-          );
+          const destX = baseRect.x * canvas.width;
+          const destY = baseRect.y * canvas.height;
+          const destWidth = baseRect.width * canvas.width;
+          const destHeight = baseRect.height * canvas.height;
+          // "Make it 3D" -- mirrors CanvasPlayer.tsx's identical branch
+          // exactly (same computeCamera3DPoseForZoomEffect call, same
+          // "flip already applied via the outer ctx transform" reasoning
+          // for why both flip args are false), so the export matches the
+          // live preview frame-for-frame.
+          const activeZoomEffectIndex = segment.entryId && cutawayCamera3DByEntryId.get(segment.entryId) ? findActiveZoomEffectIndex(selections.zoomEffects, sourceTimeSeconds) : -1;
+          if (activeZoomEffectIndex !== -1) {
+            const pose = computeCamera3DPoseForZoomEffect(
+              selections.zoomEffects[activeZoomEffectIndex],
+              cutawayTemplateIdsByEntryId.get(segment.entryId!) ?? [],
+              sourceTimeSeconds
+            );
+            camera3DRenderer.drawImage3D(ctx, source, pose, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight, false, false);
+          } else {
+            ctx.drawImage(source, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight);
+          }
         }
         ctx.restore();
       } else {
@@ -1061,10 +1096,18 @@ export async function exportVideoLocally(
             activeExclusiveImageOverlay.framing.panX, activeExclusiveImageOverlay.framing.panY, activeExclusiveImageOverlay.framing.zoom
           );
           ctx.filter = cssFilterFor(activeExclusiveImageOverlay.colorFilterId);
-          drawImageFlipped(
-            ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
-            activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
-          );
+          if (activeExclusiveImageOverlay.camera3D) {
+            const pose = computeCamera3DPoseForOverlay(activeExclusiveImageOverlay.startTimeSeconds, activeExclusiveImageOverlay.endTimeSeconds, sourceTimeSeconds);
+            camera3DRenderer.drawImage3D(
+              ctx, overlayImage, pose, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+              activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
+            );
+          } else {
+            drawImageFlipped(
+              ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+              activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
+            );
+          }
           ctx.filter = "none";
         }
       } else if (activeExclusiveVideoOverlay && overlayRect) {
@@ -1113,6 +1156,12 @@ export async function exportVideoLocally(
                 (osx / overlayVideo.videoWidth) * overlayMatte.videoWidth, (osy / overlayVideo.videoHeight) * overlayMatte.videoHeight,
                 (osw / overlayVideo.videoWidth) * overlayMatte.videoWidth, (osh / overlayVideo.videoHeight) * overlayMatte.videoHeight,
                 destX, destY, destWidth, destHeight,
+                activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
+              );
+            } else if (activeExclusiveVideoOverlay.camera3D) {
+              const pose = computeCamera3DPoseForOverlay(activeExclusiveVideoOverlay.startTimeSeconds, activeExclusiveVideoOverlay.endTimeSeconds, sourceTimeSeconds);
+              camera3DRenderer.drawImage3D(
+                ctx, overlayVideo, pose, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
                 activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
               );
             } else {
@@ -1164,6 +1213,9 @@ export async function exportVideoLocally(
               destX, destY, destWidth, destHeight,
               pip.framing.flipHorizontal, pip.framing.flipVertical
             );
+          } else if (pip.camera3D) {
+            const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, sourceTimeSeconds);
+            camera3DRenderer.drawImage3D(ctx, overlayVideo, pose, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
           } else {
             drawImageFlipped(ctx, overlayVideo, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
           }
@@ -1186,7 +1238,12 @@ export async function exportVideoLocally(
           overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom, MIN_PICTURE_IN_PICTURE_ZOOM
         );
         ctx.filter = cssFilterFor(pip.colorFilterId);
-        drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+        if (pip.camera3D) {
+          const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, sourceTimeSeconds);
+          camera3DRenderer.drawImage3D(ctx, overlayImage, pose, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+        } else {
+          drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+        }
         ctx.filter = "none";
       }
 
@@ -1275,6 +1332,7 @@ export async function exportVideoLocally(
     if (!target.buffer) throw new Error("Local render finished with no output data");
     return { blob: new Blob([target.buffer], { type: mimeType }), mimeType, warnings };
   } finally {
+    camera3DRenderer.dispose();
     for (const video of videoElementsByAssetId.values()) {
       video.removeAttribute("src");
       video.load();
