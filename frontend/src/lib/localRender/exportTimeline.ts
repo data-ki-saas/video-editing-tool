@@ -46,6 +46,7 @@ import {
 } from "mediabunny";
 import { loadVideoElement, seekVideoTo, drawImageFlipped, drawImageFlippedMasked, drawImageFlippedChromaKeyed } from "@/lib/video/video";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay } from "@/lib/video/camera3D";
+import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { DEFAULT_CHROMA_KEY_COLOR, hexToRgb } from "@/lib/video/chromaKey";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
@@ -583,6 +584,12 @@ export async function exportVideoLocally(
   const cutawayCamera3DByEntryId = new Map(
     selections.sequenceClips.map((entry) => [entry.id, entry.kind === "image" && Boolean(entry.camera3D)])
   );
+  // Ambient overlay effect (lib/video/ambientEffects.ts) -- same per-entryId
+  // lookup shape as cutawayCamera3DByEntryId above, mirroring CanvasPlayer's
+  // clipAmbientEffectById.
+  const cutawayAmbientEffectByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [entry.id, entry.kind === "image" ? (entry.ambientEffect ?? null) : null])
+  );
   const cutawayTemplateIdsByEntryId = new Map(
     selections.sequenceClips.map((entry) => [entry.id, entry.kind === "image" ? normalizeImageTemplateIds(entry) : []])
   );
@@ -1012,6 +1019,23 @@ export async function exportVideoLocally(
           }
         }
         ctx.restore();
+
+        // Ambient overlay effect (ambientEffects.ts) -- mirrors
+        // CanvasPlayer's identical post-restore draw exactly (same
+        // baseRect/localSeconds reasoning), so the export matches the live
+        // preview frame-for-frame.
+        if (baseRect && segment.entryId && cutawayAmbientEffectByEntryId.get(segment.entryId)) {
+          drawAmbientEffect(
+            ctx,
+            cutawayAmbientEffectByEntryId.get(segment.entryId) ?? null,
+            baseRect.x * canvas.width,
+            baseRect.y * canvas.height,
+            baseRect.width * canvas.width,
+            baseRect.height * canvas.height,
+            localSeconds,
+            ambientEffectSeed(segment.entryId)
+          );
+        }
       } else {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
@@ -1109,6 +1133,12 @@ export async function exportVideoLocally(
             );
           }
           ctx.filter = "none";
+          if (activeExclusiveImageOverlay.ambientEffect) {
+            drawAmbientEffect(
+              ctx, activeExclusiveImageOverlay.ambientEffect, destX, destY, destWidth, destHeight,
+              sourceTimeSeconds - activeExclusiveImageOverlay.startTimeSeconds, ambientEffectSeed(activeExclusiveImageOverlay.startTimeSeconds)
+            );
+          }
         }
       } else if (activeExclusiveVideoOverlay && overlayRect) {
         const overlayVideo = videoOverlayElementsByAssetId.get(activeExclusiveVideoOverlay.assetId);
@@ -1172,6 +1202,12 @@ export async function exportVideoLocally(
             }
           }
           ctx.filter = "none";
+          if (activeExclusiveVideoOverlay.ambientEffect) {
+            drawAmbientEffect(
+              ctx, activeExclusiveVideoOverlay.ambientEffect, destX, destY, destWidth, destHeight,
+              sourceTimeSeconds - activeExclusiveVideoOverlay.startTimeSeconds, ambientEffectSeed(activeExclusiveVideoOverlay.startTimeSeconds)
+            );
+          }
         }
       }
 
@@ -1221,6 +1257,9 @@ export async function exportVideoLocally(
           }
         }
         ctx.filter = "none";
+        if (pip.ambientEffect) {
+          drawAmbientEffect(ctx, pip.ambientEffect, destX, destY, destWidth, destHeight, sourceTimeSeconds - pip.startTimeSeconds, ambientEffectSeed(pip.startTimeSeconds));
+        }
       }
 
       // Picture-in-Picture IMAGE overlays draw AFTER video PiP overlays, so
@@ -1245,6 +1284,9 @@ export async function exportVideoLocally(
           drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
         }
         ctx.filter = "none";
+        if (pip.ambientEffect) {
+          drawAmbientEffect(ctx, pip.ambientEffect, destX, destY, destWidth, destHeight, sourceTimeSeconds - pip.startTimeSeconds, ambientEffectSeed(pip.startTimeSeconds));
+        }
       }
 
       for (const overlay of findActiveTextOverlays(selections.textOverlays, sourceTimeSeconds)) {

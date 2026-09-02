@@ -11,6 +11,7 @@
 import type { FilterPresetId } from "./filterPresets";
 import { CUT_TRANSITION_DURATION_SECONDS, type CutTransitionId } from "./cutTransitionPresets";
 import type { CanvasFillMode } from "./canvasFillPresets";
+import type { AmbientEffectId } from "./ambientEffects";
 
 /**
  * Timestamps (seconds) to sample a clip of the given duration at a fixed
@@ -715,6 +716,11 @@ export interface VideoOverlayClip {
   // subtle push over the overlay's own start->end window rather than riding
   // an existing effect -- see camera3D.ts's computeCamera3DPoseForOverlay.
   camera3D?: boolean;
+  // A subtle looping overlay (light sweep / sparkle / leaves, see
+  // ambientEffects.ts) drawn on top of whatever this overlay already
+  // rendered (plain framing OR the camera3D path above) -- independent of
+  // camera3D, so the two combine freely. Absent/null means none.
+  ambientEffect?: AmbientEffectId | null;
 }
 
 /**
@@ -742,6 +748,8 @@ export interface ImageOverlayClip {
   colorFilterId?: FilterPresetId | null;
   // Same "Make it 3D" toggle as VideoOverlayClip.camera3D above.
   camera3D?: boolean;
+  // Same ambient overlay as VideoOverlayClip.ambientEffect above.
+  ambientEffect?: AmbientEffectId | null;
 }
 
 /** Cache key for a still frame captured at one overlay placement's own
@@ -1317,6 +1325,11 @@ export type SequenceEntry =
       // unchanged. Only meaningful on the image variant -- a plain video
       // cutaway has no pan/zoom motion to attach a dolly to.
       camera3D?: boolean;
+      // A subtle looping overlay (light sweep / sparkle / leaves, see
+      // ambientEffects.ts), independent of camera3D above -- same
+      // image-only scoping as camera3D, for now (no picker exists yet for
+      // the "video" variant below). Absent/null means none.
+      ambientEffect?: AmbientEffectId | null;
     };
 
 // Both SequenceEntry variants above carry a `cutTransitionInId` -- which

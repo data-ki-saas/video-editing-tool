@@ -49,6 +49,7 @@ import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { IMAGE_TEMPLATE_AXES, IMAGE_TEMPLATE_OPTIONS, buildKenBurnsEffect, type ImageTemplateId } from "@/lib/video/imageTemplates";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect } from "@/lib/video/camera3D";
+import { AMBIENT_EFFECT_OPTIONS, ambientEffectSeed, drawAmbientEffect, type AmbientEffectId } from "@/lib/video/ambientEffects";
 import { CropRectOverlay } from "./CropRectOverlay";
 import {
   DEFAULT_IMAGE_CLIP_DURATION_SECONDS,
@@ -155,6 +156,10 @@ export function CutawayDialog({
     // reopening a cutaway that already has it on, same staging as
     // backgroundRemoval above.
     camera3D?: boolean;
+    // Ambient overlay effect (lib/video/ambientEffects.ts) -- pre-selects
+    // the picker when reopening a cutaway that already has one set, same
+    // staging as camera3D above.
+    ambientEffect?: AmbientEffectId | null;
   } | null;
   /** Non-null when opened via AssetGallery's right-click "Cutaway" on a
    * specific IMAGE asset -- an ADD, not an edit, just pre-selects that
@@ -165,7 +170,7 @@ export function CutawayDialog({
     durationSeconds: number,
     templateIds: string[],
     cropRect: CropRect,
-    options?: { removeBackground?: boolean; camera3D?: boolean }
+    options?: { removeBackground?: boolean; camera3D?: boolean; ambientEffect?: AmbientEffectId | null }
   ) => void;
   onAddVideo: (assetId: string, options?: { removeBackground?: boolean }) => void;
   onClose: () => void;
@@ -184,6 +189,9 @@ export function CutawayDialog({
   // reasoning doesn't apply here (video kind has nothing to attach a Ken
   // Burns dolly to), so this is only ever read/shown in the image panel.
   const [camera3D, setCamera3D] = useState(Boolean(editing?.camera3D));
+  // Ambient overlay effect (ambientEffects.ts) -- same image-only scoping
+  // as camera3D above.
+  const [ambientEffect, setAmbientEffect] = useState<AmbientEffectId | null>(editing?.ambientEffect ?? null);
   const isEditing = Boolean(editing);
 
   const imageAssets = assets.filter((asset) => asset.kind === "image");
@@ -324,12 +332,13 @@ export function CutawayDialog({
       } else {
         ctx!.drawImage(img, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height);
       }
+      drawAmbientEffect(ctx!, ambientEffect, dest.x, dest.y, dest.width, dest.height, elapsed, ambientEffectSeed(selectedAssetId ?? ""));
 
       rafId = requestAnimationFrame(draw);
     }
     rafId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafId);
-  }, [loadedImage, templateIds, durationSeconds, photoCropRect, camera3D]);
+  }, [loadedImage, templateIds, durationSeconds, photoCropRect, camera3D, ambientEffect, selectedAssetId]);
 
   // Toggles one template id, one pick per axis (zoom / horizontal pan /
   // vertical pan) -- picking a second id from the SAME axis as an existing
@@ -661,6 +670,26 @@ export function CutawayDialog({
               />
               Make it 3D
             </label>
+            {/* Ambient overlay effect (ambientEffects.ts) -- a subtle
+                looping overlay composited on top of the motion above,
+                independent of "Make it 3D" (works with either). No per-
+                effect tuning, same "no exposed knobs" reasoning as
+                camera3D. */}
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              Ambience
+              <select
+                value={ambientEffect ?? ""}
+                onChange={(e) => setAmbientEffect((e.target.value || null) as AmbientEffectId | null)}
+                className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+              >
+                <option value="">None</option>
+                {AMBIENT_EFFECT_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id} title={option.description}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="ml-auto flex gap-2">
               <button
                 type="button"
@@ -675,7 +704,7 @@ export function CutawayDialog({
                 onClick={() =>
                   selectedAsset &&
                   photoCropRect &&
-                  onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect, { removeBackground, camera3D })
+                  onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect, { removeBackground, camera3D, ambientEffect })
                 }
                 className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
               >

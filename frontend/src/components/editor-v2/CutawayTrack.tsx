@@ -23,6 +23,7 @@ import type { BackgroundRemovalState, CropRect } from "@/lib/video/video_math";
 import { getImageTemplateOption } from "@/lib/video/imageTemplates";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { getCanvasFillOption, type CanvasFillMode } from "@/lib/video/canvasFillPresets";
+import type { AmbientEffectId } from "@/lib/video/ambientEffects";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 import { MattingProgressBadge } from "./MattingProgressBadge";
 
@@ -53,6 +54,9 @@ export type CutawaySegment =
       // "Make it 3D" (lib/video/camera3D.ts) -- see CutawayDialog.tsx's own
       // toggle.
       camera3D?: boolean;
+      // Ambient overlay effect (lib/video/ambientEffects.ts) -- see
+      // CutawayDialog.tsx's own picker.
+      ambientEffect?: AmbientEffectId | null;
     }
   | {
       kind: "video";

@@ -47,6 +47,7 @@ import { buildKenBurnsEffect } from "./imageTemplates";
 import { getFilterPresetOption, type FilterPresetId } from "./filterPresets";
 import { getCutTransitionOption, type CutTransitionId } from "./cutTransitionPresets";
 import { getCanvasFillOption, type CanvasFillMode } from "./canvasFillPresets";
+import type { AmbientEffectId } from "./ambientEffects";
 
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
@@ -550,7 +551,7 @@ export function applyChangeImageOverlayFraming(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   framing: OverlayFraming,
-  options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect; camera3D?: boolean }
+  options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect; camera3D?: boolean; ambientEffect?: AmbientEffectId | null }
 ): TransformationResult {
   const overlay = selections.overlayImages[overlayIndex];
   if (!overlay) return { label: "Adjusted overlay framing", state: selections };
@@ -565,7 +566,13 @@ export function applyChangeImageOverlayFraming(
         ? { ...overlay.layout, rect: options?.rect ?? overlay.layout.rect }
         : overlay.layout;
   const nextOverlays = [...selections.overlayImages];
-  nextOverlays[overlayIndex] = { ...overlay, framing, layout: nextLayout, camera3D: options?.camera3D ?? overlay.camera3D };
+  nextOverlays[overlayIndex] = {
+    ...overlay,
+    framing,
+    layout: nextLayout,
+    camera3D: options?.camera3D ?? overlay.camera3D,
+    ambientEffect: options?.ambientEffect ?? overlay.ambientEffect,
+  };
   return { label: "Adjusted overlay framing", state: { ...selections, overlayImages: nextOverlays } };
 }
 
@@ -659,7 +666,8 @@ export function applyAddImageSequenceClip(
   cropRect: CropRect,
   startTimeSeconds: number,
   removeBackground?: boolean,
-  camera3D?: boolean
+  camera3D?: boolean,
+  ambientEffect?: AmbientEffectId | null
 ): TransformationResult {
   const newEntry: SequenceEntry = {
     id: crypto.randomUUID(),
@@ -676,6 +684,7 @@ export function applyAddImageSequenceClip(
     // rather than after a real poll loop.
     ...(removeBackground ? { backgroundRemoval: { enabled: true, matteAssetId: null } } : {}),
     camera3D,
+    ambientEffect,
   };
   const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, startTimeSeconds, durationSeconds);
   return {
@@ -791,7 +800,8 @@ export function applyEditImageSequenceClip(
   cropRect: CropRect,
   clipStartSeconds: number,
   removeBackground?: boolean,
-  camera3D?: boolean
+  camera3D?: boolean,
+  ambientEffect?: AmbientEffectId | null
 ): TransformationResult {
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
   const entry = selections.sequenceClips[entryIndex];
@@ -823,6 +833,7 @@ export function applyEditImageSequenceClip(
     // caller) when the toggle is newly turned on this save.
     backgroundRemoval: removeBackground ? { enabled: true, matteAssetId: entry.backgroundRemoval?.matteAssetId ?? null } : null,
     camera3D,
+    ambientEffect,
   };
 
   const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, clipStartSeconds, clampedDuration);
@@ -1451,7 +1462,14 @@ export function applyChangeOverlayFraming(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   framing: OverlayFraming,
-  options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect; camera3D?: boolean }
+  options?: {
+    baseFraming?: OverlayFraming;
+    ratio?: number;
+    audioBalance?: number;
+    rect?: CropRect;
+    camera3D?: boolean;
+    ambientEffect?: AmbientEffectId | null;
+  }
 ): TransformationResult {
   const overlay = selections.videoOverlays[overlayIndex];
   if (!overlay) return { label: "Adjusted overlay framing", state: selections };
@@ -1472,6 +1490,7 @@ export function applyChangeOverlayFraming(
     layout: nextLayout,
     audioBalance: options?.audioBalance ?? overlay.audioBalance,
     camera3D: options?.camera3D ?? overlay.camera3D,
+    ambientEffect: options?.ambientEffect ?? overlay.ambientEffect,
   };
   return { label: "Adjusted overlay framing", state: { ...selections, videoOverlays: nextOverlays } };
 }

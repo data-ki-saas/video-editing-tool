@@ -128,6 +128,7 @@ import {
 import type { FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import type { CanvasFillMode } from "@/lib/video/canvasFillPresets";
+import type { AmbientEffectId } from "@/lib/video/ambientEffects";
 import {
   DEFAULT_EDIT_SELECTIONS,
   type Timeline,
@@ -1541,7 +1542,14 @@ export function ThreePaneEditor({
   // halves and their divider.
   function handleSaveVideoOverlayFraming(
     framing: OverlayFraming,
-    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect; camera3D?: boolean }
+    options?: {
+      baseFraming?: OverlayFraming;
+      ratio?: number;
+      audioBalance?: number;
+      rect?: CropRect;
+      camera3D?: boolean;
+      ambientEffect?: AmbientEffectId | null;
+    }
   ) {
     if (framingDialogOverlayIndex === null) return;
     const { label, state } = applyChangeOverlayFraming(selections, framingDialogOverlayIndex, framing, options);
@@ -1618,7 +1626,7 @@ export function ThreePaneEditor({
 
   function handleSaveImageOverlayFraming(
     framing: OverlayFraming,
-    options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect; camera3D?: boolean }
+    options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect; camera3D?: boolean; ambientEffect?: AmbientEffectId | null }
   ) {
     if (imageFramingDialogOverlayIndex === null) return;
     const { label, state } = applyChangeImageOverlayFraming(selections, imageFramingDialogOverlayIndex, framing, options);
@@ -1720,7 +1728,7 @@ export function ThreePaneEditor({
     durationSeconds: number,
     templateIds: string[],
     cropRect: CropRect,
-    options?: { removeBackground?: boolean; camera3D?: boolean }
+    options?: { removeBackground?: boolean; camera3D?: boolean; ambientEffect?: AmbientEffectId | null }
   ) {
     const replacedAssetId =
       editingCutaway && editingCutaway.kind === "image" && editingCutaway.assetId !== assetId
@@ -1738,7 +1746,8 @@ export function ThreePaneEditor({
             cropRect,
             editingCutaway.startTimeSeconds,
             options?.removeBackground,
-            options?.camera3D
+            options?.camera3D,
+            options?.ambientEffect
           )
         : applyAddImageSequenceClip(
             selections,
@@ -1748,7 +1757,8 @@ export function ThreePaneEditor({
             cropRect,
             videoDurationSeconds,
             options?.removeBackground,
-            options?.camera3D
+            options?.camera3D,
+            options?.ambientEffect
           );
     pushChange(label, state);
     setIsCutawayDialogOpen(false);

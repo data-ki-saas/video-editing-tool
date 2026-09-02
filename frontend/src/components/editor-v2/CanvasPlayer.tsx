@@ -70,6 +70,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { extractPreviewFrames, getVideoDuration, drawImageFlipped, drawImageFlippedMasked } from "@/lib/video/video";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay } from "@/lib/video/camera3D";
+import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { segmentClipFramesApproximate, lumaFramesToAlphaMasks, segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { chromaKeyFramesToAlphaMasks, DEFAULT_CHROMA_KEY_COLOR } from "@/lib/video/chromaKey";
@@ -397,6 +398,10 @@ export const CanvasPlayer = forwardRef<
   // roll direction -- same id-keyed lookup shape as clipFilterById above.
   const clipCamera3DById = new Map(clips.map((clip) => [clip.id, clip.kind === "image" && Boolean(clip.camera3D)]));
   const clipTemplateIdsById = new Map(clips.map((clip) => [clip.id, clip.kind === "image" ? normalizeImageTemplateIds(clip) : []]));
+  // Ambient overlay effect (lib/video/ambientEffects.ts) -- same image-only
+  // scope as clipCamera3DById above, independent of it (works with or
+  // without "Make it 3D" active).
+  const clipAmbientEffectById = new Map(clips.map((clip) => [clip.id, clip.kind === "image" ? (clip.ambientEffect ?? null) : null]));
   // Per-clip decoded preview frames + frame rate, indexed the same as
   // loadedClipsRef below (NOT necessarily the same as the `clips` prop --
   // a clip that failed to load is excluded from all three in lockstep). A
@@ -898,6 +903,27 @@ export const CanvasPlayer = forwardRef<
     }
     ctx.restore();
 
+    // Ambient overlay effect (ambientEffects.ts) -- drawn AFTER ctx.restore()
+    // (outside the flip transform, same reasoning as every other overlay
+    // below) so it's never mirrored along with the footage. `baseRect` is
+    // whatever this frame's base clip actually filled (its own full frame,
+    // or its own half of a Split-Screen layout) regardless of which branch
+    // above drew it -- independent of camera3D/canvasFillMode/background
+    // removal. `position.localSeconds` is time since THIS clip's own start,
+    // so the effect's own loop is self-contained per clip.
+    if (baseRect && currentEntryId && clipAmbientEffectById.get(currentEntryId)) {
+      drawAmbientEffect(
+        ctx,
+        clipAmbientEffectById.get(currentEntryId),
+        baseRect.x * canvas.width,
+        baseRect.y * canvas.height,
+        baseRect.width * canvas.width,
+        baseRect.height * canvas.height,
+        position.localSeconds,
+        ambientEffectSeed(currentEntryId)
+      );
+    }
+
     // The incoming side of a cut-transition blend -- drawn as its own
     // independent save/restore (not nested inside the outgoing clip's own
     // flip transform above) since the incoming clip can have a different
@@ -1004,6 +1030,12 @@ export const CanvasPlayer = forwardRef<
           );
         }
         ctx.filter = "none";
+        if (activeExclusiveImageOverlay.ambientEffect) {
+          drawAmbientEffect(
+            ctx, activeExclusiveImageOverlay.ambientEffect, destX, destY, destWidth, destHeight,
+            elapsedSeconds - activeExclusiveImageOverlay.startTimeSeconds, ambientEffectSeed(activeExclusiveImageOverlay.startTimeSeconds)
+          );
+        }
       }
     } else if (activeExclusiveVideoOverlay && overlayRect) {
       const frames = videoOverlayFramesByAssetIdRef.current[activeExclusiveVideoOverlay.assetId];
@@ -1061,6 +1093,12 @@ export const CanvasPlayer = forwardRef<
           );
         }
         ctx.filter = "none";
+        if (activeExclusiveVideoOverlay.ambientEffect) {
+          drawAmbientEffect(
+            ctx, activeExclusiveVideoOverlay.ambientEffect, destX, destY, destWidth, destHeight,
+            elapsedSeconds - activeExclusiveVideoOverlay.startTimeSeconds, ambientEffectSeed(activeExclusiveVideoOverlay.startTimeSeconds)
+          );
+        }
         if (isVideoOverlayMattePending(activeExclusiveVideoOverlay.backgroundRemoval, overlayMattes)) {
           drawBackgroundRemovalSpinnerBadge(ctx, destX, destY, destWidth, destHeight, elapsedSeconds);
         }
@@ -1123,6 +1161,9 @@ export const CanvasPlayer = forwardRef<
         drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
       }
       ctx.filter = "none";
+      if (pip.ambientEffect) {
+        drawAmbientEffect(ctx, pip.ambientEffect, destX, destY, destWidth, destHeight, elapsedSeconds - pip.startTimeSeconds, ambientEffectSeed(pip.startTimeSeconds));
+      }
       if (isVideoOverlayMattePending(pip.backgroundRemoval, pipMattes)) {
         drawBackgroundRemovalSpinnerBadge(ctx, destX, destY, destWidth, destHeight, elapsedSeconds);
       }
@@ -1152,6 +1193,9 @@ export const CanvasPlayer = forwardRef<
         drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
       }
       ctx.filter = "none";
+      if (pip.ambientEffect) {
+        drawAmbientEffect(ctx, pip.ambientEffect, destX, destY, destWidth, destHeight, elapsedSeconds - pip.startTimeSeconds, ambientEffectSeed(pip.startTimeSeconds));
+      }
     }
 
     // Text overlays draw last, always on top of every overlay above.

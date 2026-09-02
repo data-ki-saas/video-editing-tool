@@ -699,6 +699,7 @@ export function ActionArea({
                   cropRect: editingCutaway.cropRect,
                   backgroundRemoval: editingCutaway.backgroundRemoval,
                   camera3D: editingCutaway.camera3D,
+                  ambientEffect: editingCutaway.ambientEffect,
                 }
               : null
           }

@@ -51,6 +51,7 @@ import { FlipHorizontalIcon, FlipVerticalIcon } from "@/components/icons/UIIcons
 import { LAYOUT_GRADIENT_TO_CLASSNAMES } from "./VideoOverlayTrack";
 import { VolumeFader } from "./VolumeFader";
 import { DEFAULT_PIP_RECT } from "@/lib/video/transformations";
+import { AMBIENT_EFFECT_OPTIONS, type AmbientEffectId } from "@/lib/video/ambientEffects";
 
 // Keeps either half from being dragged down to a sliver too thin to grab
 // or usefully see.
@@ -379,7 +380,14 @@ export function VideoOverlayFramingDialog({
   outputAspectRatio: number | null;
   onSave: (
     framing: OverlayFraming,
-    options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect; camera3D?: boolean }
+    options?: {
+      baseFraming?: OverlayFraming;
+      ratio?: number;
+      audioBalance?: number;
+      rect?: CropRect;
+      camera3D?: boolean;
+      ambientEffect?: AmbientEffectId | null;
+    }
   ) => void;
   onClose: () => void;
   onDelete: () => void;
@@ -409,6 +417,9 @@ export function VideoOverlayFramingDialog({
   // (an overlay has no keyframed pan/zoom timeline of its own -- see
   // computeCamera3DPoseForOverlay's own doc comment).
   const [camera3D, setCamera3D] = useState(Boolean(overlay.camera3D));
+  // Ambient overlay effect (ambientEffects.ts) -- same picker as
+  // ImageOverlayFramingDialog's own.
+  const [ambientEffect, setAmbientEffect] = useState<AmbientEffectId | null>(overlay.ambientEffect ?? null);
   // Which half the right-hand actions apply to -- only meaningful (and only
   // ever shown) for Split Screen, where there genuinely are two frameable
   // halves; Full-Screen/Picture-in-Picture only ever have the overlay's own
@@ -426,6 +437,7 @@ export function VideoOverlayFramingDialog({
     setPipRect(overlay.layout.type === "picture-in-picture" ? overlay.layout.rect : DEFAULT_PIP_RECT);
     setAudioBalance(overlay.audioBalance);
     setCamera3D(Boolean(overlay.camera3D));
+    setAmbientEffect(overlay.ambientEffect ?? null);
     setSelectedSide("overlay");
   }, [overlay]);
 
@@ -442,6 +454,7 @@ export function VideoOverlayFramingDialog({
       audioBalance,
       rect: isPictureInPicture ? pipRect : undefined,
       camera3D,
+      ambientEffect,
     });
   }
 
@@ -626,6 +639,21 @@ export function VideoOverlayFramingDialog({
                 className="h-3.5 w-3.5"
               />
               Make it 3D
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              Ambience
+              <select
+                value={ambientEffect ?? ""}
+                onChange={(e) => setAmbientEffect((e.target.value || null) as AmbientEffectId | null)}
+                className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+              >
+                <option value="">None</option>
+                {AMBIENT_EFFECT_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id} title={option.description}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
         </div>
