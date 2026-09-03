@@ -55,6 +55,25 @@ export interface Camera3DPose {
 const MAX_PAN_X_FRACTION = 0.06;
 const MAX_PAN_Y_FRACTION = 0.04;
 const MAX_PUSH_FRACTION = 0.13;
+// A plain (never-manually-epicentered) Ken Burns clip has its ZoomEffect's
+// epicenterTimeSeconds === endTimeSeconds (buildKenBurnsEffect always seeds
+// it that way -- most cutaways never touch ZoomEffectsTrack's epicenter
+// drag at all), which collapses computeCamera3DPoseForZoomEffect's "ease
+// back OUT of the epicenter" half to zero duration: the 3D pose then keeps
+// easing further INTO its push/tilt/pan every frame right up to the clip's
+// own last one, never settling back to neutral before the cut. Followed by
+// a flat (non-3D) clip that reads fine -- the photo just changes -- but
+// followed by ANOTHER "Make it 3D" clip, which starts its own dolly ramping
+// up again from neutral with no settle in between, the two reads as one
+// continuous camera move carrying straight across the cut rather than two
+// independent shots (reported as "the 3D effect keeps playing over the next
+// cutaway"). Reserving at least this fraction of the clip's own duration as
+// a 3D-only ease-out window -- independent of the ACTUAL authored
+// epicenterTimeSeconds, which keeps driving the 2D crop rect unchanged --
+// guarantees a real settle-back-to-neutral beat before every cut, even for
+// this (common) default-epicenter case, while leaving an already-dragged
+// epicenter (already < endTimeSeconds by more than this) untouched.
+const MIN_EASE_OUT_FRACTION = 0.25;
 // Constant throughout the move (mirrors test/test.html) -- a moderate,
 // fixed FOV rather than a wide sweep is what keeps the plane close to
 // face-on to the camera, avoiding the grazing-angle blur described above.
@@ -97,16 +116,27 @@ function directionFromTemplateIds(templateIds: string[]): { tiltSign: number; ro
  * timeline of its own. Returns the neutral (no-op) pose when `timeSeconds`
  * is outside the effect's own range -- callers should only invoke this
  * while the effect is active (same precondition computeEffectiveCropRect's
- * own callers already satisfy via findActiveZoomEffectIndex). */
+ * own callers already satisfy via findActiveZoomEffectIndex).
+ *
+ * The 3D pose's own epicenter is clamped to leave at least
+ * MIN_EASE_OUT_FRACTION of the clip for the ease-OUT half, even when the
+ * REAL authored epicenterTimeSeconds sits right at (or very close to)
+ * endTimeSeconds -- see that constant's own comment for why, otherwise, the
+ * 3D dolly never settles back to neutral before the cut. The 2D crop rect
+ * this rides is untouched (still reads the real epicenterTimeSeconds via
+ * computeEffectiveCropRect directly) -- only this superimposed camera
+ * push/pan/tilt gets the synthetic ease-out window. */
 export function computeCamera3DPoseForZoomEffect(zoomEffect: ZoomEffect, templateIds: string[], timeSeconds: number): Camera3DPose {
   const { tiltSign, rollSign } = directionFromTemplateIds(templateIds);
-  if (timeSeconds <= zoomEffect.epicenterTimeSeconds) {
-    const duration = zoomEffect.epicenterTimeSeconds - zoomEffect.startTimeSeconds;
+  const clipDuration = zoomEffect.endTimeSeconds - zoomEffect.startTimeSeconds;
+  const poseEpicenterTimeSeconds = Math.min(zoomEffect.epicenterTimeSeconds, zoomEffect.endTimeSeconds - MIN_EASE_OUT_FRACTION * clipDuration);
+  if (timeSeconds <= poseEpicenterTimeSeconds) {
+    const duration = poseEpicenterTimeSeconds - zoomEffect.startTimeSeconds;
     const t = duration > 0 ? (timeSeconds - zoomEffect.startTimeSeconds) / duration : 1;
     return poseAtProgress(Math.min(Math.max(t, 0), 1), tiltSign, rollSign);
   }
-  const duration = zoomEffect.endTimeSeconds - zoomEffect.epicenterTimeSeconds;
-  const t = duration > 0 ? (timeSeconds - zoomEffect.epicenterTimeSeconds) / duration : 1;
+  const duration = zoomEffect.endTimeSeconds - poseEpicenterTimeSeconds;
+  const t = duration > 0 ? (timeSeconds - poseEpicenterTimeSeconds) / duration : 1;
   return poseAtProgress(1 - Math.min(Math.max(t, 0), 1), tiltSign, rollSign);
 }
 
