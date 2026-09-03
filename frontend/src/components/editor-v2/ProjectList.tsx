@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { listProjects, deleteProject, resetProject, renameProject, type Project } from "@/lib/projects";
+import { clearLastProjectId } from "@/lib/lastProject";
 import { InlineEditableText } from "@/components/InlineEditableText";
 import { TrashIcon, ResetIcon } from "@/components/icons/UIIcons";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
@@ -38,8 +39,14 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
       setProjects((prev) => prev?.filter((p) => p.id !== project.id) ?? prev);
       // The deleted reel's own editor page is currently open under us --
       // bounce to bare /dashboard, which resumes into whichever reel is
-      // next most recent (see lib/lastProject.ts).
-      if (project.id === activeProjectId) router.push("/dashboard");
+      // next most recent (see lib/lastProject.ts). Clear the cached id
+      // FIRST: it still points at this now-deleted reel, so bare /dashboard
+      // would otherwise read it back and redirect straight into the dead
+      // reel's URL again.
+      if (project.id === activeProjectId) {
+        clearLastProjectId();
+        router.push("/dashboard");
+      }
     } catch (err) {
       window.alert(err instanceof Error ? err.message : "Failed to delete this reel");
     }

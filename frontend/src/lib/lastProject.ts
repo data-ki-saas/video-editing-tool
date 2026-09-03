@@ -16,3 +16,11 @@ export function setLastProjectId(projectId: string): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(STORAGE_KEY, projectId);
 }
+
+/** Clears the cached id -- use this when the reel it points at is gone
+ * (deleted), so bare /dashboard falls through to listing projects instead
+ * of bouncing straight back to a dead reel's URL. */
+export function clearLastProjectId(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(STORAGE_KEY);
+}

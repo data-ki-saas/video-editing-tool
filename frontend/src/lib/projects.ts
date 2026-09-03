@@ -270,10 +270,27 @@ export async function listProjects(): Promise<Project[]> {
   return data;
 }
 
+/** Thrown by getProject when no row matches `projectId` (deleted, or never
+ * existed) -- distinguishes that case from a real fetch failure so callers
+ * can recover instead of just displaying the error. */
+export class ProjectNotFoundError extends Error {
+  constructor() {
+    super("This reel no longer exists");
+    this.name = "ProjectNotFoundError";
+  }
+}
+
 export async function getProject(projectId: string): Promise<Project> {
   const supabase = createClient();
   const { data, error } = await supabase.from("projects").select("*").eq("id", projectId).single();
-  if (error) throw new Error(error.message);
+  if (error) {
+    // PGRST116 = "0 or more than 1 rows returned" for .single() -- since
+    // `id` is a primary key, an exact-match .eq() can only ever return 0 or
+    // 1 rows, so this code here always means "not found" (deleted, or a
+    // stale/bookmarked/foreign id), never a genuine multi-row ambiguity.
+    if (error.code === "PGRST116") throw new ProjectNotFoundError();
+    throw new Error(error.message);
+  }
   return data;
 }
 

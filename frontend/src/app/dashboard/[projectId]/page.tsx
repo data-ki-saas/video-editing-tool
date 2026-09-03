@@ -1,8 +1,9 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import { getProject, type Project } from "@/lib/projects";
-import { setLastProjectId } from "@/lib/lastProject";
+import { useRouter } from "next/navigation";
+import { getProject, ProjectNotFoundError, type Project } from "@/lib/projects";
+import { getLastProjectId, setLastProjectId, clearLastProjectId } from "@/lib/lastProject";
 import { ThreePaneEditor } from "@/components/editor-v2/ThreePaneEditor";
 import { MobileEditor } from "@/components/editor-mobile/MobileEditor";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -14,6 +15,7 @@ import { ReelLoader } from "@/components/ReelLoader";
 // row of vertical space the editor could use instead.
 export default function ReelEditorPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = use(params);
+  const router = useRouter();
 
   const [project, setProject] = useState<Project | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,8 +33,20 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
         // is opened -- see lib/lastProject.ts.
         setLastProjectId(loaded.id);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load this reel"));
-  }, [projectId]);
+      .catch((err) => {
+        if (err instanceof ProjectNotFoundError) {
+          // This reel is gone (deleted from another tab/device, a stale
+          // bookmark, or a dead back-button entry) -- bounce to bare
+          // /dashboard instead of getting stuck here. Only clear the cached
+          // last-project-id if it's the one that just failed, so a
+          // still-valid pointer to some OTHER reel isn't wiped out.
+          if (getLastProjectId() === projectId) clearLastProjectId();
+          router.replace("/dashboard");
+          return;
+        }
+        setError(err instanceof Error ? err.message : "Failed to load this reel");
+      });
+  }, [projectId, router]);
 
   if (error) {
     return <p className="p-6 text-sm text-red-600">Couldn&apos;t load this reel: {error}</p>;

@@ -1,7 +1,8 @@
 /**
  * A small library of subtle, purely time-driven ambient overlay effects --
- * "Light Sweep", "Sparkle", "Leaves" -- that composite on top of whatever a
- * clip already drew. Deliberately pipeline-agnostic: both the plain 2D Ken
+ * "Light Sweep", "Sparkle", "Leaves", "Gentle Rain", "Misty Cloud", "Sun
+ * Rays", "Crackers" -- that composite on top of whatever a clip already
+ * drew. Deliberately pipeline-agnostic: both the plain 2D Ken
  * Burns path and the "Make it 3D" path (camera3D.ts) converge on the same
  * 2D `ctx` before this runs, so one effect library works identically either
  * way -- no separate 3D-specific implementation needed, no three.js here.
