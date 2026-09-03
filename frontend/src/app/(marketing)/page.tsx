@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ReelIcon } from "@/components/IconButton";
+import { HeroLanguageCarousel } from "@/components/marketing/HeroLanguageCarousel";
 
 const SITE_URL = "https://video-editing-tool-gamma.vercel.app";
 
@@ -128,6 +129,8 @@ export default function Home() {
               Sign in
             </Link>
           </div>
+
+          <HeroLanguageCarousel />
 
           <div className="grid w-full max-w-xl grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="rounded-lg border border-border bg-accent/5 p-4 text-left">
