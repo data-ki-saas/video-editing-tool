@@ -252,6 +252,27 @@ export class Camera3DRenderer {
     if (this.scratchCanvas.width !== sWidth || this.scratchCanvas.height !== sHeight) {
       this.scratchCanvas.width = sWidth;
       this.scratchCanvas.height = sHeight;
+      // A resize needs a brand-new CanvasTexture, not just needsUpdate on the
+      // existing one -- three.js keeps its underlying GPU texture allocated
+      // at whatever size it first saw and reuses a texSubImage2D-style
+      // partial upload for a same-size CanvasTexture, which silently fails
+      // (GL_INVALID_VALUE, "offset overflows texture dimensions") once the
+      // source's pixel size actually changed, leaving the OLD image's pixels
+      // on screen -- reproduced directly against three.js: draw A, draw B
+      // (same size, updates fine), draw C (different size, GPU stall +
+      // that GL error, canvas still shows B). This is exactly why cycling
+      // through several "Make it 3D" cutaways of differing resolutions
+      // (real-world photos, e.g. from different phones/cameras) froze on
+      // the first one's photo while the pose (pan/tilt/push) kept animating
+      // correctly -- pose comes from a separate, per-frame computation, only
+      // the texture was stuck. Disposing and recreating the texture forces
+      // three.js to allocate fresh GPU storage sized for the new source.
+      this.texture.dispose();
+      this.texture = new THREE.CanvasTexture(this.scratchCanvas);
+      this.texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+      const material = this.mesh.material as THREE.MeshBasicMaterial;
+      material.map = this.texture;
+      material.needsUpdate = true;
     }
     this.scratchCtx.clearRect(0, 0, sWidth, sHeight);
     drawImageFlipped(this.scratchCtx, source, sx, sy, sWidth, sHeight, 0, 0, sWidth, sHeight, flipHorizontal, flipVertical);
