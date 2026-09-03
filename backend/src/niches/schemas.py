@@ -18,6 +18,9 @@ class MediaSlot(BaseModel):
     required: bool = False
 
 
+NicheLanguage = Literal["en", "hi", "mr", "pa", "bn", "ta", "or"]
+
+
 class NicheConfig(BaseModel):
     id: str
     niche_key: str
@@ -29,7 +32,9 @@ class NicheConfig(BaseModel):
     cta_template: str | None = None
     hashtag_seed: list[str] = []
     created_at: str
+    language: str = "en"
 
 
 class GenerateNicheRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    language: NicheLanguage = "en"

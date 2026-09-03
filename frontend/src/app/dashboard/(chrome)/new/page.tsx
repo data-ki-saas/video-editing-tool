@@ -15,7 +15,7 @@ import {
 } from "@/lib/api";
 import { pollAvatarGeneration } from "@/lib/avatarGeneration";
 import { downscaleImageIfNeeded } from "@/lib/image";
-import { getOrCreateNiche, listNiches, type MediaSlot, type NicheConfig } from "@/lib/niches";
+import { getOrCreateNiche, listNiches, localeForNicheLanguage, NICHE_LANGUAGES, type MediaSlot, type NicheConfig } from "@/lib/niches";
 import { createProject, renameProject, saveTimeline, updateProjectAttributes, type Project } from "@/lib/projects";
 import { interpolateScript } from "@/lib/timeline/autoAssemble";
 import { autoAssembleFromWizard, type WizardSlotAsset } from "@/lib/timeline/autoAssembleFromWizard";
@@ -25,6 +25,7 @@ import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { TEXT_TEMPLATE_OPTIONS } from "@/lib/video/textTemplates";
 import { DEFAULT_TTS_OVERLAY_RECT, type TtsOverlay } from "@/lib/video/video_math";
 import { WizardProgress, type WizardStep } from "@/components/wizard/WizardProgress";
+import { TransliterateInput, TransliterateTextarea } from "@/components/TransliterateField";
 
 const inputClass = "rounded-md border border-border bg-surface px-3 py-2 text-sm text-foreground";
 const primaryButtonClass =
@@ -79,13 +80,19 @@ export default function NewReelPage() {
 
   // Niche step
   const [nicheName, setNicheName] = useState("");
+  // Which language the LLM should write script_template/hooks/cta_template
+  // in (see backend/src/niches/service.py's _LANGUAGE_INFO) -- also drives
+  // which locale every downstream TransliterateInput/Textarea targets and
+  // which TTS voices the Review step shows.
+  const [nicheLanguage, setNicheLanguage] = useState("en");
   const [niche, setNiche] = useState<NicheConfig | null>(null);
   const [nicheError, setNicheError] = useState<string | null>(null);
   const [loadingNiche, setLoadingNiche] = useState(false);
-  // Niches someone has already generated (and are therefore cached, so
-  // picking one is instant and can't hit an LLM-generation failure) --
-  // fetched once on mount, shown as a dropdown alongside the free-text
-  // input rather than replacing it (any niche can still be typed fresh).
+  // Niches someone has already generated in the selected language (and are
+  // therefore cached, so picking one is instant and can't hit an
+  // LLM-generation failure) -- re-fetched whenever nicheLanguage changes,
+  // shown as a dropdown alongside the free-text input rather than replacing
+  // it (any niche can still be typed fresh).
   const [existingNiches, setExistingNiches] = useState<NicheConfig[]>([]);
   // "I'll do it myself" bypass -- a separate flag from loadingNiche so the
   // two buttons' busy states don't get confused with each other while one
@@ -93,13 +100,13 @@ export default function NewReelPage() {
   const [creatingBlank, setCreatingBlank] = useState(false);
 
   useEffect(() => {
-    listNiches()
+    listNiches(nicheLanguage)
       .then(setExistingNiches)
       .catch(() => {
         // Non-fatal -- the dropdown just falls back to suggestions-only;
         // the free-text input still works either way.
       });
-  }, []);
+  }, [nicheLanguage]);
 
   // A draft project is created as soon as the niche resolves, so every
   // subsequent step (starting with Media) can upload straight into it via
@@ -214,6 +221,17 @@ export default function NewReelPage() {
     return interpolateScript(niche.script_template, currentFieldValues());
   }
 
+  // Narrows the voice picker to the niche's script language (e.g. only
+  // hi-IN voices when nicheLanguage is "hi") -- falls back to the full
+  // catalog if that ever yields nothing, e.g. a language without a matching
+  // curated voice yet, so the picker is never left empty.
+  const narrationVoicesForLanguage = (() => {
+    const localePrefix = NICHE_LANGUAGES.find((l) => l.code === nicheLanguage)?.voiceLocalePrefix;
+    if (!localePrefix) return narrationVoices;
+    const filtered = narrationVoices.filter((voice) => voice.locale.toLowerCase().startsWith(localePrefix));
+    return filtered.length > 0 ? filtered : narrationVoices;
+  })();
+
   // Fetches the voice catalog once the Review step is reached -- same
   // fetch-on-mount pattern as TtsOverlayDialog, just triggered by step
   // instead of dialog-open, and skipped entirely for a niche with no
@@ -245,12 +263,13 @@ export default function NewReelPage() {
     setLoadingNiche(true);
     setNicheError(null);
     try {
-      // First time any given niche is requested, the backend's configured
-      // LLM provider generates its field/media-slot/hook schema -- can take
-      // a few seconds; instant on every call after that (including when
-      // picked from the "Already set up" dropdown below, which only ever
-      // lists niches that succeeded before).
-      const config = await getOrCreateNiche(trimmed);
+      // First time any given niche+language pair is requested, the
+      // backend's configured LLM provider generates its field/media-slot/
+      // hook schema -- can take a few seconds; instant on every call after
+      // that (including when picked from the "Already set up" dropdown
+      // below, which only ever lists niches that succeeded before, for the
+      // currently selected language).
+      const config = await getOrCreateNiche(trimmed, nicheLanguage);
       const draft = await createProject({
         name: `New ${config.display_name} Reel`,
         niche: config.niche_key,
@@ -468,6 +487,27 @@ export default function NewReelPage() {
             shop, hardware store — anything works)
           </p>
 
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted">Script language</span>
+            <div className="flex flex-wrap gap-1.5">
+              {NICHE_LANGUAGES.map((lang) => (
+                <button
+                  key={lang.code}
+                  type="button"
+                  onClick={() => setNicheLanguage(lang.code)}
+                  disabled={loadingNiche || creatingBlank}
+                  className={`rounded-full border px-3 py-1 text-sm disabled:opacity-50 ${
+                    nicheLanguage === lang.code
+                      ? "border-accent bg-accent/10 text-foreground"
+                      : "border-border text-muted hover:text-foreground"
+                  }`}
+                >
+                  {lang.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {(existingNiches.length > 0 || SUGGESTED_NICHES.length > 0) && (
             <select
               value=""
@@ -634,21 +674,33 @@ export default function NewReelPage() {
 
           {niche.fields.map((field) =>
             field.type === "textarea" ? (
-              <textarea
+              <TransliterateTextarea
                 key={field.key}
                 placeholder={field.label}
                 value={values[field.key] ?? ""}
-                onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                onChange={(next) => setValues((prev) => ({ ...prev, [field.key]: next }))}
+                locale={localeForNicheLanguage(nicheLanguage)}
                 className={`${inputClass} min-h-20`}
                 required={field.required}
               />
-            ) : (
+            ) : field.type === "number" ? (
               <input
                 key={field.key}
-                type={field.type === "number" ? "number" : "text"}
+                type="number"
                 placeholder={field.label}
                 value={values[field.key] ?? ""}
                 onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                className={inputClass}
+                required={field.required}
+              />
+            ) : (
+              <TransliterateInput
+                key={field.key}
+                type="text"
+                placeholder={field.label}
+                value={values[field.key] ?? ""}
+                onChange={(next) => setValues((prev) => ({ ...prev, [field.key]: next }))}
+                locale={localeForNicheLanguage(nicheLanguage)}
                 className={inputClass}
                 required={field.required}
               />
@@ -709,13 +761,14 @@ export default function NewReelPage() {
               />
               <span className="flex-1">
                 <span className="mb-1 block text-foreground">Write your own</span>
-                <input
+                <TransliterateInput
                   placeholder="Your own opening line"
                   value={customHook}
-                  onChange={(e) => {
-                    setCustomHook(e.target.value);
+                  onChange={(next) => {
+                    setCustomHook(next);
                     setSelectedHook("custom");
                   }}
+                  locale={localeForNicheLanguage(nicheLanguage)}
                   className={`${inputClass} w-full`}
                 />
               </span>
@@ -726,11 +779,12 @@ export default function NewReelPage() {
             <p className="mb-2 text-sm font-medium text-foreground">Top 3 highlights (optional)</p>
             <div className="flex flex-col gap-2">
               {([0, 1, 2] as const).map((index) => (
-                <input
+                <TransliterateInput
                   key={index}
                   placeholder={`Highlight #${index + 1}`}
                   value={highlights[index]}
-                  onChange={(e) => handleHighlightChange(index, e.target.value)}
+                  onChange={(next) => handleHighlightChange(index, next)}
+                  locale={localeForNicheLanguage(nicheLanguage)}
                   className={inputClass}
                 />
               ))}
@@ -855,7 +909,7 @@ export default function NewReelPage() {
                 className={inputClass}
               >
                 <option value="">No voiceover</option>
-                {narrationVoices.map((voice) => (
+                {narrationVoicesForLanguage.map((voice) => (
                   <option key={voice.id} value={voice.id}>
                     {voice.label} ({voice.locale})
                   </option>

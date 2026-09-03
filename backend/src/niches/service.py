@@ -61,6 +61,34 @@ SYSTEM_PROMPT = (
     "No markdown fences, no commentary."
 )
 
+# language code -> (English name, script name), used to steer the LLM's
+# spoken/read output into a specific Indian language + script. Adding
+# another Indian language later is just one more entry here (plus the
+# frontend's mirroring LANGUAGE_SCRIPTS table in lib/transliteration.ts and
+# tts/providers/edge_provider.py's voice catalog).
+_LANGUAGE_INFO: dict[str, tuple[str, str]] = {
+    "hi": ("Hindi", "Devanagari"),
+    "mr": ("Marathi", "Devanagari"),
+    "pa": ("Punjabi", "Gurmukhi"),
+    "bn": ("Bengali", "Bengali"),
+    "ta": ("Tamil", "Tamil"),
+    "or": ("Odia", "Odia"),
+}
+
+
+def _system_prompt(language: str) -> str:
+    info = _LANGUAGE_INFO.get(language)
+    if info is None:
+        return SYSTEM_PROMPT
+    name, script = info
+    return (
+        SYSTEM_PROMPT
+        + f"\nWrite script_template, hooks, and cta_template entirely in {name} "
+        f"using {script} script -- these are read aloud/shown to a {name}-speaking "
+        "viewer. Keep display_name, fields[].label, and media_slots[].label/hint "
+        "in English (they're wizard UI chrome, not viewer-facing script)."
+    )
+
 
 def _to_schema(record: repository.NicheConfigRecord) -> NicheConfig:
     return NicheConfig(
@@ -74,6 +102,7 @@ def _to_schema(record: repository.NicheConfigRecord) -> NicheConfig:
         cta_template=record.cta_template,
         hashtag_seed=record.hashtag_seed,
         created_at=record.created_at,
+        language=record.language,
     )
 
 
@@ -112,15 +141,16 @@ def _parse_string_list(raw: object) -> list[str]:
     return [entry.strip() for entry in raw if isinstance(entry, str) and entry.strip()]
 
 
-async def get_or_create_niche(name: str, user_id: str, provider: LLMProvider) -> NicheConfig:
-    """Looks up a cached niche config by its normalized key, or asks the
-    configured LLM provider to design one (fields + a voiceover script
-    template) and persists it for every future caller. The generated schema
+async def get_or_create_niche(name: str, user_id: str, provider: LLMProvider, language: str = "en") -> NicheConfig:
+    """Looks up a cached niche config by its normalized key + language, or
+    asks the configured LLM provider to design one (fields + a voiceover
+    script template, in the requested language) and persists it for every
+    future caller asking for that same niche+language. The generated schema
     is a UI scaffold, not an enforced one -- a project's `attributes` stays
     a freeform jsonb column regardless of what fields were suggested here."""
     niche_key = normalize_niche_key(name)
 
-    existing = repository.get_niche_by_key(niche_key)
+    existing = repository.get_niche_by_key(niche_key, language)
     if existing is not None:
         return _to_schema(existing)
 
@@ -133,7 +163,9 @@ async def get_or_create_niche(name: str, user_id: str, provider: LLMProvider) ->
         # json.loads() below just like a real generation error would -- kept
         # generous rather than tuned tight, since a bigger cap costs nothing
         # when the model naturally stops earlier for a simpler niche.
-        completion = await provider.complete(f"Business niche: {name.strip()}", system=SYSTEM_PROMPT, max_tokens=1800)
+        completion = await provider.complete(
+            f"Business niche: {name.strip()}", system=_system_prompt(language), max_tokens=1800
+        )
         response = completion.text
         parsed = json.loads(response)
     except Exception as exc:
@@ -187,12 +219,13 @@ async def get_or_create_niche(name: str, user_id: str, provider: LLMProvider) ->
             hooks=hooks,
             cta_template=cta_template if isinstance(cta_template, str) else None,
             hashtag_seed=hashtag_seed,
+            language=language,
         )
     except Exception:
-        # Another request may have created the same niche_key concurrently
-        # (unique constraint) -- fall back to whatever's there now rather
-        # than erroring on a benign race.
-        existing = repository.get_niche_by_key(niche_key)
+        # Another request may have created the same niche_key+language
+        # concurrently (unique constraint) -- fall back to whatever's there
+        # now rather than erroring on a benign race.
+        existing = repository.get_niche_by_key(niche_key, language)
         if existing is None:
             raise
         record = existing
@@ -200,5 +233,5 @@ async def get_or_create_niche(name: str, user_id: str, provider: LLMProvider) ->
     return _to_schema(record)
 
 
-def list_niches() -> list[NicheConfig]:
-    return [_to_schema(record) for record in repository.list_niches()]
+def list_niches(language: str | None = None) -> list[NicheConfig]:
+    return [_to_schema(record) for record in repository.list_niches(language)]

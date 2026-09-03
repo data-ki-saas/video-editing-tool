@@ -33,6 +33,7 @@ import {
 import { pollAvatarGeneration } from "@/lib/avatarGeneration";
 import { usePermissions } from "@/lib/usePermissions";
 import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
+import { TransliterateTextarea } from "@/components/TransliterateField";
 
 export function TtsAvatarDialog({
   projectId,
@@ -168,9 +169,10 @@ export function TtsAvatarDialog({
             squeezing this below its own 3-row height. The avatar section
             below is the one part that should actually flex/scroll instead
             of this. */}
-        <textarea
+        <TransliterateTextarea
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={setText}
+          locale={voices.find((option) => option.id === voice)?.locale ?? null}
           placeholder="Type what the avatar should say…"
           rows={3}
           className="w-full shrink-0 resize-none rounded-md border border-border bg-background px-2 py-1 text-sm"

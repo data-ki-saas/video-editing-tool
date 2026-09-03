@@ -24,14 +24,23 @@ class NicheConfigRecord:
     hooks: list[str]
     cta_template: str | None
     hashtag_seed: list[str]
+    language: str
 
 
 def _strip_internal(row: dict) -> dict:
     return {k: v for k, v in row.items() if k != "created_by"}
 
 
-def get_niche_by_key(niche_key: str) -> NicheConfigRecord | None:
-    result = get_supabase_client().table(_TABLE).select("*").eq("niche_key", niche_key).limit(1).execute()
+def get_niche_by_key(niche_key: str, language: str) -> NicheConfigRecord | None:
+    result = (
+        get_supabase_client()
+        .table(_TABLE)
+        .select("*")
+        .eq("niche_key", niche_key)
+        .eq("language", language)
+        .limit(1)
+        .execute()
+    )
     if not result.data:
         return None
     return NicheConfigRecord(**_strip_internal(result.data[0]))
@@ -48,6 +57,7 @@ def create_niche(
     hooks: list[str],
     cta_template: str | None,
     hashtag_seed: list[str],
+    language: str,
 ) -> NicheConfigRecord:
     payload = {
         "id": str(uuid.uuid4()),
@@ -60,11 +70,15 @@ def create_niche(
         "hooks": hooks,
         "cta_template": cta_template,
         "hashtag_seed": hashtag_seed,
+        "language": language,
     }
     result = get_supabase_client().table(_TABLE).insert(payload).execute()
     return NicheConfigRecord(**_strip_internal(result.data[0]))
 
 
-def list_niches() -> list[NicheConfigRecord]:
-    result = get_supabase_client().table(_TABLE).select("*").order("display_name").execute()
+def list_niches(language: str | None = None) -> list[NicheConfigRecord]:
+    query = get_supabase_client().table(_TABLE).select("*")
+    if language is not None:
+        query = query.eq("language", language)
+    result = query.order("display_name").execute()
     return [NicheConfigRecord(**_strip_internal(row)) for row in result.data]

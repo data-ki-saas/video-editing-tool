@@ -46,6 +46,7 @@ import { FeatureLockedError, listTtsVoices, synthesizeTts, type TtsVoiceOption }
 import { getAudioDuration } from "@/lib/video/audio";
 import { usePermissions } from "@/lib/usePermissions";
 import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
+import { TransliterateTextarea } from "@/components/TransliterateField";
 
 const PREVIEW_PROGRESS = 0.6;
 const DEFAULT_PREVIEW_TEXT = "Your narration here";
@@ -314,9 +315,10 @@ export function TtsOverlayDialog({
 
           {/* Right half: script + voice + mode + template gallery. */}
           <div className="flex min-h-0 flex-1 flex-col sm:w-1/2">
-            <textarea
+            <TransliterateTextarea
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={setText}
+              locale={voices.find((option) => option.id === voice)?.locale ?? null}
               placeholder="Type what the narrator should say…"
               rows={3}
               className="mb-2 w-full resize-none rounded-md border border-border bg-background px-2 py-1 text-sm"

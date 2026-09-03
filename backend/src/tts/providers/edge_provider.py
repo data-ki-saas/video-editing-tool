@@ -2,26 +2,41 @@ import edge_tts
 
 from src.tts.providers.base import SynthesisResult, TTSProvider, VoiceOption, WordTimingResult
 
-# A curated shortlist of well-known, stable Edge neural voices spanning a few
-# languages/genders -- NOT the full ~400-voice catalog edge_tts.list_voices()
-# would return over the network. This app's whole design philosophy is
-# "simple over pro-NLE" (see repo CLAUDE.md's "Driving vision" section): a
-# casual creator picking a voiceover voice should see a dozen good options,
-# not an unfiltered vendor list. ShortNames below are real, current Edge
-# neural voices.
+# A curated shortlist of well-known, stable Edge neural voices -- NOT the
+# full ~400-voice catalog edge_tts.list_voices() would return over the
+# network. This app's whole design philosophy is "simple over pro-NLE" (see
+# repo CLAUDE.md's "Driving vision" section): a casual creator picking a
+# voiceover voice should see a dozen-odd good options, not an unfiltered
+# vendor list. ShortNames below are real, current Edge neural voices.
+#
+# Indian-language voices come first -- this app's script generation
+# supports Hindi/Marathi/Punjabi/Bengali/Tamil/Odia (see
+# backend/src/niches/service.py's _LANGUAGE_INFO), so those are the
+# preferred/most-relevant voices; list order is dropdown order everywhere
+# this catalog is shown, so "Indian voices preferred" needs no extra
+# frontend sorting. Non-English-non-Indian voices (Spanish/French/German/
+# Portuguese) were dropped as "far removed" from this app's actual target
+# languages, per product decision.
 _VOICES = [
+    VoiceOption(id="hi-IN-SwaraNeural", label="Swara (Hindi, female)", locale="hi-IN", gender="female"),
+    VoiceOption(id="hi-IN-MadhurNeural", label="Madhur (Hindi, male)", locale="hi-IN", gender="male"),
+    VoiceOption(id="en-IN-NeerjaNeural", label="Neerja (Indian English, female)", locale="en-IN", gender="female"),
+    VoiceOption(id="en-IN-PrabhatNeural", label="Prabhat (Indian English, male)", locale="en-IN", gender="male"),
+    VoiceOption(id="pa-IN-VaaniNeural", label="Vaani (Punjabi, female)", locale="pa-IN", gender="female"),
+    VoiceOption(id="pa-IN-OjasNeural", label="Ojas (Punjabi, male)", locale="pa-IN", gender="male"),
+    VoiceOption(id="bn-IN-TanishaaNeural", label="Tanishaa (Bengali, female)", locale="bn-IN", gender="female"),
+    VoiceOption(id="bn-IN-BashkarNeural", label="Bashkar (Bengali, male)", locale="bn-IN", gender="male"),
+    VoiceOption(id="mr-IN-AarohiNeural", label="Aarohi (Marathi, female)", locale="mr-IN", gender="female"),
+    VoiceOption(id="mr-IN-ManoharNeural", label="Manohar (Marathi, male)", locale="mr-IN", gender="male"),
+    VoiceOption(id="ta-IN-PallaviNeural", label="Pallavi (Tamil, female)", locale="ta-IN", gender="female"),
+    VoiceOption(id="ta-IN-ValluvarNeural", label="Valluvar (Tamil, male)", locale="ta-IN", gender="male"),
+    VoiceOption(id="or-IN-SubhasiniNeural", label="Subhasini (Odia, female)", locale="or-IN", gender="female"),
+    VoiceOption(id="or-IN-SukantNeural", label="Sukant (Odia, male)", locale="or-IN", gender="male"),
     VoiceOption(id="en-US-AriaNeural", label="Aria (US English, female)", locale="en-US", gender="female"),
     VoiceOption(id="en-US-GuyNeural", label="Guy (US English, male)", locale="en-US", gender="male"),
     VoiceOption(id="en-GB-SoniaNeural", label="Sonia (UK English, female)", locale="en-GB", gender="female"),
     VoiceOption(id="en-GB-RyanNeural", label="Ryan (UK English, male)", locale="en-GB", gender="male"),
-    VoiceOption(id="en-IN-NeerjaNeural", label="Neerja (Indian English, female)", locale="en-IN", gender="female"),
     VoiceOption(id="en-AU-NatashaNeural", label="Natasha (Australian English, female)", locale="en-AU", gender="female"),
-    VoiceOption(id="es-ES-ElviraNeural", label="Elvira (Spanish, female)", locale="es-ES", gender="female"),
-    VoiceOption(id="es-MX-DaliaNeural", label="Dalia (Mexican Spanish, female)", locale="es-MX", gender="female"),
-    VoiceOption(id="fr-FR-DeniseNeural", label="Denise (French, female)", locale="fr-FR", gender="female"),
-    VoiceOption(id="de-DE-KatjaNeural", label="Katja (German, female)", locale="de-DE", gender="female"),
-    VoiceOption(id="hi-IN-SwaraNeural", label="Swara (Hindi, female)", locale="hi-IN", gender="female"),
-    VoiceOption(id="pt-BR-FranciscaNeural", label="Francisca (Brazilian Portuguese, female)", locale="pt-BR", gender="female"),
 ]
 
 # Trailing padding added to the last WordBoundary's end offset to cover the
