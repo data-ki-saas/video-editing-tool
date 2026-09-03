@@ -20,7 +20,7 @@
  * camera3D.ts.
  */
 
-export type AmbientEffectId = "light-sweep" | "sparkle" | "leaves";
+export type AmbientEffectId = "light-sweep" | "sparkle" | "leaves" | "rain" | "mist" | "sun-rays" | "crackers";
 
 export interface AmbientEffectOption {
   id: AmbientEffectId;
@@ -32,6 +32,10 @@ export const AMBIENT_EFFECT_OPTIONS: AmbientEffectOption[] = [
   { id: "light-sweep", label: "Light Sweep", description: "A soft glow drifts diagonally across the frame, like shifting sunlight." },
   { id: "sparkle", label: "Sparkle", description: "Faint light flecks twinkle and drift across the frame." },
   { id: "leaves", label: "Leaves", description: "A few leaves drift gently across the frame." },
+  { id: "rain", label: "Gentle Rain", description: "Soft rain streaks fall gently across the frame." },
+  { id: "mist", label: "Misty Cloud", description: "A soft mist drifts across the frame like a passing cloud." },
+  { id: "sun-rays", label: "Sun Rays", description: "Warm rays of light fan out softly across the frame." },
+  { id: "crackers", label: "Crackers", description: "Tiny sparks burst and fade softly across the frame." },
 ];
 
 /** Deterministic per-clip seed (0..1) derived from whatever stable
@@ -209,6 +213,206 @@ function drawLeaves(
   ctx.restore();
 }
 
+const RAIN_COUNT = 40;
+
+function drawRain(
+  ctx: CanvasRenderingContext2D,
+  destX: number,
+  destY: number,
+  destWidth: number,
+  destHeight: number,
+  elapsedSeconds: number,
+  seed: number
+): void {
+  const random = mulberry32(seed);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(destX, destY, destWidth, destHeight);
+  ctx.clip();
+  ctx.lineCap = "round";
+
+  const windSlope = 0.12; // slight rightward slant -- gentle rain, not a storm
+  for (let i = 0; i < RAIN_COUNT; i++) {
+    const baseX = random();
+    const phase = random();
+    const fallSpeed = (0.55 + random() * 0.25) * destHeight; // px/s
+    const length = (0.03 + random() * 0.02) * destHeight;
+    const lineWidth = 1 + random() * 0.6;
+    const opacity = 0.18 + random() * 0.22;
+
+    const travel = destHeight + length * 2;
+    const fracFallen = (((elapsedSeconds * fallSpeed) / travel + phase) % 1 + 1) % 1;
+    const y = destY - length + fracFallen * travel;
+    const x = destX + baseX * destWidth + windSlope * (y - destY);
+
+    ctx.globalAlpha = opacity;
+    ctx.strokeStyle = "rgba(210,225,240,1)";
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + windSlope * length, y + length);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+const MIST_COUNT = 3;
+
+function drawMist(
+  ctx: CanvasRenderingContext2D,
+  destX: number,
+  destY: number,
+  destWidth: number,
+  destHeight: number,
+  elapsedSeconds: number,
+  seed: number
+): void {
+  const random = mulberry32(seed);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(destX, destY, destWidth, destHeight);
+  ctx.clip();
+
+  for (let i = 0; i < MIST_COUNT; i++) {
+    const crossingPeriod = 14 + random() * 8; // slow-drifting cloud, crosses over many seconds
+    const phase = random() * crossingPeriod;
+    const lane = 0.15 + random() * 0.7;
+    const radius = (0.55 + random() * 0.25) * Math.max(destWidth, destHeight);
+    const peakOpacity = 0.1 + random() * 0.08;
+
+    const crossingT = (((elapsedSeconds + phase) % crossingPeriod) + crossingPeriod) % crossingPeriod / crossingPeriod;
+    const fadeEdge = 0.2;
+    const opacity = Math.min(1, Math.min(crossingT, 1 - crossingT) / fadeEdge) * peakOpacity;
+    if (opacity <= 0.005) continue;
+
+    const x = destX - radius * 0.5 + crossingT * (destWidth + radius);
+    const y = destY + lane * destHeight;
+
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    gradient.addColorStop(0, `rgba(235,238,242,${opacity})`);
+    gradient.addColorStop(1, "rgba(235,238,242,0)");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+const SUN_RAY_COUNT = 7;
+
+function drawSunRays(
+  ctx: CanvasRenderingContext2D,
+  destX: number,
+  destY: number,
+  destWidth: number,
+  destHeight: number,
+  elapsedSeconds: number,
+  seed: number
+): void {
+  const random = mulberry32(seed);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(destX, destY, destWidth, destHeight);
+  ctx.clip();
+  ctx.globalCompositeOperation = "screen";
+
+  const fromRight = random() < 0.5;
+  const originX = destX + (fromRight ? destWidth * 0.92 : destWidth * 0.08);
+  const originY = destY - destHeight * 0.05;
+  const reach = Math.hypot(destWidth, destHeight) * 1.3;
+  const fanSpread = Math.PI * 0.4; // ~72deg fan, opening downward into the frame
+  const baseAngle = Math.PI / 2; // straight down
+  const swayPeriod = 9 + random() * 4;
+  const swayPhase = random() * Math.PI * 2;
+  const sway = Math.sin((elapsedSeconds / swayPeriod) * Math.PI * 2 + swayPhase) * 0.05;
+  const pulsePeriod = 5 + random() * 3;
+
+  for (let i = 0; i < SUN_RAY_COUNT; i++) {
+    const t = i / (SUN_RAY_COUNT - 1);
+    const angle = baseAngle - fanSpread / 2 + t * fanSpread + sway;
+    const rayHalfWidth = (0.05 + random() * 0.03) * reach;
+    const pulsePhase = random() * pulsePeriod;
+    const pulse = 0.5 + 0.5 * Math.sin((((elapsedSeconds + pulsePhase) % pulsePeriod) / pulsePeriod) * Math.PI * 2);
+    const peakOpacity = (0.05 + random() * 0.05) * (0.6 + 0.4 * pulse);
+
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle);
+    const px = -dy;
+    const py = dx;
+    const farX = originX + dx * reach;
+    const farY = originY + dy * reach;
+
+    const gradient = ctx.createLinearGradient(originX, originY, farX, farY);
+    gradient.addColorStop(0, `rgba(255,244,214,${peakOpacity})`);
+    gradient.addColorStop(1, "rgba(255,244,214,0)");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.moveTo(originX, originY);
+    ctx.lineTo(farX + px * rayHalfWidth, farY + py * rayHalfWidth);
+    ctx.lineTo(farX - px * rayHalfWidth, farY - py * rayHalfWidth);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+const CRACKER_COUNT = 4;
+const CRACKER_SPARKS = 10;
+const CRACKER_COLORS = ["#ffd27a", "#ff9d5c", "#fff3d6"]; // warm gold / orange / white
+
+function drawCrackers(
+  ctx: CanvasRenderingContext2D,
+  destX: number,
+  destY: number,
+  destWidth: number,
+  destHeight: number,
+  elapsedSeconds: number,
+  seed: number
+): void {
+  const random = mulberry32(seed);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(destX, destY, destWidth, destHeight);
+  ctx.clip();
+  ctx.globalCompositeOperation = "screen";
+  ctx.lineCap = "round";
+
+  for (let i = 0; i < CRACKER_COUNT; i++) {
+    const cycle = 3 + random() * 3; // seconds between bursts at this site
+    const phase = random() * cycle;
+    const burstDuration = 0.55 + random() * 0.25;
+    const cx = destX + (0.15 + random() * 0.7) * destWidth;
+    const cy = destY + (0.1 + random() * 0.45) * destHeight; // upper portion, like real crackers
+    const maxRadius = (0.05 + random() * 0.04) * Math.min(destWidth, destHeight);
+    const color = CRACKER_COLORS[Math.floor(random() * CRACKER_COLORS.length)];
+    const rotationOffset = random() * Math.PI * 2;
+
+    const cycleT = (((elapsedSeconds + phase) % cycle) + cycle) % cycle;
+    if (cycleT > burstDuration) continue;
+    const burstT = cycleT / burstDuration; // 0..1
+    const grow = Math.min(1, burstT / 0.35);
+    const fade = 1 - Math.max(0, (burstT - 0.5) / 0.5);
+    const opacity = Math.max(0, Math.min(grow, fade)) * 0.6;
+    if (opacity <= 0.01) continue;
+    const radius = maxRadius * (0.3 + 0.7 * grow);
+
+    for (let s = 0; s < CRACKER_SPARKS; s++) {
+      const sparkAngle = rotationOffset + (s / CRACKER_SPARKS) * Math.PI * 2;
+      const sx = cx + Math.cos(sparkAngle) * radius;
+      const sy = cy + Math.sin(sparkAngle) * radius;
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = opacity;
+      ctx.lineWidth = Math.max(1, radius * 0.08);
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(sparkAngle) * radius * 0.35, cy + Math.sin(sparkAngle) * radius * 0.35);
+      ctx.lineTo(sx, sy);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
 /** Draws `effectId` (a no-op when absent) on top of whatever `ctx` already
  * has painted at [destX,destY,destWidth,destHeight] -- call this AFTER the
  * clip's own draw (plain 2D Ken Burns or camera3D.ts's drawImage3D), same
@@ -234,6 +438,18 @@ export function drawAmbientEffect(
       return;
     case "leaves":
       drawLeaves(ctx, destX, destY, destWidth, destHeight, elapsedSeconds, seed);
+      return;
+    case "rain":
+      drawRain(ctx, destX, destY, destWidth, destHeight, elapsedSeconds, seed);
+      return;
+    case "mist":
+      drawMist(ctx, destX, destY, destWidth, destHeight, elapsedSeconds, seed);
+      return;
+    case "sun-rays":
+      drawSunRays(ctx, destX, destY, destWidth, destHeight, elapsedSeconds, seed);
+      return;
+    case "crackers":
+      drawCrackers(ctx, destX, destY, destWidth, destHeight, elapsedSeconds, seed);
       return;
   }
 }
