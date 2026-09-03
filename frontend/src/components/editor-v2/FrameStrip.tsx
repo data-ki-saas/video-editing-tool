@@ -459,6 +459,7 @@ export function FrameStrip({
   onDeleteCutaway,
   onOpenCutawayFilter,
   onOpenCutawayCanvasFill,
+  onReorderCutaway,
   onOpenClipTransition,
   isLoading,
   durationSeconds,
@@ -568,6 +569,9 @@ export function FrameStrip({
   // CanvasFillDialog scoped to just this cutaway (see
   // applySelectCanvasFillMode).
   onOpenCutawayCanvasFill: (segment: CutawaySegment) => void;
+  // The Cutaways rail's own click-hold-drag reorder -- see CutawayTrack's
+  // own prop comment and transformations.ts's applyMoveSequenceClip.
+  onReorderCutaway: (segments: CutawaySegment[], entryId: string, toIndex: number) => void;
   // The clip-boundary transition badge's own click (see clipBoundarySeconds'
   // own render block below) -- opens CutTransitionDialog scoped to the
   // INCOMING clip of that boundary (whichever sequenceEntries[index+1] is),
@@ -1120,6 +1124,7 @@ export function FrameStrip({
           onDelete={onDeleteCutaway}
           onOpenFilter={onOpenCutawayFilter}
           onOpenCanvasFill={onOpenCutawayCanvasFill}
+          onReorder={onReorderCutaway}
         />
 
         <TrimTrack

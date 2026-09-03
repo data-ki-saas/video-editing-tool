@@ -1014,6 +1014,93 @@ export function applyReorderSequenceClip(
   };
 }
 
+/** Moves a base-sequence clip to an arbitrary new position -- CutawayTrack's
+ * click-hold-drag reorder, as opposed to applyReorderSequenceClip's
+ * adjacent-neighbor-only swap (which backs mobile's up/down buttons and
+ * can't express "drop three slots over" in one step). `toIndex` follows
+ * Array.splice "move" semantics: the index the clip ends up at in the array
+ * AFTER it's already been removed from its old position.
+ *
+ * Every clip keeps its own duration -- only array order changes -- so the
+ * new start time of each clip can be recomputed from scratch by walking the
+ * reordered array once. Reflows every time-anchored selection by however
+ * much ITS containing clip's start time moved, same reflow-by-delta idiom as
+ * applyReorderSequenceClip/applyDeleteSequenceClip, generalized from a fixed
+ * swap-pair/single-clip range to however many clips the drag crossed. */
+export function applyMoveSequenceClip(
+  selections: EditSelectionsSnapshot,
+  entryId: string,
+  toIndex: number,
+  entryStartSeconds: (id: string) => number,
+  entryDurationSeconds: (entry: SequenceEntry) => number
+): TransformationResult {
+  const entries = selections.sequenceClips;
+  const fromIndex = entries.findIndex((entry) => entry.id === entryId);
+  const label = "Reordered clips";
+  const clampedToIndex = Math.max(0, Math.min(toIndex, entries.length - 1));
+  if (fromIndex === -1 || clampedToIndex === fromIndex) {
+    return { label, state: selections };
+  }
+
+  const oldRanges = entries.map((entry) => {
+    const startTimeSeconds = entryStartSeconds(entry.id);
+    return { id: entry.id, startTimeSeconds, endTimeSeconds: startTimeSeconds + entryDurationSeconds(entry) };
+  });
+
+  const nextEntries = [...entries];
+  const [moved] = nextEntries.splice(fromIndex, 1);
+  nextEntries.splice(clampedToIndex, 0, moved);
+
+  let cursor = 0;
+  const deltaByEntryId = new Map<string, number>();
+  for (const entry of nextEntries) {
+    const oldRange = oldRanges.find((range) => range.id === entry.id)!;
+    deltaByEntryId.set(entry.id, cursor - oldRange.startTimeSeconds);
+    cursor += oldRange.endTimeSeconds - oldRange.startTimeSeconds;
+  }
+
+  function deltaFor(timeSeconds: number): number {
+    const range = oldRanges.find((r) => timeSeconds >= r.startTimeSeconds && timeSeconds < r.endTimeSeconds);
+    return range ? deltaByEntryId.get(range.id)! : 0;
+  }
+
+  const shiftRange = <T extends { startTimeSeconds: number; endTimeSeconds: number }>(item: T): T => {
+    const delta = deltaFor(item.startTimeSeconds);
+    return delta === 0 ? item : { ...item, startTimeSeconds: item.startTimeSeconds + delta, endTimeSeconds: item.endTimeSeconds + delta };
+  };
+  const shiftZoomEffectRange = (effect: ZoomEffect): ZoomEffect => {
+    const delta = deltaFor(effect.startTimeSeconds);
+    return delta === 0
+      ? effect
+      : {
+          ...effect,
+          startTimeSeconds: effect.startTimeSeconds + delta,
+          epicenterTimeSeconds: effect.epicenterTimeSeconds + delta,
+          endTimeSeconds: effect.endTimeSeconds + delta,
+        };
+  };
+  const shiftToggle = (timeSeconds: number): number => timeSeconds + deltaFor(timeSeconds);
+
+  return {
+    label,
+    state: {
+      ...selections,
+      sequenceClips: nextEntries,
+      zoomEffects: selections.zoomEffects.map(shiftZoomEffectRange),
+      overlayImages: selections.overlayImages.map(shiftRange),
+      textOverlays: selections.textOverlays.map(shiftRange),
+      ttsOverlays: selections.ttsOverlays.map((overlay) => ({
+        ...overlay,
+        startTimeSeconds: shiftToggle(overlay.startTimeSeconds),
+      })),
+      videoOverlays: selections.videoOverlays.map(shiftRange),
+      trimRanges: selections.trimRanges.map(shiftRange),
+      flipHorizontalToggles: selections.flipHorizontalToggles.map(shiftToggle),
+      flipVerticalToggles: selections.flipVerticalToggles.map(shiftToggle),
+    },
+  };
+}
+
 // Default duration for a freshly-added text overlay. Unlike an image
 // overlay's "always the first frame," a caption is added at whatever
 // moment the playhead is on when the dialog opens -- captions are placed

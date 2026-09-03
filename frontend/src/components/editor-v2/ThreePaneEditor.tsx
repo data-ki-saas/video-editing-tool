@@ -92,6 +92,7 @@ import {
   applyAddImageSequenceClip,
   applyEditImageSequenceClip,
   applyDeleteSequenceClip,
+  applyMoveSequenceClip,
   applyResizeImageClip,
   applyAddTextOverlay,
   applyEditTextOverlay,
@@ -1827,6 +1828,24 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  // CutawayTrack's own click-hold-drag reorder. `segments` is the same
+  // resolved list CutawayTrack was rendering (from FrameStrip's own
+  // cutawaySegments memo) -- each one already carries its real
+  // startTimeSeconds/durationSeconds, so those can feed applyMoveSequenceClip's
+  // callbacks directly instead of re-deriving them from clipBoundarySeconds.
+  function handleReorderCutaway(segments: CutawaySegment[], entryId: string, toIndex: number) {
+    const startSecondsByEntryId = new Map(segments.map((segment) => [segment.entryId, segment.startTimeSeconds]));
+    const durationSecondsByEntryId = new Map(segments.map((segment) => [segment.entryId, segment.durationSeconds]));
+    const { label, state } = applyMoveSequenceClip(
+      selections,
+      entryId,
+      toIndex,
+      (id) => startSecondsByEntryId.get(id) ?? 0,
+      (entry) => durationSecondsByEntryId.get(entry.id) ?? 0
+    );
+    pushChange(label, state);
+  }
+
   // FrameStrip's post-add drag handle on an image clip's boundary --
   // `clipStartSeconds` comes from the caller's own resolved playbackClips
   // (which has real elapsed-seconds positions, accounting for any
@@ -2596,6 +2615,7 @@ export function ThreePaneEditor({
           onDeleteCutaway={handleDeleteCutaway}
           onOpenCutawayFilter={handleOpenCutawayFilter}
           onOpenCutawayCanvasFill={handleOpenCutawayCanvasFill}
+          onReorderCutaway={handleReorderCutaway}
           onOpenClipTransition={handleOpenClipTransition}
           mainAudioVolume={mainAudioVolume}
           onChangeMainAudioVolume={setMainAudioVolume}
