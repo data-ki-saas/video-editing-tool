@@ -238,6 +238,7 @@ export function CutawayTrack({
 
   function handleDragPointerDown(e: React.PointerEvent, entryId: string) {
     if (e.button !== 0) return;
+    e.preventDefault(); // no native text-selection/drag-ghost while pressing on the label text inside
     const startClientX = e.clientX;
     didDragRef.current = false;
     let previewOrder = segments.map((s) => s.entryId);
