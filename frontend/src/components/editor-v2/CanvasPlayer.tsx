@@ -130,7 +130,7 @@ import {
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { ReelLoader } from "@/components/ReelLoader";
-import { PlayIcon, PauseIcon, LoopIcon } from "./icons/PlayerIcons";
+import { PlayIcon, PauseIcon, LoopIcon, ExpandIcon, CollapseIcon } from "./icons/PlayerIcons";
 
 export interface CanvasPlayerHandle {
   seekTo(seconds: number): void;
@@ -541,6 +541,12 @@ export const CanvasPlayer = forwardRef<
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
+  // The whole player row (video panel + controls column, see the root div
+  // below) is the fullscreen target -- not just the video panel -- so Play/
+  // Loop/full-window stay reachable while it's blown up, instead of vanishing
+  // along with the rest of the editor chrome.
+  const playerRootRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   /** The real user-authored `trimRanges` PLUS a synthetic "skip" range for
    * every cut-transition boundary (see video_math.ts's own module comment
@@ -1578,6 +1584,25 @@ export const CanvasPlayer = forwardRef<
     isLoopingRef.current = next;
   }
 
+  // Tracks isFullscreen off the browser's own state rather than the click
+  // handler alone -- also fires on Escape / the browser's native "exit
+  // fullscreen" affordance, which don't go through handleToggleFullscreen.
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setIsFullscreen(document.fullscreenElement === playerRootRef.current);
+    }
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  function handleToggleFullscreen() {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void playerRootRef.current?.requestFullscreen();
+    }
+  }
+
   useImperativeHandle(ref, () => ({
     seekTo(seconds: number) {
       if (!isReady) return;
@@ -2145,7 +2170,13 @@ export const CanvasPlayer = forwardRef<
     // flex-1 (flex-basis 0%) has nothing to grow into once the canvas went
     // absolute/out-of-flow (see below): the shrink-wrap collapses to just
     // the controls column's width and the video panel disappears entirely.
-    <div className="flex h-full w-full min-w-0 items-center gap-2 p-2" style={{ containerType: "size" }}>
+    <div
+      ref={playerRootRef}
+      className={
+        "flex h-full w-full min-w-0 items-center gap-2 p-2" + (isFullscreen ? " bg-black" : "")
+      }
+      style={{ containerType: "size" }}
+    >
       {/* This box IS the visible video panel -- flex-1/min-w-0 so it takes
           whatever width this row has left rather than requesting its own
           intrinsic width (the previous h-full+w-auto-on-the-canvas approach
@@ -2209,6 +2240,16 @@ export const CanvasPlayer = forwardRef<
             className={"shrink-0 rounded-full p-2 hover:bg-accent/10 " + (isLooping ? "text-accent" : "text-muted")}
           >
             <LoopIcon className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleToggleFullscreen}
+            aria-label={isFullscreen ? "Exit full window" : "Full window"}
+            aria-pressed={isFullscreen}
+            title={isFullscreen ? "Exit full window" : "Full window"}
+            className={"shrink-0 rounded-full p-2 hover:bg-accent/10 " + (isFullscreen ? "text-accent" : "text-muted")}
+          >
+            {isFullscreen ? <CollapseIcon className="h-5 w-5" /> : <ExpandIcon className="h-5 w-5" />}
           </button>
         </div>
       )}
