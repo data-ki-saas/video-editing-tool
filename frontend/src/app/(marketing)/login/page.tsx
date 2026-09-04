@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { prefetchPermissions } from "@/lib/usePermissions";
+import { SocialLoginButtons } from "@/components/auth/SocialLoginButtons";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -91,6 +92,8 @@ export default function LoginPage() {
           {loading ? "Please wait…" : "Sign in"}
         </button>
       </form>
+
+      <SocialLoginButtons />
 
       <Link href="/signup" className="text-sm underline">
         Need an account? Sign up

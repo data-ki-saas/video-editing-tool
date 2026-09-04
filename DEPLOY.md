@@ -86,6 +86,31 @@ earlier one.
      matches wherever signup actually happened, not just "Site URL"), but
      Supabase only honors that target if it matches an entry in this
      allow-list — otherwise it silently falls back to Site URL.
+3b. **OAuth Providers** (Authentication > Providers) — optional, powers the
+   "Continue with Google/Facebook" buttons on `/login` and `/signup`
+   (`SocialLoginButtons.tsx`). Skip this section entirely if you only want
+   email/password auth; the buttons still render either way, but clicking
+   one just fails with whatever error Supabase returns for a disabled
+   provider.
+   - **Google**: in [Google Cloud Console](https://console.cloud.google.com/)
+     create an OAuth consent screen (External, unless every user is inside
+     your own Workspace org) and an OAuth Client ID of type "Web
+     application." Its **Authorized redirect URI** must be Supabase's own
+     callback — `https://<your-project-ref>.supabase.co/auth/v1/callback`
+     — copy the exact value shown on the Google provider's config page in
+     the Supabase dashboard, not this app's own `/auth/callback` route
+     (that's a second hop: Google redirects to Supabase first, which then
+     redirects to whichever `redirectTo` `SocialLoginButtons.tsx` passed).
+     Paste the resulting Client ID and Client Secret into Supabase's Google
+     provider settings and toggle it on.
+   - **Facebook**: in [Meta for Developers](https://developers.facebook.com/),
+     create an app, add the "Facebook Login" product, and set its **Valid
+     OAuth Redirect URI** to that same Supabase callback URL. Paste the
+     App ID and App Secret into Supabase's Facebook provider settings and
+     toggle it on.
+   - No changes needed to this app's own Redirect URLs allow-list from step
+     3a above — `app/auth/callback/route.ts` lives under the same origin
+     already covered by its `/**` wildcard entries.
 4. Collect from **Project Settings > API**. Supabase now shows two key
    formats depending on when your project was created — use whichever pair
    your project has, they're equivalent:

@@ -14,6 +14,13 @@ const MARKETING_STATIC_PATHS = ["/about", "/contact", "/pricing", "/docs", "/pri
 // by default. Not a new exposure: the video itself already sits in an
 // unauthenticated-readable public R2 bucket.
 const PUBLIC_SHARE_PATH_PREFIX = "/share/";
+// Supabase OAuth's PKCE callback (Google/Facebook "Continue with" -- see
+// SocialLoginButtons.tsx and app/auth/callback/route.ts). This request
+// arrives with no session cookie yet -- exchanging the `code` for one is
+// exactly what that route is about to do -- so it can't require auth like
+// everything else here does by default, or it would get redirected to
+// /login before the exchange ever runs.
+const OAUTH_CALLBACK_PATH = "/auth/callback";
 
 // The Supabase client has no built-in request timeout -- a STALLED (not
 // outright failed) response from Auth left this middleware hanging until
@@ -72,7 +79,11 @@ export async function updateSession(request: NextRequest) {
   const isGuestOnlyPath = GUEST_ONLY_PATHS.some((path) => pathname.startsWith(path));
   const isMarketingStaticPath = MARKETING_STATIC_PATHS.some((path) => pathname.startsWith(path));
   const isPublicPath =
-    pathname === "/" || isGuestOnlyPath || isMarketingStaticPath || pathname.startsWith(PUBLIC_SHARE_PATH_PREFIX);
+    pathname === "/" ||
+    isGuestOnlyPath ||
+    isMarketingStaticPath ||
+    pathname.startsWith(PUBLIC_SHARE_PATH_PREFIX) ||
+    pathname === OAUTH_CALLBACK_PATH;
 
   if (!user && !isPublicPath) {
     return NextResponse.redirect(new URL("/login", request.url));
