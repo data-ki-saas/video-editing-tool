@@ -551,6 +551,47 @@ export async function getAdminUsageSummary(days: number): Promise<AdminUsageSumm
   };
 }
 
+export interface CapWarning {
+  userId: string;
+  email: string | null;
+  feature: string;
+  capValue: number;
+  countAtTrigger: number;
+  createdAt: string;
+}
+
+export interface CapWarningsResult {
+  days: number;
+  warnings: CapWarning[];
+}
+
+/** GET /api/metering/cap-warnings -- a log of daily-cap-exceeded events
+ * (every non-admin request a user made after hitting their render/
+ * voiceover/avatar/matting cap), gated by the same metering_admin_view
+ * feature as getAdminUsageSummary. Backs /admin/usage's warning log panel
+ * -- a possible cost-overrun signal an admin would otherwise only see by
+ * digging through Render's server logs. */
+export async function getCapWarnings(days: number): Promise<CapWarningsResult> {
+  const response = await apiFetch(`${API_BASE_URL}/api/metering/cap-warnings?days=${encodeURIComponent(days)}`, {
+    headers: await authHeader(),
+  });
+  const body = await handleResponse<{
+    days: number;
+    warnings: { user_id: string; email: string | null; feature: string; cap_value: number; count_at_trigger: number; created_at: string }[];
+  }>(response);
+  return {
+    days: body.days,
+    warnings: body.warnings.map((w) => ({
+      userId: w.user_id,
+      email: w.email,
+      feature: w.feature,
+      capValue: w.cap_value,
+      countAtTrigger: w.count_at_trigger,
+      createdAt: w.created_at,
+    })),
+  };
+}
+
 export async function deleteProject(projectId: string) {
   const response = await apiFetch(`${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}`, {
     method: "DELETE",

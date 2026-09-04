@@ -5,10 +5,11 @@ from fastapi import HTTPException
 
 from src.assets import repository as assets_repository
 from src.assets.service import store_asset_bytes
-from src.core.auth import CurrentUser
+from src.core.auth import CurrentUser, bypasses_daily_caps
 from src.core.config import settings
 from src.metering import pricing as metering_pricing
 from src.metering import repository as metering_repository
+from src.metering import service as metering_service
 from src.tts import repository as tts_repository
 from src.tts.client import get_tts_provider
 from src.tts.schemas import SynthesizeResponse, VoiceOption, VoicesResponse, WordTiming
@@ -27,15 +28,21 @@ async def synthesize(project_id: str, text: str, voice: str, rate: int, pitch: i
     if not assets_repository.project_owned_by(project_id, user.id):
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Fails OPEN: a None count means the usage_events read itself errored
-    # (see repository.count_recent_voiceover_events), which shouldn't block
-    # the feature entirely.
-    recent_count = tts_repository.count_recent_voiceover_events(user.id)
-    if recent_count is not None and recent_count >= settings.tts_daily_cap:
-        raise HTTPException(
-            status_code=429,
-            detail=f"You've reached the limit of {settings.tts_daily_cap} voice generations per day. Try again tomorrow.",
-        )
+    # Admin accounts skip the guardrail entirely -- see
+    # core/auth.py's bypasses_daily_caps.
+    if not bypasses_daily_caps(user):
+        # Fails OPEN: a None count means the usage_events read itself
+        # errored (see repository.count_recent_voiceover_events), which
+        # shouldn't block the feature entirely.
+        recent_count = tts_repository.count_recent_voiceover_events(user.id)
+        if recent_count is not None and recent_count >= settings.tts_daily_cap:
+            metering_service.record_cap_hit(
+                user_id=user.id, feature="voiceover", cap_value=settings.tts_daily_cap, count_at_trigger=recent_count + 1
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"You've reached the limit of {settings.tts_daily_cap} voice generations per day. Try again tomorrow.",
+            )
 
     result = await get_tts_provider().synthesize(text, voice, rate, pitch)
 

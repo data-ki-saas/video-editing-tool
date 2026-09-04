@@ -4,12 +4,19 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useIsAdmin } from "@/lib/useIsAdmin";
-import { getAdminUsageSummary, type AdminUsageSummary } from "@/lib/api";
+import { getAdminUsageSummary, getCapWarnings, type AdminUsageSummary, type CapWarning } from "@/lib/api";
 
 const WINDOW_OPTIONS = [7, 30, 90];
+// Fixed, unlike the cost window above -- this is a short recent-activity
+// log, not a trend the admin would want to widen/narrow.
+const CAP_WARNINGS_WINDOW_DAYS = 7;
 
 function formatCents(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
+}
+
+function formatWarningTime(iso: string): string {
+  return new Date(iso).toLocaleString();
 }
 
 export default function AdminUsagePage() {
@@ -19,6 +26,8 @@ export default function AdminUsagePage() {
   const [days, setDays] = useState(30);
   const [summary, setSummary] = useState<AdminUsageSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [capWarnings, setCapWarnings] = useState<CapWarning[] | null>(null);
+  const [capWarningsError, setCapWarningsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isAdmin === false) router.replace("/dashboard");
@@ -34,6 +43,15 @@ export default function AdminUsagePage() {
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load usage summary"));
   }, [days]);
+
+  useEffect(() => {
+    getCapWarnings(CAP_WARNINGS_WINDOW_DAYS)
+      .then((result) => {
+        setCapWarnings(result.warnings);
+        setCapWarningsError(null);
+      })
+      .catch((err) => setCapWarningsError(err instanceof Error ? err.message : "Failed to load cap warnings"));
+  }, []);
 
   if (isAdmin !== true) return null;
 
@@ -130,6 +148,31 @@ export default function AdminUsagePage() {
           </section>
         </>
       )}
+
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-medium">Cap warnings (last {CAP_WARNINGS_WINDOW_DAYS}d)</h2>
+        <p className="text-xs text-muted">
+          Fires when a non-admin account hits a daily usage cap -- render/voiceover/avatar/background-removal --
+          a possible cost-overrun signal. Admin accounts bypass these caps entirely and never appear here.
+        </p>
+        {capWarningsError && <p className="text-sm text-red-600">{capWarningsError}</p>}
+        {!capWarningsError && !capWarnings && <p className="text-sm text-muted">Loading…</p>}
+        {capWarnings && capWarnings.length === 0 && (
+          <p className="text-sm text-muted">No caps have been hit in this window.</p>
+        )}
+        {capWarnings && capWarnings.length > 0 && (
+          <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded-md border border-border bg-surface p-3 font-mono text-xs">
+            {capWarnings.map((warning, index) => (
+              <div key={index} className="text-muted">
+                <span>{formatWarningTime(warning.createdAt)}</span>{" "}
+                <span className="text-foreground">{warning.email ?? warning.userId}</span> hit{" "}
+                <span className="text-foreground">{warning.feature}</span> cap ({warning.countAtTrigger}/
+                {warning.capValue})
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </main>
   );
 }

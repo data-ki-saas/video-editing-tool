@@ -13,10 +13,11 @@ from src.assets.service import store_asset_bytes
 from src.avatar import repository as avatar_repository
 from src.avatar.client import get_avatar_provider
 from src.avatar.schemas import AvatarGenerationDetail, AvatarOptionResponse, GenerateAvatarVideoResponse
-from src.core.auth import CurrentUser
+from src.core.auth import CurrentUser, bypasses_daily_caps
 from src.core.config import settings
 from src.metering import pricing as metering_pricing
 from src.metering import repository as metering_repository
+from src.metering import service as metering_service
 from src.storage import r2_client
 
 logger = logging.getLogger(__name__)
@@ -52,16 +53,25 @@ async def generate(
     if audio_asset.kind != "audio":
         raise HTTPException(status_code=400, detail="That asset isn't audio")
 
-    # Fails OPEN on a usage_events read error, same precedent as
-    # tts/service.py's own cap check -- but unlike TTS, a miss here spends
-    # real money at the provider, so avatar_daily_cap should stay small (see
-    # its own comment in core/config.py).
-    recent_count = avatar_repository.count_recent_avatar_events(user.id)
-    if recent_count is not None and recent_count >= settings.avatar_daily_cap:
-        raise HTTPException(
-            status_code=429,
-            detail=f"You've reached the limit of {settings.avatar_daily_cap} avatar videos per day. Try again tomorrow.",
-        )
+    # Admin accounts skip the guardrail entirely -- see
+    # core/auth.py's bypasses_daily_caps.
+    if not bypasses_daily_caps(user):
+        # Fails OPEN on a usage_events read error, same precedent as
+        # tts/service.py's own cap check -- but unlike TTS, a miss here
+        # spends real money at the provider, so avatar_daily_cap should stay
+        # small (see its own comment in core/config.py).
+        recent_count = avatar_repository.count_recent_avatar_events(user.id)
+        if recent_count is not None and recent_count >= settings.avatar_daily_cap:
+            metering_service.record_cap_hit(
+                user_id=user.id,
+                feature="avatar_video",
+                cap_value=settings.avatar_daily_cap,
+                count_at_trigger=recent_count + 1,
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"You've reached the limit of {settings.avatar_daily_cap} avatar videos per day. Try again tomorrow.",
+            )
 
     resolved_avatar_id = avatar_id or settings.heygen_default_avatar_id
     if not resolved_avatar_id:

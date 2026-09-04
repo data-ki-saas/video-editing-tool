@@ -24,3 +24,17 @@ class AdminUsageSummaryResponse(BaseModel):
     totals: list[UsageTotal]
     daily: list[DailyCost]
     top_users: list[TopUser]
+
+
+class CapWarning(BaseModel):
+    user_id: str
+    email: str | None
+    feature: str
+    cap_value: int
+    count_at_trigger: int
+    created_at: str
+
+
+class CapWarningsResponse(BaseModel):
+    days: int
+    warnings: list[CapWarning]

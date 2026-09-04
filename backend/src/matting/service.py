@@ -10,13 +10,14 @@ from mutagen.mp4 import MP4
 from src.assets import repository as assets_repository
 from src.assets.repository import AssetRecord
 from src.assets.service import store_asset_bytes
-from src.core.auth import CurrentUser
+from src.core.auth import CurrentUser, bypasses_daily_caps
 from src.core.config import settings
 from src.matting import repository as matting_repository
 from src.matting.client import get_matting_provider
 from src.matting.schemas import BackgroundRemovalDetail, RequestBackgroundRemovalResponse
 from src.metering import pricing as metering_pricing
 from src.metering import repository as metering_repository
+from src.metering import service as metering_service
 from src.storage import r2_client
 
 logger = logging.getLogger(__name__)
@@ -57,16 +58,26 @@ async def request(project_id: str, source_asset_id: str, user: CurrentUser) -> R
             error=existing.error,
         )
 
-    # Fails OPEN on a usage_events read error, same precedent as
-    # avatar/service.py's own cap check -- but a miss here spends real money
-    # at the provider, so matting_daily_cap should stay conservative. Shared
-    # across both video and image jobs -- one budget, not two.
-    recent_count = matting_repository.count_recent_matting_events(user.id)
-    if recent_count is not None and recent_count >= settings.matting_daily_cap:
-        raise HTTPException(
-            status_code=429,
-            detail=f"You've reached the limit of {settings.matting_daily_cap} background removals per day. Try again tomorrow.",
-        )
+    # Admin accounts skip the guardrail entirely -- see
+    # core/auth.py's bypasses_daily_caps.
+    if not bypasses_daily_caps(user):
+        # Fails OPEN on a usage_events read error, same precedent as
+        # avatar/service.py's own cap check -- but a miss here spends real
+        # money at the provider, so matting_daily_cap should stay
+        # conservative. Shared across both video and image jobs -- one
+        # budget, not two.
+        recent_count = matting_repository.count_recent_matting_events(user.id)
+        if recent_count is not None and recent_count >= settings.matting_daily_cap:
+            metering_service.record_cap_hit(
+                user_id=user.id,
+                feature="background_removal",
+                cap_value=settings.matting_daily_cap,
+                count_at_trigger=recent_count + 1,
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"You've reached the limit of {settings.matting_daily_cap} background removals per day. Try again tomorrow.",
+            )
 
     if source_asset.kind == "image":
         return await _request_image_cutout(project_id, source_asset, user)

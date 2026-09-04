@@ -9,16 +9,10 @@ import {
   RateLimitExceededError,
   TimeoutError,
 } from "creatomate";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { compileCreatomateTimeline, type CompileTimelineInput } from "@/lib/timeline/compileCreatomateTimeline";
 
 export const runtime = "nodejs";
-
-// Abuse guardrail, not billing/metering -- a fixed daily cap per user,
-// checked against usage_events (see supabase/migrations/0006). Easy to
-// tune once real usage exists; not meant to model plans/tiers.
-const RENDER_DAILY_LIMIT = 10;
 
 interface RenderRequestBody {
   projectId: string;
@@ -51,25 +45,6 @@ function buildWebhookUrl(): string | null {
   const url = new URL("/api/webhooks/creatomate", siteUrl);
   url.searchParams.set("secret", secret);
   return url.toString();
-}
-
-/** A signed-in-but-not-yet-abusive check: counts this user's renders in the
- * last 24h against a fixed cap. Fails OPEN on a read error -- a usage_events
- * hiccup shouldn't block the render feature entirely. */
-async function isUnderRenderRateLimit(supabase: SupabaseClient, userId: string): Promise<boolean> {
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { count, error } = await supabase
-    .from("usage_events")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId)
-    .eq("event_type", "render")
-    .gte("created_at", since);
-
-  if (error) {
-    console.error("[api/render] failed to check render rate limit", error);
-    return true;
-  }
-  return (count ?? 0) < RENDER_DAILY_LIMIT;
 }
 
 /** The persisted timeline never contains a real playable URL -- only
@@ -157,11 +132,38 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
-  if (!(await isUnderRenderRateLimit(supabase, user.id))) {
-    return NextResponse.json(
-      { error: `You've reached the limit of ${RENDER_DAILY_LIMIT} renders per day. Try again tomorrow.` },
-      { status: 429 }
-    );
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  // The permission/cap source of truth lives entirely in the backend (roles
+  // + role_features -- see supabase/migrations/0015 and
+  // backend/src/permissions/), not queried directly from here, so this
+  // logic (and its "upgrade"/cap-warning copy) exists in one language. Both
+  // calls below fail CLOSED (a network error or non-2xx blocks the render).
+  const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+
+  // Daily-cap check (admin accounts bypass it -- see
+  // backend/src/core/auth.py's bypasses_daily_caps) -- this used to be a
+  // direct Supabase usage_events query here; moved server-side so it's not
+  // reimplemented in TypeScript. See backend/src/usage/service.py's
+  // assert_render_cap.
+  try {
+    if (!backendUrl) throw new Error("NEXT_PUBLIC_API_BASE_URL is not set");
+    const capRes = await fetch(`${backendUrl.replace(/\/$/, "")}/api/usage/assert-render-cap`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (!capRes.ok) {
+      const body = await capRes.json().catch(() => ({ error: "You've reached today's render limit. Try again tomorrow." }));
+      return NextResponse.json(body, { status: capRes.status });
+    }
+  } catch (err) {
+    console.error("[api/render] failed to check render cap", projectId, err);
+    return NextResponse.json({ error: "Could not verify render limit -- try again shortly" }, { status: 503 });
   }
 
   const apiKey = process.env.CREATOMATE_API_KEY;
@@ -176,21 +178,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Render service is not configured" }, { status: 500 });
   }
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
-
-  // The permission source of truth lives entirely in the backend (roles +
-  // role_features -- see supabase/migrations/0015 and
-  // backend/src/permissions/), not queried directly from here, so this
-  // logic and its "upgrade" copy exist in one language. Fails CLOSED (a
-  // network error or non-2xx blocks the render) -- the opposite of this
-  // route's own render-rate-limit check above, which fails open, since this
-  // gates access rather than abuse.
-  const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
   try {
     if (!backendUrl) throw new Error("NEXT_PUBLIC_API_BASE_URL is not set");
     const assertRes = await fetch(`${backendUrl.replace(/\/$/, "")}/api/permissions/assert`, {
