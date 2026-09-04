@@ -1,6 +1,13 @@
+import asyncio
+import logging
+
 import edge_tts
+from edge_tts.exceptions import EdgeTTSException
+from fastapi import HTTPException
 
 from src.tts.providers.base import SynthesisResult, TTSProvider, VoiceOption, WordTimingResult
+
+logger = logging.getLogger(__name__)
 
 # A curated shortlist of well-known, stable Edge neural voices -- NOT the
 # full ~400-voice catalog edge_tts.list_voices() would return over the
@@ -44,6 +51,19 @@ _VOICES = [
 # see the duration comment in synthesize() below.
 _DURATION_PADDING_SECONDS = 0.3
 
+# edge-tts talks to an unofficial, keyless Microsoft endpoint (see
+# EdgeTTSProvider's own docstring) -- it occasionally drops a request with
+# no audio at all (edge_tts.exceptions.NoAudioReceived, and its sibling
+# WebSocketError/UnexpectedResponse/UnknownResponse, all subclasses of
+# EdgeTTSException) for reasons on Microsoft's side, not this app's
+# parameters. Confirmed 2026-09-04: the exact same (voice, text, rate=0,
+# pitch=0) that failed once in production succeeded immediately when
+# retried directly against edge-tts -- i.e. transient, not a bad request.
+# One retry absorbs that without making the caller re-click "Generate
+# speech" themselves.
+_MAX_ATTEMPTS = 2
+_RETRY_DELAY_SECONDS = 0.5
+
 
 def _signed_percent(value: int) -> str:
     return f"{value:+d}%"
@@ -60,33 +80,49 @@ class EdgeTTSProvider(TTSProvider):
     Read Aloud feature itself calls."""
 
     async def synthesize(self, text: str, voice: str, rate: int, pitch: int) -> SynthesisResult:
-        communicate = edge_tts.Communicate(text, voice, rate=_signed_percent(rate), pitch=_signed_hz(pitch))
+        last_error: EdgeTTSException | None = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            if attempt > 1:
+                await asyncio.sleep(_RETRY_DELAY_SECONDS)
 
-        audio_chunks = bytearray()
-        word_timings: list[WordTimingResult] = []
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_chunks.extend(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
-                # offset/duration are in 100-nanosecond units (.NET ticks) --
-                # divide by 10_000 to get milliseconds.
-                start_ms = chunk["offset"] // 10_000
-                end_ms = (chunk["offset"] + chunk["duration"]) // 10_000
-                word_timings.append(WordTimingResult(word=chunk["text"], start_ms=start_ms, end_ms=end_ms))
+            # A fresh Communicate per attempt -- it's a single-use streamer,
+            # not safely retryable once its stream() has already run.
+            communicate = edge_tts.Communicate(text, voice, rate=_signed_percent(rate), pitch=_signed_hz(pitch))
+            audio_chunks = bytearray()
+            word_timings: list[WordTimingResult] = []
+            try:
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        audio_chunks.extend(chunk["data"])
+                    elif chunk["type"] == "WordBoundary":
+                        # offset/duration are in 100-nanosecond units (.NET
+                        # ticks) -- divide by 10_000 to get milliseconds.
+                        start_ms = chunk["offset"] // 10_000
+                        end_ms = (chunk["offset"] + chunk["duration"]) // 10_000
+                        word_timings.append(WordTimingResult(word=chunk["text"], start_ms=start_ms, end_ms=end_ms))
+            except EdgeTTSException as exc:
+                last_error = exc
+                logger.warning(
+                    "edge-tts attempt %s/%s failed for voice=%s: %s", attempt, _MAX_ATTEMPTS, voice, exc
+                )
+                continue
 
-        # There's no cheap way to get an MP3's exact duration without
-        # decoding it, and this backend deliberately has no audio-processing
-        # dependency (see stock_media/service.py's equivalent reasoning for
-        # images). The last word boundary's end offset plus a little padding
-        # for trailing silence is the pragmatic value edge-tts users rely on.
-        if word_timings:
-            duration_seconds = word_timings[-1].end_ms / 1000 + _DURATION_PADDING_SECONDS
-        else:
-            duration_seconds = 0.0
+            # There's no cheap way to get an MP3's exact duration without
+            # decoding it, and this backend deliberately has no audio-
+            # processing dependency (see stock_media/service.py's
+            # equivalent reasoning for images). The last word boundary's end
+            # offset plus a little padding for trailing silence is the
+            # pragmatic value edge-tts users rely on.
+            duration_seconds = word_timings[-1].end_ms / 1000 + _DURATION_PADDING_SECONDS if word_timings else 0.0
 
-        return SynthesisResult(
-            audio_bytes=bytes(audio_chunks), duration_seconds=duration_seconds, word_timings=word_timings
-        )
+            return SynthesisResult(
+                audio_bytes=bytes(audio_chunks), duration_seconds=duration_seconds, word_timings=word_timings
+            )
+
+        logger.error("edge-tts failed after %s attempts for voice=%s: %s", _MAX_ATTEMPTS, voice, last_error)
+        raise HTTPException(
+            status_code=502, detail="The voiceover service didn't respond -- please try again."
+        ) from last_error
 
     def list_voices(self) -> list[VoiceOption]:
         return list(_VOICES)

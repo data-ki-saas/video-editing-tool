@@ -59,15 +59,28 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         """A truly unhandled exception is caught by Starlette's outermost
-        error-handling layer, which sits OUTSIDE CORSMiddleware -- so the
-        response it generates never gets a CORS header attached, and the
-        browser reports "blocked by CORS policy" for what is actually a
-        500. Registering a handler here keeps the response inside the
-        normal middleware stack instead, so CORSMiddleware still runs on
-        it -- the frontend gets a real error message instead of a
-        misleading CORS symptom for whatever crashed."""
+        error-handling layer (ServerErrorMiddleware). Registering a plain
+        `Exception` handler here does NOT run inside CORSMiddleware like a
+        handler for a specific exception type would -- Starlette special-
+        cases the bare `Exception`/500 key and wires it directly into
+        ServerErrorMiddleware itself (see Starlette's Starlette.__init__:
+        `if key in (500, Exception): error_handler = value`), which sits
+        OUTSIDE CORSMiddleware in the middleware stack. So the response this
+        handler returns never passes back through CORSMiddleware, and the
+        browser reports "blocked by CORS policy" / "Failed to fetch" for
+        what is actually a 500 -- confirmed 2026-09-04 against a real
+        edge_tts.NoAudioReceived crash reported as a CORS error on the
+        frontend despite CORS_ORIGINS being configured correctly. Fixed by
+        echoing the same Access-Control-Allow-* headers CORSMiddleware
+        itself would have added, directly on this response, rather than
+        relying on middleware ordering we don't control."""
         logger.exception("Unhandled exception for %s %s", request.method, request.url.path)
-        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+        response = JSONResponse(status_code=500, content={"detail": "Internal server error"})
+        origin = request.headers.get("origin")
+        if origin in settings.cors_origin_list:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
 
     app.include_router(assets_router)
     app.include_router(avatar_router)
