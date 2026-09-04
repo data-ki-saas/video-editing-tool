@@ -47,6 +47,7 @@ import {
 import { loadVideoElement, seekVideoTo, drawImageFlipped, drawImageFlippedMasked, drawImageFlippedChromaKeyed } from "@/lib/video/video";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
+import { computeAudioEnvelope, sampleAudioEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { DEFAULT_CHROMA_KEY_COLOR, hexToRgb } from "@/lib/video/chromaKey";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
@@ -76,6 +77,7 @@ import {
   FULL_FRAME_CROP_RECT,
   computeMaxCoverageCropRect,
   computeContainFitRect,
+  scaleCropRectCentered,
   type RenderSegment,
   type SequenceClipInfo,
   type TtsOverlay,
@@ -590,6 +592,12 @@ export async function exportVideoLocally(
   const cutawayAmbientEffectByEntryId = new Map(
     selections.sequenceClips.map((entry) => [entry.id, entry.kind === "image" ? (entry.ambientEffect ?? null) : null])
   );
+  // "Pulse with music" (lib/video/audioReactive.ts) -- same per-entryId
+  // lookup shape as cutawayCamera3DByEntryId above, mirroring CanvasPlayer's
+  // clipAudioReactiveById.
+  const cutawayAudioReactiveByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [entry.id, entry.kind === "image" && Boolean(entry.audioReactive)])
+  );
   const cutawayTemplateIdsByEntryId = new Map(
     selections.sequenceClips.map((entry) => [entry.id, entry.kind === "image" ? normalizeImageTemplateIds(entry) : []])
   );
@@ -637,6 +645,30 @@ export async function exportVideoLocally(
   const camera3DRenderer = new Camera3DRenderer();
 
   try {
+    // "Pulse with music" (audioReactive.ts) -- decodes/concatenates the
+    // background track a second time (buildMixedAudioBuffer below does its
+    // own, separate decode for the actual audio mix -- the two passes don't
+    // share a buffer) purely to distill this envelope once before the frame
+    // loop. A decode failure here just leaves the envelope null, same "one
+    // bad track shouldn't block the rest" policy as everywhere else
+    // background audio is handled -- the toggle becomes a harmless no-op
+    // for this export.
+    let backgroundEnvelope: AudioEnvelope | null = null;
+    if (backgroundClips.length > 0) {
+      const decodedForEnvelope: AudioBuffer[] = [];
+      const envelopeAudioContext = new OfflineAudioContext(1, 1, AUDIO_SAMPLE_RATE);
+      for (const clip of backgroundClips) {
+        try {
+          decodedForEnvelope.push(await decodeAudioBuffer(clip.url));
+        } catch {
+          // Skipped -- same policy as buildMixedAudioBuffer's own background decode.
+        }
+      }
+      if (decodedForEnvelope.length > 0) {
+        backgroundEnvelope = computeAudioEnvelope(concatenateAudioBuffers(envelopeAudioContext, decodedForEnvelope));
+      }
+    }
+
     for (const clip of sequenceClips) {
       if (clip.kind === "image") {
         if (imageClipElementsByAssetId.has(clip.assetId)) continue;
@@ -997,10 +1029,22 @@ export async function exportVideoLocally(
           // null only for an active Full-Screen overlay -- its own draw
           // below fully covers the canvas regardless, so skipping this is a
           // pure optimization, never load-bearing for correctness.
-          const destX = baseRect.x * canvas.width;
-          const destY = baseRect.y * canvas.height;
-          const destWidth = baseRect.width * canvas.width;
-          const destHeight = baseRect.height * canvas.height;
+          // "Pulse with music" -- mirrors CanvasPlayer.tsx's identical
+          // branch exactly (same scaleCropRectCentered treatment, sampled
+          // at the absolute output time so it stays phase-locked to the
+          // background track the same way playback's loop is).
+          const basePulseScale =
+            segment.entryId && cutawayAudioReactiveByEntryId.get(segment.entryId)
+              ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+              : 1;
+          const baseDestRect =
+            basePulseScale !== 1
+              ? scaleCropRectCentered({ x: baseRect.x * canvas.width, y: baseRect.y * canvas.height, width: baseRect.width * canvas.width, height: baseRect.height * canvas.height }, basePulseScale)
+              : { x: baseRect.x * canvas.width, y: baseRect.y * canvas.height, width: baseRect.width * canvas.width, height: baseRect.height * canvas.height };
+          const destX = baseDestRect.x;
+          const destY = baseDestRect.y;
+          const destWidth = baseDestRect.width;
+          const destHeight = baseDestRect.height;
           // "Make it 3D" -- mirrors CanvasPlayer.tsx's identical branch
           // exactly (same computeCamera3DPoseForZoomEffect call, same
           // "flip already applied via the outer ctx transform" reasoning
@@ -1120,15 +1164,25 @@ export async function exportVideoLocally(
             activeExclusiveImageOverlay.framing.panX, activeExclusiveImageOverlay.framing.panY, activeExclusiveImageOverlay.framing.zoom
           );
           ctx.filter = cssFilterFor(activeExclusiveImageOverlay.colorFilterId);
+          // "Pulse with music" -- pulses only the image draw below, not the
+          // ambientEffect draw further down (which keeps using the original
+          // unpulsed destX/destY/destWidth/destHeight).
+          const imageOverlayPulseScale = activeExclusiveImageOverlay.audioReactive
+            ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+            : 1;
+          const imageOverlayDestRect =
+            imageOverlayPulseScale !== 1
+              ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, imageOverlayPulseScale)
+              : { x: destX, y: destY, width: destWidth, height: destHeight };
           if (activeExclusiveImageOverlay.camera3D) {
             const pose = computeCamera3DPoseForOverlay(activeExclusiveImageOverlay.startTimeSeconds, activeExclusiveImageOverlay.endTimeSeconds, sourceTimeSeconds);
             camera3DRenderer.drawImage3D(
-              ctx, overlayImage, pose, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+              ctx, overlayImage, pose, osx, osy, osw, osh, imageOverlayDestRect.x, imageOverlayDestRect.y, imageOverlayDestRect.width, imageOverlayDestRect.height,
               activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
             );
           } else {
             drawImageFlipped(
-              ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+              ctx, overlayImage, osx, osy, osw, osh, imageOverlayDestRect.x, imageOverlayDestRect.y, imageOverlayDestRect.width, imageOverlayDestRect.height,
               activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
             );
           }
@@ -1189,14 +1243,31 @@ export async function exportVideoLocally(
                 activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
               );
             } else if (activeExclusiveVideoOverlay.camera3D) {
+              // "Pulse with music" -- only in this and the plain-draw branch
+              // below, same "matte/chroma-key compositing wins" scoping as
+              // camera3D itself.
               const pose = computeCamera3DPoseForOverlay(activeExclusiveVideoOverlay.startTimeSeconds, activeExclusiveVideoOverlay.endTimeSeconds, sourceTimeSeconds);
+              const videoOverlayPulseScale = activeExclusiveVideoOverlay.audioReactive
+                ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+                : 1;
+              const videoOverlayDestRect =
+                videoOverlayPulseScale !== 1
+                  ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, videoOverlayPulseScale)
+                  : { x: destX, y: destY, width: destWidth, height: destHeight };
               camera3DRenderer.drawImage3D(
-                ctx, overlayVideo, pose, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+                ctx, overlayVideo, pose, osx, osy, osw, osh, videoOverlayDestRect.x, videoOverlayDestRect.y, videoOverlayDestRect.width, videoOverlayDestRect.height,
                 activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
               );
             } else {
+              const videoOverlayPulseScale = activeExclusiveVideoOverlay.audioReactive
+                ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+                : 1;
+              const videoOverlayDestRect =
+                videoOverlayPulseScale !== 1
+                  ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, videoOverlayPulseScale)
+                  : { x: destX, y: destY, width: destWidth, height: destHeight };
               drawImageFlipped(
-                ctx, overlayVideo, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+                ctx, overlayVideo, osx, osy, osw, osh, videoOverlayDestRect.x, videoOverlayDestRect.y, videoOverlayDestRect.width, videoOverlayDestRect.height,
                 activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
               );
             }
@@ -1249,11 +1320,26 @@ export async function exportVideoLocally(
               destX, destY, destWidth, destHeight,
               pip.framing.flipHorizontal, pip.framing.flipVertical
             );
-          } else if (pip.camera3D) {
-            const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, sourceTimeSeconds);
-            camera3DRenderer.drawImage3D(ctx, overlayVideo, pose, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
           } else {
-            drawImageFlipped(ctx, overlayVideo, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+            // "Pulse with music" -- only in this (camera3D or plain) branch,
+            // same "matte/chroma-key compositing wins" scoping as camera3D.
+            const pipPulseScale = pip.audioReactive
+              ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+              : 1;
+            const pipDestRect =
+              pipPulseScale !== 1
+                ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, pipPulseScale)
+                : { x: destX, y: destY, width: destWidth, height: destHeight };
+            if (pip.camera3D) {
+              const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, sourceTimeSeconds);
+              camera3DRenderer.drawImage3D(
+                ctx, overlayVideo, pose, psx, psy, psw, psh, pipDestRect.x, pipDestRect.y, pipDestRect.width, pipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+              );
+            } else {
+              drawImageFlipped(
+                ctx, overlayVideo, psx, psy, psw, psh, pipDestRect.x, pipDestRect.y, pipDestRect.width, pipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+              );
+            }
           }
         }
         ctx.filter = "none";
@@ -1277,11 +1363,24 @@ export async function exportVideoLocally(
           overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom, MIN_PICTURE_IN_PICTURE_ZOOM
         );
         ctx.filter = cssFilterFor(pip.colorFilterId);
+        // "Pulse with music" -- same treatment as the video-overlay PiP loop
+        // above, independent of camera3D/ambientEffect.
+        const imagePipPulseScale = pip.audioReactive
+          ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+          : 1;
+        const imagePipDestRect =
+          imagePipPulseScale !== 1
+            ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, imagePipPulseScale)
+            : { x: destX, y: destY, width: destWidth, height: destHeight };
         if (pip.camera3D) {
           const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, sourceTimeSeconds);
-          camera3DRenderer.drawImage3D(ctx, overlayImage, pose, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+          camera3DRenderer.drawImage3D(
+            ctx, overlayImage, pose, psx, psy, psw, psh, imagePipDestRect.x, imagePipDestRect.y, imagePipDestRect.width, imagePipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+          );
         } else {
-          drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+          drawImageFlipped(
+            ctx, overlayImage, psx, psy, psw, psh, imagePipDestRect.x, imagePipDestRect.y, imagePipDestRect.width, imagePipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+          );
         }
         ctx.filter = "none";
         if (pip.ambientEffect) {

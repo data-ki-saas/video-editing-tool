@@ -1550,6 +1550,7 @@ export function ThreePaneEditor({
       rect?: CropRect;
       camera3D?: boolean;
       ambientEffect?: AmbientEffectId | null;
+      audioReactive?: boolean;
     }
   ) {
     if (framingDialogOverlayIndex === null) return;
@@ -1627,7 +1628,14 @@ export function ThreePaneEditor({
 
   function handleSaveImageOverlayFraming(
     framing: OverlayFraming,
-    options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect; camera3D?: boolean; ambientEffect?: AmbientEffectId | null }
+    options?: {
+      baseFraming?: OverlayFraming;
+      ratio?: number;
+      rect?: CropRect;
+      camera3D?: boolean;
+      ambientEffect?: AmbientEffectId | null;
+      audioReactive?: boolean;
+    }
   ) {
     if (imageFramingDialogOverlayIndex === null) return;
     const { label, state } = applyChangeImageOverlayFraming(selections, imageFramingDialogOverlayIndex, framing, options);
@@ -1729,7 +1737,7 @@ export function ThreePaneEditor({
     durationSeconds: number,
     templateIds: string[],
     cropRect: CropRect,
-    options?: { removeBackground?: boolean; camera3D?: boolean; ambientEffect?: AmbientEffectId | null }
+    options?: { removeBackground?: boolean; camera3D?: boolean; ambientEffect?: AmbientEffectId | null; audioReactive?: boolean }
   ) {
     const replacedAssetId =
       editingCutaway && editingCutaway.kind === "image" && editingCutaway.assetId !== assetId
@@ -1748,7 +1756,8 @@ export function ThreePaneEditor({
             editingCutaway.startTimeSeconds,
             options?.removeBackground,
             options?.camera3D,
-            options?.ambientEffect
+            options?.ambientEffect,
+            options?.audioReactive
           )
         : applyAddImageSequenceClip(
             selections,
@@ -1759,7 +1768,8 @@ export function ThreePaneEditor({
             videoDurationSeconds,
             options?.removeBackground,
             options?.camera3D,
-            options?.ambientEffect
+            options?.ambientEffect,
+            options?.audioReactive
           );
     pushChange(label, state);
     setIsCutawayDialogOpen(false);

@@ -71,6 +71,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { extractPreviewFrames, getVideoDuration, drawImageFlipped, drawImageFlippedMasked } from "@/lib/video/video";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
+import { computeAudioEnvelope, sampleAudioEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { segmentClipFramesApproximate, lumaFramesToAlphaMasks, segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { chromaKeyFramesToAlphaMasks, DEFAULT_CHROMA_KEY_COLOR } from "@/lib/video/chromaKey";
@@ -108,6 +109,7 @@ import {
   computeMaxCoverageCropRect,
   computeContainFitRect,
   FULL_FRAME_CROP_RECT,
+  scaleCropRectCentered,
   type CropRect,
   type ImageOverlayClip,
   type SequenceClipInfo,
@@ -402,6 +404,9 @@ export const CanvasPlayer = forwardRef<
   // scope as clipCamera3DById above, independent of it (works with or
   // without "Make it 3D" active).
   const clipAmbientEffectById = new Map(clips.map((clip) => [clip.id, clip.kind === "image" ? (clip.ambientEffect ?? null) : null]));
+  // "Pulse with music" (lib/video/audioReactive.ts) -- same image-only scope
+  // as clipCamera3DById above, independent of it and of ambientEffect.
+  const clipAudioReactiveById = new Map(clips.map((clip) => [clip.id, clip.kind === "image" && Boolean(clip.audioReactive)]));
   // Per-clip decoded preview frames + frame rate, indexed the same as
   // loadedClipsRef below (NOT necessarily the same as the `clips` prop --
   // a clip that failed to load is excluded from all three in lockstep). A
@@ -491,6 +496,12 @@ export const CanvasPlayer = forwardRef<
   // absent, checked at play/seek time rather than gating isReady on it.
   const backgroundAudioBufferRef = useRef<AudioBuffer | null>(null);
   const backgroundSourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  // "Pulse with music" (audioReactive.ts) -- distilled once from the same
+  // decoded background buffer above (see loadBackgroundAudio below), then
+  // sampled per frame in drawFrameAt. Null while loading/absent, same
+  // staging as backgroundAudioBufferRef -- a clip with the toggle on just
+  // renders un-pulsed until this resolves.
+  const backgroundEnvelopeRef = useRef<AudioEnvelope | null>(null);
   // Scratch canvas reused across frames for the background-removal masked
   // composite (see drawFrameAt's own "destination-in" branch) -- resized in
   // place rather than reallocated every frame.
@@ -888,10 +899,22 @@ export const CanvasPlayer = forwardRef<
       // correctness (see video_math.ts's computeOverlayRects doc comment).
       // Not Split-Screen here, so baseRect always matches crop's own
       // aspect (the full canvas) -- no further cover-fit needed.
-      const destX = baseRect.x * canvas.width;
-      const destY = baseRect.y * canvas.height;
-      const destWidth = baseRect.width * canvas.width;
-      const destHeight = baseRect.height * canvas.height;
+      // "Pulse with music" (audioReactive.ts) -- scales the dest rect around
+      // its own center to the background track's amplitude at this instant,
+      // independent of/composes with the camera3D branch below (both take
+      // the same four dest args either way).
+      const basePulseScale =
+        currentEntryId && clipAudioReactiveById.get(currentEntryId)
+          ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+          : 1;
+      const baseDestRect =
+        basePulseScale !== 1
+          ? scaleCropRectCentered({ x: baseRect.x * canvas.width, y: baseRect.y * canvas.height, width: baseRect.width * canvas.width, height: baseRect.height * canvas.height }, basePulseScale)
+          : { x: baseRect.x * canvas.width, y: baseRect.y * canvas.height, width: baseRect.width * canvas.width, height: baseRect.height * canvas.height };
+      const destX = baseDestRect.x;
+      const destY = baseDestRect.y;
+      const destWidth = baseDestRect.width;
+      const destHeight = baseDestRect.height;
       // "Make it 3D" (camera3D.ts) -- only for a Ken Burns image cutaway
       // with an active ZoomEffect at this instant (the effect IS the dolly
       // this rides -- see applyAddImageSequenceClip, which bakes a Ken
@@ -1018,6 +1041,16 @@ export const CanvasPlayer = forwardRef<
           activeExclusiveImageOverlay.framing.panX, activeExclusiveImageOverlay.framing.panY, activeExclusiveImageOverlay.framing.zoom
         );
         ctx.filter = getFilterPresetOption(activeExclusiveImageOverlay.colorFilterId ?? null).cssFilter;
+        // "Pulse with music" -- pulses only the image draw below, not the
+        // ambientEffect draw further down (which keeps using the original
+        // unpulsed destX/destY/destWidth/destHeight).
+        const imageOverlayPulseScale = activeExclusiveImageOverlay.audioReactive
+          ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+          : 1;
+        const imageOverlayDestRect =
+          imageOverlayPulseScale !== 1
+            ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, imageOverlayPulseScale)
+            : { x: destX, y: destY, width: destWidth, height: destHeight };
         if (activeExclusiveImageOverlay.camera3D) {
           // Same synthesized-dolly "Make it 3D" as the PiP overlay loops
           // below -- a Split-Screen half tilting in 3D can reveal a sliver
@@ -1026,12 +1059,12 @@ export const CanvasPlayer = forwardRef<
           // "floating card" fallback camera3D.ts's own renderer documents.
           const pose = computeCamera3DPoseForOverlay(activeExclusiveImageOverlay.startTimeSeconds, activeExclusiveImageOverlay.endTimeSeconds, elapsedSeconds);
           getCamera3DRenderer().drawImage3D(
-            ctx, overlayImage, pose, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+            ctx, overlayImage, pose, osx, osy, osw, osh, imageOverlayDestRect.x, imageOverlayDestRect.y, imageOverlayDestRect.width, imageOverlayDestRect.height,
             activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
           );
         } else {
           drawImageFlipped(
-            ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+            ctx, overlayImage, osx, osy, osw, osh, imageOverlayDestRect.x, imageOverlayDestRect.y, imageOverlayDestRect.width, imageOverlayDestRect.height,
             activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
           );
         }
@@ -1087,14 +1120,31 @@ export const CanvasPlayer = forwardRef<
             activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
           );
         } else if (activeExclusiveVideoOverlay.camera3D) {
+          // "Pulse with music" -- only in this and the plain-draw branch
+          // below, same "matte compositing wins" scoping as camera3D itself
+          // (the masked branch above never pulses either).
           const pose = computeCamera3DPoseForOverlay(activeExclusiveVideoOverlay.startTimeSeconds, activeExclusiveVideoOverlay.endTimeSeconds, elapsedSeconds);
+          const videoOverlayPulseScale = activeExclusiveVideoOverlay.audioReactive
+            ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+            : 1;
+          const videoOverlayDestRect =
+            videoOverlayPulseScale !== 1
+              ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, videoOverlayPulseScale)
+              : { x: destX, y: destY, width: destWidth, height: destHeight };
           getCamera3DRenderer().drawImage3D(
-            ctx, overlayImage, pose, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+            ctx, overlayImage, pose, osx, osy, osw, osh, videoOverlayDestRect.x, videoOverlayDestRect.y, videoOverlayDestRect.width, videoOverlayDestRect.height,
             activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
           );
         } else {
+          const videoOverlayPulseScale = activeExclusiveVideoOverlay.audioReactive
+            ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+            : 1;
+          const videoOverlayDestRect =
+            videoOverlayPulseScale !== 1
+              ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, videoOverlayPulseScale)
+              : { x: destX, y: destY, width: destWidth, height: destHeight };
           drawImageFlipped(
-            ctx, overlayImage, osx, osy, osw, osh, destX, destY, destWidth, destHeight,
+            ctx, overlayImage, osx, osy, osw, osh, videoOverlayDestRect.x, videoOverlayDestRect.y, videoOverlayDestRect.width, videoOverlayDestRect.height,
             activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
           );
         }
@@ -1156,15 +1206,30 @@ export const CanvasPlayer = forwardRef<
           destX, destY, destWidth, destHeight,
           pip.framing.flipHorizontal, pip.framing.flipVertical
         );
-      } else if (pip.camera3D) {
-        // "Make it 3D" (camera3D.ts) -- an overlay has no keyframed pan/zoom
-        // timeline to ride (see OverlayFraming's own doc comment), so the
-        // dolly is synthesized as one fixed push across the overlay's own
-        // start->end window rather than riding an existing effect.
-        const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, elapsedSeconds);
-        getCamera3DRenderer().drawImage3D(ctx, pipImage, pose, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
       } else {
-        drawImageFlipped(ctx, pipImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+        // "Pulse with music" -- only in this (camera3D or plain) branch,
+        // same "matte compositing wins" scoping as camera3D itself.
+        const pipPulseScale = pip.audioReactive
+          ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+          : 1;
+        const pipDestRect =
+          pipPulseScale !== 1
+            ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, pipPulseScale)
+            : { x: destX, y: destY, width: destWidth, height: destHeight };
+        if (pip.camera3D) {
+          // "Make it 3D" (camera3D.ts) -- an overlay has no keyframed pan/zoom
+          // timeline to ride (see OverlayFraming's own doc comment), so the
+          // dolly is synthesized as one fixed push across the overlay's own
+          // start->end window rather than riding an existing effect.
+          const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, elapsedSeconds);
+          getCamera3DRenderer().drawImage3D(
+            ctx, pipImage, pose, psx, psy, psw, psh, pipDestRect.x, pipDestRect.y, pipDestRect.width, pipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+          );
+        } else {
+          drawImageFlipped(
+            ctx, pipImage, psx, psy, psw, psh, pipDestRect.x, pipDestRect.y, pipDestRect.width, pipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+          );
+        }
       }
       ctx.filter = "none";
       if (pip.ambientEffect) {
@@ -1190,13 +1255,26 @@ export const CanvasPlayer = forwardRef<
         overlayImage.width, overlayImage.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom, MIN_PICTURE_IN_PICTURE_ZOOM
       );
       ctx.filter = getFilterPresetOption(pip.colorFilterId ?? null).cssFilter;
+      // "Pulse with music" -- same treatment as the video-overlay PiP loop
+      // above, independent of camera3D/ambientEffect.
+      const imagePipPulseScale = pip.audioReactive
+        ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+        : 1;
+      const imagePipDestRect =
+        imagePipPulseScale !== 1
+          ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, imagePipPulseScale)
+          : { x: destX, y: destY, width: destWidth, height: destHeight };
       if (pip.camera3D) {
         // Same "Make it 3D" synthesized dolly as the video-overlay PiP loop
         // above.
         const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, elapsedSeconds);
-        getCamera3DRenderer().drawImage3D(ctx, overlayImage, pose, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+        getCamera3DRenderer().drawImage3D(
+          ctx, overlayImage, pose, psx, psy, psw, psh, imagePipDestRect.x, imagePipDestRect.y, imagePipDestRect.width, imagePipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+        );
       } else {
-        drawImageFlipped(ctx, overlayImage, psx, psy, psw, psh, destX, destY, destWidth, destHeight, pip.framing.flipHorizontal, pip.framing.flipVertical);
+        drawImageFlipped(
+          ctx, overlayImage, psx, psy, psw, psh, imagePipDestRect.x, imagePipDestRect.y, imagePipDestRect.width, imagePipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+        );
       }
       ctx.filter = "none";
       if (pip.ambientEffect) {
@@ -2121,6 +2199,7 @@ export const CanvasPlayer = forwardRef<
   useEffect(() => {
     let cancelled = false;
     backgroundAudioBufferRef.current = null;
+    backgroundEnvelopeRef.current = null;
     if (backgroundTracks.length === 0) return;
 
     async function loadBackgroundAudio() {
@@ -2135,7 +2214,11 @@ export const CanvasPlayer = forwardRef<
         }
       }
       if (cancelled || decoded.length === 0) return;
-      backgroundAudioBufferRef.current = concatenateAudioBuffers(audioContext, decoded);
+      const concatenated = concatenateAudioBuffers(audioContext, decoded);
+      backgroundAudioBufferRef.current = concatenated;
+      // "Pulse with music" -- distilled once here from the same buffer
+      // playback uses, see audioReactive.ts's own doc comment.
+      backgroundEnvelopeRef.current = computeAudioEnvelope(concatenated);
     }
 
     void loadBackgroundAudio();

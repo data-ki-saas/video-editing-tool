@@ -721,6 +721,11 @@ export interface VideoOverlayClip {
   // rendered (plain framing OR the camera3D path above) -- independent of
   // camera3D, so the two combine freely. Absent/null means none.
   ambientEffect?: AmbientEffectId | null;
+  // Same "Pulse with music" toggle as SequenceEntry's image variant (see its
+  // own doc comment) -- scales this overlay's own dest rect to the
+  // background track's amplitude, independent of camera3D/ambientEffect
+  // above so all three combine freely.
+  audioReactive?: boolean;
 }
 
 /**
@@ -750,6 +755,8 @@ export interface ImageOverlayClip {
   camera3D?: boolean;
   // Same ambient overlay as VideoOverlayClip.ambientEffect above.
   ambientEffect?: AmbientEffectId | null;
+  // Same "Pulse with music" toggle as VideoOverlayClip.audioReactive above.
+  audioReactive?: boolean;
 }
 
 /** Cache key for a still frame captured at one overlay placement's own
@@ -1330,6 +1337,12 @@ export type SequenceEntry =
       // image-only scoping as camera3D, for now (no picker exists yet for
       // the "video" variant below). Absent/null means none.
       ambientEffect?: AmbientEffectId | null;
+      // "Pulse with music" toggle (lib/video/audioReactive.ts) -- scales
+      // this cutaway's own dest rect to the project's background-music
+      // amplitude, independent of camera3D/ambientEffect above (all three
+      // combine freely). Same image-only scoping as camera3D/ambientEffect,
+      // for now. Absent/false means today's flat scale, unchanged.
+      audioReactive?: boolean;
     };
 
 // Both SequenceEntry variants above carry a `cutTransitionInId` -- which

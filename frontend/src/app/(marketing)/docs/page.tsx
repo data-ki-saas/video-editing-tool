@@ -62,6 +62,11 @@ export default function DocsPage() {
           Drag the frame at any point in your video to set up a smooth zoom or pan there. It eases
           in and back out on its own — no keyframes to manage by hand.
         </Topic>
+        <Topic title="Pulse with music">
+          Turn on Pulse with music on any photo cutaway or overlay and it subtly grows and shrinks
+          in time with your background track — an automatic way to make your reel feel more alive
+          and in sync with the beat, with nothing to keyframe by hand.
+        </Topic>
         <Topic title="Flip & mirror">
           Flip your footage horizontally or vertically starting from any point in the video, and
           flip it back later if you only want it for a stretch.

@@ -700,6 +700,7 @@ export function ActionArea({
                   backgroundRemoval: editingCutaway.backgroundRemoval,
                   camera3D: editingCutaway.camera3D,
                   ambientEffect: editingCutaway.ambientEffect,
+                  audioReactive: editingCutaway.audioReactive,
                 }
               : null
           }

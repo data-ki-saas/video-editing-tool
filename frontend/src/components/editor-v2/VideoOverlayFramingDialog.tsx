@@ -387,6 +387,7 @@ export function VideoOverlayFramingDialog({
       rect?: CropRect;
       camera3D?: boolean;
       ambientEffect?: AmbientEffectId | null;
+      audioReactive?: boolean;
     }
   ) => void;
   onClose: () => void;
@@ -420,6 +421,9 @@ export function VideoOverlayFramingDialog({
   // Ambient overlay effect (ambientEffects.ts) -- same picker as
   // ImageOverlayFramingDialog's own.
   const [ambientEffect, setAmbientEffect] = useState<AmbientEffectId | null>(overlay.ambientEffect ?? null);
+  // "Pulse with music" (audioReactive.ts) -- same toggle as
+  // ImageOverlayFramingDialog's own.
+  const [audioReactive, setAudioReactive] = useState(Boolean(overlay.audioReactive));
   // Which half the right-hand actions apply to -- only meaningful (and only
   // ever shown) for Split Screen, where there genuinely are two frameable
   // halves; Full-Screen/Picture-in-Picture only ever have the overlay's own
@@ -438,6 +442,7 @@ export function VideoOverlayFramingDialog({
     setAudioBalance(overlay.audioBalance);
     setCamera3D(Boolean(overlay.camera3D));
     setAmbientEffect(overlay.ambientEffect ?? null);
+    setAudioReactive(Boolean(overlay.audioReactive));
     setSelectedSide("overlay");
   }, [overlay]);
 
@@ -455,6 +460,7 @@ export function VideoOverlayFramingDialog({
       rect: isPictureInPicture ? pipRect : undefined,
       camera3D,
       ambientEffect,
+      audioReactive,
     });
   }
 
@@ -654,6 +660,15 @@ export function VideoOverlayFramingDialog({
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={audioReactive}
+                onChange={(e) => setAudioReactive(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Pulse with music
             </label>
           </div>
         </div>

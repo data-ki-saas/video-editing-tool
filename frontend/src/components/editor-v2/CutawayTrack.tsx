@@ -76,6 +76,9 @@ export type CutawaySegment =
       // Ambient overlay effect (lib/video/ambientEffects.ts) -- see
       // CutawayDialog.tsx's own picker.
       ambientEffect?: AmbientEffectId | null;
+      // "Pulse with music" (lib/video/audioReactive.ts) -- see
+      // CutawayDialog.tsx's own toggle.
+      audioReactive?: boolean;
     }
   | {
       kind: "video";

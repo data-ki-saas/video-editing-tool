@@ -551,7 +551,14 @@ export function applyChangeImageOverlayFraming(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   framing: OverlayFraming,
-  options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect; camera3D?: boolean; ambientEffect?: AmbientEffectId | null }
+  options?: {
+    baseFraming?: OverlayFraming;
+    ratio?: number;
+    rect?: CropRect;
+    camera3D?: boolean;
+    ambientEffect?: AmbientEffectId | null;
+    audioReactive?: boolean;
+  }
 ): TransformationResult {
   const overlay = selections.overlayImages[overlayIndex];
   if (!overlay) return { label: "Adjusted overlay framing", state: selections };
@@ -572,6 +579,7 @@ export function applyChangeImageOverlayFraming(
     layout: nextLayout,
     camera3D: options?.camera3D ?? overlay.camera3D,
     ambientEffect: options?.ambientEffect ?? overlay.ambientEffect,
+    audioReactive: options?.audioReactive ?? overlay.audioReactive,
   };
   return { label: "Adjusted overlay framing", state: { ...selections, overlayImages: nextOverlays } };
 }
@@ -667,7 +675,8 @@ export function applyAddImageSequenceClip(
   startTimeSeconds: number,
   removeBackground?: boolean,
   camera3D?: boolean,
-  ambientEffect?: AmbientEffectId | null
+  ambientEffect?: AmbientEffectId | null,
+  audioReactive?: boolean
 ): TransformationResult {
   const newEntry: SequenceEntry = {
     id: crypto.randomUUID(),
@@ -685,6 +694,7 @@ export function applyAddImageSequenceClip(
     ...(removeBackground ? { backgroundRemoval: { enabled: true, matteAssetId: null } } : {}),
     camera3D,
     ambientEffect,
+    audioReactive,
   };
   const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, startTimeSeconds, durationSeconds);
   return {
@@ -801,7 +811,8 @@ export function applyEditImageSequenceClip(
   clipStartSeconds: number,
   removeBackground?: boolean,
   camera3D?: boolean,
-  ambientEffect?: AmbientEffectId | null
+  ambientEffect?: AmbientEffectId | null,
+  audioReactive?: boolean
 ): TransformationResult {
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
   const entry = selections.sequenceClips[entryIndex];
@@ -834,6 +845,7 @@ export function applyEditImageSequenceClip(
     backgroundRemoval: removeBackground ? { enabled: true, matteAssetId: entry.backgroundRemoval?.matteAssetId ?? null } : null,
     camera3D,
     ambientEffect,
+    audioReactive,
   };
 
   const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, clipStartSeconds, clampedDuration);
@@ -1556,6 +1568,7 @@ export function applyChangeOverlayFraming(
     rect?: CropRect;
     camera3D?: boolean;
     ambientEffect?: AmbientEffectId | null;
+    audioReactive?: boolean;
   }
 ): TransformationResult {
   const overlay = selections.videoOverlays[overlayIndex];
@@ -1578,6 +1591,7 @@ export function applyChangeOverlayFraming(
     audioBalance: options?.audioBalance ?? overlay.audioBalance,
     camera3D: options?.camera3D ?? overlay.camera3D,
     ambientEffect: options?.ambientEffect ?? overlay.ambientEffect,
+    audioReactive: options?.audioReactive ?? overlay.audioReactive,
   };
   return { label: "Adjusted overlay framing", state: { ...selections, videoOverlays: nextOverlays } };
 }

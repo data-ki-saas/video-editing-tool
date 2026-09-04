@@ -318,7 +318,14 @@ export function ImageOverlayFramingDialog({
   outputAspectRatio: number | null;
   onSave: (
     framing: OverlayFraming,
-    options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect; camera3D?: boolean; ambientEffect?: AmbientEffectId | null }
+    options?: {
+      baseFraming?: OverlayFraming;
+      ratio?: number;
+      rect?: CropRect;
+      camera3D?: boolean;
+      ambientEffect?: AmbientEffectId | null;
+      audioReactive?: boolean;
+    }
   ) => void;
   onClose: () => void;
   onDelete: () => void;
@@ -341,6 +348,9 @@ export function ImageOverlayFramingDialog({
   // Ambient overlay effect (ambientEffects.ts) -- same picker as
   // VideoOverlayFramingDialog's own.
   const [ambientEffect, setAmbientEffect] = useState<AmbientEffectId | null>(overlay.ambientEffect ?? null);
+  // "Pulse with music" (audioReactive.ts) -- same toggle as
+  // VideoOverlayFramingDialog's own.
+  const [audioReactive, setAudioReactive] = useState(Boolean(overlay.audioReactive));
 
   // Re-syncs if a different overlay's framing dialog is opened while this
   // one is already mounted (same reasoning as TextOverlayDialog's own
@@ -353,6 +363,7 @@ export function ImageOverlayFramingDialog({
     setPipRect(overlay.layout.type === "picture-in-picture" ? overlay.layout.rect : DEFAULT_PIP_RECT);
     setCamera3D(Boolean(overlay.camera3D));
     setAmbientEffect(overlay.ambientEffect ?? null);
+    setAudioReactive(Boolean(overlay.audioReactive));
     setSelectedSide("overlay");
   }, [overlay]);
 
@@ -369,6 +380,7 @@ export function ImageOverlayFramingDialog({
       rect: isPictureInPicture ? pipRect : undefined,
       camera3D,
       ambientEffect,
+      audioReactive,
     });
   }
 
@@ -550,6 +562,15 @@ export function ImageOverlayFramingDialog({
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={audioReactive}
+                onChange={(e) => setAudioReactive(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Pulse with music
             </label>
           </div>
         </div>

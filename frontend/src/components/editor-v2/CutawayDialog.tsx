@@ -160,6 +160,10 @@ export function CutawayDialog({
     // the picker when reopening a cutaway that already has one set, same
     // staging as camera3D above.
     ambientEffect?: AmbientEffectId | null;
+    // "Pulse with music" (lib/video/audioReactive.ts) -- pre-checks the
+    // toggle when reopening a cutaway that already has it on, same staging
+    // as camera3D above.
+    audioReactive?: boolean;
   } | null;
   /** Non-null when opened via AssetGallery's right-click "Cutaway" on a
    * specific IMAGE asset -- an ADD, not an edit, just pre-selects that
@@ -170,7 +174,7 @@ export function CutawayDialog({
     durationSeconds: number,
     templateIds: string[],
     cropRect: CropRect,
-    options?: { removeBackground?: boolean; camera3D?: boolean; ambientEffect?: AmbientEffectId | null }
+    options?: { removeBackground?: boolean; camera3D?: boolean; ambientEffect?: AmbientEffectId | null; audioReactive?: boolean }
   ) => void;
   onAddVideo: (assetId: string, options?: { removeBackground?: boolean }) => void;
   onClose: () => void;
@@ -192,6 +196,11 @@ export function CutawayDialog({
   // Ambient overlay effect (ambientEffects.ts) -- same image-only scoping
   // as camera3D above.
   const [ambientEffect, setAmbientEffect] = useState<AmbientEffectId | null>(editing?.ambientEffect ?? null);
+  // "Pulse with music" (audioReactive.ts) -- same image-only scoping as
+  // camera3D above. Not previewed in this dialog's own standalone canvas
+  // (no background track loaded here) -- it only ever renders once the
+  // clip is actually part of the sequence (CanvasPlayer.tsx/exportTimeline.ts).
+  const [audioReactive, setAudioReactive] = useState(Boolean(editing?.audioReactive));
   const isEditing = Boolean(editing);
 
   const imageAssets = assets.filter((asset) => asset.kind === "image");
@@ -689,6 +698,20 @@ export function CutawayDialog({
                 ))}
               </select>
             </label>
+            {/* "Pulse with music" (audioReactive.ts) -- subtly scales this
+                cutaway to the project's background-music amplitude,
+                independent of "Make it 3D"/Ambience above (all three
+                combine freely). A no-op when no background track is
+                selected. */}
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={audioReactive}
+                onChange={(e) => setAudioReactive(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              Pulse with music
+            </label>
             <div className="ml-auto flex gap-2">
               <button
                 type="button"
@@ -703,7 +726,7 @@ export function CutawayDialog({
                 onClick={() =>
                   selectedAsset &&
                   photoCropRect &&
-                  onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect, { removeBackground, camera3D, ambientEffect })
+                  onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect, { removeBackground, camera3D, ambientEffect, audioReactive })
                 }
                 className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
               >

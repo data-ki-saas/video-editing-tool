@@ -1036,6 +1036,7 @@ export function FrameStrip({
           backgroundRemoval: entry.backgroundRemoval,
           camera3D: entry.camera3D,
           ambientEffect: entry.ambientEffect,
+          audioReactive: entry.audioReactive,
         };
       }
       return {
