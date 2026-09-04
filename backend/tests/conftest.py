@@ -72,6 +72,7 @@ class FakeAssetsTable:
         self,
         owner_id: str,
         *,
+        name: str = "Test Reel",
         render_id: str | None = None,
         render_status: str | None = None,
         render_url: str | None = None,
@@ -83,6 +84,7 @@ class FakeAssetsTable:
         self.projects[project_id] = {
             "id": project_id,
             "owner_id": owner_id,
+            "name": name,
             "render_id": render_id,
             "render_status": render_status,
             "render_url": render_url,
@@ -98,6 +100,7 @@ class FakeAssetsTable:
             return None
         return projects_repository.ProjectRecord(
             id=row["id"],
+            name=row["name"],
             render_id=row["render_id"],
             render_status=row["render_status"],
             render_url=row["render_url"],

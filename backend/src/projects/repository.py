@@ -8,6 +8,7 @@ _TABLE = "projects"
 @dataclass
 class ProjectRecord:
     id: str
+    name: str
     render_id: str | None
     render_status: str | None
     render_url: str | None
@@ -20,7 +21,7 @@ def get_project(project_id: str, owner_id: str) -> ProjectRecord | None:
     result = (
         get_supabase_client()
         .table(_TABLE)
-        .select("id, render_id, render_status, render_url, thumbnail_url, thumbnail_source, thumbnail_time_seconds")
+        .select("id, name, render_id, render_status, render_url, thumbnail_url, thumbnail_source, thumbnail_time_seconds")
         .eq("id", project_id)
         .eq("owner_id", owner_id)
         .limit(1)

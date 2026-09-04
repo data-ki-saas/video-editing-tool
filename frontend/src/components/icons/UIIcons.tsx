@@ -248,6 +248,65 @@ export function ScissorsIcon(props: IconProps) {
   );
 }
 
+// A play triangle inside a rounded frame, with a second frame peeking out
+// behind it -- "a collection of videos," distinguishing the Library link
+// from AccountIcon/ToolsIcon/SettingsIcon at a glance. Links to /library
+// from the header (see dashboard/(chrome)/layout.tsx / MobileReelMenu.tsx).
+export function LibraryIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="2" y="3" width="16" height="12" rx="2" />
+      <rect x="6" y="9" width="16" height="12" rx="2" fill="none" />
+      <path d="M12 13.5v4l3.2-2-3.2-2Z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+// The universal three-nodes-connected glyph -- the library page's "Share"
+// action button on a saved video, copies (or hands off to the OS share
+// sheet) that video's /share/[videoId] link.
+export function ShareIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="6" cy="12" r="2.5" />
+      <circle cx="18" cy="5.5" r="2.5" />
+      <circle cx="18" cy="18.5" r="2.5" />
+      <path d="M8.2 10.8l7.6-4.3M8.2 13.2l7.6 4.3" />
+    </svg>
+  );
+}
+
+// A down arrow into a tray -- the library page's "Download" action button
+// on a saved video.
+export function DownloadIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 3v12M7.5 10.5 12 15l4.5-4.5" />
+      <path d="M4 16.5V19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5" />
+    </svg>
+  );
+}
+
+// A bookmark, filled solid when active -- the library page's "Save as
+// template" toggle button on a saved video (see supabase/migrations/0023's
+// is_template column). Outline-only when off, solid-filled once a video is
+// in the Templates tab.
+export function BookmarkIcon({ filled, ...props }: IconProps & { filled?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1Z" />
+    </svg>
+  );
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>

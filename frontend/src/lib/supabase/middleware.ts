@@ -7,6 +7,13 @@ const GUEST_ONLY_PATHS = ["/login", "/signup"];
 // GUEST_ONLY_PATHS, a logged-in user must still be able to read these (e.g.
 // from the footer), not get redirected away from them.
 const MARKETING_STATIC_PATHS = ["/about", "/contact", "/pricing", "/docs", "/privacy", "/terms"];
+// A saved library video's public share link (see app/share/[videoId]/
+// page.tsx and its backend, GET /api/library/public/{id}) -- the whole
+// point is that someone with no account, or signed into a different one,
+// can open it, so this can't require auth like everything else here does
+// by default. Not a new exposure: the video itself already sits in an
+// unauthenticated-readable public R2 bucket.
+const PUBLIC_SHARE_PATH_PREFIX = "/share/";
 
 // The Supabase client has no built-in request timeout -- a STALLED (not
 // outright failed) response from Auth left this middleware hanging until
@@ -64,7 +71,8 @@ export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isGuestOnlyPath = GUEST_ONLY_PATHS.some((path) => pathname.startsWith(path));
   const isMarketingStaticPath = MARKETING_STATIC_PATHS.some((path) => pathname.startsWith(path));
-  const isPublicPath = pathname === "/" || isGuestOnlyPath || isMarketingStaticPath;
+  const isPublicPath =
+    pathname === "/" || isGuestOnlyPath || isMarketingStaticPath || pathname.startsWith(PUBLIC_SHARE_PATH_PREFIX);
 
   if (!user && !isPublicPath) {
     return NextResponse.redirect(new URL("/login", request.url));

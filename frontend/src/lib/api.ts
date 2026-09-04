@@ -862,3 +862,98 @@ export async function updateUserRole(userId: string, role: string): Promise<Admi
   });
   return userFromWire(await handleResponse<AdminUserWire>(response));
 }
+
+export interface LibraryVideo {
+  id: string;
+  projectId: string | null;
+  projectName: string;
+  videoUrl: string;
+  thumbnailUrl: string | null;
+  durationSeconds: number | null;
+  isTemplate: boolean;
+  createdAt: string;
+}
+
+interface LibraryVideoWire {
+  id: string;
+  project_id: string | null;
+  project_name: string;
+  video_url: string;
+  thumbnail_url: string | null;
+  duration_seconds: number | null;
+  is_template: boolean;
+  created_at: string;
+}
+
+function libraryVideoFromWire(w: LibraryVideoWire): LibraryVideo {
+  return {
+    id: w.id,
+    projectId: w.project_id,
+    projectName: w.project_name,
+    videoUrl: w.video_url,
+    thumbnailUrl: w.thumbnail_url,
+    durationSeconds: w.duration_seconds,
+    isTemplate: w.is_template,
+    createdAt: w.created_at,
+  };
+}
+
+/** GET /api/library -- this user's saved reels, newest first (the backend
+ * already orders by created_at desc via library_videos_user_time_idx). */
+export async function listLibraryVideos(): Promise<LibraryVideo[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/library`, { headers: await authHeader() });
+  const body = await handleResponse<{ videos: LibraryVideoWire[] }>(response);
+  return body.videos.map(libraryVideoFromWire);
+}
+
+/** POST /api/library (multipart) -- uploads a finished Edge Render (see
+ * LocalRenderPopup.tsx's "Save to library" button) into the user's
+ * permanent library. The local render's own blob: URL only lives as long
+ * as that tab stays open, so this is the only way to keep one past that.
+ * `thumbnail` is best-effort -- omit it (or let it fail server-side) and
+ * the saved entry just shows no preview image. */
+export async function saveToLibrary(params: {
+  projectId: string;
+  video: Blob;
+  videoFilename: string;
+  thumbnail: Blob | null;
+  durationSeconds: number | null;
+}): Promise<LibraryVideo> {
+  const formData = new FormData();
+  formData.append("project_id", params.projectId);
+  if (params.durationSeconds != null && Number.isFinite(params.durationSeconds)) {
+    formData.append("duration_seconds", String(params.durationSeconds));
+  }
+  formData.append("video", params.video, params.videoFilename);
+  if (params.thumbnail) formData.append("thumbnail", params.thumbnail, "thumbnail.jpg");
+
+  const response = await apiFetch(`${API_BASE_URL}/api/library`, {
+    method: "POST",
+    headers: await authHeader(),
+    body: formData,
+  });
+  return libraryVideoFromWire(await handleResponse<LibraryVideoWire>(response));
+}
+
+/** PATCH /api/library/{id}/template -- the library page's "Save as
+ * template" action button. A template IS a library video, just flagged
+ * (see supabase/migrations/0023's own comment) -- toggling it back off
+ * ("Remove from templates") is the same call with `isTemplate: false`. */
+export async function setLibraryVideoTemplate(videoId: string, isTemplate: boolean): Promise<LibraryVideo> {
+  const response = await apiFetch(`${API_BASE_URL}/api/library/${encodeURIComponent(videoId)}/template`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ is_template: isTemplate }),
+  });
+  return libraryVideoFromWire(await handleResponse<LibraryVideoWire>(response));
+}
+
+/** GET /api/library/public/{id} -- backs the public /share/[videoId] page.
+ * Deliberately no auth header: this is the one library call meant to work
+ * for a visitor with no account at all (or signed into a different one) --
+ * see the backend's own get_public_video comment on why that's not a new
+ * privacy exposure. */
+export async function getPublicLibraryVideo(videoId: string): Promise<LibraryVideo> {
+  const response = await apiFetch(`${API_BASE_URL}/api/library/public/${encodeURIComponent(videoId)}`);
+  return libraryVideoFromWire(await handleResponse<LibraryVideoWire>(response));
+}

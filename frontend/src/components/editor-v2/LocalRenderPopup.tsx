@@ -7,13 +7,22 @@
  * video with native play/pause/seek controls plus an explicit Download
  * button (the blob URL only lives as long as this tab stays open, unlike
  * the cloud render's permanent R2 link, so downloading it is the only way
- * to keep it). Same small-modal chrome as StockPreviewPopup.tsx, dismissed
- * only via the explicit ✕ button -- which itself only renders once
- * isDismissable is true, since there's nothing productive to do with this
- * closed mid-render (the render keeps running either way, and reopening it
- * would risk a confusing second click starting a second export).
+ * to keep it) and a "Save to library" button next to it (see
+ * lib/api.ts's saveToLibrary) that uploads the SAME bytes to a permanent
+ * public R2 object the /library page lists from then on. Same small-modal
+ * chrome as StockPreviewPopup.tsx, dismissed only via the explicit ✕
+ * button -- which itself only renders once isDismissable is true, since
+ * there's nothing productive to do with this closed mid-render (the
+ * render keeps running either way, and reopening it would risk a
+ * confusing second click starting a second export).
  */
+import { useRef, useState } from "react";
+import { saveToLibrary } from "@/lib/api";
+
+type SaveState = "idle" | "saving" | "saved" | "error";
+
 export function LocalRenderPopup({
+  projectId,
   isRendering,
   progress,
   resultUrl,
@@ -22,6 +31,7 @@ export function LocalRenderPopup({
   resultWarnings,
   onClose,
 }: {
+  projectId: string;
   isRendering: boolean;
   progress: number;
   resultUrl: string | null;
@@ -32,6 +42,51 @@ export function LocalRenderPopup({
 }) {
   const isDismissable = !isRendering;
   const fileExtension = resultMimeType === "video/webm" ? "webm" : "mp4";
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Captures whatever frame is currently on-screen (the video already
+  // autoplays, so by the time someone clicks this it's well past the first
+  // black/blank frame) rather than seeking to a specific timestamp first --
+  // simple over exact, same "smart default over exposing a knob" call as
+  // CoverPicker's own "frame" mode, just with no picker step at all here.
+  function captureThumbnail(): Promise<Blob | null> {
+    const videoEl = videoRef.current;
+    if (!videoEl || videoEl.videoWidth === 0) return Promise.resolve(null);
+    const canvas = document.createElement("canvas");
+    canvas.width = videoEl.videoWidth;
+    canvas.height = videoEl.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return Promise.resolve(null);
+    ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+    return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+  }
+
+  async function handleSaveToLibrary() {
+    if (!resultUrl || saveState === "saving" || saveState === "saved") return;
+    setSaveState("saving");
+    setSaveError(null);
+    try {
+      // resultUrl is a same-tab blob: URL (see exportTimeline.ts) -- this
+      // fetch is local, no network round trip, just recovers the Blob the
+      // <video> element is already playing.
+      const videoBlob = await fetch(resultUrl).then((res) => res.blob());
+      const thumbnailBlob = await captureThumbnail();
+      const rawDuration = videoRef.current?.duration;
+      await saveToLibrary({
+        projectId,
+        video: videoBlob,
+        videoFilename: `reel.${fileExtension}`,
+        thumbnail: thumbnailBlob,
+        durationSeconds: rawDuration != null && Number.isFinite(rawDuration) ? rawDuration : null,
+      });
+      setSaveState("saved");
+    } catch (err) {
+      setSaveState("error");
+      setSaveError(err instanceof Error ? err.message : "Failed to save to library");
+    }
+  }
 
   return (
     <div
@@ -70,6 +125,7 @@ export function LocalRenderPopup({
         {!isRendering && resultUrl && (
           <div className="flex flex-col gap-3">
             <video
+              ref={videoRef}
               src={resultUrl}
               controls
               autoPlay
@@ -82,13 +138,24 @@ export function LocalRenderPopup({
                 ))}
               </ul>
             )}
-            <a
-              href={resultUrl}
-              download={`reel.${fileExtension}`}
-              className="rounded-md bg-accent py-1.5 text-center text-sm font-medium text-accent-foreground hover:opacity-90"
-            >
-              Download
-            </a>
+            <div className="flex gap-2">
+              <a
+                href={resultUrl}
+                download={`reel.${fileExtension}`}
+                className="flex-1 rounded-md bg-accent py-1.5 text-center text-sm font-medium text-accent-foreground hover:opacity-90"
+              >
+                Download
+              </a>
+              <button
+                type="button"
+                onClick={handleSaveToLibrary}
+                disabled={saveState === "saving" || saveState === "saved"}
+                className="flex-1 rounded-md border border-border py-1.5 text-sm font-medium text-foreground hover:bg-background disabled:opacity-50"
+              >
+                {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved to library ✓" : "Save to library"}
+              </button>
+            </div>
+            {saveState === "error" && saveError && <p className="text-xs text-red-600">{saveError}</p>}
           </div>
         )}
       </div>

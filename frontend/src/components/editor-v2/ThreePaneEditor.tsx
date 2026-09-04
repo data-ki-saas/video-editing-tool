@@ -2733,6 +2733,7 @@ export function ThreePaneEditor({
       )}
       {isLocalRenderPopupOpen && (
         <LocalRenderPopup
+          projectId={projectId}
           isRendering={isLocalRendering}
           progress={localRenderProgress}
           resultUrl={localRenderUrl}

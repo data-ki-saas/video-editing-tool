@@ -16,7 +16,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { listProjects, type Project } from "@/lib/projects";
 import { SignOutButton } from "@/components/SignOutButton";
-import { AccountIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
+import { AccountIcon, LibraryIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 
 export function MobileReelMenu({ currentProjectId, onClose }: { currentProjectId: string; onClose: () => void }) {
@@ -94,6 +94,15 @@ export function MobileReelMenu({ currentProjectId, onClose }: { currentProjectId
               <ToolsIcon className="h-5 w-5" />
             </Link>
           )}
+          <Link
+            href="/library"
+            onClick={onClose}
+            aria-label="Library"
+            title="Library"
+            className="rounded-full p-2 text-muted hover:bg-foreground/10"
+          >
+            <LibraryIcon className="h-5 w-5" />
+          </Link>
           <Link
             href="/account/usage"
             onClick={onClose}
