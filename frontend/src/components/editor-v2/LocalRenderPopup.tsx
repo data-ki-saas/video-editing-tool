@@ -7,10 +7,11 @@
  * video with native play/pause/seek controls plus an explicit Download
  * button (the blob URL only lives as long as this tab stays open, unlike
  * the cloud render's permanent R2 link, so downloading it is the only way
- * to keep it). Same small-modal chrome as StockPreviewPopup.tsx, except it
- * can't be dismissed mid-render -- there's nothing productive to do with it
- * closed (the render keeps running either way, and reopening it would risk
- * a confusing second click starting a second export).
+ * to keep it). Same small-modal chrome as StockPreviewPopup.tsx, dismissed
+ * only via the explicit ✕ button -- which itself only renders once
+ * isDismissable is true, since there's nothing productive to do with this
+ * closed mid-render (the render keeps running either way, and reopening it
+ * would risk a confusing second click starting a second export).
  */
 export function LocalRenderPopup({
   isRendering,
@@ -38,7 +39,6 @@ export function LocalRenderPopup({
       aria-modal="true"
       aria-label="Edge Render"
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
-      onClick={isDismissable ? onClose : undefined}
     >
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg rounded-lg bg-surface p-4 shadow-lg">
         <div className="mb-3 flex items-center justify-between gap-2">

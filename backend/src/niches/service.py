@@ -64,8 +64,9 @@ SYSTEM_PROMPT = (
 # language code -> (English name, script name), used to steer the LLM's
 # spoken/read output into a specific Indian language + script. Adding
 # another Indian language later is just one more entry here (plus the
-# frontend's mirroring LANGUAGE_SCRIPTS table in lib/transliteration.ts and
-# tts/providers/edge_provider.py's voice catalog).
+# frontend's mirroring LANGUAGE_SCRIPTS table in lib/transliteration.ts,
+# tts/service.py's _SCRIPT_RANGES, and tts/providers/edge_provider.py's
+# voice catalog).
 _LANGUAGE_INFO: dict[str, tuple[str, str]] = {
     "hi": ("Hindi", "Devanagari"),
     "mr": ("Marathi", "Devanagari"),

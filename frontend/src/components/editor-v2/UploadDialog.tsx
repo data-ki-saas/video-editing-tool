@@ -22,7 +22,6 @@ export function UploadDialog({
       aria-modal="true"
       aria-label="Upload asset"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
     >
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-lg bg-surface p-4 shadow-lg">
         <div className="mb-2 flex items-center justify-between">

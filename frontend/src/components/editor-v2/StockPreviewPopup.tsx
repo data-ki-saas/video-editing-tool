@@ -32,14 +32,6 @@ export function StockPreviewPopup({
       aria-modal="true"
       aria-label={`Preview: ${result.title}`}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
-      // stopPropagation here matters: this popup is a DOM child of
-      // StockMediaDialog's own backdrop (which closes on any click) --
-      // without this, clicking outside the preview would bubble up and
-      // close BOTH popups instead of just this one.
-      onClick={(e) => {
-        e.stopPropagation();
-        onClose();
-      }}
     >
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg rounded-lg bg-surface p-4 shadow-lg">
         <div className="mb-2 flex items-center justify-between gap-2">

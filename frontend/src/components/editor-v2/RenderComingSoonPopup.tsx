@@ -4,7 +4,8 @@
  * Stand-in for the cloud (Creatomate) Render button while it's temporarily
  * disabled -- see ThreePaneEditor.tsx's handleRenderClick, which shows this
  * instead of actually calling startRender(). Same small-modal chrome as
- * StockPreviewPopup.tsx (backdrop closes on click, card stops propagation).
+ * StockPreviewPopup.tsx -- dismissed only via the explicit "Got it" button,
+ * not by clicking the backdrop.
  */
 export function RenderComingSoonPopup({ onClose }: { onClose: () => void }) {
   return (
@@ -13,7 +14,6 @@ export function RenderComingSoonPopup({ onClose }: { onClose: () => void }) {
       aria-modal="true"
       aria-label="High quality rendering coming soon"
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
-      onClick={onClose}
     >
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-lg bg-surface p-4 shadow-lg">
         <p className="text-sm text-foreground">High quality rendering coming soon.</p>

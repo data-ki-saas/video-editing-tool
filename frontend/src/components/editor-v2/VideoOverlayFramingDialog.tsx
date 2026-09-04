@@ -477,7 +477,7 @@ export function VideoOverlayFramingDialog({
   const overlayStyle = splitScreenPartnerFirst ? leadingStyle : trailingStyle;
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Adjust framing" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label="Adjust framing" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div onClick={(e) => e.stopPropagation()} className="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-lg bg-surface shadow-lg">
         <div className="flex items-center justify-between p-4 pb-0">
           <h2 className="text-sm font-semibold">Adjust framing</h2>

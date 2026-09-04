@@ -31,7 +31,6 @@ export function MobileClipEditor({
       aria-modal="true"
       aria-label="Clip options"
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
-      onClick={onClose}
     >
       <div onClick={(e) => e.stopPropagation()} className="flex w-full flex-col gap-1 rounded-t-lg bg-surface p-2 pb-4 shadow-lg">
         {isImageClip && (

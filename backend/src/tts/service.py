@@ -18,12 +18,45 @@ logger = logging.getLogger(__name__)
 
 MAX_TEXT_LENGTH = 2000
 
+# Unicode block ranges for each Indic script this app's niche languages use
+# (mirrors niches/service.py's _LANGUAGE_INFO and the frontend's
+# lib/transliteration.ts LANGUAGE_SCRIPTS -- add a new Indian language in
+# all three places, plus edge_provider.py's voice catalog), paired with
+# which voice-id language prefixes can actually read that script.
+#
+# Confirmed 2026-09-04: edge-tts deterministically fails (NoAudioReceived,
+# every time, not flaky) whenever a voice is given text in an Indic script
+# outside its own language -- e.g. en-IN-PrabhatNeural or ta-IN-PallaviNeural
+# given Devanagari (Hindi) text. An Indic voice reading plain English, or
+# English/its-own-script code-switched text, works fine -- so this only
+# needs to catch a genuine WRONG-script mismatch, never gate on English.
+_SCRIPT_RANGES: list[tuple[str, int, int, frozenset[str]]] = [
+    ("Devanagari", 0x0900, 0x097F, frozenset({"hi", "mr"})),
+    ("Gurmukhi", 0x0A00, 0x0A7F, frozenset({"pa"})),
+    ("Bengali", 0x0980, 0x09FF, frozenset({"bn"})),
+    ("Odia", 0x0B00, 0x0B7F, frozenset({"or"})),
+    ("Tamil", 0x0B80, 0x0BFF, frozenset({"ta"})),
+]
+
+
+def _assert_script_matches_voice(text: str, voice: str) -> None:
+    voice_lang = voice.split("-")[0].lower()
+    for script_name, start, end, supported_langs in _SCRIPT_RANGES:
+        if voice_lang in supported_langs:
+            continue
+        if any(start <= ord(ch) <= end for ch in text):
+            raise HTTPException(
+                status_code=400,
+                detail=f"This voice can't read {script_name} script -- pick a voice for that language instead.",
+            )
+
 
 async def synthesize(project_id: str, text: str, voice: str, rate: int, pitch: int, user: CurrentUser) -> SynthesizeResponse:
     if not text.strip():
         raise HTTPException(status_code=400, detail="Text is required")
     if len(text) > MAX_TEXT_LENGTH:
         raise HTTPException(status_code=400, detail=f"Text exceeds the {MAX_TEXT_LENGTH} character limit")
+    _assert_script_matches_voice(text, voice)
 
     if not assets_repository.project_owned_by(project_id, user.id):
         raise HTTPException(status_code=404, detail="Project not found")
