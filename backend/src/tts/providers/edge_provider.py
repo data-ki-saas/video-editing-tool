@@ -87,7 +87,18 @@ class EdgeTTSProvider(TTSProvider):
 
             # A fresh Communicate per attempt -- it's a single-use streamer,
             # not safely retryable once its stream() has already run.
-            communicate = edge_tts.Communicate(text, voice, rate=_signed_percent(rate), pitch=_signed_hz(pitch))
+            #
+            # boundary="WordBoundary" is NOT the edge-tts package's own
+            # default (it defaults to "SentenceBoundary" as of 7.x) --
+            # confirmed 2026-09-04: without this, every synthesis silently
+            # returns zero WordBoundary events regardless of voice/language,
+            # so word_timings is always empty and karaoke-mode captions
+            # (drawKaraokeCaption in the frontend) never draw anything. This
+            # isn't a per-language issue -- it broke the moment the
+            # installed edge-tts version added this parameter.
+            communicate = edge_tts.Communicate(
+                text, voice, rate=_signed_percent(rate), pitch=_signed_hz(pitch), boundary="WordBoundary"
+            )
             audio_chunks = bytearray()
             word_timings: list[WordTimingResult] = []
             try:
