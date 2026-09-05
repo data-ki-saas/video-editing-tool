@@ -307,6 +307,18 @@ export function BookmarkIcon({ filled, ...props }: IconProps & { filled?: boolea
   );
 }
 
+// An up arrow out of a tray -- mirrors DownloadIcon's shape, reversed.
+// Badges the "Post to YouTube" action on a saved reel (LocalRenderPopup.tsx,
+// the library page's action row).
+export function UploadIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M12 15V3M7.5 7.5 12 3l4.5 4.5" />
+      <path d="M4 16.5V19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5" />
+    </svg>
+  );
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>

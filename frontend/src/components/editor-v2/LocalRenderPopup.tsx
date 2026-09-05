@@ -18,11 +18,13 @@
  */
 import { useRef, useState } from "react";
 import { saveToLibrary } from "@/lib/api";
+import { PostToYoutubeButton } from "@/components/PostToYoutubeButton";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function LocalRenderPopup({
   projectId,
+  projectName,
   isRendering,
   progress,
   resultUrl,
@@ -32,6 +34,7 @@ export function LocalRenderPopup({
   onClose,
 }: {
   projectId: string;
+  projectName: string;
   isRendering: boolean;
   progress: number;
   resultUrl: string | null;
@@ -45,6 +48,7 @@ export function LocalRenderPopup({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedVideoId, setSavedVideoId] = useState<string | null>(null);
 
   // Captures whatever frame is currently on-screen (the video already
   // autoplays, so by the time someone clicks this it's well past the first
@@ -74,13 +78,14 @@ export function LocalRenderPopup({
       const videoBlob = await fetch(resultUrl).then((res) => res.blob());
       const thumbnailBlob = await captureThumbnail();
       const rawDuration = videoRef.current?.duration;
-      await saveToLibrary({
+      const saved = await saveToLibrary({
         projectId,
         video: videoBlob,
         videoFilename: `reel.${fileExtension}`,
         thumbnail: thumbnailBlob,
         durationSeconds: rawDuration != null && Number.isFinite(rawDuration) ? rawDuration : null,
       });
+      setSavedVideoId(saved.id);
       setSaveState("saved");
     } catch (err) {
       setSaveState("error");
@@ -154,6 +159,9 @@ export function LocalRenderPopup({
               >
                 {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved to library ✓" : "Save to library"}
               </button>
+              {saveState === "saved" && savedVideoId && (
+                <PostToYoutubeButton libraryVideoId={savedVideoId} title={projectName} />
+              )}
             </div>
             {saveState === "error" && saveError && <p className="text-xs text-red-600">{saveError}</p>}
           </div>

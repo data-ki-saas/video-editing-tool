@@ -1,24 +1,85 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useTheme } from "@/components/theme-provider";
 import { COLOR_THEMES, THEME_MODES } from "@/lib/theme";
 import { resetPermissionsCache, usePermissions } from "@/lib/usePermissions";
+import { disconnectSocialAccount, getSocialAccounts, getSocialConnectUrl, type SocialAccount } from "@/lib/api";
 
-export default function SettingsPage() {
+const SOCIAL_ERROR_MESSAGES: Record<string, string> = {
+  access_denied: "YouTube connection was cancelled.",
+  missing_code: "YouTube didn't return the expected response -- try again.",
+  connect_failed: "Couldn't connect your YouTube account -- try again.",
+};
+
+function SettingsPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const { mode, colorTheme, setMode, setColorTheme } = useTheme();
-  const { loading: isLoadingRole, roleLabel, badgeColor } = usePermissions();
+  const { loading: isLoadingRole, roleLabel, badgeColor, has: hasFeature } = usePermissions();
+  const [socialAccounts, setSocialAccounts] = useState<SocialAccount[] | null>(null);
+  const [isConnectingYoutube, setIsConnectingYoutube] = useState(false);
+  const [isDisconnectingYoutube, setIsDisconnectingYoutube] = useState(false);
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
+
+  // Read once, lazily, off the URL this page was loaded with (right after
+  // the OAuth callback's redirect back here -- see
+  // backend/src/social/service.py's handle_callback) -- a lazy initializer
+  // rather than an effect that calls setState, so the banner doesn't
+  // immediately vanish once the query-param cleanup effect below fires.
+  const [socialError] = useState<string | null>(() => {
+    const code = searchParams.get("social_error");
+    return code ? (SOCIAL_ERROR_MESSAGES[code] ?? "Couldn't connect that account -- try again.") : null;
+  });
+  const [socialNotice] = useState<string | null>(() =>
+    searchParams.get("social") === "connected" ? "YouTube connected." : null
+  );
+
+  useEffect(() => {
+    if (searchParams.get("social_error") || searchParams.get("social")) {
+      router.replace("/settings");
+    }
+  }, [searchParams, router]);
 
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
   }, []);
+
+  useEffect(() => {
+    getSocialAccounts()
+      .then(setSocialAccounts)
+      .catch(() => setSocialAccounts([]));
+  }, []);
+
+  async function handleConnectYoutube() {
+    setIsConnectingYoutube(true);
+    try {
+      window.location.href = await getSocialConnectUrl("youtube");
+    } catch (err) {
+      setDisconnectError(err instanceof Error ? err.message : "Couldn't start connecting YouTube");
+      setIsConnectingYoutube(false);
+    }
+  }
+
+  async function handleDisconnectYoutube() {
+    setIsDisconnectingYoutube(true);
+    try {
+      await disconnectSocialAccount("youtube");
+      setSocialAccounts((prev) => prev?.filter((a) => a.provider !== "youtube") ?? prev);
+    } catch (err) {
+      setDisconnectError(err instanceof Error ? err.message : "Couldn't disconnect YouTube");
+    } finally {
+      setIsDisconnectingYoutube(false);
+    }
+  }
+
+  const youtubeAccount = socialAccounts?.find((a) => a.provider === "youtube") ?? null;
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -60,6 +121,47 @@ export default function SettingsPage() {
           {signingOut ? "Signing out…" : "Sign out"}
         </button>
       </section>
+
+      {!isLoadingRole && hasFeature("social_posting") && (
+        <section className="flex flex-col gap-3">
+          <h2 className="text-lg font-medium">Connected accounts</h2>
+          <p className="text-sm text-muted">
+            Connect a platform once, then post a finished reel there in one click from the library.
+          </p>
+          {socialNotice && <p className="text-sm text-accent">{socialNotice}</p>}
+          {(socialError || disconnectError) && <p className="text-sm text-red-600">{socialError ?? disconnectError}</p>}
+
+          <div className="flex items-center justify-between rounded-md border border-border p-3">
+            <div>
+              <p className="text-sm font-medium text-foreground">YouTube</p>
+              {youtubeAccount ? (
+                <p className="text-sm text-muted">Connected as {youtubeAccount.accountName}</p>
+              ) : (
+                <p className="text-sm text-muted">Not connected</p>
+              )}
+            </div>
+            {youtubeAccount ? (
+              <button
+                type="button"
+                onClick={handleDisconnectYoutube}
+                disabled={isDisconnectingYoutube}
+                className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-surface disabled:opacity-50"
+              >
+                {isDisconnectingYoutube ? "Disconnecting…" : "Disconnect"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleConnectYoutube}
+                disabled={isConnectingYoutube || socialAccounts === null}
+                className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {isConnectingYoutube ? "Connecting…" : "Connect YouTube"}
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-medium">Appearance</h2>
@@ -117,5 +219,15 @@ export default function SettingsPage() {
         </p>
       </section>
     </main>
+  );
+}
+
+// useSearchParams (above) requires a Suspense boundary -- same convention as
+// library/page.tsx's own equivalent wrapper.
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={<main className="mx-auto w-full max-w-2xl px-4 py-12 text-sm text-muted">Loading…</main>}>
+      <SettingsPageContent />
+    </Suspense>
   );
 }

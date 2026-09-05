@@ -14,6 +14,7 @@ from src.metering.router import router as metering_router
 from src.niches.router import router as niches_router
 from src.permissions.router import router as permissions_router
 from src.projects.router import router as projects_router
+from src.social.router import router as social_router
 from src.stock_media.router import router as stock_media_router
 from src.tts.router import router as tts_router
 from src.usage.router import router as usage_router
@@ -91,6 +92,7 @@ def create_app() -> FastAPI:
     app.include_router(niches_router)
     app.include_router(permissions_router)
     app.include_router(projects_router)
+    app.include_router(social_router)
     app.include_router(stock_media_router)
     app.include_router(tts_router)
     app.include_router(usage_router)

@@ -12,6 +12,7 @@ import {
 } from "@/lib/api";
 import { BookmarkIcon, DownloadIcon, ShareIcon, SpeakerFullIcon, SpeakerMutedIcon, TrashIcon } from "@/components/icons/UIIcons";
 import { InlineEditableText } from "@/components/InlineEditableText";
+import { PostToYoutubeButton } from "@/components/PostToYoutubeButton";
 
 const DESCRIPTION_MAX_LENGTH = 120;
 
@@ -169,6 +170,7 @@ function LibraryCard({
           >
             <TrashIcon className="h-4 w-4" />
           </button>
+          <PostToYoutubeButton libraryVideoId={video.id} title={video.projectName} variant="icon" />
         </div>
         <button
           type="button"

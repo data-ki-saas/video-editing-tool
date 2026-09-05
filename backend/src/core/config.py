@@ -161,6 +161,26 @@ class Settings(BaseSettings):
     # audio is imported, not the OAuth2-gated original-quality download.
     freesound_api_key: str = ""
 
+    # Google OAuth client used ONLY for posting a saved reel to YouTube on a
+    # user's behalf (src/social/) -- a SEPARATE OAuth client from whatever
+    # one Supabase's own "Continue with Google" login button uses (see
+    # DEPLOY.md's step 3b): that one only ever requests an identity scope,
+    # this one needs youtube.upload plus a stored refresh token.
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: str = ""
+    # Signs/verifies the OAuth "state" param round-tripped through Google's
+    # consent screen (CSRF protection, and carries which user started the
+    # connect flow, since the callback has no session/bearer token to read
+    # one from -- Google redirects the browser there directly). Self-
+    # generated, same precedent as CREATOMATE_WEBHOOK_SECRET/
+    # HEYGEN_WEBHOOK_SECRET: `openssl rand -hex 32`.
+    social_oauth_state_secret: str = ""
+    # This app's own frontend origin -- lets social/service.py's OAuth
+    # callback redirect the browser back to /settings once a platform is
+    # connected. Mirrors backend_public_url above, just the other direction
+    # (the frontend's own address, not this server's).
+    frontend_public_url: str = ""
+
     @property
     def max_upload_size_bytes(self) -> int:
         return self.max_upload_size_mb * 1024 * 1024

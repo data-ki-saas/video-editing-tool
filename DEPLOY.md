@@ -259,6 +259,10 @@ the next push that touches `supabase/migrations/`.
    | `R2_SIGNED_URL_EXPIRES_SECONDS` | optional | `3600` |
    | `PEXELS_API_KEY` | optional (stock photo/video search disabled without it) | `<PEXELS_API_KEY>` |
    | `FREESOUND_API_KEY` | optional (stock music search disabled without it) | `<FREESOUND_API_KEY>` |
+   | `GOOGLE_OAUTH_CLIENT_ID` | required for the YouTube posting feature | Google Cloud Console > **APIs & Services > Credentials** > create an OAuth Client ID (type "Web application") — **a separate client from whatever one Supabase's own Google login button uses** (step 3b above): that one only requests an identity scope, this one requests `youtube.upload` and needs a stored refresh token. Its **Authorized redirect URI** must be exactly `<YOUR_RENDER_BACKEND_URL>/api/social/youtube/callback`. While the OAuth consent screen is unverified (the normal state for a POC), add your own Google account as a **Test user** or every consent attempt will be blocked |
+   | `GOOGLE_OAUTH_CLIENT_SECRET` | required for the YouTube posting feature | Same credential screen as above |
+   | `SOCIAL_OAUTH_STATE_SECRET` | required for the YouTube posting feature | Self-generated: `openssl rand -hex 32` |
+   | `FRONTEND_PUBLIC_URL` | required for the YouTube posting feature | This app's own production frontend URL — same value as the frontend's own `SITE_URL` (step 6) — lets the OAuth callback redirect the browser back to `/settings` once a platform is connected |
    | `BACKEND_PUBLIC_URL` | required for the avatar-video feature | this same backend's own Render URL, e.g. `https://<your-backend>.onrender.com` (no trailing slash) -- lets it hand HeyGen a callback URL pointing back at itself |
    | `HEYGEN_API_KEY` | required for the avatar-video feature | [app.heygen.com](https://app.heygen.com) > **API** — pay-as-you-go, no free tier as of writing |
    | `HEYGEN_DEFAULT_AVATAR_ID` | required for the avatar-video feature | the `avatar_id` of one avatar you create in HeyGen's dashboard — there's no in-app avatar picker yet, every generation uses this one |
@@ -469,6 +473,10 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | `ANTHROPIC_MODEL` | `claude-sonnet-5` | Not fetched — optional to set |
 | `PEXELS_API_KEY` | `""` | [pexels.com/api](https://www.pexels.com/api/) — sign up, one key covers both photo and video search |
 | `FREESOUND_API_KEY` | `""` | [freesound.org/apiv2/apply](https://freesound.org/apiv2/apply/) — request an API credential (basic token auth, no OAuth2 needed) |
+| `GOOGLE_OAUTH_CLIENT_ID` | `""` | Google Cloud Console > **APIs & Services > Credentials** — a Web-application OAuth Client ID dedicated to YouTube posting, separate from Supabase's own Google login client |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | `""` | Same credential screen as above |
+| `SOCIAL_OAUTH_STATE_SECRET` | `""` | Self-generated: `openssl rand -hex 32` |
+| `FRONTEND_PUBLIC_URL` | `""` | This app's own production frontend URL — same value as the frontend's `SITE_URL` below |
 
 ### Render-transfer worker (Render), from `worker/.env.example`
 
@@ -512,6 +520,7 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | Pexels > API | `PEXELS_API_KEY` |
 | Freesound > apiv2/apply | `FREESOUND_API_KEY` |
 | Creatomate > project > Preview SDK | `NEXT_PUBLIC_CREATOMATE_PUBLIC_TOKEN` |
+| Google Cloud Console > APIs & Services > Credentials | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` |
 | Render > timeline-editor-backend service page | `NEXT_PUBLIC_API_BASE_URL` (the service's own URL) |
 | Render > render-transfer-worker service page | `RENDER_WORKER_URL` (the service's own URL + `/transfer`) |
 | Vercel > project page (after first deploy) | `SITE_URL`, and `CORS_ORIGINS` on the backend |

@@ -986,3 +986,84 @@ export async function getPublicLibraryVideo(videoId: string): Promise<LibraryVid
   const response = await apiFetch(`${API_BASE_URL}/api/library/public/${encodeURIComponent(videoId)}`);
   return libraryVideoFromWire(await handleResponse<LibraryVideoWire>(response));
 }
+
+export interface SocialAccount {
+  provider: string;
+  accountName: string;
+  connectedAt: string;
+}
+
+interface SocialAccountWire {
+  provider: string;
+  account_name: string;
+  connected_at: string;
+}
+
+/** GET /api/social/accounts -- every social platform this user has
+ * connected (currently just "youtube"). Empty until they click "Connect
+ * YouTube" in Settings. */
+export async function getSocialAccounts(): Promise<SocialAccount[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/social/accounts`, { headers: await authHeader() });
+  const body = await handleResponse<{ accounts: SocialAccountWire[] }>(response);
+  return body.accounts.map((a) => ({ provider: a.provider, accountName: a.account_name, connectedAt: a.connected_at }));
+}
+
+/** GET /api/social/{provider}/connect-url -- the OAuth consent-screen URL
+ * to send the browser to (a full-page redirect, not a popup/fetch target --
+ * see settings/page.tsx's "Connect YouTube" button). The backend's own
+ * callback redirects back to /settings once connected. */
+export async function getSocialConnectUrl(provider: string): Promise<string> {
+  const response = await apiFetch(`${API_BASE_URL}/api/social/${encodeURIComponent(provider)}/connect-url`, {
+    headers: await authHeader(),
+  });
+  const body = await handleResponse<{ url: string }>(response);
+  return body.url;
+}
+
+export async function disconnectSocialAccount(provider: string): Promise<void> {
+  const response = await apiFetch(`${API_BASE_URL}/api/social/${encodeURIComponent(provider)}/disconnect`, {
+    method: "POST",
+    headers: await authHeader(),
+  });
+  await throwIfNotOk(response);
+}
+
+export type SocialPostStatus = "processing" | "completed" | "failed";
+
+export interface SocialPost {
+  id: string;
+  status: SocialPostStatus;
+  providerUrl: string | null;
+  error: string | null;
+}
+
+/** POST /api/social/{provider}/publish -- kicks off uploading an
+ * already-saved library video to the connected account for that platform.
+ * Returns immediately with status "processing" (the actual upload runs
+ * server-side after this responds, see backend/src/social/service.py) --
+ * poll getSocialPost/pollSocialPost (lib/socialPost.ts) until it reaches a
+ * terminal status. */
+export async function publishSocialPost(
+  provider: string,
+  libraryVideoId: string,
+  title: string,
+  description: string
+): Promise<SocialPost> {
+  const response = await apiFetch(`${API_BASE_URL}/api/social/${encodeURIComponent(provider)}/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ library_video_id: libraryVideoId, title, description }),
+  });
+  const body = await handleResponse<{ id: string; status: SocialPostStatus }>(response);
+  return { id: body.id, status: body.status, providerUrl: null, error: null };
+}
+
+export async function getSocialPost(id: string): Promise<SocialPost> {
+  const response = await apiFetch(`${API_BASE_URL}/api/social/posts/${encodeURIComponent(id)}`, {
+    headers: await authHeader(),
+  });
+  const body = await handleResponse<{ id: string; status: SocialPostStatus; provider_url: string | null; error: string | null }>(
+    response
+  );
+  return { id: body.id, status: body.status, providerUrl: body.provider_url, error: body.error };
+}

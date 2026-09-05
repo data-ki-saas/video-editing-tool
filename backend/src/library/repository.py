@@ -66,6 +66,18 @@ def get_by_id(video_id: str) -> LibraryVideoRecord | None:
     return LibraryVideoRecord(**result.data[0])
 
 
+def get_owned(video_id: str, user_id: str) -> LibraryVideoRecord | None:
+    """Owner-scoped lookup, unlike get_by_id above (which backs the public
+    share view and is deliberately unscoped) -- for a caller that needs to
+    both find AND authorize a specific video in one step, e.g.
+    social/service.py's publish, which needs this row's video_url as the
+    upload source and must not let one user post another's saved reel."""
+    result = get_supabase_client().table(_TABLE).select("*").eq("id", video_id).eq("user_id", user_id).limit(1).execute()
+    if not result.data:
+        return None
+    return LibraryVideoRecord(**result.data[0])
+
+
 def set_is_template(video_id: str, user_id: str, is_template: bool) -> LibraryVideoRecord | None:
     """Scoped by user_id directly (not a separate ownership check first) --
     an update matching zero rows (wrong id, or someone else's video) just
