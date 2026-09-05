@@ -337,11 +337,16 @@ export function CutawayDialog({
       // states for the 2D case.
       if (camera3D) {
         const pose = computeCamera3DPoseForZoomEffect(zoomEffect, templateIds, elapsed);
-        getCamera3DRenderer().drawImage3D(ctx!, img, pose, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height, false, false);
+        getCamera3DRenderer().drawImage3D(
+          ctx!, img, pose, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height, false, false,
+          ambientEffect ? { effectId: ambientEffect, elapsedSeconds: elapsed, seed: ambientEffectSeed(selectedAssetId ?? "") } : null
+        );
       } else {
         ctx!.drawImage(img, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height);
+        // Skipped when camera3D above already rendered this effect inside
+        // its own 3D scene (real parallax) -- see that branch's own comment.
+        drawAmbientEffect(ctx!, ambientEffect, dest.x, dest.y, dest.width, dest.height, elapsed, ambientEffectSeed(selectedAssetId ?? ""));
       }
-      drawAmbientEffect(ctx!, ambientEffect, dest.x, dest.y, dest.width, dest.height, elapsed, ambientEffectSeed(selectedAssetId ?? ""));
 
       rafId = requestAnimationFrame(draw);
     }

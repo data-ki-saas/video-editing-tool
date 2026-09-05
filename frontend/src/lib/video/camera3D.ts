@@ -33,6 +33,7 @@
 import * as THREE from "three";
 import { drawImageFlipped } from "./video";
 import { easeInOut, type ZoomEffect } from "./video_math";
+import { drawAmbientEffect, type AmbientEffectId } from "./ambientEffects";
 
 export interface Camera3DPose {
   panXFraction: number; // horizontal camera dolly-pan, as a fraction of the frame's rest half-width
@@ -79,6 +80,28 @@ const MIN_EASE_OUT_FRACTION = 0.25;
 // face-on to the camera, avoiding the grazing-angle blur described above.
 const FOV_DEGREES = 45;
 const CAMERA_DISTANCE = 10;
+
+// An ambient effect (ambientEffects.ts) rendered alongside a 3D-enabled clip
+// sits on its own plane, closer to the camera than the image plane (which
+// stays at z=0) -- both planes then share the SAME moving/re-aiming camera,
+// so the effect naturally parallaxes MORE than the image for the same pan/
+// push (it's a smaller fraction of CAMERA_DISTANCE away from the camera to
+// begin with). See Camera3DRenderer's own doc comment for the derivation of
+// why this depth was chosen. Expressed as a fraction of CAMERA_DISTANCE
+// (not an absolute unit) so it scales along with that constant if it's ever
+// retuned.
+const EFFECT_DEPTH_FRACTION = 0.4;
+// The effect plane parallaxes more than the image plane (being nearer the
+// camera), so the same pan/push amplitude sweeps it further across the
+// frame -- oversized so that sweep never reveals a transparent edge. Safe to
+// oversize freely (unlike the image plane) since an ambient effect's own
+// texture is mostly transparent background with no real edge to preserve.
+const EFFECT_PLANE_OVERSIZE = 1.15;
+// Effects whose 2D draw uses "screen" compositing (see ambientEffects.ts) --
+// mirrored here as a WebGL blend so they still read as light ADDING onto
+// the photo rather than a flat translucent shape once they're composited in
+// the 3D scene instead of directly onto the 2D ctx.
+const SCREEN_BLENDED_EFFECTS = new Set<AmbientEffectId>(["light-sweep", "sparkle", "sun-rays", "crackers"]);
 
 function poseAtProgress(t: number, tiltSign: number, rollSign: number): Camera3DPose {
   const eased = easeInOut(t);
@@ -191,6 +214,15 @@ export class Camera3DRenderer {
   private texture: THREE.CanvasTexture;
   private scratchCanvas: HTMLCanvasElement;
   private scratchCtx: CanvasRenderingContext2D;
+  // The ambient-effect plane -- see EFFECT_DEPTH_FRACTION's own comment.
+  // Hidden (never rendered) whenever the current drawImage3D call has no
+  // ambient effect to show, so it doesn't linger from whatever the
+  // sequentially-reused renderer drew last (a previous clip/overlay, or a
+  // previous frame).
+  private effectMesh: THREE.Mesh;
+  private effectTexture: THREE.CanvasTexture;
+  private effectScratchCanvas: HTMLCanvasElement;
+  private effectScratchCtx: CanvasRenderingContext2D;
 
   constructor() {
     const canvas = document.createElement("canvas");
@@ -215,9 +247,26 @@ export class Camera3DRenderer {
     const material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true });
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
     this.mesh.position.set(0, 0, 0);
+    this.mesh.renderOrder = 0;
+
+    this.effectScratchCanvas = document.createElement("canvas");
+    const effectScratchCtx = this.effectScratchCanvas.getContext("2d");
+    if (!effectScratchCtx) throw new Error("Camera3DRenderer: 2D context unavailable for ambient-effect scratch canvas");
+    this.effectScratchCtx = effectScratchCtx;
+    this.effectTexture = new THREE.CanvasTexture(this.effectScratchCanvas);
+    const effectMaterial = new THREE.MeshBasicMaterial({ map: this.effectTexture, transparent: true, depthWrite: false });
+    this.effectMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), effectMaterial);
+    this.effectMesh.position.set(0, 0, CAMERA_DISTANCE * EFFECT_DEPTH_FRACTION);
+    // Explicit render order (rather than relying on three.js's own
+    // distance-from-camera transparency sort) so the effect always composites
+    // ON TOP of the image regardless of how close the dolly push brings the
+    // camera to either plane.
+    this.effectMesh.renderOrder = 1;
+    this.effectMesh.visible = false;
 
     this.scene = new THREE.Scene();
     this.scene.add(this.mesh);
+    this.scene.add(this.effectMesh);
   }
 
   dispose(): void {
@@ -225,13 +274,44 @@ export class Camera3DRenderer {
     this.texture.dispose();
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
+    this.effectTexture.dispose();
+    this.effectMesh.geometry.dispose();
+    (this.effectMesh.material as THREE.Material).dispose();
+  }
+
+  /** Recreates `texture` sized for `canvas` when its pixel dimensions
+   * change -- three.js keeps a same-size CanvasTexture's GPU storage fixed
+   * and reuses a partial texSubImage2D-style upload, which silently fails
+   * once the source's actual size changes (see drawImage3D's own comment
+   * for the full GL_INVALID_VALUE story this was lifted from). Recreating
+   * forces fresh GPU storage sized for the new source. Returns the
+   * (possibly new) texture -- caller reassigns it to whichever material
+   * owns it. */
+  private resizeTexture(canvas: HTMLCanvasElement, texture: THREE.CanvasTexture, width: number, height: number): THREE.CanvasTexture {
+    if (canvas.width === width && canvas.height === height) return texture;
+    canvas.width = width;
+    canvas.height = height;
+    texture.dispose();
+    const next = new THREE.CanvasTexture(canvas);
+    next.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    return next;
   }
 
   /** Renders `source`'s [sx,sy,sWidth,sHeight] sub-rect through the 3D
    * scene at `pose`, then composites the result into `ctx` at
    * [destX,destY,destWidth,destHeight] -- same argument shape as
    * drawImageFlipped, so call sites swap one function for the other rather
-   * than restructuring their draw loop. */
+   * than restructuring their draw loop.
+   *
+   * `ambientEffect`, when given, renders that ambientEffects.ts effect onto
+   * the SAME [destX,destY,destWidth,destHeight] rect but on its own plane
+   * nearer the camera (see EFFECT_DEPTH_FRACTION) -- sharing this call's one
+   * `pose` is what makes it parallax against the image instead of sitting on
+   * top of it like a flat sticker. Omit (or pass null) for a 3D element with
+   * no ambient effect; a plain (non-3D) clip/overlay with an ambient effect
+   * still calls drawAmbientEffect directly against its own 2D ctx as before
+   * -- this path only applies once there's a shared camera for the two
+   * layers to react to together. */
   drawImage3D(
     ctx: CanvasRenderingContext2D,
     source: CanvasImageSource,
@@ -245,31 +325,14 @@ export class Camera3DRenderer {
     destWidth: number,
     destHeight: number,
     flipHorizontal: boolean,
-    flipVertical: boolean
+    flipVertical: boolean,
+    ambientEffect?: { effectId: AmbientEffectId; elapsedSeconds: number; seed: number } | null
   ): void {
     if (destWidth <= 0 || destHeight <= 0) return;
 
-    if (this.scratchCanvas.width !== sWidth || this.scratchCanvas.height !== sHeight) {
-      this.scratchCanvas.width = sWidth;
-      this.scratchCanvas.height = sHeight;
-      // A resize needs a brand-new CanvasTexture, not just needsUpdate on the
-      // existing one -- three.js keeps its underlying GPU texture allocated
-      // at whatever size it first saw and reuses a texSubImage2D-style
-      // partial upload for a same-size CanvasTexture, which silently fails
-      // (GL_INVALID_VALUE, "offset overflows texture dimensions") once the
-      // source's pixel size actually changed, leaving the OLD image's pixels
-      // on screen -- reproduced directly against three.js: draw A, draw B
-      // (same size, updates fine), draw C (different size, GPU stall +
-      // that GL error, canvas still shows B). This is exactly why cycling
-      // through several "Make it 3D" cutaways of differing resolutions
-      // (real-world photos, e.g. from different phones/cameras) froze on
-      // the first one's photo while the pose (pan/tilt/push) kept animating
-      // correctly -- pose comes from a separate, per-frame computation, only
-      // the texture was stuck. Disposing and recreating the texture forces
-      // three.js to allocate fresh GPU storage sized for the new source.
-      this.texture.dispose();
-      this.texture = new THREE.CanvasTexture(this.scratchCanvas);
-      this.texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    const nextTexture = this.resizeTexture(this.scratchCanvas, this.texture, sWidth, sHeight);
+    if (nextTexture !== this.texture) {
+      this.texture = nextTexture;
       const material = this.mesh.material as THREE.MeshBasicMaterial;
       material.map = this.texture;
       material.needsUpdate = true;
@@ -296,6 +359,48 @@ export class Camera3DRenderer {
     const visibleHeight = 2 * CAMERA_DISTANCE * Math.tan(fovRad / 2);
     const visibleWidth = visibleHeight * (destWidth / destHeight);
     this.mesh.scale.set(visibleWidth, visibleHeight, 1);
+
+    if (ambientEffect) {
+      const roundedWidth = Math.max(1, Math.round(destWidth));
+      const roundedHeight = Math.max(1, Math.round(destHeight));
+      const nextEffectTexture = this.resizeTexture(this.effectScratchCanvas, this.effectTexture, roundedWidth, roundedHeight);
+      if (nextEffectTexture !== this.effectTexture) {
+        this.effectTexture = nextEffectTexture;
+        const material = this.effectMesh.material as THREE.MeshBasicMaterial;
+        material.map = this.effectTexture;
+        material.needsUpdate = true;
+      }
+      this.effectScratchCtx.clearRect(0, 0, roundedWidth, roundedHeight);
+      drawAmbientEffect(this.effectScratchCtx, ambientEffect.effectId, 0, 0, roundedWidth, roundedHeight, ambientEffect.elapsedSeconds, ambientEffect.seed);
+      this.effectTexture.needsUpdate = true;
+
+      const effectMaterial = this.effectMesh.material as THREE.MeshBasicMaterial;
+      if (SCREEN_BLENDED_EFFECTS.has(ambientEffect.effectId)) {
+        // Reproduces "screen" (result = src + dst - src*dst) as a WebGL
+        // blend equation, so it still reads as light adding onto the image
+        // plane behind it rather than a flat translucent shape -- see
+        // ambientEffects.ts's own per-effect comments for which effects use
+        // "screen" in their 2D form.
+        effectMaterial.blending = THREE.CustomBlending;
+        effectMaterial.blendEquation = THREE.AddEquation;
+        effectMaterial.blendSrc = THREE.OneMinusDstColorFactor;
+        effectMaterial.blendDst = THREE.OneFactor;
+      } else {
+        effectMaterial.blending = THREE.NormalBlending;
+      }
+
+      // Sized to exactly fill the frame at REST from the effect plane's OWN
+      // (nearer) depth, same formula as the image plane above but at its
+      // shorter rest distance -- then oversized (EFFECT_PLANE_OVERSIZE) since
+      // this plane parallaxes further than the image for the same pose.
+      const effectRestDistance = CAMERA_DISTANCE - this.effectMesh.position.z;
+      const effectVisibleHeight = 2 * effectRestDistance * Math.tan(fovRad / 2) * EFFECT_PLANE_OVERSIZE;
+      const effectVisibleWidth = effectVisibleHeight * (destWidth / destHeight);
+      this.effectMesh.scale.set(effectVisibleWidth, effectVisibleHeight, 1);
+      this.effectMesh.visible = true;
+    } else {
+      this.effectMesh.visible = false;
+    }
 
     const dollyDistance = CAMERA_DISTANCE * (1 - pose.pushFraction);
     this.camera.position.set(pose.panXFraction * (visibleWidth / 2), pose.panYFraction * (visibleHeight / 2), dollyDistance);

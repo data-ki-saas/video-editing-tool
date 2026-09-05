@@ -737,6 +737,12 @@ export const CanvasPlayer = forwardRef<
     // clipMattesRef assignment); undefined for every other clip/frame,
     // which every branch below just treats as "no masking".
     const matte = clipMattesRef.current[position.clipIndex]?.[frameIndex];
+    // Set true only inside the camera3D branch below -- lets the ambient-
+    // effect draw after ctx.restore() know whether this frame's base clip
+    // already rendered its ambient effect INSIDE that 3D scene (for real
+    // parallax against the image) so it doesn't also draw a second, flat
+    // copy on top.
+    let baseAmbientRoutedThrough3D = false;
     ctx.save();
     ctx.filter = getFilterPresetOption(currentEntryId ? (clipFilterById.get(currentEntryId) ?? null) : null).cssFilter;
     ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
@@ -925,9 +931,14 @@ export const CanvasPlayer = forwardRef<
       // flip args here are false -- passing the real toggles too would
       // flip it twice.
       const activeZoomEffectIndex = currentEntryId && clipCamera3DById.get(currentEntryId) ? findActiveZoomEffectIndex(zoomEffects, elapsedSeconds) : -1;
+      const baseAmbientEffectId = currentEntryId ? clipAmbientEffectById.get(currentEntryId) : undefined;
       if (activeZoomEffectIndex !== -1) {
         const pose = computeCamera3DPoseForZoomEffect(zoomEffects[activeZoomEffectIndex], clipTemplateIdsById.get(currentEntryId!) ?? [], elapsedSeconds);
-        getCamera3DRenderer().drawImage3D(ctx, image, pose, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight, false, false);
+        getCamera3DRenderer().drawImage3D(
+          ctx, image, pose, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight, false, false,
+          baseAmbientEffectId ? { effectId: baseAmbientEffectId, elapsedSeconds: position.localSeconds, seed: ambientEffectSeed(currentEntryId!) } : null
+        );
+        baseAmbientRoutedThrough3D = Boolean(baseAmbientEffectId);
       } else {
         ctx.drawImage(image, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight);
       }
@@ -941,8 +952,11 @@ export const CanvasPlayer = forwardRef<
     // or its own half of a Split-Screen layout) regardless of which branch
     // above drew it -- independent of camera3D/canvasFillMode/background
     // removal. `position.localSeconds` is time since THIS clip's own start,
-    // so the effect's own loop is self-contained per clip.
-    if (baseRect && currentEntryId && clipAmbientEffectById.get(currentEntryId)) {
+    // so the effect's own loop is self-contained per clip. Skipped when
+    // camera3D already rendered this same effect INSIDE its 3D scene above
+    // (baseAmbientRoutedThrough3D) -- that's what gives it real parallax
+    // against the image instead of sitting on top like a flat sticker.
+    if (baseRect && currentEntryId && !baseAmbientRoutedThrough3D && clipAmbientEffectById.get(currentEntryId)) {
       drawAmbientEffect(
         ctx,
         clipAmbientEffectById.get(currentEntryId),
@@ -1062,7 +1076,14 @@ export const CanvasPlayer = forwardRef<
           const pose = computeCamera3DPoseForOverlay(activeExclusiveImageOverlay.startTimeSeconds, activeExclusiveImageOverlay.endTimeSeconds, elapsedSeconds);
           getCamera3DRenderer().drawImage3D(
             ctx, overlayImage, pose, osx, osy, osw, osh, imageOverlayDestRect.x, imageOverlayDestRect.y, imageOverlayDestRect.width, imageOverlayDestRect.height,
-            activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
+            activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical,
+            activeExclusiveImageOverlay.ambientEffect
+              ? {
+                  effectId: activeExclusiveImageOverlay.ambientEffect,
+                  elapsedSeconds: elapsedSeconds - activeExclusiveImageOverlay.startTimeSeconds,
+                  seed: ambientEffectSeed(activeExclusiveImageOverlay.startTimeSeconds),
+                }
+              : null
           );
         } else {
           drawImageFlipped(
@@ -1071,7 +1092,9 @@ export const CanvasPlayer = forwardRef<
           );
         }
         ctx.filter = "none";
-        if (activeExclusiveImageOverlay.ambientEffect) {
+        // Skipped when camera3D above already rendered this effect inside
+        // its own 3D scene (real parallax) -- see that branch's own comment.
+        if (activeExclusiveImageOverlay.ambientEffect && !activeExclusiveImageOverlay.camera3D) {
           drawAmbientEffect(
             ctx, activeExclusiveImageOverlay.ambientEffect, destX, destY, destWidth, destHeight,
             elapsedSeconds - activeExclusiveImageOverlay.startTimeSeconds, ambientEffectSeed(activeExclusiveImageOverlay.startTimeSeconds)
@@ -1106,6 +1129,9 @@ export const CanvasPlayer = forwardRef<
         const overlayMattes = activeExclusiveVideoOverlay.backgroundRemoval?.enabled
           ? videoOverlayMattesByAssetIdRef.current[activeExclusiveVideoOverlay.assetId]
           : undefined;
+        // Set true only inside the camera3D branch below -- see the
+        // ambientEffect check after ctx.filter = "none" further down.
+        let videoOverlayAmbientRoutedThrough3D = false;
         if (overlayMattes && overlayMattes.length > 0) {
           // Same proportional-fraction mapping onto the matte's own pixel
           // dimensions as the base clip's crop-fraction path above -- an
@@ -1135,8 +1161,16 @@ export const CanvasPlayer = forwardRef<
               : { x: destX, y: destY, width: destWidth, height: destHeight };
           getCamera3DRenderer().drawImage3D(
             ctx, overlayImage, pose, osx, osy, osw, osh, videoOverlayDestRect.x, videoOverlayDestRect.y, videoOverlayDestRect.width, videoOverlayDestRect.height,
-            activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
+            activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical,
+            activeExclusiveVideoOverlay.ambientEffect
+              ? {
+                  effectId: activeExclusiveVideoOverlay.ambientEffect,
+                  elapsedSeconds: elapsedSeconds - activeExclusiveVideoOverlay.startTimeSeconds,
+                  seed: ambientEffectSeed(activeExclusiveVideoOverlay.startTimeSeconds),
+                }
+              : null
           );
+          videoOverlayAmbientRoutedThrough3D = Boolean(activeExclusiveVideoOverlay.ambientEffect);
         } else {
           const videoOverlayPulseScale = activeExclusiveVideoOverlay.audioReactive
             ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
@@ -1151,7 +1185,7 @@ export const CanvasPlayer = forwardRef<
           );
         }
         ctx.filter = "none";
-        if (activeExclusiveVideoOverlay.ambientEffect) {
+        if (activeExclusiveVideoOverlay.ambientEffect && !videoOverlayAmbientRoutedThrough3D) {
           drawAmbientEffect(
             ctx, activeExclusiveVideoOverlay.ambientEffect, destX, destY, destWidth, destHeight,
             elapsedSeconds - activeExclusiveVideoOverlay.startTimeSeconds, ambientEffectSeed(activeExclusiveVideoOverlay.startTimeSeconds)
@@ -1197,6 +1231,9 @@ export const CanvasPlayer = forwardRef<
       );
       ctx.filter = getFilterPresetOption(pip.colorFilterId ?? null).cssFilter;
       const pipMattes = pip.backgroundRemoval?.enabled ? videoOverlayMattesByAssetIdRef.current[pip.assetId] : undefined;
+      // Set true only inside the camera3D sub-branch below -- see the
+      // ambientEffect check after ctx.filter = "none" further down.
+      let pipVideoAmbientRoutedThrough3D = false;
       if (pipMattes && pipMattes.length > 0) {
         // Same proportional mapping as the exclusive-overlay branch above.
         const matte = pipMattes[Math.min(pipFrameIndex, pipMattes.length - 1)];
@@ -1225,8 +1262,10 @@ export const CanvasPlayer = forwardRef<
           // start->end window rather than riding an existing effect.
           const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, elapsedSeconds);
           getCamera3DRenderer().drawImage3D(
-            ctx, pipImage, pose, psx, psy, psw, psh, pipDestRect.x, pipDestRect.y, pipDestRect.width, pipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+            ctx, pipImage, pose, psx, psy, psw, psh, pipDestRect.x, pipDestRect.y, pipDestRect.width, pipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical,
+            pip.ambientEffect ? { effectId: pip.ambientEffect, elapsedSeconds: elapsedSeconds - pip.startTimeSeconds, seed: ambientEffectSeed(pip.startTimeSeconds) } : null
           );
+          pipVideoAmbientRoutedThrough3D = Boolean(pip.ambientEffect);
         } else {
           drawImageFlipped(
             ctx, pipImage, psx, psy, psw, psh, pipDestRect.x, pipDestRect.y, pipDestRect.width, pipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
@@ -1234,7 +1273,7 @@ export const CanvasPlayer = forwardRef<
         }
       }
       ctx.filter = "none";
-      if (pip.ambientEffect) {
+      if (pip.ambientEffect && !pipVideoAmbientRoutedThrough3D) {
         drawAmbientEffect(ctx, pip.ambientEffect, destX, destY, destWidth, destHeight, elapsedSeconds - pip.startTimeSeconds, ambientEffectSeed(pip.startTimeSeconds));
       }
       if (isVideoOverlayMattePending(pip.backgroundRemoval, pipMattes)) {
@@ -1271,7 +1310,8 @@ export const CanvasPlayer = forwardRef<
         // above.
         const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, elapsedSeconds);
         getCamera3DRenderer().drawImage3D(
-          ctx, overlayImage, pose, psx, psy, psw, psh, imagePipDestRect.x, imagePipDestRect.y, imagePipDestRect.width, imagePipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+          ctx, overlayImage, pose, psx, psy, psw, psh, imagePipDestRect.x, imagePipDestRect.y, imagePipDestRect.width, imagePipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical,
+          pip.ambientEffect ? { effectId: pip.ambientEffect, elapsedSeconds: elapsedSeconds - pip.startTimeSeconds, seed: ambientEffectSeed(pip.startTimeSeconds) } : null
         );
       } else {
         drawImageFlipped(
@@ -1279,7 +1319,7 @@ export const CanvasPlayer = forwardRef<
         );
       }
       ctx.filter = "none";
-      if (pip.ambientEffect) {
+      if (pip.ambientEffect && !pip.camera3D) {
         drawAmbientEffect(ctx, pip.ambientEffect, destX, destY, destWidth, destHeight, elapsedSeconds - pip.startTimeSeconds, ambientEffectSeed(pip.startTimeSeconds));
       }
     }

@@ -907,6 +907,11 @@ export async function exportVideoLocally(
         const flipHorizontal = computeEffectiveFlip(selections.flipHorizontalToggles, sourceTimeSeconds);
         const flipVertical = computeEffectiveFlip(selections.flipVerticalToggles, sourceTimeSeconds);
 
+        // Set true only inside the camera3D branch below -- mirrors
+        // CanvasPlayer.tsx's identical flag exactly, so the ambient-effect
+        // draw after ctx.restore() doesn't also draw a second, flat copy of
+        // an effect camera3D already rendered inside its 3D scene.
+        let baseAmbientRoutedThrough3D = false;
         ctx.save();
         ctx.filter = cssFilterFor(segment.entryId ? cutawayFilterByEntryId.get(segment.entryId) : null);
         ctx.translate(flipHorizontal ? canvas.width : 0, flipVertical ? canvas.height : 0);
@@ -1053,13 +1058,18 @@ export async function exportVideoLocally(
           // for why both flip args are false), so the export matches the
           // live preview frame-for-frame.
           const activeZoomEffectIndex = segment.entryId && cutawayCamera3DByEntryId.get(segment.entryId) ? findActiveZoomEffectIndex(selections.zoomEffects, sourceTimeSeconds) : -1;
+          const baseAmbientEffectId = segment.entryId ? cutawayAmbientEffectByEntryId.get(segment.entryId) : undefined;
           if (activeZoomEffectIndex !== -1) {
             const pose = computeCamera3DPoseForZoomEffect(
               selections.zoomEffects[activeZoomEffectIndex],
               cutawayTemplateIdsByEntryId.get(segment.entryId!) ?? [],
               sourceTimeSeconds
             );
-            camera3DRenderer.drawImage3D(ctx, source, pose, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight, false, false);
+            camera3DRenderer.drawImage3D(
+              ctx, source, pose, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight, false, false,
+              baseAmbientEffectId ? { effectId: baseAmbientEffectId, elapsedSeconds: localSeconds, seed: ambientEffectSeed(segment.entryId!) } : null
+            );
+            baseAmbientRoutedThrough3D = Boolean(baseAmbientEffectId);
           } else {
             ctx.drawImage(source, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight);
           }
@@ -1069,8 +1079,9 @@ export async function exportVideoLocally(
         // Ambient overlay effect (ambientEffects.ts) -- mirrors
         // CanvasPlayer's identical post-restore draw exactly (same
         // baseRect/localSeconds reasoning), so the export matches the live
-        // preview frame-for-frame.
-        if (baseRect && segment.entryId && cutawayAmbientEffectByEntryId.get(segment.entryId)) {
+        // preview frame-for-frame. Skipped when camera3D above already
+        // rendered this same effect inside its 3D scene (real parallax).
+        if (baseRect && segment.entryId && !baseAmbientRoutedThrough3D && cutawayAmbientEffectByEntryId.get(segment.entryId)) {
           drawAmbientEffect(
             ctx,
             cutawayAmbientEffectByEntryId.get(segment.entryId) ?? null,
@@ -1180,7 +1191,14 @@ export async function exportVideoLocally(
             const pose = computeCamera3DPoseForOverlay(activeExclusiveImageOverlay.startTimeSeconds, activeExclusiveImageOverlay.endTimeSeconds, sourceTimeSeconds);
             camera3DRenderer.drawImage3D(
               ctx, overlayImage, pose, osx, osy, osw, osh, imageOverlayDestRect.x, imageOverlayDestRect.y, imageOverlayDestRect.width, imageOverlayDestRect.height,
-              activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical
+              activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical,
+              activeExclusiveImageOverlay.ambientEffect
+                ? {
+                    effectId: activeExclusiveImageOverlay.ambientEffect,
+                    elapsedSeconds: sourceTimeSeconds - activeExclusiveImageOverlay.startTimeSeconds,
+                    seed: ambientEffectSeed(activeExclusiveImageOverlay.startTimeSeconds),
+                  }
+                : null
             );
           } else {
             drawImageFlipped(
@@ -1189,7 +1207,7 @@ export async function exportVideoLocally(
             );
           }
           ctx.filter = "none";
-          if (activeExclusiveImageOverlay.ambientEffect) {
+          if (activeExclusiveImageOverlay.ambientEffect && !activeExclusiveImageOverlay.camera3D) {
             drawAmbientEffect(
               ctx, activeExclusiveImageOverlay.ambientEffect, destX, destY, destWidth, destHeight,
               sourceTimeSeconds - activeExclusiveImageOverlay.startTimeSeconds, ambientEffectSeed(activeExclusiveImageOverlay.startTimeSeconds)
@@ -1218,6 +1236,9 @@ export async function exportVideoLocally(
           const overlayBackgroundRemoval = activeExclusiveVideoOverlay.backgroundRemoval?.enabled
             ? activeExclusiveVideoOverlay.backgroundRemoval
             : null;
+          // Set true only inside the camera3D sub-branch below -- mirrors
+          // CanvasPlayer.tsx's identical flag.
+          let videoOverlayAmbientRoutedThrough3D = false;
           if (overlayBackgroundRemoval?.mode === "chromaKey") {
             // Chroma key never depends on fal.ai, not even at render time --
             // see chromaKey.ts's own module comment. Keyed live, right here,
@@ -1258,8 +1279,16 @@ export async function exportVideoLocally(
                   : { x: destX, y: destY, width: destWidth, height: destHeight };
               camera3DRenderer.drawImage3D(
                 ctx, overlayVideo, pose, osx, osy, osw, osh, videoOverlayDestRect.x, videoOverlayDestRect.y, videoOverlayDestRect.width, videoOverlayDestRect.height,
-                activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical
+                activeExclusiveVideoOverlay.framing.flipHorizontal, activeExclusiveVideoOverlay.framing.flipVertical,
+                activeExclusiveVideoOverlay.ambientEffect
+                  ? {
+                      effectId: activeExclusiveVideoOverlay.ambientEffect,
+                      elapsedSeconds: sourceTimeSeconds - activeExclusiveVideoOverlay.startTimeSeconds,
+                      seed: ambientEffectSeed(activeExclusiveVideoOverlay.startTimeSeconds),
+                    }
+                  : null
               );
+              videoOverlayAmbientRoutedThrough3D = Boolean(activeExclusiveVideoOverlay.ambientEffect);
             } else {
               const videoOverlayPulseScale = activeExclusiveVideoOverlay.audioReactive
                 ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
@@ -1275,7 +1304,7 @@ export async function exportVideoLocally(
             }
           }
           ctx.filter = "none";
-          if (activeExclusiveVideoOverlay.ambientEffect) {
+          if (activeExclusiveVideoOverlay.ambientEffect && !videoOverlayAmbientRoutedThrough3D) {
             drawAmbientEffect(
               ctx, activeExclusiveVideoOverlay.ambientEffect, destX, destY, destWidth, destHeight,
               sourceTimeSeconds - activeExclusiveVideoOverlay.startTimeSeconds, ambientEffectSeed(activeExclusiveVideoOverlay.startTimeSeconds)
@@ -1303,6 +1332,8 @@ export async function exportVideoLocally(
         );
         ctx.filter = cssFilterFor(pip.colorFilterId);
         const pipBackgroundRemoval = pip.backgroundRemoval?.enabled ? pip.backgroundRemoval : null;
+        // Set true only inside the camera3D sub-branch below.
+        let pipVideoAmbientRoutedThrough3D = false;
         if (pipBackgroundRemoval?.mode === "chromaKey") {
           drawImageFlippedChromaKeyed(
             ctx, maskCanvas, overlayVideo, hexToRgb(pipBackgroundRemoval.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR),
@@ -1335,8 +1366,10 @@ export async function exportVideoLocally(
             if (pip.camera3D) {
               const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, sourceTimeSeconds);
               camera3DRenderer.drawImage3D(
-                ctx, overlayVideo, pose, psx, psy, psw, psh, pipDestRect.x, pipDestRect.y, pipDestRect.width, pipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+                ctx, overlayVideo, pose, psx, psy, psw, psh, pipDestRect.x, pipDestRect.y, pipDestRect.width, pipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical,
+                pip.ambientEffect ? { effectId: pip.ambientEffect, elapsedSeconds: sourceTimeSeconds - pip.startTimeSeconds, seed: ambientEffectSeed(pip.startTimeSeconds) } : null
               );
+              pipVideoAmbientRoutedThrough3D = Boolean(pip.ambientEffect);
             } else {
               drawImageFlipped(
                 ctx, overlayVideo, psx, psy, psw, psh, pipDestRect.x, pipDestRect.y, pipDestRect.width, pipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
@@ -1345,7 +1378,7 @@ export async function exportVideoLocally(
           }
         }
         ctx.filter = "none";
-        if (pip.ambientEffect) {
+        if (pip.ambientEffect && !pipVideoAmbientRoutedThrough3D) {
           drawAmbientEffect(ctx, pip.ambientEffect, destX, destY, destWidth, destHeight, sourceTimeSeconds - pip.startTimeSeconds, ambientEffectSeed(pip.startTimeSeconds));
         }
       }
@@ -1377,7 +1410,8 @@ export async function exportVideoLocally(
         if (pip.camera3D) {
           const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, sourceTimeSeconds);
           camera3DRenderer.drawImage3D(
-            ctx, overlayImage, pose, psx, psy, psw, psh, imagePipDestRect.x, imagePipDestRect.y, imagePipDestRect.width, imagePipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical
+            ctx, overlayImage, pose, psx, psy, psw, psh, imagePipDestRect.x, imagePipDestRect.y, imagePipDestRect.width, imagePipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical,
+            pip.ambientEffect ? { effectId: pip.ambientEffect, elapsedSeconds: sourceTimeSeconds - pip.startTimeSeconds, seed: ambientEffectSeed(pip.startTimeSeconds) } : null
           );
         } else {
           drawImageFlipped(
@@ -1385,7 +1419,7 @@ export async function exportVideoLocally(
           );
         }
         ctx.filter = "none";
-        if (pip.ambientEffect) {
+        if (pip.ambientEffect && !pip.camera3D) {
           drawAmbientEffect(ctx, pip.ambientEffect, destX, destY, destWidth, destHeight, sourceTimeSeconds - pip.startTimeSeconds, ambientEffectSeed(pip.startTimeSeconds));
         }
       }
