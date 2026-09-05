@@ -159,6 +159,7 @@ export function AssetGallery({
   function getAudioElement() {
     if (audioRef.current) return audioRef.current;
     const audio = new Audio();
+    audio.crossOrigin = "anonymous"; // matches audio.ts's getAudioDuration -- forces a CORS-mode fetch so this preview play doesn't cache an opaque no-cors response that decodeAudioBuffer's later cors-mode fetch() for the same URL (once this track is added as background music) would get served instead
     audio.addEventListener("timeupdate", () => {
       if (audio.duration) setPlaybackProgress(audio.currentTime / audio.duration);
     });

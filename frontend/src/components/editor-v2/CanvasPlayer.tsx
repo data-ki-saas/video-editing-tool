@@ -1386,6 +1386,13 @@ export const CanvasPlayer = forwardRef<
     const audioBuffer = audioBufferRef.current;
     if (!audioBuffer) return;
     const audioContext = ensureAudioContext();
+    // The context is first created back in the clip-loading effect (not a
+    // user gesture), so browsers start it "suspended" -- this Play click is
+    // the actual user gesture, so it's the one place that can legally
+    // resume it. Without this, every source below connects fine but never
+    // makes sound: state stays "suspended" forever since nothing else ever
+    // calls resume().
+    if (audioContext.state === "suspended") void audioContext.resume();
 
     const adjustedOffsetSeconds = Math.min(skipTrimmedRanges(getEffectiveSkipRanges(), offsetSeconds), durationRef.current);
 
