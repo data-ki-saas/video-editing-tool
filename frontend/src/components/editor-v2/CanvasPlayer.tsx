@@ -649,6 +649,7 @@ export const CanvasPlayer = forwardRef<
     if (!images || images.length === 0) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    ctx.imageSmoothingQuality = "high"; // default "low" visibly softens/aliases every scaled drawImage below (crop/zoom, overlays)
 
     const frameIndex = frameIndexAtTime(position.localSeconds, frameRatesRef.current[position.clipIndex], images.length);
     const image = images[frameIndex];
@@ -831,6 +832,7 @@ export const CanvasPlayer = forwardRef<
         const maskCanvas = maskCompositeCanvasRef.current;
         const maskCtx = maskCanvas.getContext("2d");
         if (maskCtx) {
+          maskCtx.imageSmoothingQuality = "high"; // keep matte edges as smooth as the base frame they composite against
           // `crop` is a FRACTION of the frame (0..1) -- reapplied against
           // the matte's own width/height, not image's sx/sy/sWidth/sHeight
           // verbatim, since the matte (a MediaPipe mask or VEED's own

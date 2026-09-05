@@ -804,6 +804,7 @@ export async function exportVideoLocally(
     canvas.height = outputHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Canvas 2D context unavailable");
+    ctx.imageSmoothingQuality = "high"; // default "low" visibly softens/aliases every scaled drawImage below (crop/zoom, overlays)
 
     // Scratch canvas for the background-removal masked composite (a base
     // clip's own "destination-in" branch below, and a video overlay's own),
@@ -815,6 +816,7 @@ export async function exportVideoLocally(
     maskCanvas.width = outputWidth;
     maskCanvas.height = outputHeight;
     const maskCtx = maskCanvas.getContext("2d");
+    if (maskCtx) maskCtx.imageSmoothingQuality = "high"; // keep matte edges as smooth as the base frame they composite against
 
     const target = new BufferTarget();
     const output = new Output({ format, target });
