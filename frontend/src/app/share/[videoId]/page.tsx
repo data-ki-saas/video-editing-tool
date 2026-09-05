@@ -29,7 +29,10 @@ export default function SharedVideoPage({ params }: { params: Promise<{ videoId:
       {!error && !video && <p className="text-sm text-muted">Loading…</p>}
       {video && (
         <>
-          <video src={video.videoUrl} controls autoPlay className="max-h-[80vh] w-full rounded-md bg-black" />
+          {/* Muted by default -- browsers only allow autoplay at all when
+              muted; the native `controls` bar's own speaker icon is how a
+              viewer unmutes, same as any other embedded video player. */}
+          <video src={video.videoUrl} controls autoPlay loop muted className="max-h-[80vh] w-full rounded-md bg-black" />
           <p className="text-sm font-medium text-foreground">{video.projectName}</p>
         </>
       )}
