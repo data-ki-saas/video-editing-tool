@@ -89,8 +89,15 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // Signed-in users don't need the marketing home page or the sign-in/sign-up forms.
-  if (user && (pathname === "/" || isGuestOnlyPath)) {
+  // Signed-in users don't need the sign-in/sign-up forms -- bounced to
+  // /dashboard instead. The marketing home page itself is deliberately
+  // EXEMPT from this: TopMenuBar.tsx's Home icon links a signed-in user
+  // there on purpose (to see the public site, e.g. before sharing a link),
+  // and redirecting it back to /dashboard made that link a no-op -- see
+  // this file's own SiteHeader.tsx, which already shows a "Dashboard" link
+  // in place of "Sign in" for a signed-in visitor on "/" and every other
+  // marketing page, so there's nothing there that needs hiding from them.
+  if (user && isGuestOnlyPath) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

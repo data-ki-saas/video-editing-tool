@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { ReelIcon } from "@/components/IconButton";
+import { DashboardIcon } from "@/components/icons/UIIcons";
 
 const NAV_LINKS = [
   { href: "/whats-new", label: "What's New" },
@@ -49,8 +50,9 @@ export function SiteHeader() {
           {hasSession ? (
             <Link
               href="/dashboard"
-              className="rounded-md bg-accent px-3 py-1.5 text-accent-foreground hover:opacity-90"
+              className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-accent-foreground hover:opacity-90"
             >
+              <DashboardIcon className="h-4 w-4" />
               Dashboard
             </Link>
           ) : (

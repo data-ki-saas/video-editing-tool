@@ -10,6 +10,7 @@
 import Link from "next/link";
 import { RenderIcon, LocalRenderIcon, CoverIcon } from "./icons/PlayerIcons";
 import { SignOutButton } from "@/components/SignOutButton";
+import { ReelIcon } from "@/components/IconButton";
 import { AccountIcon, BookmarkIcon, LibraryIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import type { TranscriptCaption } from "@/lib/video/video_math";
@@ -103,6 +104,16 @@ export function TopMenuBar({
       </div>
 
       <div className="flex items-center gap-1">
+        <Link
+          href="/"
+          aria-label="Home"
+          title="Home"
+          className="rounded-full p-2 text-muted hover:bg-foreground/10"
+        >
+          <span className="block h-5 w-5">
+            <ReelIcon />
+          </span>
+        </Link>
         <Link
           href="/library"
           aria-label="Library"

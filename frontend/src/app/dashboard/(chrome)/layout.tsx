@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { SignOutButton } from "@/components/SignOutButton";
+import { ReelIcon } from "@/components/IconButton";
 import { AccountIcon, BookmarkIcon, LibraryIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 
@@ -26,6 +27,16 @@ export default function DashboardChromeLayout({ children }: { children: React.Re
             <ToolsIcon className="h-5 w-5" />
           </Link>
         )}
+        <Link
+          href="/"
+          aria-label="Home"
+          title="Home"
+          className="rounded-full p-2 text-muted hover:bg-foreground/10"
+        >
+          <span className="block h-5 w-5">
+            <ReelIcon />
+          </span>
+        </Link>
         <Link
           href="/library"
           aria-label="Library"
