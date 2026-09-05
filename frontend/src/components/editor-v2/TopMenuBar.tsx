@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * Persistent top bar for the reel editor. Left: the two video-generation
- * actions -- the cloud Render button and the local/free Edge Render button
- * (see lib/localRender/exportTimeline.ts) -- kept reachable at all times
- * instead of anchored to the bottom strip. Right: settings/sign-out, same
- * controls the bare /dashboard route shows via its own (chrome) layout.
+ * Persistent top bar for the reel editor. Left: Home (back to the
+ * marketing site, same solid-button weight as the two video-generation
+ * actions next to it so it doesn't read as an afterthought) then the cloud
+ * Render button and the local/free Edge Render button (see
+ * lib/localRender/exportTimeline.ts) -- kept reachable at all times instead
+ * of anchored to the bottom strip. Right: settings/sign-out, same controls
+ * the bare /dashboard route shows via its own (chrome) layout.
  */
 import Link from "next/link";
 import { RenderIcon, LocalRenderIcon, CoverIcon } from "./icons/PlayerIcons";
@@ -65,6 +67,17 @@ export function TopMenuBar({
   return (
     <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
       <div className="flex items-center gap-2">
+        <Link
+          href="/"
+          aria-label="Home"
+          title="Home"
+          className="rounded-full bg-neutral-700 p-2 text-white hover:bg-neutral-600"
+        >
+          <span className="block h-5 w-5">
+            <ReelIcon />
+          </span>
+        </Link>
+
         <button
           type="button"
           onClick={onRenderClick}
@@ -103,17 +116,7 @@ export function TopMenuBar({
         </button>
       </div>
 
-      <div className="flex items-center gap-1">
-        <Link
-          href="/"
-          aria-label="Home"
-          title="Home"
-          className="rounded-full p-2 text-muted hover:bg-foreground/10"
-        >
-          <span className="block h-5 w-5">
-            <ReelIcon />
-          </span>
-        </Link>
+      <div className="flex items-center gap-2 pr-1">
         <Link
           href="/library"
           aria-label="Library"
