@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { ReelIcon } from "@/components/IconButton";
 
 const NAV_LINKS = [
+  { href: "/whats-new", label: "What's New" },
   { href: "/about", label: "About Us" },
   { href: "/contact", label: "Contact Us" },
   { href: "/pricing", label: "Pricing" },

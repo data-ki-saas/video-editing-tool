@@ -6,7 +6,7 @@ const GUEST_ONLY_PATHS = ["/login", "/signup"];
 // Public for everyone, including a signed-in visitor -- unlike
 // GUEST_ONLY_PATHS, a logged-in user must still be able to read these (e.g.
 // from the footer), not get redirected away from them.
-const MARKETING_STATIC_PATHS = ["/about", "/contact", "/pricing", "/docs", "/privacy", "/terms"];
+const MARKETING_STATIC_PATHS = ["/about", "/contact", "/pricing", "/docs", "/privacy", "/terms", "/whats-new"];
 // A saved library video's public share link (see app/share/[videoId]/
 // page.tsx and its backend, GET /api/library/public/{id}) -- the whole
 // point is that someone with no account, or signed into a different one,
