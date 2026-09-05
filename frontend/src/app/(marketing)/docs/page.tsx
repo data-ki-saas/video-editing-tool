@@ -25,6 +25,32 @@ function Topic({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
+// A shared reel (see app/library/page.tsx's Share action / app/share/
+// [videoId]/page.tsx) embedded next to its own caption -- laid out in a
+// row rather than stacked, since the reel itself is a tall 9:16 clip and
+// reads much better beside its description than above/below it, same
+// "image beside its caption" shape print/blog articles use for a portrait
+// photo. Stacks back to a column below `sm` (a 9:16 video and a paragraph
+// side by side get too cramped on a narrow phone screen).
+function VideoExample({ title, shareUrl, children }: { title: string; shareUrl: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+      <div className="aspect-[9/16] w-full max-w-[220px] shrink-0 overflow-hidden rounded-md border border-neutral-300 bg-black">
+        <iframe
+          src={shareUrl}
+          title={title}
+          allow="autoplay; fullscreen"
+          className="h-full w-full border-0"
+        />
+      </div>
+      <div className="flex flex-col gap-2 sm:pt-1">
+        <h3 className="text-lg font-medium">{title}</h3>
+        <p className="text-neutral-600">{children}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function DocsPage() {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-14 px-4 py-16">
@@ -34,6 +60,33 @@ export default function DocsPage() {
           Everything you need to go from a blank project to a finished, share-ready reel.
         </p>
       </div>
+
+      <Category title="Examples">
+        <VideoExample
+          title="Ken Burns with animated sparkle"
+          shareUrl="https://video-editing-tool-gamma.vercel.app/share/e9fb44f2-2593-4b19-97fb-6c7ec7af5dea"
+        >
+          A photo cutaway animated with a Ken Burns zoom/pan, with the Sparkle ambient effect
+          layered softly on top — one of a full library of effects (light sweep, sparkle, leaves,
+          rain, mist, sun rays, crackers) you can add to any photo or overlay.
+        </VideoExample>
+        <VideoExample
+          title="Ken Burns that pulses with the beat"
+          shareUrl="https://video-editing-tool-gamma.vercel.app/share/05bac439-f4eb-4cb1-a668-59116add98ab"
+        >
+          The same kind of Ken Burns cutaway, this time with Pulse with music turned on — it
+          gently grows and shrinks in time with the background track automatically, no
+          keyframing required.
+        </VideoExample>
+        <VideoExample
+          title="3D Ken Burns, pulsing with the beat"
+          shareUrl="https://video-editing-tool-gamma.vercel.app/share/20c39cf7-f4ab-4baf-8cc3-fc67834ef8a8"
+        >
+          Make it 3D turns the same cutaway into a real camera move — the photo&apos;s own subject
+          lifts off its background as the camera pushes in and pans, genuine depth rather than a
+          flat zoom — combined here with Pulse with music for both effects at once.
+        </VideoExample>
+      </Category>
 
       <Category title="Editing">
         <Topic title="Getting started">
