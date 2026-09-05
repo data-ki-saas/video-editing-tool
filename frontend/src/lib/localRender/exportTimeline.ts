@@ -47,6 +47,7 @@ import {
 import { loadVideoElement, seekVideoTo, drawImageFlipped, drawImageFlippedMasked, drawImageFlippedChromaKeyed } from "@/lib/video/video";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
+import { segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { computeAudioEnvelope, sampleAudioEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { DEFAULT_CHROMA_KEY_COLOR, hexToRgb } from "@/lib/video/chromaKey";
@@ -692,6 +693,29 @@ export async function exportVideoLocally(
       videoElementsByAssetId.set(clip.assetId, await loadVideoElement(clip.url, "auto"));
     }
 
+    // "Make it 3D" foreground/background parallax -- an automatic MediaPipe
+    // subject cutout (see CanvasPlayer.tsx's identical camera3DSubjectCutout
+    // comment) for every image clip with camera3D on and backgroundRemoval
+    // off (that combination keeps its own existing flat-cutout treatment
+    // unchanged -- camera3D stays a no-op there, same as before this
+    // feature existed). Unlike backgroundRemovalMatteByEntryId's own "never
+    // run live segmentation in export" policy above, this is a ONE-TIME
+    // cost per unique image asset (same as the live preview's own one-time
+    // computation), not a per-frame one -- that policy is specifically
+    // about re-segmenting every real seeked VIDEO frame, which this isn't.
+    const camera3DSubjectCutoutsByAssetId = new Map<string, HTMLImageElement | ImageBitmap>();
+    for (const entry of selections.sequenceClips) {
+      if (entry.kind !== "image" || !entry.camera3D || entry.backgroundRemoval?.enabled) continue;
+      if (camera3DSubjectCutoutsByAssetId.has(entry.assetId)) continue;
+      const original = imageClipElementsByAssetId.get(entry.assetId);
+      if (!original) continue;
+      try {
+        camera3DSubjectCutoutsByAssetId.set(entry.assetId, await segmentImageApproximate(original));
+      } catch (err) {
+        console.error("3D subject cutout failed for entry=%s", entry.id, err);
+      }
+    }
+
     const overlayAssetIds = new Set(selections.overlayImages.map((overlay) => overlay.assetId));
     for (const assetId of overlayAssetIds) {
       const url = assetUrlById[assetId];
@@ -1067,7 +1091,8 @@ export async function exportVideoLocally(
             );
             camera3DRenderer.drawImage3D(
               ctx, source, pose, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight, false, false,
-              baseAmbientEffectId ? { effectId: baseAmbientEffectId, elapsedSeconds: localSeconds, seed: ambientEffectSeed(segment.entryId!) } : null
+              baseAmbientEffectId ? { effectId: baseAmbientEffectId, elapsedSeconds: localSeconds, seed: ambientEffectSeed(segment.entryId!) } : null,
+              camera3DSubjectCutoutsByAssetId.get(segment.assetId) ?? null
             );
             baseAmbientRoutedThrough3D = Boolean(baseAmbientEffectId);
           } else {

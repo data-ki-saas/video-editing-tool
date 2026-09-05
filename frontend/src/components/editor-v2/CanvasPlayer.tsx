@@ -425,6 +425,19 @@ export const CanvasPlayer = forwardRef<
   // segmentClipFramesApproximate (an instant MediaPipe cutout, while that's
   // still null) -- see backgroundSegmentation.ts's own module comment.
   const clipMattesRef = useRef<(ImageBitmap[] | null)[]>([]);
+  // "Make it 3D" foreground/background parallax -- an automatic subject
+  // cutout (same segmentImageApproximate MediaPipe model as background
+  // removal's own instant fallback, or the clip's real rembg matte if one's
+  // already available) for any image clip with camera3D on, computed
+  // independently of whether backgroundRemoval itself is enabled (see the
+  // loading effect's own comment on why this is skipped when it IS enabled
+  // -- that combination keeps today's flat cutout-over-a-new-backdrop
+  // treatment unchanged, camera3D stays a no-op there same as before this
+  // feature existed). null for any clip this doesn't apply to. Passed to
+  // Camera3DRenderer.drawImage3D as its own nearer-camera plane, same
+  // depth-plane technique ambientEffects.ts's effect layer already uses --
+  // see camera3D.ts's own SUBJECT_DEPTH_FRACTION comment.
+  const clipCamera3DSubjectCutoutsRef = useRef<(HTMLImageElement | ImageBitmap | null)[]>([]);
   // Which clips actually loaded, with cumulative start times -- what
   // resolveSequencePosition resolves elapsedSeconds against, and what
   // durationRef.current is derived from (their total).
@@ -936,7 +949,8 @@ export const CanvasPlayer = forwardRef<
         const pose = computeCamera3DPoseForZoomEffect(zoomEffects[activeZoomEffectIndex], clipTemplateIdsById.get(currentEntryId!) ?? [], elapsedSeconds);
         getCamera3DRenderer().drawImage3D(
           ctx, image, pose, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight, false, false,
-          baseAmbientEffectId ? { effectId: baseAmbientEffectId, elapsedSeconds: position.localSeconds, seed: ambientEffectSeed(currentEntryId!) } : null
+          baseAmbientEffectId ? { effectId: baseAmbientEffectId, elapsedSeconds: position.localSeconds, seed: ambientEffectSeed(currentEntryId!) } : null,
+          clipCamera3DSubjectCutoutsRef.current[position.clipIndex] ?? null
         );
         baseAmbientRoutedThrough3D = Boolean(baseAmbientEffectId);
       } else {
@@ -1774,6 +1788,7 @@ export const CanvasPlayer = forwardRef<
     clipImagesRef.current = [];
     frameRatesRef.current = [];
     clipMattesRef.current = [];
+    clipCamera3DSubjectCutoutsRef.current = [];
     loadedClipsRef.current = [];
     audioBufferRef.current = null;
     pausedAtSecondsRef.current = 0;
@@ -1785,7 +1800,15 @@ export const CanvasPlayer = forwardRef<
 
       type LoadedClipMeta = { id: string; assetId: string; url: string; durationSeconds: number; kind: "video" | "image" };
       type ClipLoadResult =
-        | { ok: true; images: (HTMLImageElement | ImageBitmap)[]; frameRate: number; audioBuffer: AudioBuffer; meta: LoadedClipMeta; mattes: ImageBitmap[] | null }
+        | {
+            ok: true;
+            images: (HTMLImageElement | ImageBitmap)[];
+            frameRate: number;
+            audioBuffer: AudioBuffer;
+            meta: LoadedClipMeta;
+            mattes: ImageBitmap[] | null;
+            camera3DSubjectCutout: HTMLImageElement | ImageBitmap | null;
+          }
         | { ok: false; message: string };
 
       // Fraction (0..1) each clip has progressed -- driven by
@@ -1840,6 +1863,24 @@ export const CanvasPlayer = forwardRef<
               image = await loadImage(clip.url);
             }
 
+            // "Make it 3D" foreground/background parallax -- an automatic
+            // subject cutout so the dolly/pan gets real depth (the subject
+            // parallaxes against its own background) instead of just moving
+            // one flat plane. Skipped when backgroundRemoval is ALSO enabled
+            // -- that combination keeps its own existing (flat cutout over a
+            // new backdrop) treatment, under which `image` above is already
+            // the cutout and camera3D never runs at all (see drawFrameAt's
+            // own branch priority) -- so there's no original photo left
+            // here to build a parallax background from in that case anyway.
+            let camera3DSubjectCutout: HTMLImageElement | ImageBitmap | null = null;
+            if (clip.camera3D && !clip.backgroundRemoval?.enabled) {
+              try {
+                camera3DSubjectCutout = await segmentImageApproximate(image);
+              } catch (err) {
+                console.error("3D subject cutout failed for clip=%s", clip.id, err);
+              }
+            }
+
             const silentAudioBuffer = audioContext.createBuffer(1, Math.max(1, Math.round(duration * audioContext.sampleRate)), audioContext.sampleRate);
             clipProgress[index] = 1;
             reportProgress();
@@ -1850,6 +1891,7 @@ export const CanvasPlayer = forwardRef<
               audioBuffer: silentAudioBuffer,
               meta: { id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "image" },
               mattes: null,
+              camera3DSubjectCutout,
             };
           }
 
@@ -1893,6 +1935,10 @@ export const CanvasPlayer = forwardRef<
             audioBuffer,
             meta: { id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "video" },
             mattes,
+            // "Make it 3D" parallax (see the image branch above) is scoped
+            // to still-image Ken Burns cutaways only -- a video clip has no
+            // single frame to segment once for its whole duration.
+            camera3DSubjectCutout: null,
           };
         } catch (err) {
           return { ok: false, message: err instanceof Error ? err.message : "Failed to load this clip" };
@@ -1917,6 +1963,7 @@ export const CanvasPlayer = forwardRef<
       const loadedAudioBuffers: AudioBuffer[] = [];
       const loadedClipMeta: LoadedClipMeta[] = [];
       const loadedMattes: (ImageBitmap[] | null)[] = [];
+      const loadedCamera3DSubjectCutouts: (HTMLImageElement | ImageBitmap | null)[] = [];
       let failureCount = 0;
       let lastFailureMessage = "";
       for (const result of results) {
@@ -1926,6 +1973,7 @@ export const CanvasPlayer = forwardRef<
           loadedAudioBuffers.push(result.audioBuffer);
           loadedClipMeta.push(result.meta);
           loadedMattes.push(result.mattes);
+          loadedCamera3DSubjectCutouts.push(result.camera3DSubjectCutout);
         } else {
           failureCount += 1;
           lastFailureMessage = result.message;
@@ -1939,6 +1987,7 @@ export const CanvasPlayer = forwardRef<
       clipImagesRef.current = loadedImages;
       frameRatesRef.current = loadedFrameRates;
       clipMattesRef.current = loadedMattes;
+      clipCamera3DSubjectCutoutsRef.current = loadedCamera3DSubjectCutouts;
       loadedClipsRef.current = buildSequenceClipInfos(loadedClipMeta);
       durationRef.current = totalSequenceDuration(loadedClipsRef.current);
       audioBufferRef.current = concatenateAudioBuffers(audioContext, loadedAudioBuffers);

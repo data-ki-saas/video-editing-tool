@@ -10,8 +10,7 @@ import {
   updateLibraryVideo,
   type LibraryVideo,
 } from "@/lib/api";
-import { BookmarkIcon, DownloadIcon, ShareIcon, TrashIcon } from "@/components/icons/UIIcons";
-import { PlayIcon, PauseIcon } from "@/components/editor-v2/icons/PlayerIcons";
+import { BookmarkIcon, DownloadIcon, ShareIcon, SpeakerFullIcon, SpeakerMutedIcon, TrashIcon } from "@/components/icons/UIIcons";
 import { InlineEditableText } from "@/components/InlineEditableText";
 
 const DESCRIPTION_MAX_LENGTH = 120;
@@ -72,11 +71,12 @@ function LibraryCard({
   onDelete: (video: LibraryVideo) => void;
 }) {
   const [copied, setCopied] = useState(false);
-  // Plays the actual video right in the card (replacing the thumbnail)
-  // instead of opening it in a new tab -- toggled off again on its own
-  // "ended" event, so the card falls back to the thumbnail rather than
-  // freezing on the last frame.
-  const [isPlaying, setIsPlaying] = useState(false);
+  // Autoplays muted+looped by default (browsers only allow autoplay at all
+  // when muted, same reason every silent Instagram/TikTok-style feed
+  // preview works this way) -- the speaker button just flips .muted on the
+  // already-playing element, which unlike starting playback itself needs
+  // no separate autoplay-policy handling since it's a direct user gesture.
+  const [isMuted, setIsMuted] = useState(true);
   const [description, setDescription] = useState(video.description ?? "");
   const duration = formatDuration(video.durationSeconds);
 
@@ -97,49 +97,28 @@ function LibraryCard({
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border p-2">
       <div className="relative aspect-[9/16] overflow-hidden rounded-md bg-black">
-        {isPlaying ? (
-          <video
-            src={video.videoUrl}
-            controls
-            autoPlay
-            onEnded={() => setIsPlaying(false)}
-            className="h-full w-full"
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setIsPlaying(true)}
-            aria-label={`Play ${video.projectName}`}
-            className="group relative block h-full w-full"
-          >
-            {video.thumbnailUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- a public R2 URL, not a Next-optimizable static asset
-              <img src={video.thumbnailUrl} alt={video.projectName} className="h-full w-full object-cover" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center text-xs text-muted">No preview</div>
-            )}
-            <span className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover:bg-black/30">
-              <span className="rounded-full bg-black/60 p-2 text-white opacity-0 transition-opacity group-hover:opacity-100">
-                <PlayIcon className="h-6 w-6" />
-              </span>
-            </span>
-            {duration && (
-              <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[10px] text-white">
-                {duration}
-              </span>
-            )}
-          </button>
-        )}
-        {isPlaying && (
-          <button
-            type="button"
-            onClick={() => setIsPlaying(false)}
-            title="Back to preview"
-            aria-label="Back to preview"
-            className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
-          >
-            <PauseIcon className="h-3.5 w-3.5" />
-          </button>
+        <video
+          src={video.videoUrl}
+          poster={video.thumbnailUrl ?? undefined}
+          autoPlay
+          loop
+          muted={isMuted}
+          playsInline
+          className="h-full w-full object-cover"
+        />
+        <button
+          type="button"
+          onClick={() => setIsMuted((prev) => !prev)}
+          title={isMuted ? "Unmute" : "Mute"}
+          aria-label={isMuted ? "Unmute" : "Mute"}
+          className="absolute right-1 top-1 rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80"
+        >
+          {isMuted ? <SpeakerMutedIcon className="h-3.5 w-3.5" /> : <SpeakerFullIcon className="h-3.5 w-3.5" />}
+        </button>
+        {duration && (
+          <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[10px] text-white">
+            {duration}
+          </span>
         )}
       </div>
 

@@ -49,6 +49,7 @@ import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { IMAGE_TEMPLATE_AXES, IMAGE_TEMPLATE_OPTIONS, buildKenBurnsEffect, type ImageTemplateId } from "@/lib/video/imageTemplates";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect } from "@/lib/video/camera3D";
+import { segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { AMBIENT_EFFECT_OPTIONS, ambientEffectSeed, drawAmbientEffect, type AmbientEffectId } from "@/lib/video/ambientEffects";
 import { CropRectOverlay } from "./CropRectOverlay";
 import {
@@ -298,6 +299,34 @@ export function CutawayDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `editing` is only read for its value at the moment loadedImage/selectedAssetId change; it can't change mid-lifetime since this dialog fully remounts each time it reopens (see ActionArea's conditional render)
   }, [loadedImage, selectedAssetId, clipRectAspectRatio]);
 
+  // "Make it 3D" foreground/background parallax (see camera3D.ts's own
+  // SUBJECT_DEPTH_FRACTION comment) -- an automatic MediaPipe subject cutout
+  // for this preview's own drawImage3D call below, recomputed whenever the
+  // photo or the toggle itself changes. Unlike the "Remove background"
+  // checkbox (never actually applied to this dialog's own preview canvas,
+  // same simplification as audioReactive above), this only reads `camera3D`
+  // -- there's no equivalent "flat cutout over a new backdrop" treatment to
+  // preserve here to conflict with.
+  const [subjectCutout, setSubjectCutout] = useState<ImageBitmap | null>(null);
+  useEffect(() => {
+    if (!loadedImage || !camera3D) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change, same pattern as this file's other re-sync effects
+      setSubjectCutout(null);
+      return;
+    }
+    let cancelled = false;
+    segmentImageApproximate(loadedImage)
+      .then((cutout) => {
+        if (!cancelled) setSubjectCutout(cutout);
+      })
+      .catch((err) => {
+        console.error("3D subject cutout failed", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadedImage, camera3D]);
+
   // Loops the chosen template(s)' combined motion over the loaded image,
   // redrawing every frame -- reuses computeEffectiveCropRect/
   // buildKenBurnsEffect verbatim, the exact math the real added clip will
@@ -339,7 +368,8 @@ export function CutawayDialog({
         const pose = computeCamera3DPoseForZoomEffect(zoomEffect, templateIds, elapsed);
         getCamera3DRenderer().drawImage3D(
           ctx!, img, pose, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height, false, false,
-          ambientEffect ? { effectId: ambientEffect, elapsedSeconds: elapsed, seed: ambientEffectSeed(selectedAssetId ?? "") } : null
+          ambientEffect ? { effectId: ambientEffect, elapsedSeconds: elapsed, seed: ambientEffectSeed(selectedAssetId ?? "") } : null,
+          subjectCutout
         );
       } else {
         ctx!.drawImage(img, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height);
@@ -352,7 +382,7 @@ export function CutawayDialog({
     }
     rafId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafId);
-  }, [loadedImage, templateIds, durationSeconds, photoCropRect, camera3D, ambientEffect, selectedAssetId]);
+  }, [loadedImage, templateIds, durationSeconds, photoCropRect, camera3D, ambientEffect, selectedAssetId, subjectCutout]);
 
   // Toggles one template id, one pick per axis (zoom / horizontal pan /
   // vertical pan) -- picking a second id from the SAME axis as an existing

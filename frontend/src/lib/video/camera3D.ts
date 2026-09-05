@@ -98,6 +98,30 @@ const EFFECT_DEPTH_FRACTION = 0.4;
 // texture is mostly transparent background with no real edge to preserve.
 const EFFECT_PLANE_OVERSIZE = 1.15;
 
+// The photo's own SUBJECT (an automatic cutout, see CanvasPlayer.tsx's
+// camera3DSubjectCutout) sits on a THIRD plane, between the background image
+// (z=0) and the ambient-effect plane above -- nearer than the background so
+// it parallaxes more (the actual "pops off the photo" depth cue), but not as
+// aggressively near as an atmospheric effect like rain/sparkle, which reads
+// fine floating disconnected from the photo in a way a photo's own subject
+// popping too far forward would not (a face or object relative to its OWN
+// background shifting further than the ambient-effects plane would look
+// like it's detaching from the scene, not just closer within it).
+const SUBJECT_DEPTH_FRACTION = 0.22;
+// Much smaller margin than EFFECT_PLANE_OVERSIZE: that plane is a fully
+// opaque-at-its-marks rectangle where ANY edge reveal reads as a visible
+// rectangular seam, so it can afford a generous cushion. This plane is
+// mostly transparent already (only the segmented subject itself is
+// opaque) -- the only real risk is the subject's own silhouette clipping
+// at an extreme pose, not a seam, and the subject rarely touches the
+// photo's edge to begin with. A bigger margin here only buys a smaller
+// (and already low-risk) safety net at the direct cost of misaligning the
+// cutout against its own background at REST, where they should line up
+// exactly -- verified empirically (Playwright + the real bundled
+// renderer): 1.1 measurably misaligned a marker at rest; 1.05 is a
+// reasonable middle ground.
+const SUBJECT_PLANE_OVERSIZE = 1.05;
+
 function poseAtProgress(t: number, tiltSign: number, rollSign: number): Camera3DPose {
   const eased = easeInOut(t);
   return {
@@ -218,6 +242,12 @@ export class Camera3DRenderer {
   private effectTexture: THREE.CanvasTexture;
   private effectScratchCanvas: HTMLCanvasElement;
   private effectScratchCtx: CanvasRenderingContext2D;
+  // The photo's own subject cutout -- see SUBJECT_DEPTH_FRACTION's own
+  // comment. Same hidden-when-unused reasoning as effectMesh above.
+  private subjectMesh: THREE.Mesh;
+  private subjectTexture: THREE.CanvasTexture;
+  private subjectScratchCanvas: HTMLCanvasElement;
+  private subjectScratchCtx: CanvasRenderingContext2D;
 
   constructor() {
     const canvas = document.createElement("canvas");
@@ -244,6 +274,17 @@ export class Camera3DRenderer {
     this.mesh.position.set(0, 0, 0);
     this.mesh.renderOrder = 0;
 
+    this.subjectScratchCanvas = document.createElement("canvas");
+    const subjectScratchCtx = this.subjectScratchCanvas.getContext("2d");
+    if (!subjectScratchCtx) throw new Error("Camera3DRenderer: 2D context unavailable for subject scratch canvas");
+    this.subjectScratchCtx = subjectScratchCtx;
+    this.subjectTexture = new THREE.CanvasTexture(this.subjectScratchCanvas);
+    const subjectMaterial = new THREE.MeshBasicMaterial({ map: this.subjectTexture, transparent: true, depthWrite: false });
+    this.subjectMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), subjectMaterial);
+    this.subjectMesh.position.set(0, 0, CAMERA_DISTANCE * SUBJECT_DEPTH_FRACTION);
+    this.subjectMesh.renderOrder = 1;
+    this.subjectMesh.visible = false;
+
     this.effectScratchCanvas = document.createElement("canvas");
     const effectScratchCtx = this.effectScratchCanvas.getContext("2d");
     if (!effectScratchCtx) throw new Error("Camera3DRenderer: 2D context unavailable for ambient-effect scratch canvas");
@@ -253,14 +294,17 @@ export class Camera3DRenderer {
     this.effectMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), effectMaterial);
     this.effectMesh.position.set(0, 0, CAMERA_DISTANCE * EFFECT_DEPTH_FRACTION);
     // Explicit render order (rather than relying on three.js's own
-    // distance-from-camera transparency sort) so the effect always composites
-    // ON TOP of the image regardless of how close the dolly push brings the
-    // camera to either plane.
-    this.effectMesh.renderOrder = 1;
+    // distance-from-camera transparency sort) so these composite ON TOP of
+    // the image (and the subject plane on top of THAT) regardless of how
+    // close the dolly push brings the camera to any of them -- background
+    // (0) < subject (1) < ambient effect (2), an atmospheric effect like
+    // rain reading as in front of the subject, not behind it.
+    this.effectMesh.renderOrder = 2;
     this.effectMesh.visible = false;
 
     this.scene = new THREE.Scene();
     this.scene.add(this.mesh);
+    this.scene.add(this.subjectMesh);
     this.scene.add(this.effectMesh);
   }
 
@@ -269,6 +313,9 @@ export class Camera3DRenderer {
     this.texture.dispose();
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
+    this.subjectTexture.dispose();
+    this.subjectMesh.geometry.dispose();
+    (this.subjectMesh.material as THREE.Material).dispose();
     this.effectTexture.dispose();
     this.effectMesh.geometry.dispose();
     (this.effectMesh.material as THREE.Material).dispose();
@@ -306,7 +353,16 @@ export class Camera3DRenderer {
    * no ambient effect; a plain (non-3D) clip/overlay with an ambient effect
    * still calls drawAmbientEffect directly against its own 2D ctx as before
    * -- this path only applies once there's a shared camera for the two
-   * layers to react to together. */
+   * layers to react to together.
+   *
+   * `subjectCutout`, when given, is drawn from the SAME [sx,sy,sWidth,
+   * sHeight] source rect (so it aligns with `source` exactly at rest) onto
+   * its own plane between the background and the ambient effect (see
+   * SUBJECT_DEPTH_FRACTION) -- the automatic foreground/background parallax
+   * this gives a Ken Burns photo (CanvasPlayer.tsx's camera3DSubjectCutout,
+   * an automatic MediaPipe segmentation or the clip's own real matte). Omit
+   * (or pass null) for a 3D element with no subject cutout available -- it
+   * just falls back to the plain single-plane dolly. */
   drawImage3D(
     ctx: CanvasRenderingContext2D,
     source: CanvasImageSource,
@@ -321,7 +377,8 @@ export class Camera3DRenderer {
     destHeight: number,
     flipHorizontal: boolean,
     flipVertical: boolean,
-    ambientEffect?: { effectId: AmbientEffectId; elapsedSeconds: number; seed: number } | null
+    ambientEffect?: { effectId: AmbientEffectId; elapsedSeconds: number; seed: number } | null,
+    subjectCutout?: CanvasImageSource | null
   ): void {
     if (destWidth <= 0 || destHeight <= 0) return;
 
@@ -354,6 +411,33 @@ export class Camera3DRenderer {
     const visibleHeight = 2 * CAMERA_DISTANCE * Math.tan(fovRad / 2);
     const visibleWidth = visibleHeight * (destWidth / destHeight);
     this.mesh.scale.set(visibleWidth, visibleHeight, 1);
+
+    if (subjectCutout) {
+      const nextSubjectTexture = this.resizeTexture(this.subjectScratchCanvas, this.subjectTexture, sWidth, sHeight);
+      if (nextSubjectTexture !== this.subjectTexture) {
+        this.subjectTexture = nextSubjectTexture;
+        const material = this.subjectMesh.material as THREE.MeshBasicMaterial;
+        material.map = this.subjectTexture;
+        material.needsUpdate = true;
+      }
+      this.subjectScratchCtx.clearRect(0, 0, sWidth, sHeight);
+      // Same [sx,sy,sWidth,sHeight] sub-rect as the background texture above
+      // -- the cutout is the SAME photo, same pixel dimensions, just with
+      // its background segmented to transparent, so it aligns with the
+      // background plane exactly at rest (pose = neutral).
+      drawImageFlipped(this.subjectScratchCtx, subjectCutout, sx, sy, sWidth, sHeight, 0, 0, sWidth, sHeight, flipHorizontal, flipVertical);
+      this.subjectTexture.needsUpdate = true;
+
+      // Sized to exactly fill the frame at REST from the subject plane's
+      // OWN (nearer) depth, same formula as the background/effect planes.
+      const subjectRestDistance = CAMERA_DISTANCE - this.subjectMesh.position.z;
+      const subjectVisibleHeight = 2 * subjectRestDistance * Math.tan(fovRad / 2) * SUBJECT_PLANE_OVERSIZE;
+      const subjectVisibleWidth = subjectVisibleHeight * (destWidth / destHeight);
+      this.subjectMesh.scale.set(subjectVisibleWidth, subjectVisibleHeight, 1);
+      this.subjectMesh.visible = true;
+    } else {
+      this.subjectMesh.visible = false;
+    }
 
     if (ambientEffect) {
       const roundedWidth = Math.max(1, Math.round(destWidth));
