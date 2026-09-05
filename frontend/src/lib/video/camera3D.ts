@@ -97,11 +97,6 @@ const EFFECT_DEPTH_FRACTION = 0.4;
 // oversize freely (unlike the image plane) since an ambient effect's own
 // texture is mostly transparent background with no real edge to preserve.
 const EFFECT_PLANE_OVERSIZE = 1.15;
-// Effects whose 2D draw uses "screen" compositing (see ambientEffects.ts) --
-// mirrored here as a WebGL blend so they still read as light ADDING onto
-// the photo rather than a flat translucent shape once they're composited in
-// the 3D scene instead of directly onto the 2D ctx.
-const SCREEN_BLENDED_EFFECTS = new Set<AmbientEffectId>(["light-sweep", "sparkle", "sun-rays", "crackers"]);
 
 function poseAtProgress(t: number, tiltSign: number, rollSign: number): Camera3DPose {
   const eased = easeInOut(t);
@@ -373,21 +368,20 @@ export class Camera3DRenderer {
       this.effectScratchCtx.clearRect(0, 0, roundedWidth, roundedHeight);
       drawAmbientEffect(this.effectScratchCtx, ambientEffect.effectId, 0, 0, roundedWidth, roundedHeight, ambientEffect.elapsedSeconds, ambientEffect.seed);
       this.effectTexture.needsUpdate = true;
-
-      const effectMaterial = this.effectMesh.material as THREE.MeshBasicMaterial;
-      if (SCREEN_BLENDED_EFFECTS.has(ambientEffect.effectId)) {
-        // Reproduces "screen" (result = src + dst - src*dst) as a WebGL
-        // blend equation, so it still reads as light adding onto the image
-        // plane behind it rather than a flat translucent shape -- see
-        // ambientEffects.ts's own per-effect comments for which effects use
-        // "screen" in their 2D form.
-        effectMaterial.blending = THREE.CustomBlending;
-        effectMaterial.blendEquation = THREE.AddEquation;
-        effectMaterial.blendSrc = THREE.OneMinusDstColorFactor;
-        effectMaterial.blendDst = THREE.OneFactor;
-      } else {
-        effectMaterial.blending = THREE.NormalBlending;
-      }
+      // NormalBlending (the material's default) -- straight alpha-over,
+      // same as ctx.drawImage's own default "source-over" the 2D path uses
+      // for most of these effects. An EARLIER version tried to reproduce
+      // "screen" (see ambientEffects.ts's own per-effect comments for which
+      // ones use it in their 2D form) as a WebGL CustomBlending equation,
+      // but fixed-function GL blend factors have no way to fold in the
+      // texture's OWN per-pixel alpha (the 0.16/pulse-scaled opacity
+      // ambientEffects.ts already bakes into each effect's soft, diffused
+      // look) -- the RGB-only "screen" formula rendered every mark at full
+      // strength/coverage regardless of that alpha, reported as effects
+      // looking "fully opaque" instead of soft. NormalBlending at least
+      // respects that alpha correctly, at the cost of the 4 screen-style
+      // effects (light-sweep/sparkle/sun-rays/crackers) reading as a soft
+      // translucent overlay rather than literally brightening past white.
 
       // Sized to exactly fill the frame at REST from the effect plane's OWN
       // (nearer) depth, same formula as the image plane above but at its
