@@ -867,6 +867,7 @@ export interface LibraryVideo {
   id: string;
   projectId: string | null;
   projectName: string;
+  description: string | null;
   videoUrl: string;
   thumbnailUrl: string | null;
   durationSeconds: number | null;
@@ -878,6 +879,7 @@ interface LibraryVideoWire {
   id: string;
   project_id: string | null;
   project_name: string;
+  description: string | null;
   video_url: string;
   thumbnail_url: string | null;
   duration_seconds: number | null;
@@ -890,6 +892,7 @@ function libraryVideoFromWire(w: LibraryVideoWire): LibraryVideo {
     id: w.id,
     projectId: w.project_id,
     projectName: w.project_name,
+    description: w.description,
     videoUrl: w.video_url,
     thumbnailUrl: w.thumbnail_url,
     durationSeconds: w.duration_seconds,
@@ -946,6 +949,32 @@ export async function setLibraryVideoTemplate(videoId: string, isTemplate: boole
     body: JSON.stringify({ is_template: isTemplate }),
   });
   return libraryVideoFromWire(await handleResponse<LibraryVideoWire>(response));
+}
+
+/** PATCH /api/library/{id} -- the library page's in-place name/description
+ * editing. Both fields are always sent together (the UI keeps both open at
+ * once), not a partial-field PATCH like setLibraryVideoTemplate above. */
+export async function updateLibraryVideo(
+  videoId: string,
+  params: { projectName: string; description: string | null }
+): Promise<LibraryVideo> {
+  const response = await apiFetch(`${API_BASE_URL}/api/library/${encodeURIComponent(videoId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ project_name: params.projectName, description: params.description }),
+  });
+  return libraryVideoFromWire(await handleResponse<LibraryVideoWire>(response));
+}
+
+/** DELETE /api/library/{id} -- permanently deletes a saved reel/template,
+ * both its row and its R2 video/thumbnail objects (see the backend's own
+ * delete_video comment). */
+export async function deleteLibraryVideo(videoId: string): Promise<void> {
+  const response = await apiFetch(`${API_BASE_URL}/api/library/${encodeURIComponent(videoId)}`, {
+    method: "DELETE",
+    headers: await authHeader(),
+  });
+  await throwIfNotOk(response);
 }
 
 /** GET /api/library/public/{id} -- backs the public /share/[videoId] page.

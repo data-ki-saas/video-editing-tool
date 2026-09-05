@@ -3,8 +3,18 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { listLibraryVideos, setLibraryVideoTemplate, type LibraryVideo } from "@/lib/api";
-import { BookmarkIcon, DownloadIcon, ShareIcon } from "@/components/icons/UIIcons";
+import {
+  deleteLibraryVideo,
+  listLibraryVideos,
+  setLibraryVideoTemplate,
+  updateLibraryVideo,
+  type LibraryVideo,
+} from "@/lib/api";
+import { BookmarkIcon, DownloadIcon, ShareIcon, TrashIcon } from "@/components/icons/UIIcons";
+import { PlayIcon, PauseIcon } from "@/components/editor-v2/icons/PlayerIcons";
+import { InlineEditableText } from "@/components/InlineEditableText";
+
+const DESCRIPTION_MAX_LENGTH = 120;
 
 type Tab = "all" | "templates";
 
@@ -53,11 +63,21 @@ async function shareVideo(video: LibraryVideo) {
 function LibraryCard({
   video,
   onToggleTemplate,
+  onUpdateMetadata,
+  onDelete,
 }: {
   video: LibraryVideo;
   onToggleTemplate: (video: LibraryVideo) => void;
+  onUpdateMetadata: (video: LibraryVideo, next: { projectName: string; description: string | null }) => void;
+  onDelete: (video: LibraryVideo) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  // Plays the actual video right in the card (replacing the thumbnail)
+  // instead of opening it in a new tab -- toggled off again on its own
+  // "ended" event, so the card falls back to the thumbnail rather than
+  // freezing on the last frame.
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [description, setDescription] = useState(video.description ?? "");
   const duration = formatDuration(video.durationSeconds);
 
   async function handleShare() {
@@ -68,29 +88,78 @@ function LibraryCard({
     }
   }
 
+  function handleDescriptionBlur() {
+    const trimmed = description.trim();
+    if (trimmed === (video.description ?? "")) return;
+    onUpdateMetadata(video, { projectName: video.projectName, description: trimmed || null });
+  }
+
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border p-2">
-      <a
-        href={video.videoUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="relative block aspect-[9/16] overflow-hidden rounded-md bg-black"
-      >
-        {video.thumbnailUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- a public R2 URL, not a Next-optimizable static asset
-          <img src={video.thumbnailUrl} alt={video.projectName} className="h-full w-full object-cover" />
+      <div className="relative aspect-[9/16] overflow-hidden rounded-md bg-black">
+        {isPlaying ? (
+          <video
+            src={video.videoUrl}
+            controls
+            autoPlay
+            onEnded={() => setIsPlaying(false)}
+            className="h-full w-full"
+          />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-xs text-muted">No preview</div>
+          <button
+            type="button"
+            onClick={() => setIsPlaying(true)}
+            aria-label={`Play ${video.projectName}`}
+            className="group relative block h-full w-full"
+          >
+            {video.thumbnailUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- a public R2 URL, not a Next-optimizable static asset
+              <img src={video.thumbnailUrl} alt={video.projectName} className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-xs text-muted">No preview</div>
+            )}
+            <span className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover:bg-black/30">
+              <span className="rounded-full bg-black/60 p-2 text-white opacity-0 transition-opacity group-hover:opacity-100">
+                <PlayIcon className="h-6 w-6" />
+              </span>
+            </span>
+            {duration && (
+              <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[10px] text-white">
+                {duration}
+              </span>
+            )}
+          </button>
         )}
-        {duration && (
-          <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[10px] text-white">
-            {duration}
-          </span>
+        {isPlaying && (
+          <button
+            type="button"
+            onClick={() => setIsPlaying(false)}
+            title="Back to preview"
+            aria-label="Back to preview"
+            className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
+          >
+            <PauseIcon className="h-3.5 w-3.5" />
+          </button>
         )}
-      </a>
-      <p className="truncate text-xs font-medium text-foreground" title={video.projectName}>
-        {video.projectName}
-      </p>
+      </div>
+
+      <InlineEditableText
+        value={video.projectName}
+        onCommit={(name) => onUpdateMetadata(video, { projectName: name, description: video.description })}
+        ariaLabel="Reel name"
+        className="truncate text-xs font-medium text-foreground"
+        inputClassName="block w-full truncate rounded border border-border px-1 text-xs font-medium text-foreground outline-none"
+      />
+      <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value.slice(0, DESCRIPTION_MAX_LENGTH))}
+        onBlur={handleDescriptionBlur}
+        placeholder="Add a description…"
+        maxLength={DESCRIPTION_MAX_LENGTH}
+        rows={2}
+        aria-label="Description"
+        className="w-full resize-none rounded border border-transparent bg-transparent px-1 text-[10px] text-muted outline-none hover:border-border focus:border-border"
+      />
       <p className="text-[10px] text-muted">{formatSavedAt(video.createdAt)}</p>
       <div className="mt-1 flex items-center justify-between">
         <div className="flex items-center gap-1">
@@ -111,6 +180,15 @@ function LibraryCard({
             className="rounded-full p-1.5 text-muted hover:bg-background hover:text-foreground"
           >
             <ShareIcon className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onDelete(video)}
+            title="Delete"
+            aria-label="Delete"
+            className="rounded-full p-1.5 text-muted hover:bg-background hover:text-red-600"
+          >
+            <TrashIcon className="h-4 w-4" />
           </button>
         </div>
         <button
@@ -169,6 +247,36 @@ function LibraryPageContent() {
     }
   }
 
+  async function handleUpdateMetadata(video: LibraryVideo, next: { projectName: string; description: string | null }) {
+    const previous = { projectName: video.projectName, description: video.description };
+    setVideos((prev) => prev?.map((v) => (v.id === video.id ? { ...v, ...next } : v)) ?? prev);
+    try {
+      await updateLibraryVideo(video.id, next);
+    } catch (err) {
+      setVideos((prev) => prev?.map((v) => (v.id === video.id ? { ...v, ...previous } : v)) ?? prev);
+      setError(err instanceof Error ? err.message : "Failed to save changes");
+    }
+  }
+
+  async function handleDeleteVideo(video: LibraryVideo) {
+    if (!window.confirm(`Delete "${video.projectName}"? This can't be undone.`)) return;
+    // Optimistic, same as the toggles above -- restores the row (in its
+    // original position) if the DELETE fails.
+    const previousIndex = videos?.findIndex((v) => v.id === video.id) ?? -1;
+    setVideos((prev) => prev?.filter((v) => v.id !== video.id) ?? prev);
+    try {
+      await deleteLibraryVideo(video.id);
+    } catch (err) {
+      setVideos((prev) => {
+        if (!prev) return prev;
+        const next = [...prev];
+        next.splice(previousIndex < 0 ? next.length : previousIndex, 0, video);
+        return next;
+      });
+      setError(err instanceof Error ? err.message : "Failed to delete this video");
+    }
+  }
+
   const visibleVideos = videos?.filter((v) => tab === "all" || v.isTemplate) ?? null;
 
   return (
@@ -209,7 +317,13 @@ function LibraryPageContent() {
       {visibleVideos && visibleVideos.length > 0 && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
           {visibleVideos.map((video) => (
-            <LibraryCard key={video.id} video={video} onToggleTemplate={handleToggleTemplate} />
+            <LibraryCard
+              key={video.id}
+              video={video}
+              onToggleTemplate={handleToggleTemplate}
+              onUpdateMetadata={handleUpdateMetadata}
+              onDelete={handleDeleteVideo}
+            />
           ))}
         </div>
       )}

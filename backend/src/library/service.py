@@ -23,6 +23,7 @@ def _record_to_schema(record: repository.LibraryVideoRecord) -> LibraryVideo:
         id=record.id,
         project_id=record.project_id,
         project_name=record.project_name,
+        description=record.description,
         video_url=record.video_url,
         thumbnail_url=record.thumbnail_url,
         duration_seconds=float(record.duration_seconds) if record.duration_seconds is not None else None,
@@ -129,3 +130,34 @@ def set_is_template(video_id: str, is_template: bool, user: CurrentUser) -> Libr
     if record is None:
         raise HTTPException(status_code=404, detail="Library video not found")
     return _record_to_schema(record)
+
+
+def update_video(video_id: str, project_name: str, description: str | None, user: CurrentUser) -> LibraryVideo:
+    """Backs the library page's in-place name/description editing."""
+    record = repository.update_metadata(video_id, user.id, project_name, description)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Library video not found")
+    return _record_to_schema(record)
+
+
+def delete_video(video_id: str, user: CurrentUser) -> None:
+    """Deletes the library row AND its R2 objects -- the DB delete is the
+    ownership check (see repository.delete's own comment); the R2 side is
+    best-effort (log-and-swallow, mirroring projects/service.py's
+    _delete_thumbnail_object) so a since-deleted or already-gone R2 object
+    never turns into a user-facing 500 for what's otherwise a completed
+    delete."""
+    record = repository.delete(video_id, user.id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Library video not found")
+
+    for url in (record.video_url, record.thumbnail_url):
+        if not url:
+            continue
+        key = r2_client.thumbnail_key_from_url(url)
+        if not key:
+            continue
+        try:
+            r2_client.delete_public_object(key)
+        except Exception:
+            logger.exception("failed to delete R2 object for library video %s (%r)", video_id, url)

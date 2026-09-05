@@ -11,6 +11,7 @@ class LibraryVideoRecord:
     user_id: str
     project_id: str | None
     project_name: str
+    description: str | None
     video_url: str
     thumbnail_url: str | None
     duration_seconds: float | None
@@ -74,6 +75,41 @@ def set_is_template(video_id: str, user_id: str, is_template: bool) -> LibraryVi
         get_supabase_client()
         .table(_TABLE)
         .update({"is_template": is_template})
+        .eq("id", video_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not result.data:
+        return None
+    return LibraryVideoRecord(**result.data[0])
+
+
+def update_metadata(video_id: str, user_id: str, project_name: str, description: str | None) -> LibraryVideoRecord | None:
+    """Backs the library page's in-place name/description editing. Same
+    owner-scoped update-returns-None-if-unmatched convention as
+    set_is_template above."""
+    result = (
+        get_supabase_client()
+        .table(_TABLE)
+        .update({"project_name": project_name, "description": description})
+        .eq("id", video_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not result.data:
+        return None
+    return LibraryVideoRecord(**result.data[0])
+
+
+def delete(video_id: str, user_id: str) -> LibraryVideoRecord | None:
+    """Owner-scoped delete, returning the deleted row (so the caller can read
+    video_url/thumbnail_url off it to clean up R2) or None if it didn't
+    match -- same convention as set_is_template/update_metadata above, the
+    DB delete itself doubling as the ownership check."""
+    result = (
+        get_supabase_client()
+        .table(_TABLE)
+        .delete()
         .eq("id", video_id)
         .eq("user_id", user_id)
         .execute()

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from src.core.auth import CurrentUser, get_current_user
 from src.library import service
-from src.library.schemas import LibraryVideo, LibraryVideosResponse, SetTemplateRequest
+from src.library.schemas import LibraryVideo, LibraryVideosResponse, SetTemplateRequest, UpdateLibraryVideoRequest
 
 router = APIRouter(prefix="/api/library", tags=["library"])
 
@@ -37,3 +37,15 @@ async def set_template(
     video_id: str, body: SetTemplateRequest, user: CurrentUser = Depends(get_current_user)
 ) -> LibraryVideo:
     return service.set_is_template(video_id, body.is_template, user)
+
+
+@router.patch("/{video_id}", response_model=LibraryVideo)
+async def update_video(
+    video_id: str, body: UpdateLibraryVideoRequest, user: CurrentUser = Depends(get_current_user)
+) -> LibraryVideo:
+    return service.update_video(video_id, body.project_name, body.description, user)
+
+
+@router.delete("/{video_id}", status_code=204)
+async def delete_video(video_id: str, user: CurrentUser = Depends(get_current_user)) -> None:
+    service.delete_video(video_id, user)
