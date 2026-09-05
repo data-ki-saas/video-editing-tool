@@ -10,7 +10,7 @@
 import Link from "next/link";
 import { RenderIcon, LocalRenderIcon, CoverIcon } from "./icons/PlayerIcons";
 import { SignOutButton } from "@/components/SignOutButton";
-import { AccountIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
+import { AccountIcon, BookmarkIcon, LibraryIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import type { TranscriptCaption } from "@/lib/video/video_math";
 
@@ -103,6 +103,22 @@ export function TopMenuBar({
       </div>
 
       <div className="flex items-center gap-1">
+        <Link
+          href="/library"
+          aria-label="Library"
+          title="Library"
+          className="rounded-full p-2 text-muted hover:bg-foreground/10"
+        >
+          <LibraryIcon className="h-5 w-5" />
+        </Link>
+        <Link
+          href="/library?tab=templates"
+          aria-label="Templates"
+          title="Templates"
+          className="rounded-full p-2 text-muted hover:bg-foreground/10"
+        >
+          <BookmarkIcon className="h-5 w-5" />
+        </Link>
         {isAdmin && (
           <Link
             href="/admin"

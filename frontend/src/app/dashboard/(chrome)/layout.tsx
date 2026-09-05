@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { SignOutButton } from "@/components/SignOutButton";
-import { AccountIcon, LibraryIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
+import { AccountIcon, BookmarkIcon, LibraryIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 
 // Top bar for bare /dashboard and /dashboard/new -- a route group so it
@@ -33,6 +33,14 @@ export default function DashboardChromeLayout({ children }: { children: React.Re
           className="rounded-full p-2 text-muted hover:bg-foreground/10"
         >
           <LibraryIcon className="h-5 w-5" />
+        </Link>
+        <Link
+          href="/library?tab=templates"
+          aria-label="Templates"
+          title="Templates"
+          className="rounded-full p-2 text-muted hover:bg-foreground/10"
+        >
+          <BookmarkIcon className="h-5 w-5" />
         </Link>
         <Link
           href="/account/usage"

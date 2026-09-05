@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { listLibraryVideos, setLibraryVideoTemplate, type LibraryVideo } from "@/lib/api";
 import { BookmarkIcon, DownloadIcon, ShareIcon } from "@/components/icons/UIIcons";
 
@@ -127,10 +128,27 @@ function LibraryCard({
   );
 }
 
-export default function LibraryPage() {
+function LibraryPageContent() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // `?tab=templates` (see TopMenuBar.tsx/DashboardChromeLayout.tsx/
+  // MobileReelMenu.tsx's own Templates shortcut) lands straight on the
+  // Templates tab instead of always opening on "All" -- any other/missing
+  // value falls back to "all", same graceful-default spirit as this file's
+  // other optional fields.
+  const initialTab: Tab = searchParams.get("tab") === "templates" ? "templates" : "all";
   const [videos, setVideos] = useState<LibraryVideo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("all");
+  const [tab, setTab] = useState<Tab>(initialTab);
+
+  function handleTabClick(next: Tab) {
+    setTab(next);
+    // Keeps the URL shareable/bookmarkable at whichever tab is showing --
+    // replace (not push) since this is a filter toggle, not a real
+    // navigation worth its own back-button stop.
+    router.replace(next === "templates" ? `${pathname}?tab=templates` : pathname);
+  }
 
   useEffect(() => {
     listLibraryVideos()
@@ -168,7 +186,7 @@ export default function LibraryPage() {
           <button
             key={option}
             type="button"
-            onClick={() => setTab(option)}
+            onClick={() => handleTabClick(option)}
             className={`rounded-md border border-border px-3 py-1 ${
               tab === option ? "bg-accent text-accent-foreground" : "hover:bg-surface"
             }`}
@@ -196,5 +214,15 @@ export default function LibraryPage() {
         </div>
       )}
     </main>
+  );
+}
+
+// useSearchParams (above) requires a Suspense boundary -- see this hook's
+// own doc comment; without it a static build of this page fails.
+export default function LibraryPage() {
+  return (
+    <Suspense fallback={<main className="mx-auto w-full max-w-5xl px-4 py-12 text-sm text-muted">Loading…</main>}>
+      <LibraryPageContent />
+    </Suspense>
   );
 }
