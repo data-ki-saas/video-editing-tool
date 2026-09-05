@@ -28,6 +28,7 @@ function getAudioContextConstructor(): AudioContextConstructor {
 export function getAudioDuration(url: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const audio = document.createElement("audio");
+    audio.crossOrigin = "anonymous"; // matches video.ts's loadVideoElement -- forces a CORS-mode fetch so this doesn't cache an opaque no-cors response that a later cors-mode fetch() (decodeAudioBuffer) for the same URL would get served instead
     audio.preload = "metadata";
     audio.src = url;
     audio.onloadedmetadata = () => resolve(audio.duration);
