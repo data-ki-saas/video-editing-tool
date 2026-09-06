@@ -42,12 +42,17 @@ import { ReelLoader } from "@/components/ReelLoader";
 import { FILTER_PRESET_OPTIONS, getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { AMBIENT_EFFECT_OPTIONS, ambientEffectSeed, drawAmbientEffect, type AmbientEffectId } from "@/lib/video/ambientEffects";
 import { FACE_EFFECT_OPTIONS, detectFaceGeometryForVideoFrame, type FaceEffectId, type FaceGeometry } from "@/lib/video/faceLandmarks";
+import { segmentVideoFrameApproximate } from "@/lib/video/backgroundSegmentation";
 import { Camera3DRenderer, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { pickMediaRecorderMimeType, toMp4Asset } from "@/lib/media/cameraRecording";
 import { FlipCameraIcon, PlayIcon, PauseIcon } from "./icons/PlayerIcons";
 
 const MAX_RECORDING_SECONDS = 180;
 const FACE_DETECT_INTERVAL_MS = 150;
+// Heavier than face-landmark detection (a full selfie-segmentation model
+// pass, not just landmark math), and only ever needed for "halo" -- see
+// segmentVideoFrameApproximate's own doc comment -- so throttled coarser.
+const SUBJECT_CUTOUT_INTERVAL_MS = 200;
 const TARGET_FPS = 24;
 const TIMER_TICK_MS = 250;
 
@@ -127,6 +132,8 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
   const segmentStartMsRef = useRef(0);
   const lastFaceDetectAtRef = useRef(0);
   const liveFaceGeometryRef = useRef<FaceGeometry | null>(null);
+  const lastSubjectCutoutAtRef = useRef(0);
+  const liveSubjectCutoutRef = useRef<ImageBitmap | null>(null);
   // Guards against handleStop running twice concurrently -- e.g. the
   // 3-minute cap firing in the same tick the user taps "Finish".
   const isStoppingRef = useRef(false);
@@ -253,7 +260,7 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
         getCamera3DRenderer().drawImage3D(
           ctx, video, NEUTRAL_POSE, 0, 0, video.videoWidth, video.videoHeight, 0, 0, canvas.width, canvas.height, false, false,
           currentAmbientEffect ? { effectId: currentAmbientEffect, elapsedSeconds, seed: ambientEffectSeed(projectId) } : null,
-          null,
+          currentFaceEffect === "halo" ? liveSubjectCutoutRef.current : null,
           liveFaceGeometryRef.current ? { effectId: currentFaceEffect, geometry: liveFaceGeometryRef.current, elapsedSeconds } : null
         );
       } else {
@@ -281,6 +288,23 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
       } else {
         liveFaceGeometryRef.current = null;
       }
+
+      // Only "halo" needs a subject cutout to occlude it -- see
+      // segmentVideoFrameApproximate's own doc comment -- so this heavier
+      // segmentation pass never runs for "torus" or no face effect at all.
+      if (currentFaceEffect === "halo") {
+        const now = performance.now();
+        if (now - lastSubjectCutoutAtRef.current > SUBJECT_CUTOUT_INTERVAL_MS) {
+          lastSubjectCutoutAtRef.current = now;
+          segmentVideoFrameApproximate(video, now).then((bitmap) => {
+            liveSubjectCutoutRef.current?.close();
+            liveSubjectCutoutRef.current = bitmap;
+          });
+        }
+      } else if (liveSubjectCutoutRef.current) {
+        liveSubjectCutoutRef.current.close();
+        liveSubjectCutoutRef.current = null;
+      }
     }
 
     rafIdRef.current = requestAnimationFrame(draw);
@@ -296,6 +320,7 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
   useEffect(() => {
     return () => {
       camera3DRendererRef.current?.dispose();
+      liveSubjectCutoutRef.current?.close();
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== "inactive") recorder.stop();
     };

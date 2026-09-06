@@ -202,6 +202,67 @@ export async function segmentImageApproximate(image: HTMLImageElement | ImageBit
   }
 }
 
+/** Live per-frame counterpart to segmentImageApproximate, for the camera
+ * Record page's "Halo behind head" face effect (CameraCapturePage.tsx) --
+ * the halo's own occlusion trick (camera3D.ts's HALO_DEPTH_FRACTION) needs a
+ * subject cutout to sit in FRONT of the halo plane so the person's own body
+ * hides it exactly where they stand, letting it peek out around the edges;
+ * without one, the halo has nothing to occlude it and ends up drawn in
+ * front of the whole frame, covering the face instead of sitting behind it.
+ * "Torus" (floats above the head) needs no such cutout, so callers should
+ * only run this while "halo" specifically is picked.
+ *
+ * Same throttle-then-reuse-latest-result shape as faceLandmarks.ts's
+ * detectFaceGeometryForVideoFrame -- `timestampMs` must strictly increase
+ * across calls (use a monotonic clock like performance.now()), and callers
+ * should throttle calls (segmentation is heavier than landmark detection)
+ * rather than running this every rAF tick. Returns null on any failure --
+ * callers should then just skip the subjectCutout for that frame ("fails
+ * toward looks normal", the halo simply not occluding that one frame,
+ * rather than the frame breaking). Caller owns closing the returned
+ * ImageBitmap once done with it (each call allocates a new one). */
+export async function segmentVideoFrameApproximate(video: HTMLVideoElement, timestampMs: number): Promise<ImageBitmap | null> {
+  const width = video.videoWidth;
+  const height = video.videoHeight;
+  if (width === 0 || height === 0) return null;
+
+  let segmenter: ImageSegmenter;
+  try {
+    segmenter = await getSegmenter();
+  } catch (err) {
+    console.error("[backgroundSegmentation] failed to load MediaPipe selfie segmenter (video)", err);
+    return null;
+  }
+
+  try {
+    const result = segmenter.segmentForVideo(video, timestampMs);
+    const mask = result.confidenceMasks?.[0];
+    if (!mask) return null;
+
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(video, 0, 0, width, height);
+    const imageData = ctx.getImageData(0, 0, width, height);
+
+    const values = mask.getAsFloat32Array();
+    const maskWidth = mask.width;
+    const maskHeight = mask.height;
+    mask.close();
+    for (let y = 0; y < height; y++) {
+      const my = Math.min(maskHeight - 1, Math.floor((y / height) * maskHeight));
+      for (let x = 0; x < width; x++) {
+        const mx = Math.min(maskWidth - 1, Math.floor((x / width) * maskWidth));
+        imageData.data[(y * width + x) * 4 + 3] = Math.round(clamp01(values[my * maskWidth + mx]) * 255);
+      }
+    }
+    return createImageBitmap(imageData);
+  } catch (err) {
+    console.error("[backgroundSegmentation] segmentForVideo failed for video frame", err);
+    return null;
+  }
+}
+
 export async function lumaFramesToAlphaMasks(frames: ImageBitmap[]): Promise<ImageBitmap[]> {
   const canvas = new OffscreenCanvas(1, 1);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
