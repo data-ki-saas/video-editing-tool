@@ -36,6 +36,7 @@ import { getImageTemplateOption } from "@/lib/video/imageTemplates";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { getCanvasFillOption, type CanvasFillMode } from "@/lib/video/canvasFillPresets";
 import type { AmbientEffectId } from "@/lib/video/ambientEffects";
+import type { FaceEffectId } from "@/lib/video/faceLandmarks";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 import { MattingProgressBadge } from "./MattingProgressBadge";
 
@@ -76,6 +77,9 @@ export type CutawaySegment =
       // Ambient overlay effect (lib/video/ambientEffects.ts) -- see
       // CutawayDialog.tsx's own picker.
       ambientEffect?: AmbientEffectId | null;
+      // Face-locked glow (lib/video/faceLandmarks.ts + camera3D.ts) -- see
+      // CutawayDialog.tsx's own picker.
+      faceEffect?: FaceEffectId | null;
       // "Pulse with music" (lib/video/audioReactive.ts) -- see
       // CutawayDialog.tsx's own toggle.
       audioReactive?: boolean;

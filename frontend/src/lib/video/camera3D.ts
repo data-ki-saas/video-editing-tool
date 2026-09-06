@@ -34,12 +34,19 @@ import * as THREE from "three";
 import { drawImageFlipped } from "./video";
 import { easeInOut, type ZoomEffect } from "./video_math";
 import { drawAmbientEffect, type AmbientEffectId } from "./ambientEffects";
+import type { FaceEffectId, FaceGeometry } from "./faceLandmarks";
 
 export interface Camera3DPose {
   panXFraction: number; // horizontal camera dolly-pan, as a fraction of the frame's rest half-width
   panYFraction: number; // vertical camera dolly-pan, as a fraction of the frame's rest half-height
   pushFraction: number; // 0..1, how far the camera has dollied in toward the plane (0 = resting, 1 = peak)
 }
+
+/** A static (non-dollying) camera at rest -- used when a clip has a
+ * `faceEffect` (halo/torus) but no `camera3D` dolly of its own, so the glow
+ * object still renders through this same shared 3D scene without any
+ * camera motion. */
+export const NEUTRAL_POSE: Camera3DPose = { panXFraction: 0, panYFraction: 0, pushFraction: 0 };
 
 // Amplitude constants -- visibly "cinematic" without being disorienting.
 // pushFraction is a DISTANCE ratio, not a size ratio: apparent magnification
@@ -121,6 +128,77 @@ const SUBJECT_DEPTH_FRACTION = 0.22;
 // renderer): 1.1 measurably misaligned a marker at rest; 1.05 is a
 // reasonable middle ground.
 const SUBJECT_PLANE_OVERSIZE = 1.05;
+
+// The two "faceEffect" glow objects (camera3D.ts's own halo/torus, driven by
+// faceLandmarks.ts's detected head geometry) sit on two MORE depths, added
+// to the same stack as the subject/effect planes above. Only one is ever
+// visible at a time (they're a mutually-exclusive pick, like ambientEffect),
+// but both depths are fixed regardless of which is picked.
+//
+// The halo sits BEHIND the head -- nearer than the background (so it isn't
+// hidden behind the opaque photo) but farther than the subject cutout (so
+// the segmented subject's own silhouette occludes the halo's center,
+// leaving a ring visible around the head's edge -- the same occlusion trick
+// SUBJECT_DEPTH_FRACTION's own plane already depends on).
+const HALO_DEPTH_FRACTION = 0.1;
+// The torus floats ABOVE the head, nearer to the camera than every other
+// plane (including the subject cutout) so it's never accidentally occluded
+// -- it doesn't overlap the head's own silhouette, so it needs no occlusion
+// trick, just "always in front".
+const TORUS_ABOVE_HEAD_DEPTH_FRACTION = 0.3;
+// Ring/halo diameter, expressed as a multiple of the detected face's own
+// width -- scales with the photo's face size (a close-up vs. a far-away
+// photo) rather than a fixed pixel size. No exposed knob, per this app's
+// driving vision -- these are the one tuned "good default" each.
+const HALO_SIZE_RATIO = 1.35;
+const TORUS_SIZE_RATIO = 0.95;
+const HALO_RING_THICKNESS_RATIO = 0.82; // inner/outer radius -- a thin ring
+const TORUS_TUBE_RATIO = 0.11; // tube radius / major radius
+// Tilts the torus so it reads as a 3D ellipse (a ring floating roughly
+// horizontally above the head) rather than a flat disc face-on to the
+// camera -- the halo stays untilted/camera-facing (see HALO_DEPTH_FRACTION's
+// own comment, a classic "flat ring behind the head" look).
+const TORUS_TILT_RADIANS = THREE.MathUtils.degToRad(65);
+// Slow continuous spin so the torus reads as "alive"/magical rather than a
+// static decal -- one full rotation roughly every ~18s.
+const TORUS_SPIN_RADIANS_PER_SECOND = Math.PI * 0.35;
+// How far above the detected top-of-head point the torus hovers, expressed
+// as a multiple of face width (converted to a Y-fraction offset via the
+// image's own aspect ratio at draw time) -- so it visibly floats above the
+// head rather than sitting right at the hairline.
+const TORUS_HOVER_OFFSET_FACE_WIDTHS = 0.4;
+// The outer soft glow billboard behind each ring, sized as a multiple of the
+// ring's own radius so the glow extends past the ring's edge.
+const GLOW_BILLBOARD_SIZE_RATIO = 1.9;
+const HALO_COLOR = 0xfff0c2; // warm gold-white -- classic "halo" look
+const TORUS_COLOR = 0xcdeeff; // cool white-cyan -- reads distinctly from the halo
+
+/** A soft, point-source radial-gradient glow sprite -- same
+ * `createRadialGradient` technique ambientEffects.ts already uses for its
+ * own glow-like effects, just baked once into a texture (the gradient
+ * itself never changes call to call, only the mesh's own transform does)
+ * instead of drawn fresh into a 2D ctx every frame. */
+function createGlowSpriteTexture(colorHex: number): THREE.CanvasTexture {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Camera3DRenderer: 2D context unavailable for glow sprite texture");
+  const color = new THREE.Color(colorHex);
+  const r = Math.round(color.r * 255);
+  const g = Math.round(color.g * 255);
+  const b = Math.round(color.b * 255);
+  const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  gradient.addColorStop(0, `rgba(${r},${g},${b},0.9)`);
+  gradient.addColorStop(0.5, `rgba(${r},${g},${b},0.35)`);
+  gradient.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
 
 function poseAtProgress(t: number, tiltSign: number, rollSign: number): Camera3DPose {
   const eased = easeInOut(t);
@@ -248,6 +326,17 @@ export class Camera3DRenderer {
   private subjectTexture: THREE.CanvasTexture;
   private subjectScratchCanvas: HTMLCanvasElement;
   private subjectScratchCtx: CanvasRenderingContext2D;
+  // The "faceEffect" glow objects (halo/torus) -- see HALO_DEPTH_FRACTION's
+  // own comment for the depth-stacking rationale. Each is a Group holding a
+  // real 3D ring mesh plus a soft glow-sprite billboard, positioned/scaled
+  // together every draw call from the detected face geometry. Only one
+  // group is ever visible at a time (a mutually-exclusive pick, like
+  // ambientEffect) -- both exist unconditionally, same "always exists,
+  // hidden when unused" shape as subjectMesh/effectMesh above.
+  private haloGroup: THREE.Group;
+  private haloGlowTexture: THREE.CanvasTexture;
+  private torusGroup: THREE.Group;
+  private torusGlowTexture: THREE.CanvasTexture;
 
   constructor() {
     const canvas = document.createElement("canvas");
@@ -282,7 +371,10 @@ export class Camera3DRenderer {
     const subjectMaterial = new THREE.MeshBasicMaterial({ map: this.subjectTexture, transparent: true, depthWrite: false });
     this.subjectMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), subjectMaterial);
     this.subjectMesh.position.set(0, 0, CAMERA_DISTANCE * SUBJECT_DEPTH_FRACTION);
-    this.subjectMesh.renderOrder = 1;
+    // Bumped from 1 -> 2 to make room for the halo (order 1), which must
+    // draw BEFORE (behind) this subject cutout for its own occlusion trick
+    // to work -- see HALO_DEPTH_FRACTION's own comment.
+    this.subjectMesh.renderOrder = 2;
     this.subjectMesh.visible = false;
 
     this.effectScratchCanvas = document.createElement("canvas");
@@ -297,14 +389,75 @@ export class Camera3DRenderer {
     // distance-from-camera transparency sort) so these composite ON TOP of
     // the image (and the subject plane on top of THAT) regardless of how
     // close the dolly push brings the camera to any of them -- background
-    // (0) < subject (1) < ambient effect (2), an atmospheric effect like
-    // rain reading as in front of the subject, not behind it.
-    this.effectMesh.renderOrder = 2;
+    // (0) < halo (1) < subject (2) < torus (3) < ambient effect (4), an
+    // atmospheric effect like rain reading as in front of everything else,
+    // and the torus (floating above the head, never occluded) in front of
+    // the subject cutout.
+    this.effectMesh.renderOrder = 4;
     this.effectMesh.visible = false;
+
+    // Halo -- a flat, camera-facing ring (no tilt needed, unlike the torus
+    // below) plus a soft glow-sprite billboard, both built at "radius 1"
+    // scale and sized per draw call via Group.scale (see
+    // positionFaceGroup's own comment) rather than rebuilding geometry every
+    // frame.
+    const haloRingGeometry = new THREE.RingGeometry(HALO_RING_THICKNESS_RATIO, 1, 64);
+    const haloRingMaterial = new THREE.MeshBasicMaterial({
+      color: HALO_COLOR,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const haloRingMesh = new THREE.Mesh(haloRingGeometry, haloRingMaterial);
+    haloRingMesh.renderOrder = 1;
+    this.haloGlowTexture = createGlowSpriteTexture(HALO_COLOR);
+    const haloGlowMaterial = new THREE.MeshBasicMaterial({
+      map: this.haloGlowTexture,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const haloGlowMesh = new THREE.Mesh(new THREE.PlaneGeometry(2 * GLOW_BILLBOARD_SIZE_RATIO, 2 * GLOW_BILLBOARD_SIZE_RATIO), haloGlowMaterial);
+    haloGlowMesh.renderOrder = 1;
+    this.haloGroup = new THREE.Group();
+    this.haloGroup.add(haloGlowMesh, haloRingMesh);
+    this.haloGroup.visible = false;
+
+    // Torus -- a real 3D ring, tilted (see TORUS_TILT_RADIANS) so it reads
+    // as an ellipse floating above the head rather than a flat disc, plus
+    // its own glow-sprite billboard tilted the same way (both live under
+    // the same Group, whose own rotation carries the tilt/spin/roll -- see
+    // drawImage3D's own faceEffect block).
+    const torusGeometry = new THREE.TorusGeometry(1, TORUS_TUBE_RATIO, 16, 64);
+    const torusMaterial = new THREE.MeshBasicMaterial({
+      color: TORUS_COLOR,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const torusRingMesh = new THREE.Mesh(torusGeometry, torusMaterial);
+    torusRingMesh.renderOrder = 3;
+    this.torusGlowTexture = createGlowSpriteTexture(TORUS_COLOR);
+    const torusGlowMaterial = new THREE.MeshBasicMaterial({
+      map: this.torusGlowTexture,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const torusGlowMesh = new THREE.Mesh(new THREE.PlaneGeometry(2 * GLOW_BILLBOARD_SIZE_RATIO, 2 * GLOW_BILLBOARD_SIZE_RATIO), torusGlowMaterial);
+    torusGlowMesh.renderOrder = 3;
+    this.torusGroup = new THREE.Group();
+    this.torusGroup.add(torusGlowMesh, torusRingMesh);
+    this.torusGroup.visible = false;
 
     this.scene = new THREE.Scene();
     this.scene.add(this.mesh);
+    this.scene.add(this.haloGroup);
     this.scene.add(this.subjectMesh);
+    this.scene.add(this.torusGroup);
     this.scene.add(this.effectMesh);
   }
 
@@ -319,6 +472,58 @@ export class Camera3DRenderer {
     this.effectTexture.dispose();
     this.effectMesh.geometry.dispose();
     (this.effectMesh.material as THREE.Material).dispose();
+    this.haloGlowTexture.dispose();
+    for (const child of this.haloGroup.children as THREE.Mesh[]) {
+      child.geometry.dispose();
+      (child.material as THREE.Material).dispose();
+    }
+    this.torusGlowTexture.dispose();
+    for (const child of this.torusGroup.children as THREE.Mesh[]) {
+      child.geometry.dispose();
+      (child.material as THREE.Material).dispose();
+    }
+  }
+
+  /** Positions/scales a faceEffect Group (halo or torus) from a face
+   * geometry's anchor point -- projects a fixed point on the FULL original
+   * photo through the CURRENT crop rect (which changes every frame under a
+   * Ken Burns pan/zoom) into this group's own depth plane, reusing the same
+   * visible-size-at-a-given-depth formula the subject/effect planes already
+   * use above. Sizes the group from the detected face width, run through
+   * the SAME crop projection, so a zoomed-in crop enlarges the ring
+   * proportionally along with the photo's own apparent zoom. */
+  private positionFaceGroup(
+    group: THREE.Group,
+    anchorXFraction: number,
+    anchorYFraction: number,
+    geometry: FaceGeometry,
+    depthFraction: number,
+    sx: number,
+    sy: number,
+    sWidth: number,
+    sHeight: number,
+    destWidth: number,
+    destHeight: number,
+    fovRad: number,
+    sizeRatio: number
+  ): void {
+    const z = CAMERA_DISTANCE * depthFraction;
+    const restDistance = CAMERA_DISTANCE - z;
+    const visibleHeightAtZ = 2 * restDistance * Math.tan(fovRad / 2);
+    const visibleWidthAtZ = visibleHeightAtZ * (destWidth / destHeight);
+
+    const cropFx = (anchorXFraction * geometry.imageWidth - sx) / sWidth;
+    const cropFy = (anchorYFraction * geometry.imageHeight - sy) / sHeight;
+    const localX = (cropFx - 0.5) * visibleWidthAtZ;
+    const localY = -(cropFy - 0.5) * visibleHeightAtZ;
+
+    const faceWidthInCropFraction = (geometry.faceWidthFraction * geometry.imageWidth) / sWidth;
+    // Guarded against a degenerate (zero/negative) size at extreme
+    // zoomed-past-the-face crops.
+    const radius = Math.max(0.001, faceWidthInCropFraction * visibleWidthAtZ * sizeRatio * 0.5);
+
+    group.position.set(localX, localY, z);
+    group.scale.setScalar(radius);
   }
 
   /** Recreates `texture` sized for `canvas` when its pixel dimensions
@@ -362,7 +567,14 @@ export class Camera3DRenderer {
    * this gives a Ken Burns photo (CanvasPlayer.tsx's camera3DSubjectCutout,
    * an automatic MediaPipe segmentation or the clip's own real matte). Omit
    * (or pass null) for a 3D element with no subject cutout available -- it
-   * just falls back to the plain single-plane dolly. */
+   * just falls back to the plain single-plane dolly.
+   *
+   * `faceEffect`, when given, renders ONE of the two head-locked glow
+   * objects (a mutually-exclusive pick, like `ambientEffect`'s own effect
+   * library) -- `geometry` (faceLandmarks.ts's detectFaceGeometry output)
+   * anchors it to the detected head, projected through this call's own
+   * [sx,sy,sWidth,sHeight] crop rect same as everything else here. Omit (or
+   * pass null) to render neither. */
   drawImage3D(
     ctx: CanvasRenderingContext2D,
     source: CanvasImageSource,
@@ -378,7 +590,8 @@ export class Camera3DRenderer {
     flipHorizontal: boolean,
     flipVertical: boolean,
     ambientEffect?: { effectId: AmbientEffectId; elapsedSeconds: number; seed: number } | null,
-    subjectCutout?: CanvasImageSource | null
+    subjectCutout?: CanvasImageSource | null,
+    faceEffect?: { effectId: FaceEffectId; geometry: FaceGeometry; elapsedSeconds: number } | null
   ): void {
     if (destWidth <= 0 || destHeight <= 0) return;
 
@@ -437,6 +650,52 @@ export class Camera3DRenderer {
       this.subjectMesh.visible = true;
     } else {
       this.subjectMesh.visible = false;
+    }
+
+    if (faceEffect?.effectId === "halo") {
+      this.positionFaceGroup(
+        this.haloGroup,
+        faceEffect.geometry.headCenterXFraction,
+        faceEffect.geometry.headCenterYFraction,
+        faceEffect.geometry,
+        HALO_DEPTH_FRACTION,
+        sx,
+        sy,
+        sWidth,
+        sHeight,
+        destWidth,
+        destHeight,
+        fovRad,
+        HALO_SIZE_RATIO
+      );
+      this.haloGroup.rotation.set(0, 0, faceEffect.geometry.rollRadians);
+      this.haloGroup.visible = true;
+      this.torusGroup.visible = false;
+    } else if (faceEffect?.effectId === "torus") {
+      const { geometry } = faceEffect;
+      const hoverOffsetPx = geometry.faceWidthFraction * geometry.imageWidth * TORUS_HOVER_OFFSET_FACE_WIDTHS;
+      const anchorYFraction = geometry.topOfHeadYFraction - hoverOffsetPx / geometry.imageHeight;
+      this.positionFaceGroup(
+        this.torusGroup,
+        geometry.topOfHeadXFraction,
+        anchorYFraction,
+        geometry,
+        TORUS_ABOVE_HEAD_DEPTH_FRACTION,
+        sx,
+        sy,
+        sWidth,
+        sHeight,
+        destWidth,
+        destHeight,
+        fovRad,
+        TORUS_SIZE_RATIO
+      );
+      this.torusGroup.rotation.set(TORUS_TILT_RADIANS, faceEffect.elapsedSeconds * TORUS_SPIN_RADIANS_PER_SECOND, geometry.rollRadians);
+      this.torusGroup.visible = true;
+      this.haloGroup.visible = false;
+    } else {
+      this.haloGroup.visible = false;
+      this.torusGroup.visible = false;
     }
 
     if (ambientEffect) {

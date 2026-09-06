@@ -48,9 +48,10 @@ import { computeContainRect, computeEffectiveCropRect, computeMaxCoverageCropFra
 import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { IMAGE_TEMPLATE_AXES, IMAGE_TEMPLATE_OPTIONS, buildKenBurnsEffect, type ImageTemplateId } from "@/lib/video/imageTemplates";
-import { Camera3DRenderer, computeCamera3DPoseForZoomEffect } from "@/lib/video/camera3D";
+import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { AMBIENT_EFFECT_OPTIONS, ambientEffectSeed, drawAmbientEffect, type AmbientEffectId } from "@/lib/video/ambientEffects";
+import { FACE_EFFECT_OPTIONS, detectFaceGeometry, type FaceEffectId, type FaceGeometry } from "@/lib/video/faceLandmarks";
 import { CropRectOverlay } from "./CropRectOverlay";
 import {
   DEFAULT_IMAGE_CLIP_DURATION_SECONDS,
@@ -161,6 +162,10 @@ export function CutawayDialog({
     // the picker when reopening a cutaway that already has one set, same
     // staging as camera3D above.
     ambientEffect?: AmbientEffectId | null;
+    // Face-locked glow (lib/video/faceLandmarks.ts + camera3D.ts's
+    // halo/torus) -- pre-selects the picker when reopening a cutaway that
+    // already has one set, same staging as ambientEffect above.
+    faceEffect?: FaceEffectId | null;
     // "Pulse with music" (lib/video/audioReactive.ts) -- pre-checks the
     // toggle when reopening a cutaway that already has it on, same staging
     // as camera3D above.
@@ -175,7 +180,13 @@ export function CutawayDialog({
     durationSeconds: number,
     templateIds: string[],
     cropRect: CropRect,
-    options?: { removeBackground?: boolean; camera3D?: boolean; ambientEffect?: AmbientEffectId | null; audioReactive?: boolean }
+    options?: {
+      removeBackground?: boolean;
+      camera3D?: boolean;
+      ambientEffect?: AmbientEffectId | null;
+      faceEffect?: FaceEffectId | null;
+      audioReactive?: boolean;
+    }
   ) => void;
   onAddVideo: (assetId: string, options?: { removeBackground?: boolean }) => void;
   onClose: () => void;
@@ -197,6 +208,11 @@ export function CutawayDialog({
   // Ambient overlay effect (ambientEffects.ts) -- same image-only scoping
   // as camera3D above.
   const [ambientEffect, setAmbientEffect] = useState<AmbientEffectId | null>(editing?.ambientEffect ?? null);
+  // Face-locked glow (faceLandmarks.ts + camera3D.ts's halo/torus) -- same
+  // image-only scoping as camera3D above, mutually exclusive with itself
+  // (pick ONE of "torus"/"halo"/none) but independent of camera3D/
+  // ambientEffect.
+  const [faceEffect, setFaceEffect] = useState<FaceEffectId | null>(editing?.faceEffect ?? null);
   // "Pulse with music" (audioReactive.ts) -- same image-only scoping as
   // camera3D above. Not previewed in this dialog's own standalone canvas
   // (no background track loaded here) -- it only ever renders once the
@@ -306,10 +322,12 @@ export function CutawayDialog({
   // checkbox (never actually applied to this dialog's own preview canvas,
   // same simplification as audioReactive above), this only reads `camera3D`
   // -- there's no equivalent "flat cutout over a new backdrop" treatment to
-  // preserve here to conflict with.
+  // preserve here to conflict with. Also needed (independent of camera3D)
+  // whenever the "halo" faceEffect is picked -- its own occlusion trick
+  // (camera3D.ts's HALO_DEPTH_FRACTION) depends on this same cutout.
   const [subjectCutout, setSubjectCutout] = useState<ImageBitmap | null>(null);
   useEffect(() => {
-    if (!loadedImage || !camera3D) {
+    if (!loadedImage || !(camera3D || faceEffect === "halo")) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change, same pattern as this file's other re-sync effects
       setSubjectCutout(null);
       return;
@@ -325,7 +343,33 @@ export function CutawayDialog({
     return () => {
       cancelled = true;
     };
-  }, [loadedImage, camera3D]);
+  }, [loadedImage, camera3D, faceEffect]);
+
+  // Face detection (faceLandmarks.ts) for the "Torus above head"/"Halo
+  // behind head" pick -- one-shot per photo, same "recomputed whenever the
+  // photo or the toggle itself changes" shape as the subject cutout above.
+  // Stays null (silently, no console error) when no face is found -- the
+  // draw loop below then just skips the faceEffect branch, same "fails
+  // toward looks normal" fallback faceLandmarks.ts itself documents.
+  const [faceGeometry, setFaceGeometry] = useState<FaceGeometry | null>(null);
+  useEffect(() => {
+    if (!loadedImage || !faceEffect) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change, same pattern as this file's other re-sync effects
+      setFaceGeometry(null);
+      return;
+    }
+    let cancelled = false;
+    detectFaceGeometry(loadedImage)
+      .then((geometry) => {
+        if (!cancelled) setFaceGeometry(geometry);
+      })
+      .catch((err) => {
+        console.error("Face detection failed", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadedImage, faceEffect]);
 
   // Loops the chosen template(s)' combined motion over the loaded image,
   // redrawing every frame -- reuses computeEffectiveCropRect/
@@ -364,12 +408,16 @@ export function CutawayDialog({
       // so this popup's own preview can't drift from the real effect either,
       // same principle buildKenBurnsEffect's own module comment already
       // states for the 2D case.
-      if (camera3D) {
-        const pose = computeCamera3DPoseForZoomEffect(zoomEffect, templateIds, elapsed);
+      // A faceEffect pick routes through the 3D scene even with "Make it 3D"
+      // off, via a static NEUTRAL_POSE camera -- see camera3D.ts's own
+      // comment on that constant.
+      if (camera3D || faceEffect) {
+        const pose = camera3D ? computeCamera3DPoseForZoomEffect(zoomEffect, templateIds, elapsed) : NEUTRAL_POSE;
         getCamera3DRenderer().drawImage3D(
           ctx!, img, pose, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height, false, false,
           ambientEffect ? { effectId: ambientEffect, elapsedSeconds: elapsed, seed: ambientEffectSeed(selectedAssetId ?? "") } : null,
-          subjectCutout
+          subjectCutout,
+          faceEffect && faceGeometry ? { effectId: faceEffect, geometry: faceGeometry, elapsedSeconds: elapsed } : null
         );
       } else {
         ctx!.drawImage(img, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height);
@@ -382,7 +430,7 @@ export function CutawayDialog({
     }
     rafId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafId);
-  }, [loadedImage, templateIds, durationSeconds, photoCropRect, camera3D, ambientEffect, selectedAssetId, subjectCutout]);
+  }, [loadedImage, templateIds, durationSeconds, photoCropRect, camera3D, ambientEffect, faceEffect, faceGeometry, selectedAssetId, subjectCutout]);
 
   // Toggles one template id, one pick per axis (zoom / horizontal pan /
   // vertical pan) -- picking a second id from the SAME axis as an existing
@@ -733,6 +781,25 @@ export function CutawayDialog({
                 ))}
               </select>
             </label>
+            {/* Face-locked glow (faceLandmarks.ts + camera3D.ts) -- a
+                mutually-exclusive pick, like Ambience above, independent of
+                "Make it 3D"/Ambience (all combine freely). A no-op when no
+                face is detected in the photo. */}
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              Face effect
+              <select
+                value={faceEffect ?? ""}
+                onChange={(e) => setFaceEffect((e.target.value || null) as FaceEffectId | null)}
+                className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+              >
+                <option value="">None</option>
+                {FACE_EFFECT_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id} title={option.description}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             {/* "Pulse with music" (audioReactive.ts) -- subtly scales this
                 cutaway to the project's background-music amplitude,
                 independent of "Make it 3D"/Ambience above (all three
@@ -761,7 +828,13 @@ export function CutawayDialog({
                 onClick={() =>
                   selectedAsset &&
                   photoCropRect &&
-                  onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect, { removeBackground, camera3D, ambientEffect, audioReactive })
+                  onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect, {
+                    removeBackground,
+                    camera3D,
+                    ambientEffect,
+                    faceEffect,
+                    audioReactive,
+                  })
                 }
                 className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
               >

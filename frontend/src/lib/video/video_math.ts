@@ -12,6 +12,7 @@ import type { FilterPresetId } from "./filterPresets";
 import { CUT_TRANSITION_DURATION_SECONDS, type CutTransitionId } from "./cutTransitionPresets";
 import type { CanvasFillMode } from "./canvasFillPresets";
 import type { AmbientEffectId } from "./ambientEffects";
+import type { FaceEffectId } from "./faceLandmarks";
 
 /**
  * Timestamps (seconds) to sample a clip of the given duration at a fixed
@@ -721,6 +722,14 @@ export interface VideoOverlayClip {
   // rendered (plain framing OR the camera3D path above) -- independent of
   // camera3D, so the two combine freely. Absent/null means none.
   ambientEffect?: AmbientEffectId | null;
+  // A glow object locked to a detected face (lib/video/faceLandmarks.ts +
+  // camera3D.ts's halo/torus) -- unlike camera3D/ambientEffect/audioReactive
+  // above, this is a NO-OP on a video overlay for v1 (present on the type
+  // only for structural parity with ImageOverlayClip.faceEffect below): a
+  // video overlay has no single static photo to run face detection against,
+  // and approximating off one representative frame would drift whenever the
+  // person moves. No UI sets this field on a VideoOverlayClip today.
+  faceEffect?: FaceEffectId | null;
   // Same "Pulse with music" toggle as SequenceEntry's image variant (see its
   // own doc comment) -- scales this overlay's own dest rect to the
   // background track's amplitude, independent of camera3D/ambientEffect
@@ -755,6 +764,11 @@ export interface ImageOverlayClip {
   camera3D?: boolean;
   // Same ambient overlay as VideoOverlayClip.ambientEffect above.
   ambientEffect?: AmbientEffectId | null;
+  // Same head-locked glow object as VideoOverlayClip.faceEffect above --
+  // UNLIKE that field, this one IS wired up (an image overlay is a single
+  // static photo, same as a Ken Burns cutaway, so face detection runs
+  // exactly the same way).
+  faceEffect?: FaceEffectId | null;
   // Same "Pulse with music" toggle as VideoOverlayClip.audioReactive above.
   audioReactive?: boolean;
 }
@@ -1337,6 +1351,12 @@ export type SequenceEntry =
       // image-only scoping as camera3D, for now (no picker exists yet for
       // the "video" variant below). Absent/null means none.
       ambientEffect?: AmbientEffectId | null;
+      // A glow object locked to a detected face (lib/video/faceLandmarks.ts
+      // + camera3D.ts's halo/torus), mutually exclusive with itself (pick
+      // ONE of "torus"/"halo"/none, same picker shape as ambientEffect
+      // above) but independent of camera3D/ambientEffect/audioReactive --
+      // all four combine freely. Same image-only scoping as camera3D.
+      faceEffect?: FaceEffectId | null;
       // "Pulse with music" toggle (lib/video/audioReactive.ts) -- scales
       // this cutaway's own dest rect to the project's background-music
       // amplitude, independent of camera3D/ambientEffect above (all three

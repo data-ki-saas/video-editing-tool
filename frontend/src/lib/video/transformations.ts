@@ -48,6 +48,7 @@ import { getFilterPresetOption, type FilterPresetId } from "./filterPresets";
 import { getCutTransitionOption, type CutTransitionId } from "./cutTransitionPresets";
 import { getCanvasFillOption, type CanvasFillMode } from "./canvasFillPresets";
 import type { AmbientEffectId } from "./ambientEffects";
+import type { FaceEffectId } from "./faceLandmarks";
 
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
@@ -557,6 +558,7 @@ export function applyChangeImageOverlayFraming(
     rect?: CropRect;
     camera3D?: boolean;
     ambientEffect?: AmbientEffectId | null;
+    faceEffect?: FaceEffectId | null;
     audioReactive?: boolean;
   }
 ): TransformationResult {
@@ -579,6 +581,7 @@ export function applyChangeImageOverlayFraming(
     layout: nextLayout,
     camera3D: options?.camera3D ?? overlay.camera3D,
     ambientEffect: options?.ambientEffect ?? overlay.ambientEffect,
+    faceEffect: options?.faceEffect ?? overlay.faceEffect,
     audioReactive: options?.audioReactive ?? overlay.audioReactive,
   };
   return { label: "Adjusted overlay framing", state: { ...selections, overlayImages: nextOverlays } };
@@ -676,6 +679,7 @@ export function applyAddImageSequenceClip(
   removeBackground?: boolean,
   camera3D?: boolean,
   ambientEffect?: AmbientEffectId | null,
+  faceEffect?: FaceEffectId | null,
   audioReactive?: boolean
 ): TransformationResult {
   const newEntry: SequenceEntry = {
@@ -694,6 +698,7 @@ export function applyAddImageSequenceClip(
     ...(removeBackground ? { backgroundRemoval: { enabled: true, matteAssetId: null } } : {}),
     camera3D,
     ambientEffect,
+    faceEffect,
     audioReactive,
   };
   const newZoomEffect = buildKenBurnsEffect(templateIds, cropRect, startTimeSeconds, durationSeconds);
@@ -812,6 +817,7 @@ export function applyEditImageSequenceClip(
   removeBackground?: boolean,
   camera3D?: boolean,
   ambientEffect?: AmbientEffectId | null,
+  faceEffect?: FaceEffectId | null,
   audioReactive?: boolean
 ): TransformationResult {
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
@@ -845,6 +851,7 @@ export function applyEditImageSequenceClip(
     backgroundRemoval: removeBackground ? { enabled: true, matteAssetId: entry.backgroundRemoval?.matteAssetId ?? null } : null,
     camera3D,
     ambientEffect,
+    faceEffect,
     audioReactive,
   };
 

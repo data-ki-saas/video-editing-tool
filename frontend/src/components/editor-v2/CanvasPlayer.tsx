@@ -69,8 +69,9 @@
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { extractPreviewFrames, getVideoDuration, drawImageFlipped, drawImageFlippedMasked } from "@/lib/video/video";
-import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay } from "@/lib/video/camera3D";
+import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
+import { detectFaceGeometry, type FaceGeometry } from "@/lib/video/faceLandmarks";
 import { computeAudioEnvelope, sampleAudioEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { segmentClipFramesApproximate, lumaFramesToAlphaMasks, segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
@@ -404,6 +405,18 @@ export const CanvasPlayer = forwardRef<
   // scope as clipCamera3DById above, independent of it (works with or
   // without "Make it 3D" active).
   const clipAmbientEffectById = new Map(clips.map((clip) => [clip.id, clip.kind === "image" ? (clip.ambientEffect ?? null) : null]));
+  // Face-locked glow (lib/video/faceLandmarks.ts + camera3D.ts's halo/torus)
+  // -- same image-only scope as clipCamera3DById above, mutually exclusive
+  // with itself (one FaceEffectId or null) but independent of camera3D/
+  // ambientEffect. Also a no-op whenever backgroundRemoval is enabled, same
+  // scoping as camera3DSubjectCutout's own comment: that combination keeps
+  // the existing flat cutout-over-a-new-backdrop treatment unchanged rather
+  // than trying to reconcile it with the halo's own occlusion trick (which
+  // assumes a SEPARATE opaque background behind the cutout, not the single
+  // already-transparent image backgroundRemoval leaves in its place).
+  const clipFaceEffectById = new Map(
+    clips.map((clip) => [clip.id, clip.kind === "image" && !clip.backgroundRemoval?.enabled ? (clip.faceEffect ?? null) : null])
+  );
   // "Pulse with music" (lib/video/audioReactive.ts) -- same image-only scope
   // as clipCamera3DById above, independent of it and of ambientEffect.
   const clipAudioReactiveById = new Map(clips.map((clip) => [clip.id, clip.kind === "image" && Boolean(clip.audioReactive)]));
@@ -438,6 +451,13 @@ export const CanvasPlayer = forwardRef<
   // depth-plane technique ambientEffects.ts's effect layer already uses --
   // see camera3D.ts's own SUBJECT_DEPTH_FRACTION comment.
   const clipCamera3DSubjectCutoutsRef = useRef<(HTMLImageElement | ImageBitmap | null)[]>([]);
+  // Face detection (faceLandmarks.ts) for any image clip with a faceEffect
+  // picked -- same one-shot-per-unique-asset shape as
+  // clipCamera3DSubjectCutoutsRef above (computed once when the clip loads,
+  // not per frame), passed to Camera3DRenderer.drawImage3D to anchor the
+  // chosen glow object to the detected head. null for any clip this doesn't
+  // apply to, or where no face was found.
+  const clipFaceGeometriesRef = useRef<(FaceGeometry | null)[]>([]);
   // Which clips actually loaded, with cumulative start times -- what
   // resolveSequencePosition resolves elapsedSeconds against, and what
   // durationRef.current is derived from (their total).
@@ -453,6 +473,16 @@ export const CanvasPlayer = forwardRef<
   // (see the loading effect below), so drawFrameAt just skips an overlay
   // whose image hasn't resolved yet rather than waiting on it.
   const overlayImagesRef = useRef<Record<string, HTMLImageElement>>({});
+  // Face detection (faceLandmarks.ts) for an image overlay with a faceEffect
+  // picked -- keyed by assetId, same sharing convention as overlayImagesRef
+  // above (one-shot per unique asset, populated by the SAME loading effect).
+  // Unlike the base sequence's own camera3DSubjectCutout, there is no
+  // subject-cutout/occlusion layer for overlays (camera3D's own subject
+  // parallax is scoped to sequence clips only -- see SUBJECT_DEPTH_FRACTION's
+  // own comment), so an overlay's "halo" pick renders without the
+  // peeking-through-the-silhouette occlusion the base sequence gets -- a
+  // known, accepted scope limitation, not a bug.
+  const overlayFaceGeometriesRef = useRef<Record<string, FaceGeometry | null>>({});
   // Extracted preview frames for every video overlay's own source asset,
   // keyed by assetId (shared across multiple overlay clips reusing the
   // same asset, not per-clip) -- same extractPreviewFrames/frameIndexAtTime
@@ -945,12 +975,23 @@ export const CanvasPlayer = forwardRef<
       // flip it twice.
       const activeZoomEffectIndex = currentEntryId && clipCamera3DById.get(currentEntryId) ? findActiveZoomEffectIndex(zoomEffects, elapsedSeconds) : -1;
       const baseAmbientEffectId = currentEntryId ? clipAmbientEffectById.get(currentEntryId) : undefined;
-      if (activeZoomEffectIndex !== -1) {
-        const pose = computeCamera3DPoseForZoomEffect(zoomEffects[activeZoomEffectIndex], clipTemplateIdsById.get(currentEntryId!) ?? [], elapsedSeconds);
+      // Face-locked glow (faceLandmarks.ts + camera3D.ts's halo/torus) --
+      // unlike camera3D above, this doesn't ride the clip's own ZoomEffect
+      // (it has no dolly of its own to time), so it routes through the same
+      // shared 3D scene via a static NEUTRAL_POSE whenever camera3D itself
+      // isn't ALSO driving a real pose this instant.
+      const baseFaceEffectId = currentEntryId ? clipFaceEffectById.get(currentEntryId) : null;
+      if (activeZoomEffectIndex !== -1 || baseFaceEffectId) {
+        const pose =
+          activeZoomEffectIndex !== -1
+            ? computeCamera3DPoseForZoomEffect(zoomEffects[activeZoomEffectIndex], clipTemplateIdsById.get(currentEntryId!) ?? [], elapsedSeconds)
+            : NEUTRAL_POSE;
+        const baseFaceGeometry = clipFaceGeometriesRef.current[position.clipIndex] ?? null;
         getCamera3DRenderer().drawImage3D(
           ctx, image, pose, sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight, false, false,
           baseAmbientEffectId ? { effectId: baseAmbientEffectId, elapsedSeconds: position.localSeconds, seed: ambientEffectSeed(currentEntryId!) } : null,
-          clipCamera3DSubjectCutoutsRef.current[position.clipIndex] ?? null
+          clipCamera3DSubjectCutoutsRef.current[position.clipIndex] ?? null,
+          baseFaceEffectId && baseFaceGeometry ? { effectId: baseFaceEffectId, geometry: baseFaceGeometry, elapsedSeconds: position.localSeconds } : null
         );
         baseAmbientRoutedThrough3D = Boolean(baseAmbientEffectId);
       } else {
@@ -1081,13 +1122,18 @@ export const CanvasPlayer = forwardRef<
           imageOverlayPulseScale !== 1
             ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, imageOverlayPulseScale)
             : { x: destX, y: destY, width: destWidth, height: destHeight };
-        if (activeExclusiveImageOverlay.camera3D) {
+        if (activeExclusiveImageOverlay.camera3D || activeExclusiveImageOverlay.faceEffect) {
           // Same synthesized-dolly "Make it 3D" as the PiP overlay loops
           // below -- a Split-Screen half tilting in 3D can reveal a sliver
           // of whatever's behind it at its foreshortened edge (there's
           // nothing else in that half to show through to), same graceful
           // "floating card" fallback camera3D.ts's own renderer documents.
-          const pose = computeCamera3DPoseForOverlay(activeExclusiveImageOverlay.startTimeSeconds, activeExclusiveImageOverlay.endTimeSeconds, elapsedSeconds);
+          // A faceEffect alone (camera3D off) uses a static NEUTRAL_POSE --
+          // see that constant's own comment.
+          const pose = activeExclusiveImageOverlay.camera3D
+            ? computeCamera3DPoseForOverlay(activeExclusiveImageOverlay.startTimeSeconds, activeExclusiveImageOverlay.endTimeSeconds, elapsedSeconds)
+            : NEUTRAL_POSE;
+          const overlayFaceGeometry = overlayFaceGeometriesRef.current[activeExclusiveImageOverlay.assetId] ?? null;
           getCamera3DRenderer().drawImage3D(
             ctx, overlayImage, pose, osx, osy, osw, osh, imageOverlayDestRect.x, imageOverlayDestRect.y, imageOverlayDestRect.width, imageOverlayDestRect.height,
             activeExclusiveImageOverlay.framing.flipHorizontal, activeExclusiveImageOverlay.framing.flipVertical,
@@ -1097,6 +1143,10 @@ export const CanvasPlayer = forwardRef<
                   elapsedSeconds: elapsedSeconds - activeExclusiveImageOverlay.startTimeSeconds,
                   seed: ambientEffectSeed(activeExclusiveImageOverlay.startTimeSeconds),
                 }
+              : null,
+            null,
+            activeExclusiveImageOverlay.faceEffect && overlayFaceGeometry
+              ? { effectId: activeExclusiveImageOverlay.faceEffect, geometry: overlayFaceGeometry, elapsedSeconds: elapsedSeconds - activeExclusiveImageOverlay.startTimeSeconds }
               : null
           );
         } else {
@@ -1319,13 +1369,17 @@ export const CanvasPlayer = forwardRef<
         imagePipPulseScale !== 1
           ? scaleCropRectCentered({ x: destX, y: destY, width: destWidth, height: destHeight }, imagePipPulseScale)
           : { x: destX, y: destY, width: destWidth, height: destHeight };
-      if (pip.camera3D) {
+      if (pip.camera3D || pip.faceEffect) {
         // Same "Make it 3D" synthesized dolly as the video-overlay PiP loop
-        // above.
-        const pose = computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, elapsedSeconds);
+        // above. A faceEffect alone (camera3D off) uses a static
+        // NEUTRAL_POSE -- see that constant's own comment.
+        const pose = pip.camera3D ? computeCamera3DPoseForOverlay(pip.startTimeSeconds, pip.endTimeSeconds, elapsedSeconds) : NEUTRAL_POSE;
+        const pipFaceGeometry = overlayFaceGeometriesRef.current[pip.assetId] ?? null;
         getCamera3DRenderer().drawImage3D(
           ctx, overlayImage, pose, psx, psy, psw, psh, imagePipDestRect.x, imagePipDestRect.y, imagePipDestRect.width, imagePipDestRect.height, pip.framing.flipHorizontal, pip.framing.flipVertical,
-          pip.ambientEffect ? { effectId: pip.ambientEffect, elapsedSeconds: elapsedSeconds - pip.startTimeSeconds, seed: ambientEffectSeed(pip.startTimeSeconds) } : null
+          pip.ambientEffect ? { effectId: pip.ambientEffect, elapsedSeconds: elapsedSeconds - pip.startTimeSeconds, seed: ambientEffectSeed(pip.startTimeSeconds) } : null,
+          null,
+          pip.faceEffect && pipFaceGeometry ? { effectId: pip.faceEffect, geometry: pipFaceGeometry, elapsedSeconds: elapsedSeconds - pip.startTimeSeconds } : null
         );
       } else {
         drawImageFlipped(
@@ -1789,6 +1843,7 @@ export const CanvasPlayer = forwardRef<
     frameRatesRef.current = [];
     clipMattesRef.current = [];
     clipCamera3DSubjectCutoutsRef.current = [];
+    clipFaceGeometriesRef.current = [];
     loadedClipsRef.current = [];
     audioBufferRef.current = null;
     pausedAtSecondsRef.current = 0;
@@ -1808,6 +1863,7 @@ export const CanvasPlayer = forwardRef<
             meta: LoadedClipMeta;
             mattes: ImageBitmap[] | null;
             camera3DSubjectCutout: HTMLImageElement | ImageBitmap | null;
+            faceGeometry: FaceGeometry | null;
           }
         | { ok: false; message: string };
 
@@ -1872,12 +1928,29 @@ export const CanvasPlayer = forwardRef<
             // the cutout and camera3D never runs at all (see drawFrameAt's
             // own branch priority) -- so there's no original photo left
             // here to build a parallax background from in that case anyway.
+            // Also needed (independent of camera3D) whenever the "halo"
+            // faceEffect is picked -- its own occlusion trick (camera3D.ts's
+            // HALO_DEPTH_FRACTION) depends on this same cutout.
             let camera3DSubjectCutout: HTMLImageElement | ImageBitmap | null = null;
-            if (clip.camera3D && !clip.backgroundRemoval?.enabled) {
+            if ((clip.camera3D || clip.faceEffect === "halo") && !clip.backgroundRemoval?.enabled) {
               try {
                 camera3DSubjectCutout = await segmentImageApproximate(image);
               } catch (err) {
                 console.error("3D subject cutout failed for clip=%s", clip.id, err);
+              }
+            }
+
+            // Face detection (faceLandmarks.ts) for the "Torus above head"/
+            // "Halo behind head" pick -- same one-shot-per-asset shape, and
+            // same backgroundRemoval scoping, as camera3DSubjectCutout above
+            // (see clipFaceEffectById's own comment for why that combination
+            // isn't supported).
+            let faceGeometry: FaceGeometry | null = null;
+            if (clip.faceEffect && !clip.backgroundRemoval?.enabled) {
+              try {
+                faceGeometry = await detectFaceGeometry(image);
+              } catch (err) {
+                console.error("Face detection failed for clip=%s", clip.id, err);
               }
             }
 
@@ -1892,6 +1965,7 @@ export const CanvasPlayer = forwardRef<
               meta: { id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "image" },
               mattes: null,
               camera3DSubjectCutout,
+              faceGeometry,
             };
           }
 
@@ -1939,6 +2013,7 @@ export const CanvasPlayer = forwardRef<
             // to still-image Ken Burns cutaways only -- a video clip has no
             // single frame to segment once for its whole duration.
             camera3DSubjectCutout: null,
+            faceGeometry: null,
           };
         } catch (err) {
           return { ok: false, message: err instanceof Error ? err.message : "Failed to load this clip" };
@@ -1964,6 +2039,7 @@ export const CanvasPlayer = forwardRef<
       const loadedClipMeta: LoadedClipMeta[] = [];
       const loadedMattes: (ImageBitmap[] | null)[] = [];
       const loadedCamera3DSubjectCutouts: (HTMLImageElement | ImageBitmap | null)[] = [];
+      const loadedFaceGeometries: (FaceGeometry | null)[] = [];
       let failureCount = 0;
       let lastFailureMessage = "";
       for (const result of results) {
@@ -1974,6 +2050,7 @@ export const CanvasPlayer = forwardRef<
           loadedClipMeta.push(result.meta);
           loadedMattes.push(result.mattes);
           loadedCamera3DSubjectCutouts.push(result.camera3DSubjectCutout);
+          loadedFaceGeometries.push(result.faceGeometry);
         } else {
           failureCount += 1;
           lastFailureMessage = result.message;
@@ -1988,6 +2065,7 @@ export const CanvasPlayer = forwardRef<
       frameRatesRef.current = loadedFrameRates;
       clipMattesRef.current = loadedMattes;
       clipCamera3DSubjectCutoutsRef.current = loadedCamera3DSubjectCutouts;
+      clipFaceGeometriesRef.current = loadedFaceGeometries;
       loadedClipsRef.current = buildSequenceClipInfos(loadedClipMeta);
       durationRef.current = totalSequenceDuration(loadedClipsRef.current);
       audioBufferRef.current = concatenateAudioBuffers(audioContext, loadedAudioBuffers);
@@ -2059,6 +2137,9 @@ export const CanvasPlayer = forwardRef<
     const toLoad = overlayImages
       .map((overlay) => ({ assetId: overlay.assetId, url: assetUrlById[overlay.assetId] }))
       .filter(({ url }) => url);
+    // Which loaded assets actually need face detection -- any overlay clip
+    // reusing that asset with a faceEffect picked.
+    const faceEffectAssetIds = new Set(overlayImages.filter((overlay) => overlay.faceEffect).map((overlay) => overlay.assetId));
 
     Promise.all(
       toLoad.map(({ assetId, url }) =>
@@ -2066,14 +2147,25 @@ export const CanvasPlayer = forwardRef<
           .then((img) => ({ assetId, img }))
           .catch(() => null)
       )
-    ).then((loaded) => {
+    ).then(async (loaded) => {
       if (cancelled) return;
       let didLoadAny = false;
       for (const entry of loaded) {
         if (!entry) continue;
         overlayImagesRef.current[entry.assetId] = entry.img;
         didLoadAny = true;
+        // One-shot per unique asset -- skipped once already computed (or
+        // already attempted, even if it came back null/no-face).
+        if (faceEffectAssetIds.has(entry.assetId) && !(entry.assetId in overlayFaceGeometriesRef.current)) {
+          try {
+            overlayFaceGeometriesRef.current[entry.assetId] = await detectFaceGeometry(entry.img);
+          } catch (err) {
+            console.error("Face detection failed for overlay asset=%s", entry.assetId, err);
+            overlayFaceGeometriesRef.current[entry.assetId] = null;
+          }
+        }
       }
+      if (cancelled) return;
       if (didLoadAny && isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
     });
 

@@ -25,6 +25,7 @@ import {
 } from "@/lib/video/video_math";
 import { FlipHorizontalIcon, FlipVerticalIcon } from "@/components/icons/UIIcons";
 import { AMBIENT_EFFECT_OPTIONS, type AmbientEffectId } from "@/lib/video/ambientEffects";
+import { FACE_EFFECT_OPTIONS, type FaceEffectId } from "@/lib/video/faceLandmarks";
 
 // Keeps either half from being dragged down to a sliver too thin to grab
 // or usefully see.
@@ -324,6 +325,7 @@ export function ImageOverlayFramingDialog({
       rect?: CropRect;
       camera3D?: boolean;
       ambientEffect?: AmbientEffectId | null;
+      faceEffect?: FaceEffectId | null;
       audioReactive?: boolean;
     }
   ) => void;
@@ -348,6 +350,10 @@ export function ImageOverlayFramingDialog({
   // Ambient overlay effect (ambientEffects.ts) -- same picker as
   // VideoOverlayFramingDialog's own.
   const [ambientEffect, setAmbientEffect] = useState<AmbientEffectId | null>(overlay.ambientEffect ?? null);
+  // Face-locked glow (faceLandmarks.ts + camera3D.ts's halo/torus) -- same
+  // mutually-exclusive picker shape as ambientEffect above, independent of
+  // it.
+  const [faceEffect, setFaceEffect] = useState<FaceEffectId | null>(overlay.faceEffect ?? null);
   // "Pulse with music" (audioReactive.ts) -- same toggle as
   // VideoOverlayFramingDialog's own.
   const [audioReactive, setAudioReactive] = useState(Boolean(overlay.audioReactive));
@@ -363,6 +369,7 @@ export function ImageOverlayFramingDialog({
     setPipRect(overlay.layout.type === "picture-in-picture" ? overlay.layout.rect : DEFAULT_PIP_RECT);
     setCamera3D(Boolean(overlay.camera3D));
     setAmbientEffect(overlay.ambientEffect ?? null);
+    setFaceEffect(overlay.faceEffect ?? null);
     setAudioReactive(Boolean(overlay.audioReactive));
     setSelectedSide("overlay");
   }, [overlay]);
@@ -380,6 +387,7 @@ export function ImageOverlayFramingDialog({
       rect: isPictureInPicture ? pipRect : undefined,
       camera3D,
       ambientEffect,
+      faceEffect,
       audioReactive,
     });
   }
@@ -557,6 +565,21 @@ export function ImageOverlayFramingDialog({
               >
                 <option value="">None</option>
                 {AMBIENT_EFFECT_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id} title={option.description}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              Face effect
+              <select
+                value={faceEffect ?? ""}
+                onChange={(e) => setFaceEffect((e.target.value || null) as FaceEffectId | null)}
+                className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+              >
+                <option value="">None</option>
+                {FACE_EFFECT_OPTIONS.map((option) => (
                   <option key={option.id} value={option.id} title={option.description}>
                     {option.label}
                   </option>

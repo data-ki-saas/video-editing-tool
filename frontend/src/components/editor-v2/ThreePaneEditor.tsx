@@ -130,6 +130,7 @@ import type { FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import type { CanvasFillMode } from "@/lib/video/canvasFillPresets";
 import type { AmbientEffectId } from "@/lib/video/ambientEffects";
+import type { FaceEffectId } from "@/lib/video/faceLandmarks";
 import {
   DEFAULT_EDIT_SELECTIONS,
   type Timeline,
@@ -1634,6 +1635,7 @@ export function ThreePaneEditor({
       rect?: CropRect;
       camera3D?: boolean;
       ambientEffect?: AmbientEffectId | null;
+      faceEffect?: FaceEffectId | null;
       audioReactive?: boolean;
     }
   ) {
@@ -1737,7 +1739,13 @@ export function ThreePaneEditor({
     durationSeconds: number,
     templateIds: string[],
     cropRect: CropRect,
-    options?: { removeBackground?: boolean; camera3D?: boolean; ambientEffect?: AmbientEffectId | null; audioReactive?: boolean }
+    options?: {
+      removeBackground?: boolean;
+      camera3D?: boolean;
+      ambientEffect?: AmbientEffectId | null;
+      faceEffect?: FaceEffectId | null;
+      audioReactive?: boolean;
+    }
   ) {
     const replacedAssetId =
       editingCutaway && editingCutaway.kind === "image" && editingCutaway.assetId !== assetId
@@ -1757,6 +1765,7 @@ export function ThreePaneEditor({
             options?.removeBackground,
             options?.camera3D,
             options?.ambientEffect,
+            options?.faceEffect,
             options?.audioReactive
           )
         : applyAddImageSequenceClip(
@@ -1769,6 +1778,7 @@ export function ThreePaneEditor({
             options?.removeBackground,
             options?.camera3D,
             options?.ambientEffect,
+            options?.faceEffect,
             options?.audioReactive
           );
     pushChange(label, state);
