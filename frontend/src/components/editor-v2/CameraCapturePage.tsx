@@ -44,6 +44,7 @@ import { AMBIENT_EFFECT_OPTIONS, ambientEffectSeed, drawAmbientEffect, type Ambi
 import { FACE_EFFECT_OPTIONS, detectFaceGeometryForVideoFrame, type FaceEffectId, type FaceGeometry } from "@/lib/video/faceLandmarks";
 import { segmentVideoFrameApproximate } from "@/lib/video/backgroundSegmentation";
 import { Camera3DRenderer, NEUTRAL_POSE } from "@/lib/video/camera3D";
+import { computeCoverFitSourceRect } from "@/lib/video/video_math";
 import { pickMediaRecorderMimeType, toMp4Asset } from "@/lib/media/cameraRecording";
 import { FlipCameraIcon, PlayIcon, PauseIcon } from "./icons/PlayerIcons";
 
@@ -55,6 +56,15 @@ const FACE_DETECT_INTERVAL_MS = 150;
 const SUBJECT_CUTOUT_INTERVAL_MS = 200;
 const TARGET_FPS = 24;
 const TIMER_TICK_MS = 250;
+// Whatever the camera actually negotiates (getUserMedia's own 9:16 hints
+// below are only `ideal`, not binding -- plenty of devices/browsers hand
+// back a different ratio, e.g. a landscape-sensor default), the recorded
+// buffer is always center-cropped to this app's canonical reel shape (see
+// lib/projects.ts's resetProject / lib/timeline/resolve.ts's REEL_WIDTH/
+// REEL_HEIGHT) so footage recorded here never needs an unpredictable
+// re-crop later, and so the live preview -- once sized via CSS to match --
+// shows exactly the framing that gets saved.
+const CAPTURE_ASPECT_RATIO = 9 / 16;
 
 type RecorderState = "idle" | "recording" | "paused";
 type EffectPicker = "filter" | "ambience" | "face" | null;
@@ -188,7 +198,7 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
           facingMode,
           width: { ideal: 720 },
           height: { ideal: 1280 },
-          aspectRatio: { ideal: 9 / 16 },
+          aspectRatio: { ideal: CAPTURE_ASPECT_RATIO },
           frameRate: { ideal: TARGET_FPS, max: TARGET_FPS },
         },
       })
@@ -244,9 +254,16 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
       const canvas = canvasRef.current;
       if (!video || !canvas || video.readyState < 2 || video.videoWidth === 0) return;
 
-      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+      // Center-crop whatever the camera actually delivers down to this app's
+      // 9:16 reel shape -- see CAPTURE_ASPECT_RATIO's own comment -- rather
+      // than letting the buffer just track the negotiated stream's own
+      // (unpredictable) ratio.
+      const crop = computeCoverFitSourceRect(video.videoWidth, video.videoHeight, CAPTURE_ASPECT_RATIO, 1);
+      const bufferWidth = Math.round(crop.sWidth);
+      const bufferHeight = Math.round(crop.sHeight);
+      if (canvas.width !== bufferWidth || canvas.height !== bufferHeight) {
+        canvas.width = bufferWidth;
+        canvas.height = bufferHeight;
       }
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
@@ -258,13 +275,13 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
       ctx.filter = getFilterPresetOption(filterIdRef.current).cssFilter;
       if (currentFaceEffect) {
         getCamera3DRenderer().drawImage3D(
-          ctx, video, NEUTRAL_POSE, 0, 0, video.videoWidth, video.videoHeight, 0, 0, canvas.width, canvas.height, false, false,
+          ctx, video, NEUTRAL_POSE, crop.sx, crop.sy, crop.sWidth, crop.sHeight, 0, 0, canvas.width, canvas.height, false, false,
           currentAmbientEffect ? { effectId: currentAmbientEffect, elapsedSeconds, seed: ambientEffectSeed(projectId) } : null,
           currentFaceEffect === "halo" ? liveSubjectCutoutRef.current : null,
           liveFaceGeometryRef.current ? { effectId: currentFaceEffect, geometry: liveFaceGeometryRef.current, elapsedSeconds } : null
         );
       } else {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.drawImage(video, crop.sx, crop.sy, crop.sWidth, crop.sHeight, 0, 0, canvas.width, canvas.height);
         ctx.filter = "none";
         if (currentAmbientEffect) {
           drawAmbientEffect(ctx, currentAmbientEffect, 0, 0, canvas.width, canvas.height, elapsedSeconds, ambientEffectSeed(projectId));
@@ -473,7 +490,12 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
                 comment for why every consumer (preview/record/snap) reads
                 from that composited canvas instead of this raw feed. */}
             <video ref={videoRef} muted playsInline className="absolute h-px w-px opacity-0" />
-            <canvas ref={canvasRef} className="max-h-full max-w-full" />
+            {/* object-contain scales the canvas's actual pixel buffer (its
+                width/height attributes, kept at a 9:16 ratio by the draw
+                loop above) up to fill this box -- unlike a bare max-h/max-w
+                cap, which only ever shrinks and left the preview stuck at
+                whatever raw resolution the camera happened to negotiate. */}
+            <canvas ref={canvasRef} className="h-full w-full object-contain" />
 
             {recorderState !== "idle" && (
               <div className="absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/60 px-3 py-1 text-sm">
