@@ -2485,8 +2485,6 @@ export function ThreePaneEditor({
         localRenderUnsupportedReason={localRenderUnsupportedReason}
         onLocalRenderClick={handleLocalRenderClick}
         transcriptCaption={selections.transcriptCaption}
-        coverThumbnailUrl={coverThumbnailUrl}
-        onCoverClick={() => setIsCoverPickerOpen(true)}
       />
 
       <section className="min-h-0 flex-[3] overflow-hidden border-b border-border">
@@ -2622,6 +2620,8 @@ export function ThreePaneEditor({
           videoDurationSeconds={videoDurationSeconds}
           currentTimeSeconds={currentTimeSeconds}
           onSeek={handleSeek}
+          onOpenCoverPicker={() => setIsCoverPickerOpen(true)}
+          coverThumbnailUrl={coverThumbnailUrl}
         />
       </section>
 

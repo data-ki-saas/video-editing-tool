@@ -309,6 +309,8 @@ export function ActionArea({
   videoDurationSeconds,
   currentTimeSeconds,
   onSeek,
+  onOpenCoverPicker,
+  coverThumbnailUrl,
 }: {
   projectId: string;
   assets: Asset[];
@@ -484,6 +486,11 @@ export function ActionArea({
   // this reel" list -- jumps the live preview to an existing overlay's
   // start time when its row is clicked.
   onSeek: (seconds: number) => void;
+  // UserActions' own Thumbnail row -- opens CoverPicker, which is owned
+  // (and rendered) by ThreePaneEditor, not ActionArea, same reason
+  // isCutawayDialogOpen etc. are all lifted that high.
+  onOpenCoverPicker: () => void;
+  coverThumbnailUrl: string | null;
 }) {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
@@ -559,6 +566,8 @@ export function ActionArea({
           onOpenTtsAvatarDialog={onOpenTtsAvatarDialog}
           onOpenTranscriptDialog={onOpenTranscriptDialog}
           autoCaptionEnabled={transcriptCaption !== null}
+          onOpenCoverPicker={onOpenCoverPicker}
+          coverThumbnailUrl={coverThumbnailUrl}
         />
       </div>
 

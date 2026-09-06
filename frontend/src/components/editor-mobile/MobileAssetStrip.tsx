@@ -115,7 +115,7 @@ export function MobileAssetStrip({
                     disabled={index === 0}
                     onClick={() => onMoveSequenceEntry(entry.id, "earlier")}
                     aria-label="Move earlier"
-                    className="h-6 w-6 rounded border border-border text-xs text-foreground disabled:opacity-30"
+                    className="flex h-6 w-6 items-center justify-center rounded-full bg-[#800000] text-xs text-white hover:bg-[#660000] disabled:opacity-30"
                   >
                     ↑
                   </button>
@@ -124,7 +124,7 @@ export function MobileAssetStrip({
                     disabled={index === sequenceClips.length - 1}
                     onClick={() => onMoveSequenceEntry(entry.id, "later")}
                     aria-label="Move later"
-                    className="h-6 w-6 rounded border border-border text-xs text-foreground disabled:opacity-30"
+                    className="flex h-6 w-6 items-center justify-center rounded-full bg-[#800000] text-xs text-white hover:bg-[#660000] disabled:opacity-30"
                   >
                     ↓
                   </button>
