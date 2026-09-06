@@ -65,6 +65,16 @@ const TIMER_TICK_MS = 250;
 // re-crop later, and so the live preview -- once sized via CSS to match --
 // shows exactly the framing that gets saved.
 const CAPTURE_ASPECT_RATIO = 9 / 16;
+// Reveals a bit more of the raw camera frame than the bare minimum crop
+// needed to hit CAPTURE_ASPECT_RATIO -- passed as both `zoom` and `minZoom`
+// to computeCoverFitSourceRect below (same "reveal past cover" mechanism as
+// VideoOverlayFramingDialog's Zoom slider, video_math.ts's OverlayFraming.zoom
+// doc comment) so a person recording themselves handheld has visible room
+// around their body instead of a tight, face-filling crop. Harmless on a
+// device/browser that negotiates a camera stream already exactly 9:16 (no
+// slack to reveal) -- drawImage silently clips the request back down to
+// whatever the source frame actually has, per spec.
+const CAPTURE_ZOOM_OUT = 0.82;
 
 type RecorderState = "idle" | "recording" | "paused";
 type EffectPicker = "filter" | "ambience" | "face" | null;
@@ -196,9 +206,15 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
         audio: true,
         video: {
           facingMode,
-          width: { ideal: 720 },
+          // Deliberately NOT hinting CAPTURE_ASPECT_RATIO (9:16) here --
+          // asking the camera driver itself for that exact portrait shape
+          // invites it to digitally crop/zoom in before this page's own
+          // compositing loop ever sees the frame, with no pixels left for
+          // CAPTURE_ZOOM_OUT below to reveal back. A wider ideal width
+          // leaves the actual 9:16 shaping entirely to this page's own crop
+          // step, which has room to zoom out.
+          width: { ideal: 960 },
           height: { ideal: 1280 },
-          aspectRatio: { ideal: CAPTURE_ASPECT_RATIO },
           frameRate: { ideal: TARGET_FPS, max: TARGET_FPS },
         },
       })
@@ -257,8 +273,11 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
       // Center-crop whatever the camera actually delivers down to this app's
       // 9:16 reel shape -- see CAPTURE_ASPECT_RATIO's own comment -- rather
       // than letting the buffer just track the negotiated stream's own
-      // (unpredictable) ratio.
-      const crop = computeCoverFitSourceRect(video.videoWidth, video.videoHeight, CAPTURE_ASPECT_RATIO, 1);
+      // (unpredictable) ratio. zoom/minZoom both pinned to CAPTURE_ZOOM_OUT
+      // reveal a bit more than the bare minimum crop -- see its own comment.
+      const crop = computeCoverFitSourceRect(
+        video.videoWidth, video.videoHeight, CAPTURE_ASPECT_RATIO, 1, 0.5, 0.5, CAPTURE_ZOOM_OUT, CAPTURE_ZOOM_OUT
+      );
       const bufferWidth = Math.round(crop.sWidth);
       const bufferHeight = Math.round(crop.sHeight);
       if (canvas.width !== bufferWidth || canvas.height !== bufferHeight) {

@@ -69,7 +69,7 @@ export function TopMenuBar({
           href="/"
           aria-label="Home"
           title="Home"
-          className="ml-3 rounded-full bg-neutral-100 p-2 text-neutral-900 hover:bg-neutral-200"
+          className="mr-3 rounded-full bg-neutral-100 p-2 text-neutral-900 hover:bg-neutral-200"
         >
           <span className="block h-5 w-5">
             <ReelIcon />
