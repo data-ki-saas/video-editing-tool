@@ -30,6 +30,7 @@
  * time-anchored selections a desktop session already authored.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { listAssets, type Asset } from "@/lib/api";
 import { captureSingleFrame, getVideoDuration } from "@/lib/video/video";
 import { ReelLoader } from "@/components/ReelLoader";
@@ -91,6 +92,7 @@ export function MobileEditor({
   initialTimeline: Timeline;
   initialProject: Project;
 }) {
+  const router = useRouter();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [assetsError, setAssetsError] = useState<string | null>(null);
   // Gates the preview's empty-state message below: without this, the
@@ -601,6 +603,7 @@ export function MobileEditor({
           sequenceClips={sequenceClips}
           backgroundAssetIds={backgroundSequenceAssetIds}
           onUploaded={handleUploaded}
+          onRecord={() => router.push(`/dashboard/${projectId}/record`)}
           onAddToSequence={handleAddToSequence}
           onAddToBackground={handleAddToBackground}
           onRemoveFromSequence={handleRemoveFromSequence}

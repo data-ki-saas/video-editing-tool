@@ -32,6 +32,12 @@ function Topic({ title, children }: { title: string; children: React.ReactNode }
 // "image beside its caption" shape print/blog articles use for a portrait
 // photo. Stacks back to a column below `sm` (a 9:16 video and a paragraph
 // side by side get too cramped on a narrow phone screen).
+//
+// Placed inline right under the Topic it demonstrates rather than pooled
+// into one shared "Examples" section at the top of the page -- new feature
+// examples get added here over time, and grouping them all in one spot
+// would just keep growing a pile disconnected from the feature it's
+// showing off.
 function VideoExample({ title, shareUrl, children }: { title: string; shareUrl: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
@@ -61,33 +67,6 @@ export default function DocsPage() {
         </p>
       </div>
 
-      <Category title="Examples">
-        <VideoExample
-          title="Ken Burns with animated sparkle"
-          shareUrl="https://video-editing-tool-gamma.vercel.app/share/e9fb44f2-2593-4b19-97fb-6c7ec7af5dea"
-        >
-          A photo cutaway animated with a Ken Burns zoom/pan, with the Sparkle ambient effect
-          layered softly on top — one of a full library of effects (light sweep, sparkle, leaves,
-          rain, mist, sun rays, crackers) you can add to any photo or overlay.
-        </VideoExample>
-        <VideoExample
-          title="Ken Burns that pulses with the beat"
-          shareUrl="https://video-editing-tool-gamma.vercel.app/share/05bac439-f4eb-4cb1-a668-59116add98ab"
-        >
-          The same kind of Ken Burns cutaway, this time with Pulse with music turned on — it
-          gently grows and shrinks in time with the background track automatically, no
-          keyframing required.
-        </VideoExample>
-        <VideoExample
-          title="3D Ken Burns, pulsing with the beat"
-          shareUrl="https://video-editing-tool-gamma.vercel.app/share/20c39cf7-f4ab-4baf-8cc3-fc67834ef8a8"
-        >
-          Make it 3D turns the same cutaway into a real camera move — the photo&apos;s own subject
-          lifts off its background as the camera pushes in and pans, genuine depth rather than a
-          flat zoom — combined here with Pulse with music for both effects at once.
-        </VideoExample>
-      </Category>
-
       <Category title="Editing">
         <Topic title="Getting started">
           From your dashboard, click <strong>New Reel</strong> and tell us what kind of business
@@ -115,10 +94,53 @@ export default function DocsPage() {
           Drag the frame at any point in your video to set up a smooth zoom or pan there. It eases
           in and back out on its own — no keyframes to manage by hand.
         </Topic>
+        <Topic title="Make it 3D">
+          Turn Make it 3D on for any photo cutaway and it becomes a real camera move — the
+          photo&apos;s own subject lifts off its background as the camera pushes in, pans, and
+          tilts, genuine depth rather than a flat zoom.
+        </Topic>
+        <VideoExample
+          title="3D Ken Burns, pulsing with the beat"
+          shareUrl="https://video-editing-tool-gamma.vercel.app/share/20c39cf7-f4ab-4baf-8cc3-fc67834ef8a8"
+        >
+          Make it 3D turns the same cutaway into a real camera move — the photo&apos;s own subject
+          lifts off its background as the camera pushes in and pans, genuine depth rather than a
+          flat zoom — combined here with Pulse with music for both effects at once.
+        </VideoExample>
+        <Topic title="Ambient effects">
+          Layer a soft ambient effect onto any photo or overlay — light sweep, sparkle, drifting
+          leaves, rain, mist, sun rays, or crackers — from the Ambience option when adding it.
+        </Topic>
+        <VideoExample
+          title="Ken Burns with animated sparkle"
+          shareUrl="https://video-editing-tool-gamma.vercel.app/share/e9fb44f2-2593-4b19-97fb-6c7ec7af5dea"
+        >
+          A photo cutaway animated with a Ken Burns zoom/pan, with the Sparkle ambient effect
+          layered softly on top — one of a full library of effects (light sweep, sparkle, leaves,
+          rain, mist, sun rays, crackers) you can add to any photo or overlay.
+        </VideoExample>
+        <Topic title="Face effects">
+          For a photo with a detected face, add a glowing ring locked to the head — a Torus
+          spinning just above it, or a Halo glowing softly behind it. Pick one from the Face
+          effect option when adding the photo, and combine it freely with Make it 3D or Ambience.
+        </Topic>
         <Topic title="Pulse with music">
           Turn on Pulse with music on any photo cutaway or overlay and it subtly grows and shrinks
           in time with your background track — an automatic way to make your reel feel more alive
           and in sync with the beat, with nothing to keyframe by hand.
+        </Topic>
+        <VideoExample
+          title="Ken Burns that pulses with the beat"
+          shareUrl="https://video-editing-tool-gamma.vercel.app/share/05bac439-f4eb-4cb1-a668-59116add98ab"
+        >
+          The same kind of Ken Burns cutaway, this time with Pulse with music turned on — it
+          gently grows and shrinks in time with the background track automatically, no
+          keyframing required.
+        </VideoExample>
+        <Topic title="Filters">
+          Right-click (or long-press) any cutaway or overlay and choose Filter to give it its own
+          look — Original, Black &amp; White, Vivid, Vintage, Warm, Cool, or High Contrast. Each
+          clip keeps its own filter, independent of the rest of your reel.
         </Topic>
         <Topic title="Flip & mirror">
           Flip your footage horizontally or vertically starting from any point in the video, and
@@ -160,6 +182,14 @@ export default function DocsPage() {
           limit on how many high-quality cloud renders an account can start. If you hit it,
           you&apos;ll see a clear message telling you when to try again — Edge Render has no such
           limit.
+        </Topic>
+      </Category>
+
+      <Category title="Sharing">
+        <Topic title="Post to YouTube">
+          Connect your YouTube account once from Settings, then post any saved reel with a single
+          click — right from your Library or straight after a render. Your reel&apos;s saved name
+          becomes the video title, no extra dialog needed.
         </Topic>
       </Category>
     </main>

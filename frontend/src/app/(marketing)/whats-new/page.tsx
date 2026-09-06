@@ -16,11 +16,23 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-09-06",
+    title: "Face effects: a glowing torus or halo",
+    description:
+      "A glowing ring can now lock onto a photo's detected head — spinning just above it like a torus, or glowing softly behind it like a halo. Pick one from the same cutaway options as “Make it 3D” and Ambience, and combine it freely with either.",
+    isLatest: true,
+  },
+  {
+    date: "2026-09-05",
+    title: "Post straight to YouTube",
+    description:
+      "Connect your YouTube account once in Settings, then post any saved reel with a single click — right from your Library or straight after a render.",
+  },
+  {
     date: "2026-09-05",
     title: "“Make it 3D” now has real depth",
     description:
       "Your photo's subject now lifts off the background as the camera moves, instead of the whole photo just moving as one flat layer — genuine depth, not a bigger zoom. Automatic the moment you turn on “Make it 3D,” no extra steps.",
-    isLatest: true,
   },
   {
     date: "2026-09-05",

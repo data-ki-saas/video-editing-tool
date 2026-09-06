@@ -131,6 +131,50 @@ export function CollapseIcon(props: IconProps) {
   );
 }
 
+/** A camera body with a shutter dot -- opens the camera Record page
+ * (CameraCapturePage.tsx), badged right after CoverIcon's thumbnail button
+ * in TopMenuBar since both live in that same "this reel's own media"
+ * button group. Outline, matching CoverIcon/RenderIcon's stroke style. */
+export function RecordIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h9A1.5 1.5 0 0 1 15 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 3 16.5v-9Z" />
+      <path d="m15 10 6-3.5v11L15 14" />
+      <circle cx="9" cy="12" r="2.25" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** Two curved arrows around a camera body -- CameraCapturePage's
+ * front/back camera switch button (mobile only, shown when
+ * enumerateDevices reports more than one video input). */
+export function FlipCameraIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M8 6h2l1.2-1.6h1.6L14 6h2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z" />
+      <circle cx="12" cy="12.5" r="2.8" />
+      <path d="M4 9a8 8 0 0 1 3-6M20 15a8 8 0 0 1-3 6" />
+      <path d="M6.3 1.6 7 3l-1.7.5M17.7 20.4 17 19l1.7-.5" />
+    </svg>
+  );
+}
+
 /** Simple picture/image glyph for the cover/thumbnail picker action --
  * outline, matching LocalRenderIcon/RenderIcon's stroke style. */
 export function CoverIcon(props: IconProps) {

@@ -199,6 +199,7 @@ export function ActionArea({
   onUploaded,
   onUploadingChange,
   onAssetDeleted,
+  onRecord,
   onAddImageOverlay,
   onAddToSequence,
   onAddVideoOverlay,
@@ -317,6 +318,7 @@ export function ActionArea({
   onUploaded: (asset: Asset) => void;
   onUploadingChange?: (isUploading: boolean) => void;
   onAssetDeleted: (assetId: string) => void;
+  onRecord: () => void;
   onAddImageOverlay: (asset: Asset) => void;
   onAddToSequence: (asset: Asset) => void;
   onAddVideoOverlay: (asset: Asset, options?: { removeBackground?: boolean; chromaKeyColor?: string }) => void;
@@ -528,6 +530,7 @@ export function ActionArea({
           onSelect={onSelectAsset}
           onAddAsset={() => setIsUploadDialogOpen(true)}
           onBrowseStock={() => setIsStockDialogOpen(true)}
+          onRecord={onRecord}
           onDeleted={onAssetDeleted}
           onAddImageOverlay={onAddImageOverlay}
           onAddToSequence={onAddToSequence}

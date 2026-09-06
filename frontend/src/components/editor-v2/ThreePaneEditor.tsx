@@ -45,6 +45,7 @@
  * authored duration, with silent audio").
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { listAssets, deleteAsset, requestBackgroundRemoval, type Asset } from "@/lib/api";
 import { pollBackgroundRemoval, describeMattingTick, MAX_POLL_SECONDS } from "@/lib/backgroundRemoval";
 import { extractThumbnails, getVideoDuration, getVideoDurationAndDimensions, captureSingleFrame } from "@/lib/video/video";
@@ -168,6 +169,7 @@ export function ThreePaneEditor({
   initialTimeline: Timeline;
   initialProject: Project;
 }) {
+  const router = useRouter();
   const {
     isRendering,
     renderStatus,
@@ -2472,6 +2474,7 @@ export function ThreePaneEditor({
     <div className="h-full overflow-x-auto">
       <div className="flex h-full min-w-[1500px] flex-col">
         <TopMenuBar
+        projectId={projectId}
         canRender={effectiveSequenceEntries.length > 0}
         isRendering={isRendering}
         renderStatus={renderStatus}
@@ -2496,6 +2499,7 @@ export function ThreePaneEditor({
           onUploaded={handleUploaded}
           onUploadingChange={setIsUploading}
           onAssetDeleted={handleAssetDeleted}
+          onRecord={() => router.push(`/dashboard/${projectId}/record`)}
           onAddImageOverlay={handleAddImageOverlay}
           onAddToSequence={handleAddToSequence}
           onAddVideoOverlay={handleAddVideoOverlay}

@@ -24,6 +24,7 @@ export function MobileAssetStrip({
   sequenceClips,
   backgroundAssetIds,
   onUploaded,
+  onRecord,
   onAddToSequence,
   onAddToBackground,
   onRemoveFromSequence,
@@ -37,6 +38,10 @@ export function MobileAssetStrip({
   sequenceClips: SequenceEntry[];
   backgroundAssetIds: string[];
   onUploaded: (asset: Asset) => void;
+  // Opens the camera Record page (dashboard/[projectId]/record) -- a
+  // navigation, not the UploadDialog below, since capturing footage needs a
+  // full-screen live camera view.
+  onRecord: () => void;
   onAddToSequence: (asset: Asset) => void;
   onAddToBackground: (asset: Asset) => void;
   onRemoveFromSequence: (entryId: string) => void;
@@ -57,15 +62,24 @@ export function MobileAssetStrip({
 
   return (
     <div className="flex flex-col gap-4 p-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-foreground">Your reel</h2>
-        <button
-          type="button"
-          onClick={() => setIsUploadOpen(true)}
-          className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground"
-        >
-          + Add media
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            type="button"
+            onClick={onRecord}
+            className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground"
+          >
+            Record
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsUploadOpen(true)}
+            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground"
+          >
+            + Add media
+          </button>
+        </div>
       </div>
 
       {sequenceClips.length === 0 ? (

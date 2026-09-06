@@ -10,7 +10,7 @@
  * the bare /dashboard route shows via its own (chrome) layout.
  */
 import Link from "next/link";
-import { RenderIcon, LocalRenderIcon, CoverIcon } from "./icons/PlayerIcons";
+import { RenderIcon, LocalRenderIcon, CoverIcon, RecordIcon } from "./icons/PlayerIcons";
 import { SignOutButton } from "@/components/SignOutButton";
 import { ReelIcon } from "@/components/IconButton";
 import { AccountIcon, BookmarkIcon, LibraryIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
@@ -20,6 +20,7 @@ import type { TranscriptCaption } from "@/lib/video/video_math";
 const TERMINAL_RENDER_STATUSES = new Set(["completed", "failed"]);
 
 export function TopMenuBar({
+  projectId,
   canRender,
   isRendering,
   renderStatus,
@@ -33,6 +34,7 @@ export function TopMenuBar({
   coverThumbnailUrl,
   onCoverClick,
 }: {
+  projectId: string;
   canRender: boolean;
   isRendering: boolean;
   renderStatus: string | null;
@@ -114,6 +116,15 @@ export function TopMenuBar({
             <CoverIcon className="h-5 w-5" />
           )}
         </button>
+
+        <Link
+          href={`/dashboard/${projectId}/record`}
+          aria-label="Record"
+          title="Record a video or take a photo"
+          className="rounded-full bg-neutral-700 p-2 text-white hover:bg-neutral-600"
+        >
+          <RecordIcon className="h-5 w-5" />
+        </Link>
       </div>
 
       <div className="flex items-center gap-2 pr-1">

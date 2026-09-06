@@ -102,6 +102,28 @@ function getFaceLandmarker(): Promise<FaceLandmarker> {
   return landmarkerPromise;
 }
 
+// A second, independent FaceLandmarker instance in MediaPipe's "VIDEO"
+// running mode -- used by detectFaceGeometryForVideoFrame (the camera
+// Record page's live per-frame detection), kept entirely separate from
+// getFaceLandmarker's IMAGE-mode instance above rather than reconfiguring
+// one shared instance, since MediaPipe ties running mode to the instance
+// and the two call sites (one-shot photo vs. repeated live-video frames)
+// are never used from the same page at once anyway.
+let videoLandmarkerPromise: Promise<FaceLandmarker> | null = null;
+
+function getVideoFaceLandmarker(): Promise<FaceLandmarker> {
+  if (!videoLandmarkerPromise) {
+    videoLandmarkerPromise = FilesetResolver.forVisionTasks(WASM_BASE_PATH).then((fileset) =>
+      FaceLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: MODEL_ASSET_PATH, delegate: "CPU" },
+        runningMode: "VIDEO",
+        numFaces: 1,
+      })
+    );
+  }
+  return videoLandmarkerPromise;
+}
+
 // Canonical MediaPipe face-mesh landmark indices (fixed for every
 // detection -- not tuned/arbitrary). See this module's own doc comment,
 // caveat #1, for the "not verified against a live run" flag.
@@ -130,6 +152,41 @@ function distPx(a: Point, b: Point, imageWidth: number, imageHeight: number): nu
   return Math.hypot(dx, dy);
 }
 
+/** Shared reduction from a raw 478-point face mesh down to FaceGeometry --
+ * used by both detectFaceGeometry (IMAGE mode, a still photo) and
+ * detectFaceGeometryForVideoFrame (VIDEO mode, a live camera frame) so the
+ * landmark-index/extrapolation math below lives in exactly one place. */
+function landmarksToFaceGeometry(landmarks: Point[], imageWidth: number, imageHeight: number): FaceGeometry | null {
+  const hairlineCenter = landmarks[LM_HAIRLINE_CENTER];
+  const chin = landmarks[LM_CHIN];
+  const leftCheek = landmarks[LM_LEFT_CHEEK];
+  const rightCheek = landmarks[LM_RIGHT_CHEEK];
+  const leftEyeOuter = landmarks[LM_LEFT_EYE_OUTER];
+  const rightEyeOuter = landmarks[LM_RIGHT_EYE_OUTER];
+  if (!hairlineCenter || !chin || !leftCheek || !rightCheek || !leftEyeOuter || !rightEyeOuter) return null;
+
+  // Extrapolate past the hairline along the hairline->chin vector -- a
+  // face mesh's own topology stops at the hairline, so "top of head" (the
+  // actual skull top, above the hair) has no literal landmark to read.
+  const topOfHeadX = hairlineCenter.x + (hairlineCenter.x - chin.x) * TOP_OF_HEAD_EXTRAPOLATION_FACTOR;
+  const topOfHeadY = hairlineCenter.y + (hairlineCenter.y - chin.y) * TOP_OF_HEAD_EXTRAPOLATION_FACTOR;
+
+  const faceWidthPx = distPx(leftCheek, rightCheek, imageWidth, imageHeight);
+  const eyeDx = (rightEyeOuter.x - leftEyeOuter.x) * imageWidth;
+  const eyeDy = (rightEyeOuter.y - leftEyeOuter.y) * imageHeight;
+
+  return {
+    imageWidth,
+    imageHeight,
+    headCenterXFraction: (topOfHeadX + chin.x) / 2,
+    headCenterYFraction: (topOfHeadY + chin.y) / 2,
+    topOfHeadXFraction: topOfHeadX,
+    topOfHeadYFraction: topOfHeadY,
+    faceWidthFraction: faceWidthPx / imageWidth,
+    rollRadians: Math.atan2(eyeDy, eyeDx),
+  };
+}
+
 /** Detects the (first/largest) face in a still photo and reduces it to the
  * handful of measurements camera3D.ts needs to place a glow object relative
  * to the head. Returns `null` on load failure, detection failure, or no
@@ -153,37 +210,45 @@ export async function detectFaceGeometry(image: HTMLImageElement | ImageBitmap):
     const result = landmarker.detect(bitmap);
     const landmarks = result.faceLandmarks?.[0];
     if (!landmarks || landmarks.length === 0) return null;
-
-    const hairlineCenter = landmarks[LM_HAIRLINE_CENTER];
-    const chin = landmarks[LM_CHIN];
-    const leftCheek = landmarks[LM_LEFT_CHEEK];
-    const rightCheek = landmarks[LM_RIGHT_CHEEK];
-    const leftEyeOuter = landmarks[LM_LEFT_EYE_OUTER];
-    const rightEyeOuter = landmarks[LM_RIGHT_EYE_OUTER];
-    if (!hairlineCenter || !chin || !leftCheek || !rightCheek || !leftEyeOuter || !rightEyeOuter) return null;
-
-    // Extrapolate past the hairline along the hairline->chin vector -- a
-    // face mesh's own topology stops at the hairline, so "top of head" (the
-    // actual skull top, above the hair) has no literal landmark to read.
-    const topOfHeadX = hairlineCenter.x + (hairlineCenter.x - chin.x) * TOP_OF_HEAD_EXTRAPOLATION_FACTOR;
-    const topOfHeadY = hairlineCenter.y + (hairlineCenter.y - chin.y) * TOP_OF_HEAD_EXTRAPOLATION_FACTOR;
-
-    const faceWidthPx = distPx(leftCheek, rightCheek, imageWidth, imageHeight);
-    const eyeDx = (rightEyeOuter.x - leftEyeOuter.x) * imageWidth;
-    const eyeDy = (rightEyeOuter.y - leftEyeOuter.y) * imageHeight;
-
-    return {
-      imageWidth,
-      imageHeight,
-      headCenterXFraction: (topOfHeadX + chin.x) / 2,
-      headCenterYFraction: (topOfHeadY + chin.y) / 2,
-      topOfHeadXFraction: topOfHeadX,
-      topOfHeadYFraction: topOfHeadY,
-      faceWidthFraction: faceWidthPx / imageWidth,
-      rollRadians: Math.atan2(eyeDy, eyeDx),
-    };
+    return landmarksToFaceGeometry(landmarks, imageWidth, imageHeight);
   } catch (err) {
     console.error("[faceLandmarks] detect failed for image", err);
+    return null;
+  }
+}
+
+/** Live per-frame counterpart to detectFaceGeometry, for the camera Record
+ * page's "Torus"/"Halo" face effect over a real-time video stream rather
+ * than a still photo -- same reduction, same "fails toward looks normal"
+ * null fallback, but reads directly off an HTMLVideoElement via MediaPipe's
+ * VIDEO running mode instead of decoding one still image.
+ *
+ * `timestampMs` must strictly increase across calls for the same video
+ * element (MediaPipe's own VIDEO-mode requirement) -- pass a monotonic
+ * clock like `performance.now()`, not a timestamp derived from the video's
+ * own currentTime (which can repeat/rewind on some browsers' rAF timing).
+ * Callers should throttle how often this runs (e.g. every ~150ms) rather
+ * than every rAF tick -- detection quality doesn't need per-frame
+ * granularity for a slowly-drifting head-locked glow, and MediaPipe's own
+ * per-call cost isn't free. */
+export async function detectFaceGeometryForVideoFrame(video: HTMLVideoElement, timestampMs: number): Promise<FaceGeometry | null> {
+  if (video.videoWidth === 0 || video.videoHeight === 0) return null;
+
+  let landmarker: FaceLandmarker;
+  try {
+    landmarker = await getVideoFaceLandmarker();
+  } catch (err) {
+    console.error("[faceLandmarks] failed to load MediaPipe FaceLandmarker (video)", err);
+    return null;
+  }
+
+  try {
+    const result = landmarker.detectForVideo(video, timestampMs);
+    const landmarks = result.faceLandmarks?.[0];
+    if (!landmarks || landmarks.length === 0) return null;
+    return landmarksToFaceGeometry(landmarks, video.videoWidth, video.videoHeight);
+  } catch (err) {
+    console.error("[faceLandmarks] detectForVideo failed", err);
     return null;
   }
 }
