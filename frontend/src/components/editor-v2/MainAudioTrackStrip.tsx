@@ -14,24 +14,27 @@
  * overlays one, followed by the VolumeBadge, on this rail's left edge; see
  * that file's own module comment.)
  *
- * A one-second ruler (a horizontal line the full width of the rail, with a
- * tick crossing it every second at the same `pixelsPerSecond` scale the
- * other synced strips use, each tick labeled with its second number) gives
- * this rail a sense of elapsed time on its own, without needing to line it
- * up against FrameStrip's tiles to tell.
+ * Used to draw its own one-second ruler (ticks + second-number labels)
+ * directly on the rail, but those tick labels sat right under this rail's
+ * own overlaid VolumeBadge (Playground.tsx's own module comment) -- the two
+ * fought for the same pointer target when dragging the playhead to the very
+ * start of the clip. That ruler now lives in its own TimeRulerStrip row at
+ * the bottom of the whole synced group instead (see that file's own module
+ * comment) -- this rail keeps its own playhead line + floating ticker below
+ * (still useful without FrameStrip in view) but no longer draws tick marks.
  *
  * `hide-scrollbar`, same as FrameStrip/BackgroundTrackStrip -- see
  * globals.css's own comment. Playground.tsx's own proxy scrollbar row, at
- * the very bottom of the whole synced group (below both audio rails), is
- * the one visible, draggable affordance; this rail still stays scrollable
- * via trackpad/wheel too.
+ * the very bottom of the whole synced group (below TimeRulerStrip), is the
+ * one visible, draggable affordance; this rail still stays scrollable via
+ * trackpad/wheel too.
  *
  * Click-to-seek works here exactly like FrameStrip's own click handler --
  * this rail is part of the same shared timeline, so scrubbing shouldn't
  * only work from the video frames above it. FrameStrip owns the
  * authoritative currentTimeSeconds/onSeek wiring (shared editor state), but
  * this rail draws its OWN red playhead line (at the exact same
- * `currentTimeSeconds * pixelsPerSecond` this file's own second-ticks use,
+ * `currentTimeSeconds * pixelsPerSecond` TimeRulerStrip's own ticks use,
  * not FrameStrip's %-based one) plus a floating time ticker above it, so the
  * rail reads its own elapsed time without needing FrameStrip in view --
  * FrameStrip's tile widths are now sized so the two strips' total widths
@@ -79,13 +82,9 @@ export function MainAudioTrackStrip({
     onSeek(fraction * videoDurationSeconds);
   }
 
-  // One tick per whole second, including a trailing tick for a
-  // non-whole-second duration's final partial second.
-  const secondTicks = Array.from({ length: Math.floor(videoDurationSeconds) + 1 }, (_, second) => second);
-
-  // Raw pixel offset (not a %) so this lines up exactly with secondTicks'
-  // own `second * pixelsPerSecond` placement above, on this rail's own
-  // exact-width track -- see this file's module comment.
+  // Raw pixel offset (not a %) so this lines up exactly with
+  // TimeRulerStrip's own `second * pixelsPerSecond` tick placement, on this
+  // rail's own exact-width track -- see this file's module comment.
   const playheadLeftPx = Math.min(Math.max(currentTimeSeconds, 0), videoDurationSeconds) * pixelsPerSecond;
 
   return (
@@ -102,16 +101,6 @@ export function MainAudioTrackStrip({
         style={{ width: videoDurationSeconds * pixelsPerSecond }}
       >
         <div className="pointer-events-none absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-black/30" />
-        {secondTicks.map((second) => (
-          <div
-            key={second}
-            className="pointer-events-none absolute inset-y-0 -translate-x-1/2"
-            style={{ left: second * pixelsPerSecond }}
-          >
-            <div className="absolute top-0 h-2 w-px bg-black/40" />
-            <div className="absolute bottom-0 whitespace-nowrap text-[8px] leading-none text-black/70">{second}</div>
-          </div>
-        ))}
         <div
           className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-red-500"
           style={{ left: playheadLeftPx }}

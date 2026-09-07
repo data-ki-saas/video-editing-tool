@@ -51,18 +51,26 @@
  * absent from layout flow entirely, so they stay visible regardless of
  * scroll position.
  *
- * All three strips hide their own native scrollbar (`hide-scrollbar`, see
- * globals.css) -- a fourth synced element, a thin proxy scrollbar row below
- * BackgroundTrackStrip (the last rail), supplies the one visible, draggable
- * scrollbar for the whole group instead. Putting it below every rail rather
- * than on any one of them keeps the group reading as one panel: a
- * scrollbar directly on FrameStrip (an earlier version of this) sat
- * visually between it and the two audio rails, splitting the "one seamless
- * panel" apart.
+ * Below BackgroundTrackStrip (the last rail) sits TimeRulerStrip, a shared
+ * one-second ruler for the whole group -- it used to be drawn inside
+ * MainAudioTrackStrip's own rail, but its tick labels sat right under that
+ * rail's own overlaid VolumeBadge, so dragging the playhead to the very
+ * start of the clip fought with the volume control for the same pointer
+ * target (see TimeRulerStrip.tsx's own module comment). Its own row, out
+ * from under every rail's own overlaid controls, avoids that.
+ *
+ * All strips hide their own native scrollbar (`hide-scrollbar`, see
+ * globals.css) -- a final synced element, a thin proxy scrollbar row below
+ * TimeRulerStrip, supplies the one visible, draggable scrollbar for the
+ * whole group instead. Putting it below everything else rather than on any
+ * one rail keeps the group reading as one panel: a scrollbar directly on
+ * FrameStrip (an earlier version of this) sat visually between it and the
+ * two audio rails, splitting the "one seamless panel" apart.
  */
 import { BackgroundTrackStrip } from "./BackgroundTrackStrip";
 import { FrameStrip, type VideoOverlayThumbnailFrames } from "./FrameStrip";
 import { MainAudioTrackStrip } from "./MainAudioTrackStrip";
+import { TimeRulerStrip } from "./TimeRulerStrip";
 import { VolumeBadge } from "./VolumeBadge";
 import { MicrophoneIcon, MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { CutawaySegment } from "./CutawayTrack";
@@ -97,6 +105,12 @@ const RAIL_GAP_PX = 8;
 // enough for a comfortable drag target for the thin themed scrollbar
 // (globals.css's own `* { scrollbar-width: thin }`), not a full rail tier.
 const PROXY_SCROLLBAR_HEIGHT_PX = 10;
+// Height of the shared one-second ruler row (TimeRulerStrip), below every
+// track rail and above the proxy scrollbar -- see that file's own module
+// comment on why it's a standalone row instead of drawn inside a rail.
+// Shorter than RAIL_HEIGHT_PX since it's just a tick + a one-line label,
+// not a rail with its own background/content.
+const TIME_RULER_HEIGHT_PX = 14;
 
 // Shared time-to-pixel scale for all three strips -- see this file's
 // module comment. 120 (not 60) so a 1-second thumbnail tile on FrameStrip
@@ -109,7 +123,8 @@ const PIXELS_PER_SECOND = 120;
 const BACKGROUND_STRIP_INDEX = 0;
 const FRAME_STRIP_INDEX = 1;
 const MAIN_AUDIO_STRIP_INDEX = 2;
-const PROXY_SCROLLBAR_INDEX = 3;
+const TIME_RULER_INDEX = 3;
+const PROXY_SCROLLBAR_INDEX = 4;
 
 export function Playground({
   musicClips,
@@ -347,7 +362,7 @@ export function Playground({
   // OverlaySourceStartDialog for that specific overlay placement.
   onOpenSourceStart: (overlayIndex: number) => void;
 }) {
-  const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(4);
+  const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(5);
 
   // What BackgroundTrackStrip's own edge/body drag snaps against -- the
   // sequence's own bounds, the playhead, and every OTHER music clip's own
@@ -528,6 +543,16 @@ export function Playground({
             onChangePosition={onChangeMusicClipPosition}
             onCommitPosition={onCommitMusicClipPosition}
             onDelete={onDeleteMusicClip}
+          />
+        </div>
+
+        <div className="shrink-0" style={{ height: TIME_RULER_HEIGHT_PX, marginTop: RAIL_GAP_PX }}>
+          <TimeRulerStrip
+            videoDurationSeconds={videoDurationSeconds}
+            pixelsPerSecond={PIXELS_PER_SECOND}
+            onSeek={onSeek}
+            scrollContainerRef={bindRef(TIME_RULER_INDEX)}
+            onScroll={bindOnScroll(TIME_RULER_INDEX)}
           />
         </div>
 
