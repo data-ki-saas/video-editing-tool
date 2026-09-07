@@ -2486,35 +2486,41 @@ export const CanvasPlayer = forwardRef<
     // default. Without a definite width on THIS element, the video box's
     // flex-1 (flex-basis 0%) has nothing to grow into once the canvas went
     // absolute/out-of-flow (see below): the shrink-wrap collapses to just
-    // the controls column's width and the video panel disappears entirely.
+    // the controls row's height and the video panel disappears entirely.
+    // flex-col -- the controls row sits BELOW the video panel (not beside
+    // it), same reasoning as CanvasPlayer's own module comment about
+    // favoring direct-manipulation, uncluttered chrome: a strip under the
+    // preview reads as a media player's transport bar, whereas a side rail
+    // competed with the panel for the row's own width.
     <div
       ref={playerRootRef}
       className={
-        "flex h-full w-full min-w-0 items-center gap-2 p-2" + (isFullscreen ? " bg-black" : "")
+        "flex h-full w-full min-w-0 flex-col items-center gap-2 p-2" + (isFullscreen ? " bg-black" : "")
       }
       style={{ containerType: "size" }}
     >
-      {/* This box IS the visible video panel -- flex-1/min-w-0 so it takes
-          whatever width this row has left rather than requesting its own
-          intrinsic width (the previous h-full+w-auto-on-the-canvas approach
-          sized this box from the canvas's own aspect ratio, which read fine
-          until the row got tight -- e.g. a narrower browser window -- at
-          which point the flexbox default (shrink:1) squeezed THIS box's
-          width independently of its h-full height, stretching/squashing the
-          frame inside it. object-contain on the canvas below is what
-          actually pins the aspect ratio now: whatever box this ends up
-          with, the canvas always letterboxes/pillarboxes inside it rather
+      {/* This box IS the visible video panel -- flex-1/min-h-0/w-full so it
+          takes whatever height this column has left rather than requesting
+          its own intrinsic height (the previous h-full+w-auto-on-the-canvas
+          approach sized this box from the canvas's own aspect ratio, which
+          read fine until the column got tight -- e.g. a shorter browser
+          window -- at which point the flexbox default (shrink:1) squeezed
+          THIS box's height independently of its w-full width, stretching/
+          squashing the frame inside it. object-contain on the canvas below
+          is what actually pins the aspect ratio now: whatever box this ends
+          up with, the canvas always letterboxes/pillarboxes inside it rather
           than distorting -- so this can shrink freely and safely).
-          max-w-[235cqh] caps it at the widest real clip ratio (2.35:1
-          cinematic widescreen) relative to ITS OWN height -- container query
-          units, not a percentage of the row's width, since the row can be
-          far wider than 2.35x tall (see the parent's own container-type:
-          size above, which is what makes cqh resolve against this row's
-          height instead of the nearest ancestor that happens to have one).
-          Below that ratio (the vast majority of reels, which are portrait or
-          square) flex-1 still governs the width exactly as before -- this
-          only ever clamps DOWN from what flex-1 would otherwise claim. */}
-      <div className="relative h-full min-w-0 max-w-[235cqh] flex-1 overflow-hidden rounded-md border border-border bg-black">
+          max-h-[235cqw] caps it at the widest real clip ratio (2.35:1
+          cinematic widescreen) relative to ITS OWN width -- container query
+          units, not a percentage of the column's height, since the column
+          can be far taller than 2.35x wide (see the parent's own
+          container-type: size above, which is what makes cqw resolve
+          against this column's width instead of the nearest ancestor that
+          happens to have one). Below that ratio (the vast majority of reels,
+          which are portrait or square) flex-1 still governs the height
+          exactly as before -- this only ever clamps DOWN from what flex-1
+          would otherwise claim. */}
+      <div className="relative w-full min-h-0 max-h-[235cqw] flex-1 overflow-hidden rounded-md border border-border bg-black">
         {/* absolute inset-0 + object-contain, not h-full/w-auto -- lets this
             fill whatever box the wrapper above ends up with while the
             canvas's own width/height attributes (set in drawFrameAt to the
@@ -2536,10 +2542,10 @@ export const CanvasPlayer = forwardRef<
       </div>
 
       {/* Icon-only, transparent background -- reads as video-player
-          controls rather than generic form buttons -- outside the video
-          panel itself, stacked vertically, own fixed width. */}
+          controls rather than generic form buttons -- below the video
+          panel itself, in a row, own fixed height. */}
       {isReady && (
-        <div className="flex shrink-0 flex-col items-center gap-1">
+        <div className="flex shrink-0 flex-row items-center gap-1">
           {renderControls && (
             <>
               <button
@@ -2548,7 +2554,7 @@ export const CanvasPlayer = forwardRef<
                 disabled={renderDisabled}
                 aria-label="Render"
                 title={renderControls.canRender ? "Render" : "Add a video before rendering"}
-                className="shrink-0 rounded-full bg-green-500 p-2 text-white hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+                className="shrink-0 rounded-full p-2 text-accent hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <RenderIcon className="h-5 w-5" />
               </button>
@@ -2558,11 +2564,11 @@ export const CanvasPlayer = forwardRef<
                 disabled={localRenderDisabled}
                 aria-label="Edge Render"
                 title={localRenderTitle}
-                className="shrink-0 rounded-full bg-green-300 p-2 text-white hover:bg-green-400 disabled:cursor-not-allowed disabled:opacity-40"
+                className="shrink-0 rounded-full p-2 text-accent hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <LocalRenderIcon className="h-5 w-5" />
               </button>
-              <div className="my-1 h-px w-6 shrink-0 bg-border" />
+              <div className="mx-1 h-6 w-px shrink-0 bg-border" />
             </>
           )}
           <button
