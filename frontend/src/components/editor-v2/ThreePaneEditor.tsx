@@ -10,10 +10,13 @@
  * no render pipeline of its own yet, so that's still what a future "render
  * this reel" action would hook into.
  *
- * A fixed-height TopMenuBar (render actions left, settings/sign-out right)
- * sits above three horizontal bands that split the remaining height
- * 3:7 -- action area, playground -- plus a one-line feedback strip pinned
- * to the bottom. This component owns the cross-band state (the full asset
+ * The global nav bar (app/(app)/layout.tsx's GlobalTopNav) sits above this
+ * whole page; this component itself is just three horizontal bands that
+ * split the available height 3:7 -- action area, playground -- plus a
+ * one-line feedback strip pinned to the bottom. Render/Edge Render live in
+ * the Playground's CanvasPlayer preview toolbar (passed down as
+ * `renderControls`), not a top bar of this component's own. This component
+ * owns the cross-band state (the full asset
  * list, the video sequence, the frame-affecting edit history, playback
  * position, crop/zoom/flip/trim/overlay/text) and the thumbnail/volume
  * extraction pipeline; each band below is otherwise a plain, mostly-
@@ -148,7 +151,6 @@ import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { BACKGROUND_TRACK_OPTIONS } from "@/lib/backgroundTracks";
 import { DEFAULT_MARKER_LABEL } from "./MarkerTrack";
 import { ActionArea } from "./ActionArea";
-import { TopMenuBar } from "./TopMenuBar";
 import { Playground } from "./Playground";
 import type { VideoOverlayThumbnailFrames } from "./FrameStrip";
 import type { CutawaySegment } from "./CutawayTrack";
@@ -2459,11 +2461,24 @@ export function ThreePaneEditor({
     ? overlaySourceDurationSeconds[sourceStartDialogOverlay.assetId] ?? Infinity
     : Infinity;
 
+  const renderControls = {
+    canRender: effectiveSequenceEntries.length > 0,
+    isRendering,
+    renderStatus,
+    onRenderClick: handleRenderClick,
+    canLocalRender: effectiveSequenceEntries.length > 0,
+    isLocalRendering,
+    isLocalRenderSupported,
+    localRenderUnsupportedReason,
+    onLocalRenderClick: handleLocalRenderClick,
+    transcriptCaption: selections.transcriptCaption,
+  };
+
   return (
-    // Outer h-full/overflow-x-auto + inner min-w -- the whole editor (top
-    // bar, Action Area, Playground, Feedback Area) scrolls horizontally as
-    // ONE unit once the window gets narrower than the fixed-width side
-    // panels in Action Area (ProjectList/AssetGallery/UserActions/
+    // Outer h-full/overflow-x-auto + inner min-w -- the whole editor
+    // (Action Area, Playground, Feedback Area) scrolls horizontally as ONE
+    // unit once the window gets narrower than the fixed-width side panels
+    // in Action Area (ProjectList/AssetGallery/UserActions/
     // ActiveTransformationsList) need, instead of each section clipping or
     // squeezing its own contents independently (which is what let the video
     // panel get squeezed into distortion on resize -- see CanvasPlayer's
@@ -2473,20 +2488,6 @@ export function ThreePaneEditor({
     // shrink to nothing.
     <div className="h-full overflow-x-auto">
       <div className="flex h-full min-w-[1500px] flex-col">
-        <TopMenuBar
-        projectId={projectId}
-        canRender={effectiveSequenceEntries.length > 0}
-        isRendering={isRendering}
-        renderStatus={renderStatus}
-        onRenderClick={handleRenderClick}
-        canLocalRender={effectiveSequenceEntries.length > 0}
-        isLocalRendering={isLocalRendering}
-        isLocalRenderSupported={isLocalRenderSupported}
-        localRenderUnsupportedReason={localRenderUnsupportedReason}
-        onLocalRenderClick={handleLocalRenderClick}
-        transcriptCaption={selections.transcriptCaption}
-      />
-
       <section className="min-h-0 flex-[3] overflow-hidden border-b border-border">
         <ActionArea
           projectId={projectId}
@@ -2608,6 +2609,7 @@ export function ThreePaneEditor({
           backgroundVolume={backgroundVolume}
           assetUrlById={assetUrlById}
           onFrameDimensions={setFrameDimensions}
+          renderControls={renderControls}
           playerRef={canvasPlayerRef}
           onPlayerTimeUpdate={setCurrentTimeSeconds}
           selections={{

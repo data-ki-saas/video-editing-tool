@@ -303,6 +303,7 @@ export function ActionArea({
   backgroundVolume,
   assetUrlById,
   onFrameDimensions,
+  renderControls,
   playerRef,
   onPlayerTimeUpdate,
   selections,
@@ -473,6 +474,20 @@ export function ActionArea({
   backgroundVolume: number;
   assetUrlById: Record<string, string>;
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
+  // Forwarded straight through to CanvasPlayer's own renderControls prop --
+  // Render/Edge Render now live in its preview toolbar, not the top bar.
+  renderControls?: {
+    canRender: boolean;
+    isRendering: boolean;
+    renderStatus: string | null;
+    onRenderClick: () => void;
+    canLocalRender: boolean;
+    isLocalRendering: boolean;
+    isLocalRenderSupported: boolean;
+    localRenderUnsupportedReason: string | null;
+    onLocalRenderClick: () => void;
+    transcriptCaption: TranscriptCaption | null;
+  };
   // Lets ThreePaneEditor's Playground scrub this player and track a
   // playhead against it -- see CanvasPlayer.tsx's seekTo/onTimeUpdate.
   playerRef: RefObject<CanvasPlayerHandle | null>;
@@ -599,6 +614,7 @@ export function ActionArea({
             assetUrlById={assetUrlById}
             onFrameDimensions={onFrameDimensions}
             onTimeUpdate={onPlayerTimeUpdate}
+            renderControls={renderControls}
           />
         ) : (
           <div

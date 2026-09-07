@@ -121,6 +121,7 @@ import {
   type BackgroundRemovalState,
   type TrimRange,
   type ZoomEffect,
+  type TranscriptCaption,
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
 import { getFilterPresetOption } from "@/lib/video/filterPresets";
@@ -133,7 +134,9 @@ import {
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { ReelLoader } from "@/components/ReelLoader";
-import { PlayIcon, PauseIcon, LoopIcon, ExpandIcon, CollapseIcon } from "./icons/PlayerIcons";
+import { PlayIcon, PauseIcon, LoopIcon, ExpandIcon, CollapseIcon, RenderIcon, LocalRenderIcon } from "./icons/PlayerIcons";
+
+const TERMINAL_RENDER_STATUSES = new Set(["completed", "failed"]);
 
 export interface CanvasPlayerHandle {
   seekTo(seconds: number): void;
@@ -338,6 +341,22 @@ export const CanvasPlayer = forwardRef<
     backgroundVolume: number;
     onFrameDimensions?: (dimensions: { width: number; height: number }) => void;
     onTimeUpdate?: (seconds: number) => void;
+    // Cloud Render + local/free Edge Render, shown alongside Play/Loop/
+    // Fullscreen below since both act on the reel currently in this
+    // preview. Omitted entirely by MobileEditor.tsx (the other caller),
+    // which has no render UI -- the buttons only render when this is set.
+    renderControls?: {
+      canRender: boolean;
+      isRendering: boolean;
+      renderStatus: string | null;
+      onRenderClick: () => void;
+      canLocalRender: boolean;
+      isLocalRendering: boolean;
+      isLocalRenderSupported: boolean;
+      localRenderUnsupportedReason: string | null;
+      onLocalRenderClick: () => void;
+      transcriptCaption: TranscriptCaption | null;
+    };
   }
 >(function CanvasPlayer(
   {
@@ -359,6 +378,7 @@ export const CanvasPlayer = forwardRef<
     backgroundVolume,
     onFrameDimensions,
     onTimeUpdate,
+    renderControls,
   },
   ref
 ) {
@@ -2436,6 +2456,30 @@ export const CanvasPlayer = forwardRef<
     );
   }
 
+  // lib/localRender/exportTimeline.ts still has no knowledge of Creatomate's
+  // server-side speech transcription -- transcript captions stay gated on
+  // the cloud Render button until/unless a client-side transcription path
+  // exists.
+  const hasTranscriptCaption = Boolean(renderControls?.transcriptCaption);
+  const renderDisabled =
+    !renderControls ||
+    !renderControls.canRender ||
+    renderControls.isRendering ||
+    (renderControls.renderStatus !== null && !TERMINAL_RENDER_STATUSES.has(renderControls.renderStatus));
+  const localRenderDisabled =
+    !renderControls ||
+    !renderControls.canLocalRender ||
+    renderControls.isLocalRendering ||
+    hasTranscriptCaption ||
+    !renderControls.isLocalRenderSupported;
+  const localRenderTitle = !renderControls?.canLocalRender
+    ? "Add a video before rendering"
+    : hasTranscriptCaption
+      ? "Edge Render doesn't support auto-captions yet — use Render instead"
+      : !renderControls.isLocalRenderSupported
+        ? (renderControls.localRenderUnsupportedReason ?? "Edge Render needs a Chromium browser (Chrome or Microsoft Edge)")
+        : "Edge Render (in your browser, no cost)";
+
   return (
     // w-full/min-w-0 here, not just on the video box below -- this root sits
     // in ActionArea's `justify-end` wrapper, which shrink-wraps its child by
@@ -2496,6 +2540,31 @@ export const CanvasPlayer = forwardRef<
           panel itself, stacked vertically, own fixed width. */}
       {isReady && (
         <div className="flex shrink-0 flex-col items-center gap-1">
+          {renderControls && (
+            <>
+              <button
+                type="button"
+                onClick={renderControls.onRenderClick}
+                disabled={renderDisabled}
+                aria-label="Render"
+                title={renderControls.canRender ? "Render" : "Add a video before rendering"}
+                className="shrink-0 rounded-full bg-green-500 p-2 text-white hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <RenderIcon className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                onClick={renderControls.onLocalRenderClick}
+                disabled={localRenderDisabled}
+                aria-label="Edge Render"
+                title={localRenderTitle}
+                className="shrink-0 rounded-full bg-green-300 p-2 text-white hover:bg-green-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <LocalRenderIcon className="h-5 w-5" />
+              </button>
+              <div className="my-1 h-px w-6 shrink-0 bg-border" />
+            </>
+          )}
           <button
             type="button"
             onClick={handlePlayPause}
