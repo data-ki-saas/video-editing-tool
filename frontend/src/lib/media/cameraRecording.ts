@@ -72,3 +72,35 @@ export async function toMp4Asset(blob: Blob, filename: string): Promise<File> {
   if (!target.buffer) throw new Error("mp4 conversion produced no output");
   return new File([target.buffer], filename, { type: "video/mp4" });
 }
+
+/** Trims `blob` down to [trim.start, trim.end] (seconds) and returns the
+ * result as an `video/mp4` File named `filename` -- backs the Recordings
+ * library's trim popup (RecordingEditDialog.tsx). Unlike toMp4Asset above,
+ * this always runs a real mediabunny Conversion (never a no-op rewrap),
+ * since a trim requires re-encoding regardless of the input's own
+ * container/codec -- it reuses the same `trim` option Conversion already
+ * exposes natively (see mediabunny's ConversionOptions.trim) rather than
+ * this app hand-rolling segment extraction. */
+export async function trimToMp4Asset(blob: Blob, trim: { start: number; end: number }, filename: string): Promise<File> {
+  const canH264 = await canEncodeVideo("avc");
+  const canAac = await canEncodeAudio("aac");
+  if (!canH264) {
+    throw new Error("This browser can't encode H.264 video, so the trim can't be saved.");
+  }
+
+  const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
+  const target = new BufferTarget();
+  const output = new Output({ format: new Mp4OutputFormat({ fastStart: "in-memory" }), target });
+
+  const conversion = await Conversion.init({
+    input,
+    output,
+    video: { codec: "avc" },
+    audio: canAac ? { codec: "aac" } : { discard: true },
+    trim,
+  });
+  await conversion.execute();
+
+  if (!target.buffer) throw new Error("mp4 conversion produced no output");
+  return new File([target.buffer], filename, { type: "video/mp4" });
+}

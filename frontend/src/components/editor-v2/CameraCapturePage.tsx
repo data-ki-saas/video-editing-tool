@@ -30,14 +30,17 @@
  * upload via lib/media/cameraRecording.ts's toMp4Asset, since backend/src/
  * assets/service.py's allow-list only accepts mp4 video.
  *
- * Saves into this PROJECT's own asset library (POST /api/assets, the same
- * gallery AssetGallery.tsx shows) rather than the separate finished-renders
- * /library page -- a recording is raw footage to edit with, not a finished
- * reel.
+ * Saves into the user's own personal Recordings library (POST
+ * /api/recordings -- see /recordings, reachable from TopMenuBar's spool
+ * icon) rather than straight into this project's own assets or the
+ * separate finished-renders /library page -- a recording is raw footage to
+ * edit with, kept across every project, not tied to the one it happened to
+ * be recorded from. Pulling it into a specific reel's Assets panel is a
+ * deliberate later step (the "+Asset" popup's Recordings tab).
  */
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { uploadAssetWithProgress } from "@/lib/api";
+import { uploadRecordingWithProgress } from "@/lib/api";
 import { ReelLoader } from "@/components/ReelLoader";
 import { FILTER_PRESET_OPTIONS, getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { AMBIENT_EFFECT_OPTIONS, ambientEffectSeed, drawAmbientEffect, type AmbientEffectId } from "@/lib/video/ambientEffects";
@@ -438,9 +441,14 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
       setProcessingStage("Preparing your recording…");
       const rawBlob = new Blob(recordedChunksRef.current, { type: recorder.mimeType });
       const file = await toMp4Asset(rawBlob, `recording-${Date.now()}.mp4`);
-      setProcessingStage("Saving to your assets…");
-      await uploadAssetWithProgress(projectId, file, (fraction) =>
-        setProcessingStage(`Saving to your assets… ${Math.round(fraction * 100)}%`)
+      setProcessingStage("Saving to your recordings…");
+      const durationSeconds = accumulatedRecordedMsRef.current / 1000;
+      await uploadRecordingWithProgress(
+        file,
+        `Recording — ${new Date().toLocaleString()}`,
+        null,
+        durationSeconds,
+        (fraction) => setProcessingStage(`Saving to your recordings… ${Math.round(fraction * 100)}%`)
       );
       router.push(`/dashboard/${projectId}`);
     } catch (err) {
@@ -454,13 +462,17 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
     if (!canvas) return;
     setIsProcessing(true);
     setSaveError(null);
-    setProcessingStage("Saving to your assets…");
+    setProcessingStage("Saving to your recordings…");
     try {
       const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
       if (!blob) throw new Error("Couldn't capture a photo");
       const file = new File([blob], `photo-${Date.now()}.jpg`, { type: "image/jpeg" });
-      await uploadAssetWithProgress(projectId, file, (fraction) =>
-        setProcessingStage(`Saving to your assets… ${Math.round(fraction * 100)}%`)
+      await uploadRecordingWithProgress(
+        file,
+        `Photo — ${new Date().toLocaleString()}`,
+        null,
+        null,
+        (fraction) => setProcessingStage(`Saving to your recordings… ${Math.round(fraction * 100)}%`)
       );
       router.push(`/dashboard/${projectId}`);
     } catch (err) {

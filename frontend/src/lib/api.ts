@@ -987,6 +987,221 @@ export async function getPublicLibraryVideo(videoId: string): Promise<LibraryVid
   return libraryVideoFromWire(await handleResponse<LibraryVideoWire>(response));
 }
 
+export type RecordingKind = "video" | "image";
+
+export interface Recording {
+  id: string;
+  userId: string;
+  name: string;
+  description: string | null;
+  kind: RecordingKind;
+  mimeType: "video/mp4" | "image/jpeg";
+  sizeBytes: number;
+  // A presigned R2 URL, valid for a limited time (see the backend's
+  // R2_SIGNED_URL_EXPIRES_SECONDS) -- not a permanent link, same convention
+  // as Asset.url above.
+  url: string;
+  durationSeconds: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface RecordingWire {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  kind: RecordingKind;
+  mime_type: "video/mp4" | "image/jpeg";
+  size_bytes: number;
+  url: string;
+  duration_seconds: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function recordingFromWire(w: RecordingWire): Recording {
+  return {
+    id: w.id,
+    userId: w.user_id,
+    name: w.name,
+    description: w.description,
+    kind: w.kind,
+    mimeType: w.mime_type,
+    sizeBytes: w.size_bytes,
+    url: w.url,
+    durationSeconds: w.duration_seconds,
+    createdAt: w.created_at,
+    updatedAt: w.updated_at,
+  };
+}
+
+/** GET /api/recordings -- this user's own camera recordings/photos
+ * (CameraCapturePage.tsx's Record button), newest first. */
+export async function listRecordings(): Promise<Recording[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/recordings`, { headers: await authHeader() });
+  const body = await handleResponse<{ recordings: RecordingWire[] }>(response);
+  return body.recordings.map(recordingFromWire);
+}
+
+/** Same upload-with-progress shape as uploadAssetWithProgress -- used by
+ * CameraCapturePage after recording/snapping, which saves into this
+ * personal library instead of straight into a project's own assets. */
+export function uploadRecordingWithProgress(
+  file: File,
+  name: string,
+  description: string | null,
+  durationSeconds: number | null,
+  onProgress: (fraction: number) => void
+): Promise<Recording> {
+  return authHeader().then(
+    (headers) =>
+      new Promise<Recording>((resolve, reject) => {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("name", name);
+        if (description) formData.append("description", description);
+        if (durationSeconds != null && Number.isFinite(durationSeconds)) {
+          formData.append("duration_seconds", String(durationSeconds));
+        }
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${API_BASE_URL}/api/recordings`);
+        for (const [key, value] of Object.entries(headers)) {
+          xhr.setRequestHeader(key, value);
+        }
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(e.loaded / e.total);
+        };
+
+        xhr.onload = () => {
+          let body: { detail?: unknown } = {};
+          try {
+            body = JSON.parse(xhr.responseText);
+          } catch {
+            // Non-JSON response body -- fall through to the generic message below.
+          }
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(recordingFromWire(body as unknown as RecordingWire));
+          } else {
+            console.error(`[api] recording upload failed: HTTP ${xhr.status}`, body);
+            reject(errorFromDetail(xhr.status, body.detail));
+          }
+        };
+
+        xhr.onerror = () => {
+          console.error(`[api] network error uploading a recording (backend base URL: ${API_BASE_URL})`);
+          reject(
+            new Error(
+              `Could not reach the API at ${API_BASE_URL} -- this usually means a CORS or network ` +
+                `configuration issue, not a problem with your recording.`
+            )
+          );
+        };
+
+        xhr.send(formData);
+      })
+  );
+}
+
+/** PATCH /api/recordings/{id} -- the recordings page's in-place name/
+ * description editing, same both-fields-together convention as
+ * updateLibraryVideo. */
+export async function updateRecording(
+  recordingId: string,
+  params: { name: string; description: string | null }
+): Promise<Recording> {
+  const response = await apiFetch(`${API_BASE_URL}/api/recordings/${encodeURIComponent(recordingId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ name: params.name, description: params.description }),
+  });
+  return recordingFromWire(await handleResponse<RecordingWire>(response));
+}
+
+/** PUT /api/recordings/{id}/content -- backs the trim/crop popup's Save,
+ * overwriting this recording's underlying media in place (same id/name/
+ * description). Progress-reporting shape mirrors uploadRecordingWithProgress
+ * above. */
+export function replaceRecordingContentWithProgress(
+  recordingId: string,
+  file: File,
+  durationSeconds: number | null,
+  onProgress: (fraction: number) => void
+): Promise<Recording> {
+  return authHeader().then(
+    (headers) =>
+      new Promise<Recording>((resolve, reject) => {
+        const formData = new FormData();
+        formData.append("file", file);
+        if (durationSeconds != null && Number.isFinite(durationSeconds)) {
+          formData.append("duration_seconds", String(durationSeconds));
+        }
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", `${API_BASE_URL}/api/recordings/${encodeURIComponent(recordingId)}/content`);
+        for (const [key, value] of Object.entries(headers)) {
+          xhr.setRequestHeader(key, value);
+        }
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) onProgress(e.loaded / e.total);
+        };
+
+        xhr.onload = () => {
+          let body: { detail?: unknown } = {};
+          try {
+            body = JSON.parse(xhr.responseText);
+          } catch {
+            // Non-JSON response body -- fall through to the generic message below.
+          }
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(recordingFromWire(body as unknown as RecordingWire));
+          } else {
+            console.error(`[api] recording content replace failed: HTTP ${xhr.status}`, body);
+            reject(errorFromDetail(xhr.status, body.detail));
+          }
+        };
+
+        xhr.onerror = () => {
+          console.error(`[api] network error replacing a recording's content (backend base URL: ${API_BASE_URL})`);
+          reject(
+            new Error(
+              `Could not reach the API at ${API_BASE_URL} -- this usually means a CORS or network ` +
+                `configuration issue, not a problem with your edit.`
+            )
+          );
+        };
+
+        xhr.send(formData);
+      })
+  );
+}
+
+/** DELETE /api/recordings/{id} -- permanently deletes a recording, both its
+ * row and its R2 object. */
+export async function deleteRecording(recordingId: string): Promise<void> {
+  const response = await apiFetch(`${API_BASE_URL}/api/recordings/${encodeURIComponent(recordingId)}`, {
+    method: "DELETE",
+    headers: await authHeader(),
+  });
+  await throwIfNotOk(response);
+}
+
+/** POST /api/recordings/{id}/add-to-project -- backs the "+Asset" popup's
+ * Recordings tab. Copies the recording's bytes into a fresh row in
+ * `projectId`'s own asset list (its own storage_key, not shared with the
+ * recording) -- see the backend's own add_to_project comment for why. */
+export async function addRecordingToProject(recordingId: string, projectId: string): Promise<Asset> {
+  const response = await apiFetch(`${API_BASE_URL}/api/recordings/${encodeURIComponent(recordingId)}/add-to-project`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ project_id: projectId }),
+  });
+  return handleResponse<Asset>(response);
+}
+
 export interface SocialAccount {
   provider: string;
   accountName: string;

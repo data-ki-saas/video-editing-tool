@@ -13,7 +13,7 @@ import Link from "next/link";
 import { RenderIcon, LocalRenderIcon, RecordIcon } from "./icons/PlayerIcons";
 import { SignOutButton } from "@/components/SignOutButton";
 import { ReelIcon } from "@/components/IconButton";
-import { AccountIcon, BookmarkIcon, LibraryIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
+import { AccountIcon, BookmarkIcon, LibraryIcon, RecordingsIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import type { TranscriptCaption } from "@/lib/video/video_math";
 
@@ -116,6 +116,14 @@ export function TopMenuBar({
           className="rounded-full p-2 text-muted hover:bg-foreground/10"
         >
           <LibraryIcon className="h-5 w-5" />
+        </Link>
+        <Link
+          href="/recordings"
+          aria-label="Recordings"
+          title="Recordings"
+          className="rounded-full p-2 text-muted hover:bg-foreground/10"
+        >
+          <RecordingsIcon className="h-5 w-5" />
         </Link>
         <Link
           href="/library?tab=templates"

@@ -10,6 +10,7 @@ from src.core.auth import CurrentUser, get_current_user
 from src.core.config import settings
 from src.permissions.features import FEATURE_KEYS
 from src.projects import repository as projects_repository
+from src.recordings import repository as recordings_repository
 
 # Full access by default so existing router/service tests (written before
 # the permissions module existed) keep exercising real behavior rather than
@@ -190,6 +191,71 @@ def fake_assets_table(monkeypatch):
     monkeypatch.setattr(projects_repository, "clear_render_state", table.clear_render_state)
     monkeypatch.setattr(projects_repository, "set_thumbnail", table.set_thumbnail)
     monkeypatch.setattr(projects_repository, "clear_thumbnail", table.clear_thumbnail)
+    return table
+
+
+class FakeRecordingsTable:
+    """In-memory stand-in for the Supabase `recordings` table -- same
+    purpose as FakeAssetsTable above, avoids hitting a real Supabase
+    project."""
+
+    def __init__(self):
+        self.recordings: dict[str, dict] = {}
+
+    def create(self, **payload) -> recordings_repository.RecordingRecord:
+        payload = {
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+            **payload,
+        }
+        self.recordings[payload["id"]] = payload
+        return recordings_repository.RecordingRecord(**payload)
+
+    def list_for_user(self, user_id: str) -> list[recordings_repository.RecordingRecord]:
+        return [
+            recordings_repository.RecordingRecord(**row)
+            for row in self.recordings.values()
+            if row["user_id"] == user_id
+        ]
+
+    def get_owned(self, recording_id: str, user_id: str) -> recordings_repository.RecordingRecord | None:
+        row = self.recordings.get(recording_id)
+        if row is None or row["user_id"] != user_id:
+            return None
+        return recordings_repository.RecordingRecord(**row)
+
+    def update_metadata(self, recording_id, user_id, name, description):
+        record = self.get_owned(recording_id, user_id)
+        if record is None:
+            return None
+        self.recordings[recording_id].update(name=name, description=description)
+        return recordings_repository.RecordingRecord(**self.recordings[recording_id])
+
+    def replace_content(self, recording_id, user_id, *, mime_type, size_bytes, storage_key, duration_seconds):
+        record = self.get_owned(recording_id, user_id)
+        if record is None:
+            return None
+        self.recordings[recording_id].update(
+            mime_type=mime_type, size_bytes=size_bytes, storage_key=storage_key, duration_seconds=duration_seconds
+        )
+        return recordings_repository.RecordingRecord(**self.recordings[recording_id])
+
+    def delete(self, recording_id: str, user_id: str) -> recordings_repository.RecordingRecord | None:
+        record = self.get_owned(recording_id, user_id)
+        if record is not None:
+            del self.recordings[recording_id]
+        return record
+
+
+@pytest.fixture
+def fake_recordings_table(monkeypatch):
+    table = FakeRecordingsTable()
+    monkeypatch.setattr(recordings_repository, "create", lambda **kwargs: table.create(id=str(uuid.uuid4()), **kwargs))
+    monkeypatch.setattr(recordings_repository, "list_for_user", table.list_for_user)
+    monkeypatch.setattr(recordings_repository, "get_owned", table.get_owned)
+    monkeypatch.setattr(recordings_repository, "update_metadata", table.update_metadata)
+    monkeypatch.setattr(recordings_repository, "replace_content", table.replace_content)
+    monkeypatch.setattr(recordings_repository, "delete", table.delete)
     return table
 
 

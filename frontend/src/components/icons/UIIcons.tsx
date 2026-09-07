@@ -341,3 +341,22 @@ export function DashboardIcon(props: IconProps) {
     </svg>
   );
 }
+
+// A film-reel spool -- an outer ring, a center hub, and five hub holes
+// around it -- links to /recordings (this user's own camera recordings/
+// photos from CameraCapturePage.tsx's Record button). Sits right after
+// LibraryIcon in TopMenuBar, deliberately a distinct glyph from Library's
+// play-frame icon since the two lead to two different collections.
+export function RecordingsIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="12" cy="6.5" r="1.5" />
+      <circle cx="17" cy="9.8" r="1.5" />
+      <circle cx="15.2" cy="16" r="1.5" />
+      <circle cx="8.8" cy="16" r="1.5" />
+      <circle cx="7" cy="9.8" r="1.5" />
+    </svg>
+  );
+}
