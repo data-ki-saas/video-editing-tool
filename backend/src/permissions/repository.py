@@ -1,3 +1,6 @@
+import httpx
+
+from src.core.config import settings
 from src.core.supabase_client import get_supabase_client
 
 _ROLE_SELECT = "key, display_name, description, is_system, is_default, badge_color, role_features(feature_key)"
@@ -124,3 +127,30 @@ def get_user_basic(user_id: str) -> dict | None:
 
 def upsert_user_role(user_id: str, role_key: str) -> None:
     get_supabase_client().table("profiles").upsert({"user_id": user_id, "role": role_key}).execute()
+
+
+def create_impersonation_session(email: str) -> dict:
+    """Mints a real Supabase session for `email`, for the admin "impersonate
+    user" action (see permissions/service.py's start_impersonation).
+
+    admin.generate_link's magiclink type never emails anything by itself --
+    only the user-facing OTP/magiclink *request* endpoints do that -- it just
+    returns a hashed_token. Redeeming that token ourselves at GoTrue's
+    /verify endpoint (the same request the emailed link's click would have
+    made) hands back a real access/refresh token pair for that user, so the
+    frontend can swap its actual Supabase session rather than faking the
+    identity client-side.
+    """
+    link = get_supabase_client().auth.admin.generate_link({"type": "magiclink", "email": email})
+    response = httpx.post(
+        f"{settings.supabase_url}/auth/v1/verify",
+        headers={
+            "apikey": settings.supabase_service_role_key,
+            "Authorization": f"Bearer {settings.supabase_service_role_key}",
+            "Content-Type": "application/json",
+        },
+        json={"type": "magiclink", "token": link.properties.hashed_token},
+        timeout=10,
+    )
+    response.raise_for_status()
+    return response.json()

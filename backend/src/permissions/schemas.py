@@ -61,3 +61,11 @@ class UsersListResponse(BaseModel):
 
 class UserRoleUpdateRequest(BaseModel):
     role: str
+
+
+class ImpersonationResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    user_id: str
+    email: str | None
+    display_name: str | None

@@ -10,17 +10,39 @@
  * navigation.
  */
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { RecordIcon } from "./editor-v2/icons/PlayerIcons";
 import { SignOutButton } from "@/components/SignOutButton";
 import { ReelIcon } from "@/components/IconButton";
 import { AccountIcon, BookmarkIcon, DashboardIcon, LibraryIcon, RecordingsIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
 import { useIsAdmin } from "@/lib/useIsAdmin";
+import { getActiveImpersonation, stopImpersonation, type ActiveImpersonation } from "@/lib/impersonation";
 
 export function GlobalTopNav() {
   const isAdmin = useIsAdmin();
+  const router = useRouter();
   const params = useParams<{ projectId?: string }>();
   const projectId = typeof params?.projectId === "string" ? params.projectId : null;
+
+  const [impersonation, setImpersonation] = useState<ActiveImpersonation | null>(null);
+  const [stopping, setStopping] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- first client-side read of localStorage, can't happen any earlier
+    setImpersonation(getActiveImpersonation());
+  }, []);
+
+  async function handleStopImpersonation() {
+    setStopping(true);
+    try {
+      await stopImpersonation();
+      router.push("/admin/users");
+      router.refresh();
+    } finally {
+      setStopping(false);
+    }
+  }
 
   return (
     <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
@@ -104,6 +126,18 @@ export function GlobalTopNav() {
         >
           <SettingsIcon className="h-5 w-5" />
         </Link>
+        {impersonation && (
+          <button
+            type="button"
+            onClick={handleStopImpersonation}
+            disabled={stopping}
+            aria-label={`Impersonating ${impersonation.email ?? "a user"} -- click to stop`}
+            title={`Impersonating ${impersonation.email ?? "a user"} -- click to stop`}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-yellow-400 text-yellow-950 hover:bg-yellow-300 disabled:opacity-50"
+          >
+            <AccountIcon className="h-4 w-4" />
+          </button>
+        )}
         <SignOutButton />
       </div>
     </div>

@@ -5,6 +5,7 @@ from src.permissions import service
 from src.permissions.schemas import (
     AssertFeatureRequest,
     FeatureOut,
+    ImpersonationResponse,
     MyPermissionsResponse,
     RoleCreateRequest,
     RoleFeaturesUpdateRequest,
@@ -81,3 +82,8 @@ async def update_user_role(
     user_id: str, body: UserRoleUpdateRequest, user: CurrentUser = Depends(_require_manage_roles)
 ) -> UserOut:
     return service.update_user_role(user_id, body.role, user.id, user.features)
+
+
+@router.post("/users/{user_id}/impersonate", response_model=ImpersonationResponse)
+async def impersonate_user(user_id: str, user: CurrentUser = Depends(_require_manage_roles)) -> ImpersonationResponse:
+    return service.start_impersonation(user_id, user.id)

@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useIsAdmin } from "@/lib/useIsAdmin";
+import { createClient } from "@/lib/supabase/client";
+import { startImpersonation } from "@/lib/impersonation";
+import { AccountIcon } from "@/components/icons/UIIcons";
 import { listRoles, listUsers, updateUserRole, type AdminUserInfo, type RoleInfo } from "@/lib/api";
 
 export default function AdminUsersPage() {
@@ -15,10 +18,22 @@ export default function AdminUsersPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isAdmin === false) router.replace("/dashboard");
   }, [isAdmin, router]);
+
+  useEffect(() => {
+    // So the impersonate action can hide itself on the admin's own row --
+    // not fetched through usePermissions()/getMyPermissions(), which only
+    // ever returns role/features, never the caller's own id.
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => setMyUserId(data.user?.id ?? null))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     // Fetched in parallel with the isAdmin check (not gated on it) so this
@@ -50,6 +65,22 @@ export default function AdminUsersPage() {
       setError(err instanceof Error ? err.message : "Failed to update this user's role");
     } finally {
       setSavingUserId(null);
+    }
+  }
+
+  async function handleImpersonate(user: AdminUserInfo) {
+    if (!window.confirm(`Impersonate ${user.email ?? user.id}? You'll act as this user until you stop impersonating.`)) {
+      return;
+    }
+    setImpersonatingId(user.id);
+    setError(null);
+    try {
+      await startImpersonation(user.id);
+      router.push("/dashboard");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start impersonation");
+      setImpersonatingId(null);
     }
   }
 
@@ -108,6 +139,18 @@ export default function AdminUsersPage() {
                     </option>
                   ))}
                 </select>
+                {user.id !== myUserId && (
+                  <button
+                    type="button"
+                    onClick={() => handleImpersonate(user)}
+                    disabled={impersonatingId === user.id}
+                    aria-label={`Impersonate ${user.email ?? user.id}`}
+                    title={`Impersonate ${user.email ?? user.id}`}
+                    className="rounded-full p-1.5 text-yellow-500 hover:bg-yellow-500/10 disabled:opacity-50"
+                  >
+                    <AccountIcon className="h-5 w-5" />
+                  </button>
+                )}
               </div>
             </div>
           ))}

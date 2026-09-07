@@ -863,6 +863,39 @@ export async function updateUserRole(userId: string, role: string): Promise<Admi
   return userFromWire(await handleResponse<AdminUserWire>(response));
 }
 
+export interface ImpersonationSession {
+  accessToken: string;
+  refreshToken: string;
+  userId: string;
+  email: string | null;
+  displayName: string | null;
+}
+
+/** POST /api/users/{id}/impersonate -- admin-only. Mints a real Supabase
+ * session for the target user (see backend/src/permissions/repository.py's
+ * create_impersonation_session) rather than a UI-only pretend mode -- see
+ * lib/impersonation.ts, which swaps this into the browser's own session. */
+export async function impersonateUser(userId: string): Promise<ImpersonationSession> {
+  const response = await apiFetch(`${API_BASE_URL}/api/users/${encodeURIComponent(userId)}/impersonate`, {
+    method: "POST",
+    headers: await authHeader(),
+  });
+  const body = await handleResponse<{
+    access_token: string;
+    refresh_token: string;
+    user_id: string;
+    email: string | null;
+    display_name: string | null;
+  }>(response);
+  return {
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token,
+    userId: body.user_id,
+    email: body.email,
+    displayName: body.display_name,
+  };
+}
+
 export interface LibraryVideo {
   id: string;
   projectId: string | null;

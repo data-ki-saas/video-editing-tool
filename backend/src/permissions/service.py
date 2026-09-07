@@ -1,3 +1,4 @@
+import logging
 import re
 
 from fastapi import HTTPException
@@ -6,6 +7,7 @@ from src.permissions import repository
 from src.permissions.features import FEATURES, FEATURE_KEYS, label_for
 from src.permissions.schemas import (
     FeatureOut,
+    ImpersonationResponse,
     MyPermissionsResponse,
     RoleCreateRequest,
     RoleFeaturesUpdateRequest,
@@ -14,6 +16,8 @@ from src.permissions.schemas import (
     UserOut,
     UsersListResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 _KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,49}$")
 
@@ -176,4 +180,28 @@ def update_user_role(user_id: str, new_role_key: str, caller_id: str, caller_fea
         role=new_role_key,
         role_label=new_role["display_name"],
         badge_color=new_role["badge_color"],
+    )
+
+
+def start_impersonation(user_id: str, caller_id: str) -> ImpersonationResponse:
+    if user_id == caller_id:
+        raise HTTPException(status_code=409, detail="You can't impersonate your own account.")
+
+    user_row = repository.get_user_basic(user_id)
+    if user_row is None or not user_row.get("email"):
+        raise HTTPException(status_code=404, detail="User not found")
+
+    session = repository.create_impersonation_session(user_row["email"])
+    # Impersonation hands out a real session for someone else's account --
+    # worth its own log line beyond the generic access log, so "who was
+    # acting as whom, when" is answerable later if a support/audit question
+    # comes up.
+    logger.warning("admin %s started impersonating user %s (%s)", caller_id, user_id, user_row["email"])
+
+    return ImpersonationResponse(
+        access_token=session["access_token"],
+        refresh_token=session["refresh_token"],
+        user_id=user_id,
+        email=user_row.get("email"),
+        display_name=user_row.get("display_name"),
     )
