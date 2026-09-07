@@ -59,6 +59,7 @@ import {
   type CropRect,
   type ZoomEffect,
   type RenderSegment,
+  type MusicClip,
   type TranscriptCaption,
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
@@ -89,8 +90,13 @@ export interface CompileTimelineInput {
    * entry's duration is probed from the file; an image entry's is its own
    * authored durationSeconds, carried straight through. */
   sequenceClips: SequenceClipInfo[];
-  /** Same shape, for the resolved background-music sequence (empty if none). */
-  backgroundClips: SequenceClipInfo[];
+  /** Each background-music clip's own authored placement -- see
+   * video_math.ts's MusicClip. Unresolved (assetId only, no url): this
+   * compiler never touches a real asset URL client-side, same convention as
+   * every other element builder in this file (a fresh presigned URL is
+   * resolved server-side, per-assetId, right before the actual Creatomate
+   * call -- see resolveAssetSources in app/api/render/route.ts). */
+  musicClips: MusicClip[];
   /** Each video overlay source asset's own real probed duration, by
    * assetId -- gathered fresh client-side the same way sequenceClips'
    * durations are (ThreePaneEditor already caches this for
@@ -1151,55 +1157,38 @@ function buildTextTemplateStyle(templateId: string, durationSeconds: number): Re
   }
 }
 
-/** Background music -- mirrors BackgroundTrackStrip.tsx's own
- * concatenate-then-loop model. A single track is one looping Audio
- * element; multiple tracks are wrapped in a looping Composition so the
- * whole concatenated sequence repeats, not just its first track. */
-function buildBackgroundAudioElement(
-  backgroundClips: SequenceClipInfo[],
-  totalOutputDurationSeconds: number,
+/** Background music -- one Audio element per MusicClip, each at its own
+ * authored `time`/`duration`, `trimStart` set to sourceStartSeconds (the
+ * clip's own trim-in point) and `loop: true` so a clip stretched past one
+ * play-through of its source repeats from that same trim-in point rather
+ * than the source's beginning -- verified against the real installed SDK
+ * types (node_modules/creatomate/dist/elements/Audio.d.ts): `trimStart`
+ * ("trims the source audio clip to begin at the specified time"), `loop`
+ * ("the audio clip starts over when it reaches the end"), and `duration`
+ * are all genuine AudioProperties fields, the same `duration`+`loop`
+ * pairing the old single-track case already relied on. All clips share one
+ * `track` number -- BackgroundTrackStrip.tsx packs them into a single,
+ * neighbor-clamped, non-overlapping row, so nothing here needs its own
+ * Composition to keep clips from colliding. */
+function buildMusicAudioElements(
+  musicClips: MusicClip[],
   track: number,
   appMeta: Record<string, AppMetaEntry>,
   backgroundVolumePercent: string
-): Audio | Composition | null {
-  if (backgroundClips.length === 0 || totalOutputDurationSeconds <= 0) return null;
-
-  if (backgroundClips.length === 1) {
-    const id = nextId("music");
-    appMeta[id] = { role: "music", assetId: backgroundClips[0].assetId };
-    return new Audio({
-      id,
-      track,
-      time: 0,
-      duration: totalOutputDurationSeconds,
-      loop: true,
-      volume: backgroundVolumePercent,
-      source: "",
-    });
-  }
-
-  const loopDurationSeconds = totalSequenceDuration(backgroundClips);
-  const children = backgroundClips.map((clip) => {
+): Audio[] {
+  return musicClips.map((clip) => {
     const id = nextId("music");
     appMeta[id] = { role: "music", assetId: clip.assetId };
     return new Audio({
       id,
-      track: 1,
+      track,
       time: clip.startTimeSeconds,
-      duration: clip.durationSeconds,
+      duration: clip.endTimeSeconds - clip.startTimeSeconds,
+      trimStart: clip.sourceStartSeconds,
+      loop: true,
       volume: backgroundVolumePercent,
       source: "",
     });
-  });
-
-  return new Composition({
-    id: nextId("music-loop"),
-    track,
-    time: 0,
-    duration: totalOutputDurationSeconds,
-    loop: true,
-    plays: Math.ceil(totalOutputDurationSeconds / Math.max(loopDurationSeconds, 0.01)),
-    elements: children,
   });
 }
 
@@ -1400,7 +1389,7 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const {
     selections,
     sequenceClips,
-    backgroundClips,
+    musicClips,
     outputWidth,
     outputHeight,
     videoOverlaySourceDurations = {},
@@ -1517,13 +1506,7 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const textElements = buildTextElements(clampedTextOverlays, segments, nextTrack);
   const ttsOverlayElements = buildTtsOverlayElements(clampedTtsOverlays, segments, nextTrack, appMeta);
   const transcriptCaptionElements = buildTranscriptCaptionElements(selections.transcriptCaption, videoSegmentPairs, nextTrack());
-  const backgroundAudio = buildBackgroundAudioElement(
-    backgroundClips,
-    totalOutputDurationSeconds,
-    nextTrack(),
-    appMeta,
-    toVolumePercent(backgroundVolume)
-  );
+  const musicAudioElements = buildMusicAudioElements(musicClips, nextTrack(), appMeta, toVolumePercent(backgroundVolume));
   // Always the LAST element added and the HIGHEST track number -- must
   // render on top of every other overlay/caption no matter which of
   // Creatomate's two possible z-order rules (array order within a
@@ -1540,7 +1523,7 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     ...textElements.map((el) => el.toMap() as TemplateElement),
     ...ttsOverlayElements.map((el) => el.toMap() as TemplateElement),
     ...transcriptCaptionElements.map((el) => el.toMap() as TemplateElement),
-    ...(backgroundAudio ? [backgroundAudio.toMap() as TemplateElement] : []),
+    ...musicAudioElements.map((el) => el.toMap() as TemplateElement),
     brandWatermarkElement.toMap() as TemplateElement,
   ];
 

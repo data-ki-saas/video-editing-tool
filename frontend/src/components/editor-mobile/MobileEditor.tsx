@@ -33,6 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { listAssets, type Asset } from "@/lib/api";
 import { captureSingleFrame, getVideoDuration } from "@/lib/video/video";
+import { getAudioDuration } from "@/lib/video/audio";
 import { ReelLoader } from "@/components/ReelLoader";
 import {
   DEFAULT_MAIN_AUDIO_VOLUME,
@@ -41,6 +42,7 @@ import {
   DEFAULT_SPLIT_SCREEN_RATIO,
   type CropRect,
   type ImageOverlayClip,
+  type MusicClip,
   type SequenceEntry,
   type TtsOverlay,
   type VideoOverlayClip,
@@ -187,6 +189,12 @@ export function MobileEditor({
     sequenceClips,
     videoOverlays,
     transcriptCaption: rawSelections.transcriptCaption ?? null,
+    // This editor has no music-clip drag/resize UI (see ThreePaneEditor's
+    // BackgroundTrackStrip for that) -- round-tripped unchanged so a reel
+    // edited here doesn't silently drop music authored in the desktop
+    // editor, same "carry it through, never touch it" treatment as
+    // videoOverlays would get if this editor didn't expose overlay editing.
+    musicClips: rawSelections.musicClips ?? [],
   };
 
   // Cosmetic-only Timeline fields this editor doesn't expose UI for --
@@ -197,11 +205,14 @@ export function MobileEditor({
   const selectedTemplateId = initialTimeline.selectedTemplateId ?? null;
   const markers = initialTimeline.markers ?? [];
 
-  const [selectedBackgroundTrackId, setSelectedBackgroundTrackId] = useState(initialTimeline.selectedBackgroundTrackId ?? "none");
-  const [backgroundSequenceAssetIds, setBackgroundSequenceAssetIds] = useState<string[]>(
-    initialTimeline.backgroundSequenceAssetIds ??
-      (initialTimeline.selectedBackgroundAssetId ? [initialTimeline.selectedBackgroundAssetId] : [])
-  );
+  // Dead going forward -- superseded by selections.musicClips (see
+  // ThreePaneEditor's own note on backgroundSequenceAssetIds/
+  // selectedBackgroundTrackId). Round-tripped completely unchanged, same
+  // "kept around, never set here" treatment as selectedTemplateId/markers
+  // above, rather than live state this editor could drift out of sync with
+  // ThreePaneEditor's own musicClips by still writing to.
+  const [selectedBackgroundTrackId] = useState(initialTimeline.selectedBackgroundTrackId ?? "none");
+  const backgroundSequenceAssetIdsForRoundTrip = initialTimeline.backgroundSequenceAssetIds ?? [];
   const [mainAudioVolume, setMainAudioVolume] = useState(initialTimeline.mainAudioVolume ?? DEFAULT_MAIN_AUDIO_VOLUME);
   const [backgroundVolume, setBackgroundVolume] = useState(initialTimeline.backgroundVolume ?? DEFAULT_BACKGROUND_VOLUME);
 
@@ -212,7 +223,7 @@ export function MobileEditor({
     editHistoryIndex,
     selectedTemplateId,
     selectedBackgroundTrackId,
-    backgroundSequenceAssetIds,
+    backgroundSequenceAssetIds: backgroundSequenceAssetIdsForRoundTrip,
     markers,
     mainAudioVolume,
     backgroundVolume,
@@ -311,11 +322,6 @@ export function MobileEditor({
 
   const playbackClips = sequenceClips.filter((entry) => assetUrlById[entry.assetId]).map((entry) => ({ ...entry, url: assetUrlById[entry.assetId] }));
 
-  const backgroundAssetTracks = backgroundSequenceAssetIds
-    .map((id) => assets.find((asset) => asset.id === id))
-    .filter((asset): asset is Asset => Boolean(asset))
-    .map((asset) => ({ name: asset.filename, url: asset.url }));
-
   const clipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selections.clipRectId) ?? null;
   const clipRectAspectRatio = clipRectOption
     ? clipRectOption.widthRatio / clipRectOption.heightRatio
@@ -368,13 +374,35 @@ export function MobileEditor({
     }
   }
 
-  function handleAddToBackground(asset: Asset) {
-    setBackgroundSequenceAssetIds((prev) => [...prev, asset.id]);
-    setSelectedBackgroundTrackId("none");
+  // Mobile's own background-music picker is a flat add/remove list (see
+  // MobileAssetStrip.tsx), not a draggable timeline rail like
+  // ThreePaneEditor's BackgroundTrackStrip -- so unlike that editor's own
+  // handleAddMusicClip (which places a clip at the playhead, via
+  // applyAddMusicClip), this always appends straight after whatever music
+  // is already there, same "always append, order is everything" behavior
+  // this picker has always had. Still builds a real MusicClip (probing the
+  // track's own duration first) rather than the old durationless
+  // backgroundSequenceAssetIds entry, since a MusicClip's position is
+  // authored, not inferred at render time anymore.
+  async function handleAddToBackground(asset: Asset) {
+    let durationSeconds: number;
+    try {
+      durationSeconds = await getAudioDuration(asset.url);
+    } catch {
+      durationSeconds = 0;
+    }
+    if (durationSeconds <= 0) return; // probe failed -- nothing to place a real clip for
+    const cursor = selections.musicClips.reduce((max, clip) => Math.max(max, clip.endTimeSeconds), 0);
+    const newClip: MusicClip = { assetId: asset.id, startTimeSeconds: cursor, endTimeSeconds: cursor + durationSeconds, sourceStartSeconds: 0 };
+    pushChange("Added music", { ...selections, musicClips: [...selections.musicClips, newClip] });
   }
 
+  // Removes every clip for this asset (there's normally only one -- this
+  // picker has no per-clip identity of its own, just the asset list
+  // MobileAssetStrip renders, same as the old backgroundSequenceAssetIds
+  // model this replaced).
   function handleRemoveFromBackground(assetId: string) {
-    setBackgroundSequenceAssetIds((prev) => prev.filter((id) => id !== assetId));
+    pushChange("Removed music", { ...selections, musicClips: selections.musicClips.filter((clip) => clip.assetId !== assetId) });
   }
 
   function handleRemoveFromSequence(entryId: string) {
@@ -518,7 +546,7 @@ export function MobileEditor({
               ttsOverlays={selections.ttsOverlays}
               videoOverlays={selections.videoOverlays}
               assetUrlById={assetUrlById}
-              backgroundTracks={backgroundAssetTracks}
+              musicClips={selections.musicClips}
               mainAudioVolume={mainAudioVolume}
               backgroundVolume={backgroundVolume}
               onFrameDimensions={setFrameDimensions}
@@ -566,7 +594,7 @@ export function MobileEditor({
         </button>
       </div>
 
-      {(backgroundSequenceAssetIds.length > 0 || playbackClips.length > 0) && (
+      {(selections.musicClips.length > 0 || playbackClips.length > 0) && (
         <div className="mx-auto flex w-full max-w-md flex-col gap-2 px-3 pt-3">
           <label className="flex flex-col gap-1 text-xs text-muted">
             Main volume
@@ -579,7 +607,7 @@ export function MobileEditor({
               onChange={(e) => setMainAudioVolume(Number(e.target.value))}
             />
           </label>
-          {backgroundSequenceAssetIds.length > 0 && (
+          {selections.musicClips.length > 0 && (
             <label className="flex flex-col gap-1 text-xs text-muted">
               Background music volume
               <input
@@ -601,7 +629,7 @@ export function MobileEditor({
           assets={assets}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
           sequenceClips={sequenceClips}
-          backgroundAssetIds={backgroundSequenceAssetIds}
+          backgroundAssetIds={selections.musicClips.map((clip) => clip.assetId)}
           onUploaded={handleUploaded}
           onRecord={() => router.push(`/dashboard/${projectId}/record`)}
           onAddToSequence={handleAddToSequence}

@@ -56,23 +56,25 @@
  * `onTimeUpdate` every tick so that timeline can draw a moving playhead --
  * see ThreePaneEditor for how the two are wired together.
  *
- * `backgroundTracks` (resolved {name, url}[], same list BackgroundTrackStrip
- * visualizes) plays here too, mixed under the main clip audio at a fixed,
- * lower gain -- decoded/concatenated the same way as the main sequence's
- * audio (one buffer, looped via AudioBufferSourceNode.loop rather than
- * manually rescheduled, which naturally reproduces "the whole concatenated
- * sequence repeats across the video's duration"). Decoded in its own effect,
- * independent of the main clips-loading effect, so adding/changing a
- * background track doesn't re-extract every video frame from scratch; if
- * it's still decoding (or absent) when Play is pressed, the clip simply
- * plays without music that time around rather than blocking playback on it.
+ * `musicClips` (see video_math.ts's MusicClip, same array BackgroundTrackStrip
+ * visualizes) play here too, mixed under the main clip audio at a fixed,
+ * lower gain -- one AudioBufferSourceNode scheduled per clip at its own
+ * startTimeSeconds, same "schedule everything ahead of time" idiom the
+ * video-overlay-audio block above it already uses, with `loop`/`loopStart`/
+ * `loopEnd` set so a clip stretched past one play-through of its own source
+ * wraps back to its own trim-in point (sourceStartSeconds) rather than 0.
+ * Each distinct asset is decoded once (by assetId, not per clip) in its own
+ * effect, independent of the main clips-loading effect, so adding/moving a
+ * music clip doesn't re-extract every video frame from scratch; if a clip's
+ * audio is still decoding (or absent) when Play is pressed, that one clip
+ * simply plays without sound that time around rather than blocking playback.
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { extractPreviewFrames, getVideoDuration, drawImageFlipped, drawImageFlippedMasked } from "@/lib/video/video";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
 import { detectFaceGeometry, type FaceGeometry } from "@/lib/video/faceLandmarks";
-import { computeAudioEnvelope, sampleAudioEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
+import { computeAudioEnvelope, sampleMusicClipsEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { segmentClipFramesApproximate, lumaFramesToAlphaMasks, segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { chromaKeyFramesToAlphaMasks, DEFAULT_CHROMA_KEY_COLOR } from "@/lib/video/chromaKey";
@@ -113,6 +115,7 @@ import {
   scaleCropRectCentered,
   type CropRect,
   type ImageOverlayClip,
+  type MusicClip,
   type SequenceClipInfo,
   type SequenceEntry,
   type TextOverlay,
@@ -326,10 +329,12 @@ export const CanvasPlayer = forwardRef<
     // for image overlays.
     videoOverlays: VideoOverlayClip[];
     assetUrlById: Record<string, string>;
-    // Resolved background-music sequence (project assets and/or a curated
-    // catalog track) -- mixed into playback here, see this file's module
-    // comment. Empty when no background track is selected.
-    backgroundTracks: { name: string; url: string }[];
+    // Freely positioned/resizable background-music clips (see
+    // video_math.ts's MusicClip and BackgroundTrackStrip.tsx) -- each
+    // scheduled at its own startTimeSeconds, mixed into playback here (see
+    // this file's module comment). Resolved against `assetUrlById` above,
+    // same convention as videoOverlays/ttsOverlays.
+    musicClips: MusicClip[];
     // Flat 0..1 multipliers set from each audio rail's own VolumeFader (see
     // Playground.tsx) -- mainAudioVolume scales the main sequence's own
     // audio (still ducked underneath it during an overlay window that wants
@@ -373,7 +378,7 @@ export const CanvasPlayer = forwardRef<
     ttsOverlays,
     videoOverlays,
     assetUrlById,
-    backgroundTracks,
+    musicClips,
     mainAudioVolume,
     backgroundVolume,
     onFrameDimensions,
@@ -554,17 +559,22 @@ export const CanvasPlayer = forwardRef<
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
-  // Background-music sequence, decoded/concatenated independently of the
-  // main clips (see this file's module comment) -- null while loading or
-  // absent, checked at play/seek time rather than gating isReady on it.
-  const backgroundAudioBufferRef = useRef<AudioBuffer | null>(null);
-  const backgroundSourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
-  // "Pulse with music" (audioReactive.ts) -- distilled once from the same
-  // decoded background buffer above (see loadBackgroundAudio below), then
-  // sampled per frame in drawFrameAt. Null while loading/absent, same
-  // staging as backgroundAudioBufferRef -- a clip with the toggle on just
-  // renders un-pulsed until this resolves.
-  const backgroundEnvelopeRef = useRef<AudioEnvelope | null>(null);
+  // Decoded audio for every distinct music-clip source asset, keyed by
+  // assetId -- same lazy/cached decode pattern as
+  // videoOverlayAudioBuffersByAssetIdRef above, decoded independently of the
+  // main clips (see this file's module comment) so adding/moving a music
+  // clip never re-extracts video frames.
+  const musicAudioBuffersByAssetIdRef = useRef<Record<string, AudioBuffer>>({});
+  // Every music-clip source node currently scheduled for this playback pass
+  // (one per clip whose window overlaps this resume and whose asset has
+  // finished decoding) -- stopPlaybackLoop stops and clears all of them
+  // together, same as overlayAudioSourceNodesRef above.
+  const musicSourceNodesRef = useRef<AudioBufferSourceNode[]>([]);
+  // "Pulse with music" (audioReactive.ts) -- one envelope per distinct
+  // music-clip asset, distilled once right after that asset's own buffer
+  // above finishes decoding, then sampled per frame in drawFrameAt via
+  // sampleMusicClipsEnvelopeAt (which picks whichever clip is active).
+  const musicEnvelopesByAssetIdRef = useRef<Record<string, AudioEnvelope>>({});
   // Scratch canvas reused across frames for the background-removal masked
   // composite (see drawFrameAt's own "destination-in" branch) -- resized in
   // place rather than reallocated every frame.
@@ -652,12 +662,14 @@ export const CanvasPlayer = forwardRef<
       // Already stopped (e.g. it ran to the end on its own) -- fine to ignore.
     }
     sourceNodeRef.current = null;
-    try {
-      backgroundSourceNodeRef.current?.stop();
-    } catch {
-      // Already stopped -- fine to ignore.
+    for (const node of musicSourceNodesRef.current) {
+      try {
+        node.stop();
+      } catch {
+        // Already stopped -- fine to ignore.
+      }
     }
-    backgroundSourceNodeRef.current = null;
+    musicSourceNodesRef.current = [];
     for (const node of overlayAudioSourceNodesRef.current) {
       try {
         node.stop();
@@ -976,7 +988,7 @@ export const CanvasPlayer = forwardRef<
       // the same four dest args either way).
       const basePulseScale =
         currentEntryId && clipAudioReactiveById.get(currentEntryId)
-          ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+          ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetIdRef.current, elapsedSeconds))
           : 1;
       const baseDestRect =
         basePulseScale !== 1
@@ -1136,7 +1148,7 @@ export const CanvasPlayer = forwardRef<
         // ambientEffect draw further down (which keeps using the original
         // unpulsed destX/destY/destWidth/destHeight).
         const imageOverlayPulseScale = activeExclusiveImageOverlay.audioReactive
-          ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+          ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetIdRef.current, elapsedSeconds))
           : 1;
         const imageOverlayDestRect =
           imageOverlayPulseScale !== 1
@@ -1237,7 +1249,7 @@ export const CanvasPlayer = forwardRef<
           // (the masked branch above never pulses either).
           const pose = computeCamera3DPoseForOverlay(activeExclusiveVideoOverlay.startTimeSeconds, activeExclusiveVideoOverlay.endTimeSeconds, elapsedSeconds);
           const videoOverlayPulseScale = activeExclusiveVideoOverlay.audioReactive
-            ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+            ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetIdRef.current, elapsedSeconds))
             : 1;
           const videoOverlayDestRect =
             videoOverlayPulseScale !== 1
@@ -1257,7 +1269,7 @@ export const CanvasPlayer = forwardRef<
           videoOverlayAmbientRoutedThrough3D = Boolean(activeExclusiveVideoOverlay.ambientEffect);
         } else {
           const videoOverlayPulseScale = activeExclusiveVideoOverlay.audioReactive
-            ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+            ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetIdRef.current, elapsedSeconds))
             : 1;
           const videoOverlayDestRect =
             videoOverlayPulseScale !== 1
@@ -1333,7 +1345,7 @@ export const CanvasPlayer = forwardRef<
         // "Pulse with music" -- only in this (camera3D or plain) branch,
         // same "matte compositing wins" scoping as camera3D itself.
         const pipPulseScale = pip.audioReactive
-          ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+          ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetIdRef.current, elapsedSeconds))
           : 1;
         const pipDestRect =
           pipPulseScale !== 1
@@ -1383,7 +1395,7 @@ export const CanvasPlayer = forwardRef<
       // "Pulse with music" -- same treatment as the video-overlay PiP loop
       // above, independent of camera3D/ambientEffect.
       const imagePipPulseScale = pip.audioReactive
-        ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelopeRef.current, elapsedSeconds))
+        ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetIdRef.current, elapsedSeconds))
         : 1;
       const imagePipDestRect =
         imagePipPulseScale !== 1
@@ -1750,21 +1762,39 @@ export const CanvasPlayer = forwardRef<
       mainGainNode.gain.linearRampToValueAtTime(ambientGain, startCtxTime + overlapSeconds + AUDIO_TRANSITION_RAMP_SECONDS);
     }
 
-    // Background music loops on its own (loop = true over the whole
-    // buffer) rather than being rescheduled per repeat -- its start offset
-    // is taken modulo its own duration so resuming partway through the
-    // main sequence lands at the right phase within the loop, matching
-    // what BackgroundTrackStrip visualizes.
-    const backgroundBuffer = backgroundAudioBufferRef.current;
-    if (backgroundBuffer && backgroundBuffer.duration > 0) {
-      const backgroundSource = audioContext.createBufferSource();
-      backgroundSource.buffer = backgroundBuffer;
-      backgroundSource.loop = true;
-      const gainNode = audioContext.createGain();
-      gainNode.gain.value = backgroundVolume;
-      backgroundSource.connect(gainNode).connect(audioContext.destination);
-      backgroundSource.start(0, adjustedOffsetSeconds % backgroundBuffer.duration);
-      backgroundSourceNodeRef.current = backgroundSource;
+    // One AudioBufferSourceNode per music clip whose window hasn't fully
+    // passed yet -- same "schedule everything ahead of time" idiom as the
+    // video-overlay-audio block above, all through one shared gain node
+    // (background music has never participated in ducking, so no per-clip
+    // gain automation is needed). `loop`/`loopStart`/`loopEnd` let a clip
+    // stretched past one play-through of its own source wrap back to its
+    // own trim-in point (sourceStartSeconds) rather than 0 -- see
+    // video_math.ts's MusicClip doc comment on why that's deliberately
+    // allowed, unlike VideoOverlayClip's own edge-drag today.
+    const musicGainNode = audioContext.createGain();
+    musicGainNode.gain.value = backgroundVolume;
+    musicGainNode.connect(audioContext.destination);
+    musicSourceNodesRef.current = [];
+    for (const clip of musicClips) {
+      if (clip.endTimeSeconds <= adjustedOffsetSeconds) continue; // this window is entirely in the past
+      const buffer = musicAudioBuffersByAssetIdRef.current[clip.assetId];
+      if (!buffer || buffer.duration <= 0) continue;
+
+      const windowStartSeconds = Math.max(clip.startTimeSeconds, adjustedOffsetSeconds);
+      const elapsedIntoWindowSeconds = windowStartSeconds - clip.startTimeSeconds;
+      const remainingDurationSeconds = clip.endTimeSeconds - windowStartSeconds;
+      const startCtxTime = audioContext.currentTime + (windowStartSeconds - adjustedOffsetSeconds);
+      const playableSourceSeconds = Math.max(buffer.duration - clip.sourceStartSeconds, 0.0001);
+      const bufferOffsetSeconds = clip.sourceStartSeconds + (elapsedIntoWindowSeconds % playableSourceSeconds);
+
+      const musicSource = audioContext.createBufferSource();
+      musicSource.buffer = buffer;
+      musicSource.loop = true;
+      musicSource.loopStart = clip.sourceStartSeconds;
+      musicSource.loopEnd = buffer.duration;
+      musicSource.connect(musicGainNode);
+      musicSource.start(startCtxTime, bufferOffsetSeconds, remainingDurationSeconds);
+      musicSourceNodesRef.current.push(musicSource);
     }
 
     setIsPlaying(true);
@@ -2400,43 +2430,44 @@ export const CanvasPlayer = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on ttsAudioLoadKey (joined assetId:url), not the ttsOverlays array reference
   }, [ttsAudioLoadKey]);
 
-  // Decodes/concatenates the background-music sequence independently of the
-  // main clips-loading effect above, so adding or swapping a background
-  // track doesn't re-extract every video frame. A track that fails to
-  // decode is skipped (same policy as a failed video clip); if every track
-  // fails, playback just proceeds without music rather than erroring.
-  const backgroundTracksKey = backgroundTracks.map((track) => track.url).join(",");
+  // Decodes audio for every distinct music-clip source asset, independent
+  // of the main clips-loading effect above, so adding/moving a music clip
+  // never re-extracts a single video frame. Same per-assetId cache/dedupe as
+  // overlayAudioAssetIds/loadOverlayAudio above; unlike that one, every
+  // music asset always gets decoded (no per-clip audio opt-out). A clip
+  // whose source fails to decode is skipped -- that one clip's window
+  // simply plays without sound, same policy as a failed video-overlay/TTS
+  // decode, not an error that blocks the rest.
+  const musicClipAssetIds = Array.from(new Set(musicClips.map((clip) => clip.assetId)));
+  const musicClipLoadKey = musicClipAssetIds.map((assetId) => `${assetId}:${assetUrlById[assetId] ?? ""}`).join(",");
   useEffect(() => {
     let cancelled = false;
-    backgroundAudioBufferRef.current = null;
-    backgroundEnvelopeRef.current = null;
-    if (backgroundTracks.length === 0) return;
 
-    async function loadBackgroundAudio() {
-      const audioContext = ensureAudioContext();
-      const decoded: AudioBuffer[] = [];
-      for (const track of backgroundTracks) {
+    async function loadMusicAudio() {
+      for (const assetId of musicClipAssetIds) {
         if (cancelled) return;
+        if (musicAudioBuffersByAssetIdRef.current[assetId]) continue;
+        const url = assetUrlById[assetId];
+        if (!url) continue;
         try {
-          decoded.push(await decodeAudioBuffer(track.url));
+          const buffer = await decodeAudioBuffer(url);
+          if (cancelled) return;
+          musicAudioBuffersByAssetIdRef.current[assetId] = buffer;
+          // "Pulse with music" -- distilled once here from the same buffer
+          // playback uses, see audioReactive.ts's own doc comment.
+          musicEnvelopesByAssetIdRef.current[assetId] = computeAudioEnvelope(buffer);
         } catch {
-          // Skipped -- one bad background track shouldn't block the rest.
+          // Skipped -- see this effect's own comment.
         }
       }
-      if (cancelled || decoded.length === 0) return;
-      const concatenated = concatenateAudioBuffers(audioContext, decoded);
-      backgroundAudioBufferRef.current = concatenated;
-      // "Pulse with music" -- distilled once here from the same buffer
-      // playback uses, see audioReactive.ts's own doc comment.
-      backgroundEnvelopeRef.current = computeAudioEnvelope(concatenated);
     }
 
-    void loadBackgroundAudio();
+    void loadMusicAudio();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on backgroundTracksKey (joined urls), not the backgroundTracks array reference
-  }, [backgroundTracksKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on musicClipLoadKey (joined assetId:url), not the musicClips array reference
+  }, [musicClipLoadKey]);
 
   useEffect(() => {
     return () => {

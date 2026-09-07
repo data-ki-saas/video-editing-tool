@@ -24,13 +24,13 @@
  *    ever be requested at add-time and this quick path bypasses the "Video
  *    Overlay" tab's own picker dialog (which has the same option as a
  *    checkbox instead).
- * For music, "Add" appends it to the background-music sequence
- * (handleAddToBackgroundSequence -- multiple appended tracks concatenate,
- * then loop as a whole across the video's duration). A small "+" badge
- * marks a tile as currently in use (referenced by an overlay, in the video
- * sequence, or in the background sequence), mirroring the selected-tile
- * border rather than being a separate concept. Thumbnails are a fixed
- * square, regardless of asset kind/aspect ratio.
+ * For music, "Add" places a new, freely movable/resizable clip on the
+ * background-music rail (onAddMusicClip -- see video_math.ts's MusicClip
+ * and BackgroundTrackStrip.tsx), right after whichever clip currently
+ * contains the playhead. A small "+" badge marks a tile as currently in use
+ * (referenced by an overlay, in the video sequence, or by a music clip),
+ * mirroring the selected-tile border rather than being a separate concept.
+ * Thumbnails are a fixed square, regardless of asset kind/aspect ratio.
  *
  * Music tiles also get a "Play"/"Pause" action -- plays right there in the
  * tile (a plain hidden <audio>, driven entirely by JS, not the browser's
@@ -83,7 +83,7 @@ export function AssetGallery({
   onAddImageOverlay,
   onAddToSequence,
   onOpenVideoOverlayPickerForAsset,
-  onAddToBackgroundSequence,
+  onAddMusicClip,
   onOpenCutawayDialogForAsset,
   usedAssetIds,
   videoThumbnailUrlByAssetId,
@@ -109,7 +109,7 @@ export function AssetGallery({
   // is where layout/background-removal choices (including chroma key) get
   // made, see that component's own comment.
   onOpenVideoOverlayPickerForAsset: (asset: Asset) => void;
-  onAddToBackgroundSequence: (asset: Asset) => void;
+  onAddMusicClip: (asset: Asset) => void;
   onOpenCutawayDialogForAsset: (asset: Asset) => void;
   usedAssetIds: Set<string>;
   // assetId -> a single representative still frame, one per video asset --
@@ -254,7 +254,7 @@ export function AssetGallery({
                     { label: "Overlay", onSelect: () => onOpenVideoOverlayPickerForAsset(asset) },
                   ]
                 : asset.kind === "audio"
-                  ? [{ label: "Add", onSelect: () => onAddToBackgroundSequence(asset) }]
+                  ? [{ label: "Add", onSelect: () => onAddMusicClip(asset) }]
                   : []),
             { label: "Delete", danger: true, onSelect: () => void handleDelete(asset) },
           ]);

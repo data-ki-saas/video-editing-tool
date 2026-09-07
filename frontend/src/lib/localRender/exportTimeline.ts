@@ -49,10 +49,10 @@ import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPose
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
 import { segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { detectFaceGeometry, type FaceGeometry } from "@/lib/video/faceLandmarks";
-import { computeAudioEnvelope, sampleAudioEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
+import { computeAudioEnvelope, sampleMusicClipsEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { DEFAULT_CHROMA_KEY_COLOR, hexToRgb } from "@/lib/video/chromaKey";
-import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
+import { decodeAudioBuffer } from "@/lib/video/audio";
 import {
   buildRenderSegments,
   computeEffectiveCropRect,
@@ -81,6 +81,7 @@ import {
   computeContainFitRect,
   scaleCropRectCentered,
   type RenderSegment,
+  type ResolvedMusicClip,
   type SequenceClipInfo,
   type TtsOverlay,
   type VideoOverlayClip,
@@ -104,7 +105,7 @@ const KEY_FRAME_INTERVAL_SECONDS = 3;
 export interface LocalRenderInput {
   selections: EditSelectionsSnapshot;
   sequenceClips: SequenceClipInfo[];
-  backgroundClips: SequenceClipInfo[];
+  musicClips: ResolvedMusicClip[];
   /** assetId -> presigned R2 URL, for resolving overlay images (see ThreePaneEditor's own assetUrlById). */
   assetUrlById: Record<string, string>;
   /** Re-resolves a single asset's presigned URL from the backend (a fresh
@@ -317,7 +318,7 @@ function scheduleDuckedGainOffline(
 async function buildMixedAudioBuffer(
   segments: RenderSegment[],
   sequenceClips: SequenceClipInfo[],
-  backgroundClips: SequenceClipInfo[],
+  musicClips: ResolvedMusicClip[],
   videoOverlays: VideoOverlayClip[],
   ttsOverlays: TtsOverlay[],
   assetUrlById: Record<string, string>,
@@ -503,24 +504,39 @@ async function buildMixedAudioBuffer(
     }
   }
 
-  if (backgroundClips.length > 0) {
-    const decodedBackground: AudioBuffer[] = [];
-    for (const clip of backgroundClips) {
-      try {
-        decodedBackground.push(await decodeAudioBuffer(clip.url));
-      } catch {
-        // Skipped -- same "one bad track shouldn't block the rest" policy as CanvasPlayer.
-      }
+  // One AudioBufferSourceNode per music clip, scheduled directly at its own
+  // authored startTimeSeconds -- unlike the segment/overlay/TTS audio above,
+  // this needs no mapSourceRangeToOutputRanges translation at all: this
+  // offline render always starts at output time 0 and background music has
+  // always scheduled in absolute output time (never split by a trim), so a
+  // clip's own startTimeSeconds already IS its output time. `loop`/
+  // `loopStart`/`loopEnd` mirror CanvasPlayer's live scheduling exactly --
+  // see that file's own comment on why a clip stretched past one
+  // play-through of its source wraps back to sourceStartSeconds, not 0.
+  const decodedMusicByAssetId = new Map<string, AudioBuffer>();
+  for (const clip of musicClips) {
+    if (decodedMusicByAssetId.has(clip.assetId)) continue;
+    try {
+      decodedMusicByAssetId.set(clip.assetId, await decodeAudioBuffer(clip.url));
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      warnings.push(`A background-music track (assetId ${clip.assetId}) couldn't be decoded for this render: ${reason}`);
     }
-    if (decodedBackground.length > 0) {
-      const concatenated = concatenateAudioBuffers(offlineContext, decodedBackground);
-      const backgroundSource = offlineContext.createBufferSource();
-      backgroundSource.buffer = concatenated;
-      backgroundSource.loop = true;
-      const gainNode = offlineContext.createGain();
-      gainNode.gain.value = backgroundVolume;
-      backgroundSource.connect(gainNode).connect(offlineContext.destination);
-      backgroundSource.start(0);
+  }
+  if (musicClips.length > 0) {
+    const musicGainNode = offlineContext.createGain();
+    musicGainNode.gain.value = backgroundVolume;
+    musicGainNode.connect(offlineContext.destination);
+    for (const clip of musicClips) {
+      const buffer = decodedMusicByAssetId.get(clip.assetId);
+      if (!buffer || buffer.duration <= 0) continue;
+      const musicSource = offlineContext.createBufferSource();
+      musicSource.buffer = buffer;
+      musicSource.loop = true;
+      musicSource.loopStart = clip.sourceStartSeconds;
+      musicSource.loopEnd = buffer.duration;
+      musicSource.connect(musicGainNode);
+      musicSource.start(clip.startTimeSeconds, clip.sourceStartSeconds, clip.endTimeSeconds - clip.startTimeSeconds);
     }
   }
 
@@ -531,7 +547,7 @@ export async function exportVideoLocally(
   input: LocalRenderInput,
   onProgress?: (progress: LocalRenderProgress) => void
 ): Promise<LocalRenderResult> {
-  const { selections, sequenceClips, backgroundClips, assetUrlById, refreshAssetUrl, mainAudioVolume, backgroundVolume, outputWidth, outputHeight } =
+  const { selections, sequenceClips, musicClips, assetUrlById, refreshAssetUrl, mainAudioVolume, backgroundVolume, outputWidth, outputHeight } =
     input;
   if (sequenceClips.length === 0) throw new Error("Nothing to render -- add a video to the sequence first.");
 
@@ -658,27 +674,24 @@ export async function exportVideoLocally(
   const camera3DRenderer = new Camera3DRenderer();
 
   try {
-    // "Pulse with music" (audioReactive.ts) -- decodes/concatenates the
-    // background track a second time (buildMixedAudioBuffer below does its
-    // own, separate decode for the actual audio mix -- the two passes don't
-    // share a buffer) purely to distill this envelope once before the frame
-    // loop. A decode failure here just leaves the envelope null, same "one
-    // bad track shouldn't block the rest" policy as everywhere else
-    // background audio is handled -- the toggle becomes a harmless no-op
-    // for this export.
-    let backgroundEnvelope: AudioEnvelope | null = null;
-    if (backgroundClips.length > 0) {
-      const decodedForEnvelope: AudioBuffer[] = [];
-      const envelopeAudioContext = new OfflineAudioContext(1, 1, AUDIO_SAMPLE_RATE);
-      for (const clip of backgroundClips) {
-        try {
-          decodedForEnvelope.push(await decodeAudioBuffer(clip.url));
-        } catch {
-          // Skipped -- same policy as buildMixedAudioBuffer's own background decode.
-        }
-      }
-      if (decodedForEnvelope.length > 0) {
-        backgroundEnvelope = computeAudioEnvelope(concatenateAudioBuffers(envelopeAudioContext, decodedForEnvelope));
+    // "Pulse with music" (audioReactive.ts) -- decodes each distinct
+    // music-clip asset a second time here (buildMixedAudioBuffer below does
+    // its own, separate decode for the actual audio mix -- the two passes
+    // don't share a buffer) purely to distill one envelope per asset before
+    // the frame loop, same per-assetId map CanvasPlayer's own
+    // musicEnvelopesByAssetIdRef keeps for its live preview. sampled per
+    // frame via sampleMusicClipsEnvelopeAt, which picks whichever clip is
+    // actually active. A decode failure here just leaves that asset's
+    // envelope absent, same "one bad track shouldn't block the rest" policy
+    // as everywhere else music audio is handled -- the toggle becomes a
+    // harmless no-op for that clip's own window in this export.
+    const musicEnvelopesByAssetId: Record<string, AudioEnvelope> = {};
+    for (const assetId of new Set(musicClips.map((clip) => clip.assetId))) {
+      const clip = musicClips.find((c) => c.assetId === assetId)!;
+      try {
+        musicEnvelopesByAssetId[assetId] = computeAudioEnvelope(await decodeAudioBuffer(clip.url));
+      } catch {
+        // Skipped -- same policy as buildMixedAudioBuffer's own music decode.
       }
     }
 
@@ -1117,7 +1130,7 @@ export async function exportVideoLocally(
           // background track the same way playback's loop is).
           const basePulseScale =
             segment.entryId && cutawayAudioReactiveByEntryId.get(segment.entryId)
-              ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+              ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetId, outputTimeSeconds))
               : 1;
           const baseDestRect =
             basePulseScale !== 1
@@ -1268,7 +1281,7 @@ export async function exportVideoLocally(
           // ambientEffect draw further down (which keeps using the original
           // unpulsed destX/destY/destWidth/destHeight).
           const imageOverlayPulseScale = activeExclusiveImageOverlay.audioReactive
-            ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+            ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetId, outputTimeSeconds))
             : 1;
           const imageOverlayDestRect =
             imageOverlayPulseScale !== 1
@@ -1369,7 +1382,7 @@ export async function exportVideoLocally(
               // camera3D itself.
               const pose = computeCamera3DPoseForOverlay(activeExclusiveVideoOverlay.startTimeSeconds, activeExclusiveVideoOverlay.endTimeSeconds, sourceTimeSeconds);
               const videoOverlayPulseScale = activeExclusiveVideoOverlay.audioReactive
-                ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+                ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetId, outputTimeSeconds))
                 : 1;
               const videoOverlayDestRect =
                 videoOverlayPulseScale !== 1
@@ -1389,7 +1402,7 @@ export async function exportVideoLocally(
               videoOverlayAmbientRoutedThrough3D = Boolean(activeExclusiveVideoOverlay.ambientEffect);
             } else {
               const videoOverlayPulseScale = activeExclusiveVideoOverlay.audioReactive
-                ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+                ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetId, outputTimeSeconds))
                 : 1;
               const videoOverlayDestRect =
                 videoOverlayPulseScale !== 1
@@ -1455,7 +1468,7 @@ export async function exportVideoLocally(
             // "Pulse with music" -- only in this (camera3D or plain) branch,
             // same "matte/chroma-key compositing wins" scoping as camera3D.
             const pipPulseScale = pip.audioReactive
-              ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+              ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetId, outputTimeSeconds))
               : 1;
             const pipDestRect =
               pipPulseScale !== 1
@@ -1499,7 +1512,7 @@ export async function exportVideoLocally(
         // "Pulse with music" -- same treatment as the video-overlay PiP loop
         // above, independent of camera3D/ambientEffect.
         const imagePipPulseScale = pip.audioReactive
-          ? audioReactiveScale(sampleAudioEnvelopeAt(backgroundEnvelope, outputTimeSeconds))
+          ? audioReactiveScale(sampleMusicClipsEnvelopeAt(musicClips, musicEnvelopesByAssetId, outputTimeSeconds))
           : 1;
         const imagePipDestRect =
           imagePipPulseScale !== 1
@@ -1592,7 +1605,7 @@ export async function exportVideoLocally(
       const { buffer: mixedAudio, warnings: audioWarnings } = await buildMixedAudioBuffer(
         segments,
         sequenceClips,
-        backgroundClips,
+        musicClips,
         selections.videoOverlays,
         selections.ttsOverlays,
         assetUrlById,

@@ -19,9 +19,16 @@
  * aspect ratio (video_math.ts's reprojectCropRect) instead of reusing it
  * verbatim against a differently-shaped clip -- see that function's own
  * doc comment.
+ *
+ * No background-music gatherer here anymore -- a MusicClip's own
+ * startTimeSeconds/endTimeSeconds/sourceStartSeconds are already fully
+ * authored (see video_math.ts's own doc comment), so
+ * CompileTimelineInput.musicClips is just selections.musicClips passed
+ * straight through, no probing/gathering step needed (this file's whole
+ * reason to exist is resolving what CAN'T be known until render time --
+ * real durations/dimensions -- which a music clip has no such gap for).
  */
 import { getVideoDurationAndDimensions } from "@/lib/video/video";
-import { getAudioDuration } from "@/lib/video/audio";
 import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { buildSequenceClipInfos, type SequenceClipInfo, type SequenceEntry } from "@/lib/video/video_math";
 
@@ -63,29 +70,6 @@ export async function gatherSequenceClipInfos(
     } catch {
       // Skipped -- same "one bad clip shouldn't block the rest" policy as
       // CanvasPlayer's own sequence loading.
-    }
-  }
-  return buildSequenceClipInfos(clipMeta);
-}
-
-export async function gatherBackgroundClipInfos(
-  tracks: { assetId: string | null; name: string; url: string }[]
-): Promise<SequenceClipInfo[]> {
-  // A curated catalog track (assetId null -- see BackgroundTrackSelector.tsx
-  // /lib/backgroundTracks.ts) has no project asset to resolve a render-time
-  // URL from, unlike a project asset track. BACKGROUND_TRACK_OPTIONS has no
-  // real (non-"none") entries yet, so this never actually fires today --
-  // revisit (bake the catalog URL directly into the compiled element,
-  // bypassing _appMeta) once a real one exists.
-  const resolvable = tracks.filter((track): track is { assetId: string; name: string; url: string } => track.assetId !== null);
-
-  const clipMeta: { assetId: string; url: string; durationSeconds: number }[] = [];
-  for (const track of resolvable) {
-    try {
-      const durationSeconds = await getAudioDuration(track.url);
-      clipMeta.push({ assetId: track.assetId, url: track.url, durationSeconds });
-    } catch {
-      // Skipped -- same "one bad track shouldn't block the rest" policy as above.
     }
   }
   return buildSequenceClipInfos(clipMeta);

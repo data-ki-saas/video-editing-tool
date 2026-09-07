@@ -15,13 +15,20 @@
  * track and run the exact same deterministic math over it, which is what
  * keeps them in sync -- not any shared cache between the two.
  *
- * The background track always loops phase-locked to OUTPUT timeline time 0
- * (see CanvasPlayer.tsx's backgroundSource.start(0, adjustedOffsetSeconds %
- * backgroundBuffer.duration) and exportTimeline.ts's backgroundSource.start(0))
- * -- so callers must sample this with the same absolute output-timeline
- * time already in scope at each draw site (CanvasPlayer's `elapsedSeconds`,
- * exportTimeline's `outputTimeSeconds`), never a clip-local time.
+ * `sampleAudioEnvelopeAt` itself is phase-agnostic -- given a time already
+ * expressed in whatever buffer it should sample against, its own modulo
+ * just handles that buffer looping. What phase a caller samples AT differs
+ * by source: `sampleMusicClipsEnvelopeAt` below re-bases an absolute
+ * output-timeline time into the ONE active MusicClip's own source-buffer
+ * time (each clip has its own startTimeSeconds/sourceStartSeconds phase,
+ * unlike the single project-wide background track this was originally
+ * built for) before calling `sampleAudioEnvelopeAt` -- every "Pulse with
+ * music" call site (CanvasPlayer.tsx's live preview, exportTimeline.ts's
+ * frame-accurate export) goes through that one helper rather than
+ * reimplementing the re-basing math, so the two can't drift apart.
  */
+
+import { findActiveMusicClip, type MusicClip } from "./video_math";
 
 export interface AudioEnvelope {
   values: Float32Array;
@@ -104,4 +111,31 @@ export function sampleAudioEnvelopeAt(envelope: AudioEnvelope | null, timeSecond
  * No exposed knobs -- one fixed amplitude, see MAX_PULSE_SCALE above. */
 export function audioReactiveScale(envelopeValue: number): number {
   return 1 + envelopeValue * MAX_PULSE_SCALE;
+}
+
+/** Samples "Pulse with music" at an absolute output-timeline time against
+ * whichever MusicClip (see video_math.ts) is actually active there -- music
+ * clips never overlap (BackgroundTrackStrip.tsx's own single-row, neighbor-
+ * clamped packing), so at most one ever is. Returns 0 (no pulse) where no
+ * clip is active, same graceful-degradation style as sampleAudioEnvelopeAt's
+ * own missing-envelope case. Re-bases `timeSeconds` into the active clip's
+ * OWN source-buffer time first -- elapsed time since the clip's own
+ * startTimeSeconds, offset by sourceStartSeconds, wrapped the same way
+ * CanvasPlayer's/exportTimeline's own audio scheduling wraps a looping
+ * clip's buffer offset (loopStart = sourceStartSeconds, not 0) -- before
+ * handing off to sampleAudioEnvelopeAt, which is otherwise a correct no-op
+ * modulo once time is already expressed this way. */
+export function sampleMusicClipsEnvelopeAt(
+  clips: MusicClip[],
+  envelopesByAssetId: Record<string, AudioEnvelope>,
+  timeSeconds: number
+): number {
+  const clip = findActiveMusicClip(clips, timeSeconds);
+  if (!clip) return 0;
+  const envelope = envelopesByAssetId[clip.assetId];
+  if (!envelope) return 0;
+  const elapsedIntoWindowSeconds = timeSeconds - clip.startTimeSeconds;
+  const playableSourceSeconds = Math.max(envelope.durationSeconds - clip.sourceStartSeconds, 0.0001);
+  const sourceTimeSeconds = clip.sourceStartSeconds + (elapsedIntoWindowSeconds % playableSourceSeconds);
+  return sampleAudioEnvelopeAt(envelope, sourceTimeSeconds);
 }

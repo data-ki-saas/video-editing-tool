@@ -1,169 +1,259 @@
 "use client";
 
 /**
- * Visualizes the background-music sequence repeating (looping) across the
- * full duration of the video, as a strip of segments -- one per track per
- * loop -- shown above the frame thumbnail strip in the Playground. Empty
- * state when no track is selected.
+ * One row, one segment per background-music MusicClip (see
+ * lib/video/video_math.ts) -- freely movable (body-drag) and resizable
+ * (edge-drag), the same two gestures VideoOverlayTrack.tsx already gives a
+ * video overlay, ported here for music (see that file's own
+ * startEdgeDrag/startBodyDrag for the mechanics this is based on). Clips
+ * share ONE row, sorted by time and neighbor-clamped so they never overlap
+ * -- same "exclusive layout" packing VideoOverlayTrack uses for its own
+ * Full-Screen/Split-Screen clips -- rather than TtsOverlayTrack/
+ * VideoOverlayTrack's Picture-in-Picture group, which allows free overlap in
+ * separate rows: layered, simultaneously-playing music beds aren't a case
+ * this rail supports.
  *
- * Takes an ordered list of already-resolved tracks ({assetId, name, url}[])
- * rather than a catalog id -- the caller (ThreePaneEditor) is the one that
- * knows whether the background is a curated BACKGROUND_TRACK_OPTIONS entry
- * (assetId null) or one or more of this project's own music assets
- * (appended via AssetGallery's right-click "Add"), so this component
- * doesn't need to know that distinction exists. Multiple tracks
- * concatenate into one combined sequence (fetching each one's own duration
- * sequentially, same SequenceClipInfo/buildSequenceClipInfos/
- * totalSequenceDuration math the video sequence uses -- see video_math.ts),
- * and that whole combined sequence loops across the video's duration,
- * rather than looping just one track.
+ * Two DELIBERATE divergences from VideoOverlayTrack's own edge-drag, both
+ * because a music clip's own "resize" means something different from a
+ * video overlay's:
+ *  - The END edge is allowed to stretch the on-timeline window PAST one
+ *    play-through of the source (VideoOverlayTrack's own edge-drag hard-caps
+ *    at `sourceCapEnd` today -- see its own comment on why that's now
+ *    legacy-only there). Losing "a short music bed loops to fill the reel"
+ *    would be a real regression from what background music could already do
+ *    before this rail existed, so that cap is intentionally NOT ported.
+ *    `repeatsWithinWindow`/the dimmed region below is what visualizes it.
+ *  - The START edge moves BOTH startTimeSeconds AND sourceStartSeconds
+ *    together -- true trim-from-the-source (drag the left edge in, reveal
+ *    less of the track's own beginning), unlike VideoOverlayTrack's own left
+ *    edge, which only slides the on-timeline window without ever touching
+ *    its clip's sourceStartSeconds (that field is edited through a separate
+ *    dialog there). This rail has no separate trim-start dialog, so
+ *    edge-drag is the only way to set it.
  *
- * Add always appends rather than replacing (a single track is almost
- * always already longer than the whole reel, so this is the only way to
- * layer more than one on purpose) -- each track's own name and a remove
- * button are shown directly on its first-loop segment (see `onRemoveTrack`
- * below), since that's the only way to actually swap to different music
- * short of deleting the underlying asset outright.
- *
- * Total width is `videoDurationSeconds * pixelsPerSecond` -- the same scale
- * FrameStrip and MainAudioTrackStrip use, so all three line up and share
- * one scroll position (see lib/useSyncedHorizontalScroll.ts). (This rail
- * doesn't render its own MusicNoteIcon badge -- Playground.tsx overlays
- * one, followed by the VolumeBadge, on this rail's left edge; see that
- * file's own module comment.)
- *
- * `hide-scrollbar`, same as FrameStrip/MainAudioTrackStrip -- a native
- * scrollbar here ate into this rail's own fixed RAIL_HEIGHT_PX height
- * (Playground.tsx), squeezing it shorter than every other rail.
- * Playground.tsx's own proxy scrollbar row, at the very bottom of the whole
- * synced group (below both audio rails), is the one discoverable,
- * draggable affordance for the group -- dragging it (or a trackpad/wheel
- * gesture over any of the three strips) scrolls this rail too.
+ * Each clip's own real source duration (musicClipSourceDurationSeconds,
+ * probed once by ThreePaneEditor via getAudioDuration -- same cache
+ * `handleAddMusicClip` populates) drives both the edge-drag clamp math and
+ * the repeat-region visualization; Infinity (not yet probed) degrades
+ * gracefully to "no repeat region," same as VideoOverlayTrack's own
+ * `overlaySourceDurationSeconds` fallback.
  */
-import { useEffect, useState } from "react";
-import { getAudioDuration } from "@/lib/video/audio";
-import { buildSequenceClipInfos, totalSequenceDuration, type SequenceClipInfo } from "@/lib/video/video_math";
+import { useRef } from "react";
+import { ContextMenu, useContextMenu } from "./ContextMenu";
+import { snapToNearest, MIN_MUSIC_CLIP_DURATION_SECONDS, type MusicClip } from "@/lib/video/video_math";
+
+// Matches VideoOverlayTrack.tsx's own SNAP_THRESHOLD_PX -- same magnetic-
+// snap feel across every draggable rail in this editor.
+const SNAP_THRESHOLD_PX = 8;
+
+function MusicClipSegment({
+  clip,
+  name,
+  sourceDurationSeconds,
+  videoDurationSeconds,
+  prevBoundSeconds,
+  nextBoundSeconds,
+  snapPointsSeconds,
+  onChangeRange,
+  onCommitRange,
+  onChangePosition,
+  onCommitPosition,
+  onDelete,
+}: {
+  clip: MusicClip;
+  name: string;
+  sourceDurationSeconds: number; // Infinity if not yet probed
+  videoDurationSeconds: number;
+  prevBoundSeconds: number;
+  nextBoundSeconds: number;
+  snapPointsSeconds: number[];
+  onChangeRange: (start: number, end: number, sourceStart: number) => void;
+  onCommitRange: (start: number, end: number, sourceStart: number) => void;
+  onChangePosition: (start: number) => void;
+  onCommitPosition: (start: number) => void;
+  onDelete: () => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
+
+  function startEdgeDrag(e: React.PointerEvent, edge: "start" | "end") {
+    e.preventDefault();
+    e.stopPropagation(); // load-bearing: keeps this from also triggering startBodyDrag on the root
+    const track = rootRef.current?.parentElement;
+    if (!track || videoDurationSeconds <= 0) return;
+
+    const trackRect = track.getBoundingClientRect();
+    const startX = e.clientX;
+    const { startTimeSeconds, endTimeSeconds, sourceStartSeconds } = clip;
+    const snapThresholdSeconds = (SNAP_THRESHOLD_PX / trackRect.width) * videoDurationSeconds;
+
+    function computeNext(clientX: number): [number, number, number] {
+      const dxSeconds = ((clientX - startX) / trackRect.width) * videoDurationSeconds;
+      if (edge === "start") {
+        // Can't reveal earlier than the source's own real beginning --
+        // startTimeSeconds - sourceStartSeconds is the timeline instant at
+        // which sourceStartSeconds would hit 0.
+        const minStart = Math.max(prevBoundSeconds, 0, startTimeSeconds - sourceStartSeconds);
+        const maxStart = endTimeSeconds - MIN_MUSIC_CLIP_DURATION_SECONDS;
+        const clamped = Math.min(Math.max(startTimeSeconds + dxSeconds, minStart), maxStart);
+        const snapped = snapToNearest(clamped, snapPointsSeconds, snapThresholdSeconds);
+        const nextStart = Math.min(Math.max(snapped, minStart), maxStart);
+        const appliedDelta = nextStart - startTimeSeconds;
+        return [nextStart, endTimeSeconds, sourceStartSeconds + appliedDelta];
+      }
+      // End edge -- deliberately no sourceCapEnd term, see this file's own
+      // module comment on why a music clip may stretch past one
+      // play-through of its source.
+      const maxEnd = Math.min(nextBoundSeconds, videoDurationSeconds);
+      const clamped = Math.max(Math.min(endTimeSeconds + dxSeconds, maxEnd), startTimeSeconds + MIN_MUSIC_CLIP_DURATION_SECONDS);
+      const snapped = snapToNearest(clamped, snapPointsSeconds, snapThresholdSeconds);
+      const next = Math.max(Math.min(snapped, maxEnd), startTimeSeconds + MIN_MUSIC_CLIP_DURATION_SECONDS);
+      return [startTimeSeconds, next, sourceStartSeconds];
+    }
+
+    function handleMove(ev: PointerEvent) {
+      onChangeRange(...computeNext(ev.clientX));
+    }
+    function handleUp(ev: PointerEvent) {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      onCommitRange(...computeNext(ev.clientX));
+    }
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
+  function startBodyDrag(e: React.PointerEvent) {
+    e.preventDefault();
+    const track = rootRef.current?.parentElement;
+    if (!track || videoDurationSeconds <= 0) return;
+
+    const trackRect = track.getBoundingClientRect();
+    const startX = e.clientX;
+    const durationSeconds = clip.endTimeSeconds - clip.startTimeSeconds;
+    const minStart = prevBoundSeconds;
+    const maxStart = Math.min(nextBoundSeconds, videoDurationSeconds) - durationSeconds;
+    const snapThresholdSeconds = (SNAP_THRESHOLD_PX / trackRect.width) * videoDurationSeconds;
+
+    function computeNext(clientX: number): number {
+      const dxSeconds = ((clientX - startX) / trackRect.width) * videoDurationSeconds;
+      const clamped = Math.min(Math.max(clip.startTimeSeconds + dxSeconds, minStart), Math.max(maxStart, minStart));
+      const snapped = snapToNearest(clamped, snapPointsSeconds, snapThresholdSeconds);
+      return Math.min(Math.max(snapped, minStart), Math.max(maxStart, minStart));
+    }
+    function handleMove(ev: PointerEvent) {
+      onChangePosition(computeNext(ev.clientX));
+    }
+    function handleUp(ev: PointerEvent) {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      onCommitPosition(computeNext(ev.clientX));
+    }
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
+  const leftPercent = videoDurationSeconds > 0 ? (clip.startTimeSeconds / videoDurationSeconds) * 100 : 0;
+  const durationSeconds = clip.endTimeSeconds - clip.startTimeSeconds;
+  const widthPercent = videoDurationSeconds > 0 ? (durationSeconds / videoDurationSeconds) * 100 : 0;
+
+  // How much of the source is actually playable from its own trim-in point
+  // onward -- what the clip's own window can loop across before repeating.
+  // See this file's own module comment on why this (unlike
+  // VideoOverlayTrack's equivalent, which ignores trim-in) subtracts
+  // sourceStartSeconds: trim-in and overrun can both be true here at once.
+  const hasKnownSourceDuration = Number.isFinite(sourceDurationSeconds) && sourceDurationSeconds > 0;
+  const playableSourceSeconds = hasKnownSourceDuration ? Math.max(sourceDurationSeconds - clip.sourceStartSeconds, 0) : 0;
+  const repeatsWithinWindow = hasKnownSourceDuration && playableSourceSeconds > 0 && playableSourceSeconds < durationSeconds;
+  const repeatRegionPercent = repeatsWithinWindow ? ((durationSeconds - playableSourceSeconds) / durationSeconds) * 100 : 0;
+  const loopTickPercents: number[] = [];
+  if (repeatsWithinWindow) {
+    for (let boundary = playableSourceSeconds; boundary < durationSeconds; boundary += playableSourceSeconds) {
+      loopTickPercents.push((boundary / durationSeconds) * 100);
+    }
+  }
+
+  return (
+    <div ref={rootRef} className="relative h-5 w-full shrink-0">
+      <div
+        onPointerDown={startBodyDrag}
+        onContextMenu={(e) => openContextMenu(e, [{ label: "Remove music", danger: true, onSelect: onDelete }])}
+        title="Drag the middle to move, an edge to trim; right-click to remove"
+        className="absolute top-0 flex h-full cursor-grab items-center overflow-hidden rounded-sm border border-accent-foreground/30 bg-accent px-1"
+        style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
+      >
+        <span className="pointer-events-none select-none truncate text-[9px] text-accent-foreground">{name}</span>
+        {repeatsWithinWindow && (
+          <div
+            className="pointer-events-none absolute inset-y-0 right-0 bg-black/35"
+            style={{ width: `${repeatRegionPercent}%` }}
+            title={`Repeats every ${playableSourceSeconds.toFixed(1)}s`}
+          />
+        )}
+        {loopTickPercents.map((percent, tickIndex) => (
+          <div
+            key={tickIndex}
+            title="Repeats here"
+            className="pointer-events-none absolute inset-y-0 w-[2px] bg-white"
+            style={{ left: `${percent}%`, boxShadow: "0 0 0 1px rgba(0,0,0,0.55)" }}
+          />
+        ))}
+        <div
+          onPointerDown={(e) => startEdgeDrag(e, "start")}
+          className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-black/20"
+        />
+        <div
+          onPointerDown={(e) => startEdgeDrag(e, "end")}
+          className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-black/20"
+        />
+      </div>
+      <ContextMenu state={contextMenuState} onClose={closeContextMenu} />
+    </div>
+  );
+}
 
 export function BackgroundTrackStrip({
-  tracks,
-  onRemoveTrack,
+  musicClips,
+  assetNameById,
+  musicClipSourceDurationSeconds,
   videoDurationSeconds,
+  snapPointsSeconds,
   pixelsPerSecond,
   scrollContainerRef,
   onScroll,
+  onChangeRange,
+  onCommitRange,
+  onChangePosition,
+  onCommitPosition,
+  onDelete,
 }: {
-  tracks: { assetId: string | null; name: string; url: string }[];
-  // Undefined `assetId` (a curated-catalog track, not one of this
-  // project's own assets) has nothing to remove here -- see this file's
-  // own comment on why every real track today always has one anyway.
-  onRemoveTrack: (assetId: string) => void;
+  musicClips: MusicClip[];
+  assetNameById: Record<string, string>;
+  musicClipSourceDurationSeconds: Record<string, number>;
   videoDurationSeconds: number;
+  snapPointsSeconds: number[];
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
+  onChangeRange: (clipIndex: number, start: number, end: number, sourceStart: number) => void;
+  onCommitRange: (clipIndex: number, start: number, end: number, sourceStart: number) => void;
+  onChangePosition: (clipIndex: number, start: number) => void;
+  onCommitPosition: (clipIndex: number, start: number) => void;
+  onDelete: (clipIndex: number) => void;
 }) {
-  const [sequenceClips, setSequenceClips] = useState<SequenceClipInfo[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Joined URLs, not the `tracks` array reference -- so an unrelated
-  // parent re-render doesn't re-fetch every track's duration again.
-  const tracksKey = tracks.map((track) => track.url).join(",");
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setError(null);
-    setSequenceClips([]);
-    if (tracks.length === 0) return;
-
-    let cancelled = false;
-    setIsLoading(true);
-
-    async function loadDurations() {
-      const clipMeta: { assetId: string; url: string; durationSeconds: number }[] = [];
-      for (const track of tracks) {
-        if (cancelled) return;
-        try {
-          const duration = await getAudioDuration(track.url);
-          clipMeta.push({ assetId: track.name, url: track.url, durationSeconds: duration });
-        } catch (err) {
-          if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load a background track");
-        }
-      }
-      if (!cancelled) setSequenceClips(buildSequenceClipInfos(clipMeta));
-    }
-
-    loadDurations().finally(() => {
-      if (!cancelled) setIsLoading(false);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on tracksKey (joined urls), not the tracks array reference
-  }, [tracksKey]);
-
-  if (tracks.length === 0) {
+  if (musicClips.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center bg-neutral-950 px-2 text-xs text-muted">
-        No background track selected
+      <div
+        ref={scrollContainerRef}
+        onScroll={onScroll}
+        className="hide-scrollbar flex h-full items-center overflow-x-auto bg-neutral-950 px-2 text-xs text-muted"
+      >
+        No background music yet -- right-click a music asset to add it
       </div>
     );
   }
-  if (error && sequenceClips.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center bg-neutral-950 px-2 text-xs text-red-400">{error}</div>
-    );
-  }
 
-  const sequenceDurationSeconds = totalSequenceDuration(sequenceClips);
-  if (isLoading || sequenceDurationSeconds <= 0 || videoDurationSeconds <= 0) {
-    return (
-      <div className="flex h-full items-center justify-center bg-neutral-950 px-2 text-xs text-muted">Loading…</div>
-    );
-  }
-
-  // clip.assetId here is actually each track's NAME (see clipMeta above --
-  // buildSequenceClipInfos has no separate "display name" field, and the
-  // name is unique enough for its own tooltip purpose) -- this recovers the
-  // REAL asset id for the remove button, keyed by name rather than
-  // position, since a track that failed its duration probe is skipped
-  // entirely from clipMeta/sequenceClips, which would desync a
-  // position-based lookup against the original `tracks` array.
-  const realAssetIdByName = new Map(
-    tracks.filter((track): track is { assetId: string; name: string; url: string } => Boolean(track.assetId)).map((track) => [track.name, track.assetId])
-  );
-
-  const loopCount = Math.max(1, Math.ceil(videoDurationSeconds / sequenceDurationSeconds));
-  const segments = Array.from({ length: loopCount }, (_, loopIndex) => loopIndex).flatMap((loopIndex) =>
-    sequenceClips
-      .map((clip, clipIndex) => {
-        const absoluteStartSeconds = loopIndex * sequenceDurationSeconds + clip.startTimeSeconds;
-        if (absoluteStartSeconds >= videoDurationSeconds) return null;
-        // The final segment is usually cut short by the video ending
-        // mid-track -- it shrinks proportionally instead of overhanging
-        // past the strip's right edge.
-        const remainingSeconds = videoDurationSeconds - absoluteStartSeconds;
-        const widthFraction = Math.min(clip.durationSeconds, remainingSeconds) / videoDurationSeconds;
-        return {
-          key: `${loopIndex}-${clipIndex}`,
-          widthFraction,
-          name: clip.assetId,
-          title: `${clip.assetId} -- loop ${loopIndex + 1}`,
-          // Only the first loop shows the name/remove button -- every later
-          // repetition is the same track, and repeating the control on each
-          // one would just clutter the rail with duplicate delete buttons
-          // for the exact same track.
-          removableAssetId: loopIndex === 0 ? realAssetIdByName.get(clip.assetId) : undefined,
-        };
-      })
-      .filter(
-        (
-          segment
-        ): segment is { key: string; widthFraction: number; name: string; title: string; removableAssetId: string | undefined } =>
-          segment !== null
-      )
-  );
+  const indexed = musicClips.map((clip, index) => ({ clip, index })).sort((a, b) => a.clip.startTimeSeconds - b.clip.startTimeSeconds);
 
   return (
     <div
@@ -171,34 +261,23 @@ export function BackgroundTrackStrip({
       onScroll={onScroll}
       className="hide-scrollbar h-full overflow-x-auto bg-neutral-950 px-2"
     >
-      <div className="relative flex h-full gap-px" style={{ width: videoDurationSeconds * pixelsPerSecond }}>
-        {segments.map((segment) => (
-          <div
-            key={segment.key}
-            style={{ flexBasis: `${segment.widthFraction * 100}%` }}
-            title={segment.title}
-            // Solid fill (not a translucent tint) -- the previous
-            // bg-accent/20 + border-accent/40 nearly vanished against
-            // neutral-950 for every color theme's accent, light or dark.
-            // `gap-px` on the parent (bg-neutral-950 showing through)
-            // already separates adjacent segments -- no border needed.
-            className="flex shrink-0 items-center justify-between gap-1 overflow-hidden rounded-sm bg-accent pl-1.5"
-          >
-            {segment.removableAssetId && (
-              <>
-                <span className="truncate text-[10px] leading-none text-accent-foreground">{segment.name}</span>
-                <button
-                  type="button"
-                  onClick={() => onRemoveTrack(segment.removableAssetId!)}
-                  aria-label={`Remove ${segment.name} from background music`}
-                  title="Remove"
-                  className="shrink-0 rounded-sm px-1 py-0.5 text-[10px] leading-none text-accent-foreground hover:bg-black/20"
-                >
-                  ✕
-                </button>
-              </>
-            )}
-          </div>
+      <div className="relative h-full" style={{ width: videoDurationSeconds * pixelsPerSecond }}>
+        {indexed.map(({ clip, index }, pos) => (
+          <MusicClipSegment
+            key={index}
+            clip={clip}
+            name={assetNameById[clip.assetId] ?? ""}
+            sourceDurationSeconds={musicClipSourceDurationSeconds[clip.assetId] ?? Infinity}
+            videoDurationSeconds={videoDurationSeconds}
+            prevBoundSeconds={pos > 0 ? indexed[pos - 1].clip.endTimeSeconds : 0}
+            nextBoundSeconds={pos < indexed.length - 1 ? indexed[pos + 1].clip.startTimeSeconds : videoDurationSeconds}
+            snapPointsSeconds={snapPointsSeconds}
+            onChangeRange={(start, end, sourceStart) => onChangeRange(index, start, end, sourceStart)}
+            onCommitRange={(start, end, sourceStart) => onCommitRange(index, start, end, sourceStart)}
+            onChangePosition={(start) => onChangePosition(index, start)}
+            onCommitPosition={(start) => onCommitPosition(index, start)}
+            onDelete={() => onDelete(index)}
+          />
         ))}
       </div>
     </div>

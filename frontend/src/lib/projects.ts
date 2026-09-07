@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/client";
 import type {
   CropRect,
   ImageOverlayClip,
+  MusicClip,
   SequenceEntry,
   TextOverlay,
   TranscriptCaption,
@@ -107,6 +108,13 @@ export interface EditSelectionsSnapshot {
   // a time-ranged list -- null when disabled. History-tracked since it
   // changes what's on screen, same tier as textOverlays.
   transcriptCaption: TranscriptCaption | null;
+  // Background-music clips, each with its own authored startTimeSeconds/
+  // endTimeSeconds/sourceStartSeconds (drag to move, drag an edge to trim --
+  // see video_math.ts's MusicClip and BackgroundTrackStrip.tsx). Unlike
+  // `backgroundVolume` below, this DOES belong in history: a clip's
+  // position/trim is authored placement a creator could regret, same as
+  // videoOverlays' own three equivalent fields, not a mix-level setting.
+  musicClips: MusicClip[];
 }
 
 // Shared by ThreePaneEditor.tsx and editor-mobile/MobileEditor.tsx -- both
@@ -126,6 +134,7 @@ export const DEFAULT_EDIT_SELECTIONS: EditSelectionsSnapshot = {
   sequenceClips: [],
   videoOverlays: [],
   transcriptCaption: null,
+  musicClips: [],
 };
 
 export interface EditHistoryEntrySnapshot {
@@ -185,16 +194,20 @@ export interface Timeline {
   // Cosmetic-only selections (see EditSelectionsSnapshot's comment above) --
   // persisted directly rather than through the change history.
   selectedTemplateId?: string | null;
+  // Dead -- no UI sets this anymore (the curated Background track picker
+  // was removed), kept only so a project saved while it existed still
+  // round-trips on save, same tier as selectedTemplateId above.
   selectedBackgroundTrackId?: string;
-  // Set instead of selectedBackgroundTrackId when the background music is
-  // one or more of this project's own assets (via AssetGallery's
-  // right-click "Add" on a music tile, which appends -- multiple tracks
-  // concatenate, then the whole concatenated sequence loops across the
-  // video's duration) rather than a curated BACKGROUND_TRACK_OPTIONS
-  // entry -- the two are mutually exclusive, picking one clears the other.
-  // `selectedBackgroundAssetId` (singular) is read as a one-item seed if
-  // this is absent, for the one commit where the field briefly existed in
-  // that shape.
+  // Dead going forward -- the OLD background-music model (one or more of
+  // this project's own assets, appended in order via AssetGallery's
+  // right-click "Add," concatenated then looped across the video's
+  // duration). Superseded by EditSelectionsSnapshot.musicClips (real,
+  // independently-positioned/resizable clips, see video_math.ts's MusicClip)
+  // -- these two fields are read ONLY by ThreePaneEditor's one-time
+  // migration effect for a project saved before musicClips existed, never
+  // written to again after that. `selectedBackgroundAssetId` (singular) is
+  // read as a one-item seed if the array is absent, for the one commit
+  // where the field briefly existed in that shape.
   backgroundSequenceAssetIds?: string[];
   selectedBackgroundAssetId?: string | null;
   // Named points on the main sequence's own OUTPUT timeline -- see

@@ -1154,6 +1154,58 @@ export function findActiveWordIndex(overlay: TtsOverlay, timeSeconds: number): n
   return overlay.wordTimings.findIndex((w) => relativeMs >= w.startMs && relativeMs < w.endMs);
 }
 
+/**
+ * A background-music track placed on its own timeline rail -- freely
+ * movable (body-drag) and resizable (edge-drag), same mechanics as
+ * VideoOverlayClip's own startTimeSeconds/endTimeSeconds/sourceStartSeconds
+ * trio (see BackgroundTrackStrip.tsx). UNLIKE VideoOverlayClip's edge-drag,
+ * which now hard-caps at one play-through of the source (see
+ * VideoOverlayTrack.tsx's own startEdgeDrag comment), a MusicClip's
+ * on-timeline duration is deliberately allowed to exceed its source's real
+ * length -- a short music bed looping to fill the reel is the whole point
+ * of this rail, not legacy debt to tolerate. `sourceStartSeconds` still
+ * trims which part of the source it starts (and, once looping, wraps back
+ * to) playing from.
+ *
+ * Every music clip lives in ONE row, neighbor-clamped so clips never
+ * overlap -- same "exclusive layout" packing VideoOverlayTrack.tsx uses for
+ * Full-Screen/Split-Screen clips, chosen over free overlap (TtsOverlayTrack/
+ * VideoOverlayTrack's own Picture-in-Picture group) since layered,
+ * simultaneously-playing music beds aren't a case this rail supports today.
+ *
+ * No `url` -- resolved against a separately-passed assetUrlById everywhere,
+ * same convention as VideoOverlayClip.
+ */
+export interface MusicClip {
+  assetId: string;
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  sourceStartSeconds: number;
+}
+
+// Shortest a music clip is ever allowed to be, on-timeline -- same role as
+// MIN_VIDEO_OVERLAY_DURATION_SECONDS above, just for BackgroundTrackStrip's
+// own edge-drag clamp. A music bed reads fine down to half a second (unlike
+// a video overlay, it has no visible content of its own that needs to stay
+// legible), so this is looser than that constant.
+export const MIN_MUSIC_CLIP_DURATION_SECONDS = 0.5;
+
+/** A MusicClip with its source asset's URL resolved -- what the render
+ * pipelines (exportTimeline.ts, compileCreatomateTimeline.ts) and
+ * CanvasPlayer.tsx's live preview actually schedule, as opposed to the
+ * plain authored MusicClip persisted on EditSelectionsSnapshot. */
+export interface ResolvedMusicClip extends MusicClip {
+  url: string;
+}
+
+/** The music clip active at `timeSeconds`, if any -- clips never overlap
+ * (see MusicClip's own doc comment), so at most one is ever active. Used to
+ * re-base a "Pulse with music" audio-reactive sample into that clip's own
+ * source-buffer time (see audioReactive.ts's sampleMusicClipsEnvelopeAt). */
+export function findActiveMusicClip(clips: MusicClip[], timeSeconds: number): MusicClip | null {
+  return clips.find((clip) => timeSeconds >= clip.startTimeSeconds && timeSeconds < clip.endTimeSeconds) ?? null;
+}
+
 /** How far `timeSeconds` is through a [startTimeSeconds, endTimeSeconds)
  * window, as a 0..1 fraction clamped at both ends -- what every text
  * template renderer uses to drive its own entrance/exit animation, so

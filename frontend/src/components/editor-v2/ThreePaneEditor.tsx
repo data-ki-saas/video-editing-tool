@@ -65,6 +65,7 @@ import {
   videoOverlayStartThumbnailKey,
   type CropRect,
   type ImageOverlayClip,
+  type MusicClip,
   type SequenceEntry,
   type TextOverlay,
   type TtsOverlay,
@@ -129,6 +130,10 @@ import {
   applySelectCanvasFillMode,
   applySetBackgroundRemoval,
   applySetVideoOverlayBackgroundRemoval,
+  applyAddMusicClip,
+  applyMusicClipRangeChange,
+  applyMusicClipPositionChange,
+  applyDeleteMusicClip,
 } from "@/lib/video/transformations";
 import type { FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
@@ -146,9 +151,8 @@ import { useEditHistory } from "@/lib/useEditHistory";
 import { useAutosaveTimeline } from "@/lib/useAutosaveTimeline";
 import { useRenderStatus } from "@/lib/useRenderStatus";
 import { useLocalRender } from "@/lib/useLocalRender";
-import { gatherLocalSequenceClips, gatherLocalBackgroundClips } from "@/lib/localRender/gatherLocalRenderClips";
+import { gatherLocalSequenceClips, gatherLocalMusicClips } from "@/lib/localRender/gatherLocalRenderClips";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
-import { BACKGROUND_TRACK_OPTIONS } from "@/lib/backgroundTracks";
 import { DEFAULT_MARKER_LABEL } from "./MarkerTrack";
 import { ActionArea } from "./ActionArea";
 import { Playground } from "./Playground";
@@ -301,6 +305,18 @@ export function ThreePaneEditor({
   const [liveTtsOverlayPositionEdit, setLiveTtsOverlayPositionEdit] = useState<{ index: number; startTimeSeconds: number } | null>(null);
   const [liveTtsOverlayVolumeEdit, setLiveTtsOverlayVolumeEdit] = useState<{ index: number; volume: number } | null>(null);
 
+  // BackgroundTrackStrip's own edge drag (trim, ALSO moves sourceStartSeconds
+  // -- see that file's own module comment on why this differs from
+  // liveVideoOverlayRangeEdit above) and body drag (move), same live-edit
+  // split as every other draggable rail.
+  const [liveMusicClipRangeEdit, setLiveMusicClipRangeEdit] = useState<{
+    index: number;
+    startTimeSeconds: number;
+    endTimeSeconds: number;
+    sourceStartSeconds: number;
+  } | null>(null);
+  const [liveMusicClipPositionEdit, setLiveMusicClipPositionEdit] = useState<{ index: number; startTimeSeconds: number } | null>(null);
+
   // A representative still frame per video asset -- lifted up from
   // AssetGallery.tsx (which used to generate this locally) since
   // VideoOverlayTrack.tsx needs the exact same thumbnails and lives in a
@@ -338,9 +354,13 @@ export function ThreePaneEditor({
     const id = activityLogIdRef.current;
     setActivityLog((prev) => [...prev.slice(-(MAX_ACTIVITY_LOG_ENTRIES - 1)), { id, text }]);
   }, []);
-  // Each background-music track's own probed duration, by assetId --
-  // handleAddToBackgroundSequence uses this to warn before adding a track
-  // that can never actually be heard (see that handler's own comment).
+  // Each background-music asset's own probed real duration, by assetId --
+  // BackgroundTrackStrip's edge-drag clamp/repeat-region visualization needs
+  // this (same role overlaySourceDurationSeconds plays for video overlays),
+  // and handleAddMusicClip uses it to default a fresh clip's own duration to
+  // the track's real length. Populated both by handleAddMusicClip's own
+  // synchronous probe-before-placing and by the general backfill effect
+  // below (for clips a project already had -- migrated or reloaded).
   const [backgroundTrackDurationSeconds, setBackgroundTrackDurationSeconds] = useState<Record<string, number>>({});
   // A still frame captured AT each overlay placement's own sourceStartSeconds
   // (flag icon / OverlaySourceStartDialog), keyed by videoOverlayStartThumbnailKey
@@ -474,26 +494,13 @@ export function ThreePaneEditor({
   const selectedTemplateId = initialTimeline.selectedTemplateId ?? null;
   // No UI sets this anymore (the curated Background track picker was
   // removed), but a project saved while it existed still carries a value
-  // here, and handleAddToBackgroundSequence still resets it to "none" for
-  // mutual exclusivity with a project's own asset(s) below, so it stays a
-  // real state value rather than a plain constant.
-  const [selectedBackgroundTrackId, setSelectedBackgroundTrackId] = useState(
-    initialTimeline.selectedBackgroundTrackId ?? "none"
-  );
-  // Set instead of selectedBackgroundTrackId when the background music is
-  // one or more of this project's own assets -- ordered, appended to by
-  // AssetGallery's right-click "Add" on a music tile (multiple tracks
-  // concatenate, see BackgroundTrackStrip), removed one at a time via
-  // BackgroundTrackStrip's own remove control (handleRemoveBackgroundTrack)
-  // -- mutually exclusive with the catalog choice, see
-  // handleAddToBackgroundSequence.
-  // Seeds from the old singular `selectedBackgroundAssetId` field if the
-  // array form isn't present yet (the one commit where it briefly existed
-  // in that shape) -- a one-time runtime seed, not a persisted migration.
-  const [backgroundSequenceAssetIds, setBackgroundSequenceAssetIds] = useState<string[]>(
-    initialTimeline.backgroundSequenceAssetIds ??
-      (initialTimeline.selectedBackgroundAssetId ? [initialTimeline.selectedBackgroundAssetId] : [])
-  );
+  // here, so it stays a real state value rather than a plain constant purely
+  // to round-trip on save, same treatment as selectedTemplateId above.
+  const [selectedBackgroundTrackId] = useState(initialTimeline.selectedBackgroundTrackId ?? "none");
+  // `initialTimeline.backgroundSequenceAssetIds`/`selectedBackgroundAssetId`
+  // (the OLD background-music model) are read ONLY by the one-time migration
+  // effect below, never as live state -- see EditSelectionsSnapshot's own
+  // musicClips doc comment. No local state for them anymore.
 
   // Flat 0..1 volume for each audio rail's own VolumeBadge (Playground.tsx)
   // -- cosmetic/not undo-tracked, same tier as selectedBackgroundTrackId
@@ -627,6 +634,7 @@ export function ThreePaneEditor({
     sequenceClips,
     videoOverlays,
     transcriptCaption: rawSelections.transcriptCaption ?? null,
+    musicClips: rawSelections.musicClips ?? [],
   };
 
   // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to redo (both redo
@@ -694,9 +702,10 @@ export function ThreePaneEditor({
     void refreshAssets();
   }, [refreshAssets]);
 
-  // assetId -> presigned R2 URL, for CanvasPlayer/FrameStrip/OverlayTrack/
-  // BackgroundTrackStrip to resolve an id to its actual file without each
-  // needing their own asset-list lookup.
+  // assetId -> presigned R2 URL, for CanvasPlayer/FrameStrip/OverlayTrack to
+  // resolve an id to its actual file without each needing their own
+  // asset-list lookup (CanvasPlayer resolves musicClips against this too --
+  // BackgroundTrackStrip itself never needs a URL, only assetId).
   const assetUrlById = Object.fromEntries(assets.map((asset) => [asset.id, asset.url]));
 
   // Generates one representative frame per video asset, once, the first
@@ -760,6 +769,92 @@ export function ThreePaneEditor({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- assetUrlById is a fresh object every render; videoOverlayAssetIds (memoized) + assetsLoaded is what actually gates this
   }, [videoOverlayAssetIds, assetsLoaded]);
+
+  // Same idiom as videoOverlayAssetIds/its probe effect above, for
+  // background-music clips -- BackgroundTrackStrip's edge-drag clamp/
+  // repeat-region visualization needs each distinct asset's own real
+  // duration, backfilled here for any clip this session didn't itself place
+  // via handleAddMusicClip's own synchronous probe (a reloaded project, or
+  // one the migration effect below just produced).
+  const musicClipAssetIds = useMemo(
+    () => Array.from(new Set(selections.musicClips.map((clip) => clip.assetId))),
+    [selections.musicClips]
+  );
+  useEffect(() => {
+    let cancelled = false;
+    for (const assetId of musicClipAssetIds) {
+      if (backgroundTrackDurationSeconds[assetId] !== undefined) continue;
+      const url = assetUrlById[assetId];
+      if (!url) continue;
+      getAudioDuration(url)
+        .then((duration) => {
+          if (!cancelled) setBackgroundTrackDurationSeconds((prev) => ({ ...prev, [assetId]: duration }));
+        })
+        .catch(() => {
+          // Leaves this asset's duration unresolved -- BackgroundTrackStrip's
+          // edge-drag/repeat-region just degrades to "unknown," same failure
+          // mode as overlaySourceDurationSeconds' own probe above.
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- assetUrlById is a fresh object every render; musicClipAssetIds (memoized) + assetsLoaded is what actually gates this
+  }, [musicClipAssetIds, assetsLoaded]);
+
+  // One-time migration for a project saved before MusicClip existed -- lays
+  // the OLD backgroundSequenceAssetIds queue (or the even older singular
+  // selectedBackgroundAssetId) out as real, sequential, non-overlapping
+  // MusicClips in the exact same order/positions the old concatenate-and-
+  // loop model always played, so an old reel's audible background music
+  // doesn't change out from under it. Runs once assets are loaded (needs
+  // each legacy track's own real URL/duration); guarded by a ref (not just
+  // the `musicClips.length === 0` state check) since the probe below is
+  // async and this must not re-fire mid-flight. A real pushChange, not a
+  // history bypass -- same precedent as requestAndPollBackgroundRemoval's
+  // own async-resolved matting result above.
+  const hasMigratedMusicRef = useRef(false);
+  useEffect(() => {
+    if (hasMigratedMusicRef.current) return;
+    if (selections.musicClips.length > 0) {
+      hasMigratedMusicRef.current = true; // already migrated, or a fresh project with nothing to migrate
+      return;
+    }
+    const legacyAssetIds =
+      initialTimeline.backgroundSequenceAssetIds ??
+      (initialTimeline.selectedBackgroundAssetId ? [initialTimeline.selectedBackgroundAssetId] : []);
+    if (legacyAssetIds.length === 0 || !assetsLoaded) return;
+    hasMigratedMusicRef.current = true;
+
+    let cancelled = false;
+    async function migrate() {
+      const migratedClips: MusicClip[] = [];
+      let cursor = 0;
+      for (const assetId of legacyAssetIds) {
+        const url = assetUrlById[assetId];
+        if (!url) continue; // asset since deleted -- drop it, same as the old model would have silently done
+        let duration = backgroundTrackDurationSeconds[assetId];
+        if (duration === undefined) {
+          try {
+            duration = await getAudioDuration(url);
+            if (!cancelled) setBackgroundTrackDurationSeconds((prev) => ({ ...prev, [assetId]: duration! }));
+          } catch {
+            continue; // couldn't probe -- same "skip it" policy the old concatenation loop used
+          }
+        }
+        if (duration <= 0) continue;
+        migratedClips.push({ assetId, startTimeSeconds: cursor, endTimeSeconds: cursor + duration, sourceStartSeconds: 0 });
+        cursor += duration;
+      }
+      if (cancelled || migratedClips.length === 0) return;
+      pushChange("Migrated background music", { ...selections, musicClips: migratedClips });
+    }
+    void migrate();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately runs once per mount (hasMigratedMusicRef guards re-entry, same as every other run-once-on-load effect in this file)
+  }, [assetsLoaded]);
 
   // Captures one still frame per (assetId, sourceStartSeconds) pair actually
   // in use across the current overlays -- so FrameStrip's main track can show
@@ -1019,7 +1114,11 @@ export function ThreePaneEditor({
     editHistoryIndex,
     selectedTemplateId,
     selectedBackgroundTrackId,
-    backgroundSequenceAssetIds,
+    // Dead field -- round-tripped completely unchanged from however this
+    // project was originally saved (see this file's own note above), never
+    // read from live state anymore now that EditSelectionsSnapshot.musicClips
+    // is the real source of truth.
+    backgroundSequenceAssetIds: initialTimeline.backgroundSequenceAssetIds ?? [],
     markers,
     mainAudioVolume,
     backgroundVolume,
@@ -1033,7 +1132,6 @@ export function ThreePaneEditor({
   function handleAssetDeleted(assetId: string) {
     setAssets((prev) => prev.filter((asset) => asset.id !== assetId));
     setSelectedAsset((prev) => (prev?.id === assetId ? null : prev));
-    setBackgroundSequenceAssetIds((prev) => prev.filter((id) => id !== assetId));
     setSourceStartDialogOverlayIndex((prev) =>
       prev !== null && selections.videoOverlays[prev]?.assetId === assetId ? null : prev
     );
@@ -1042,7 +1140,8 @@ export function ThreePaneEditor({
       selections.overlayImages.some((overlay) => overlay.assetId === assetId) ||
       selections.sequenceClips.some((entry) => entry.assetId === assetId) ||
       selections.videoOverlays.some((overlay) => overlay.assetId === assetId) ||
-      selections.ttsOverlays.some((overlay) => overlay.assetId === assetId);
+      selections.ttsOverlays.some((overlay) => overlay.assetId === assetId) ||
+      selections.musicClips.some((clip) => clip.assetId === assetId);
     if (referencesDeletedAsset) {
       const { label, state } = {
         label: "Removed deleted asset",
@@ -1052,6 +1151,7 @@ export function ThreePaneEditor({
           sequenceClips: selections.sequenceClips.filter((entry) => entry.assetId !== assetId),
           videoOverlays: selections.videoOverlays.filter((overlay) => overlay.assetId !== assetId),
           ttsOverlays: selections.ttsOverlays.filter((overlay) => overlay.assetId !== assetId),
+          musicClips: selections.musicClips.filter((clip) => clip.assetId !== assetId),
         },
       };
       pushChange(label, state);
@@ -1823,7 +1923,7 @@ export function ThreePaneEditor({
         state.sequenceClips.some((entry) => entry.assetId === replacedAssetId) ||
         state.videoOverlays.some((overlay) => overlay.assetId === replacedAssetId) ||
         state.ttsOverlays.some((overlay) => overlay.assetId === replacedAssetId) ||
-        backgroundSequenceAssetIds.includes(replacedAssetId);
+        state.musicClips.some((clip) => clip.assetId === replacedAssetId);
       if (!stillReferenced) {
         deleteAsset(replacedAssetId)
           .then(() => setAssets((prev) => prev.filter((asset) => asset.id !== replacedAssetId)))
@@ -1881,51 +1981,57 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
-  // Right-click "Add" on a music asset in AssetGallery -- appends it to
-  // the background-music sequence (multiple appended tracks concatenate,
-  // then the whole thing loops across the video's duration -- see
-  // BackgroundTrackStrip). A single track is almost always already longer
-  // than the whole reel, so anything appended after the first one won't
-  // actually be heard during playback until the first is removed --
-  // handleRemoveBackgroundTrack (BackgroundTrackStrip's own remove
-  // control) is how a creator swaps to a different track, not by adding a
-  // second one on top. Warns (rather than silently no-op'ing) whenever the
-  // tracks already queued up already cover the whole reel on their own,
-  // since that's exactly the case where this add would never be heard --
-  // confirmable anyway, since a creator might genuinely want it queued for
-  // a reel they're about to lengthen. Mutually exclusive with the curated
-  // catalog choice; cosmetic/not history-tracked, like the catalog choice.
-  async function handleAddToBackgroundSequence(asset: Asset) {
-    let duration = backgroundTrackDurationSeconds[asset.id];
-    if (duration === undefined) {
+  // Right-click "Add" on a music asset in AssetGallery -- places a new,
+  // freely movable/resizable MusicClip (see video_math.ts's own doc comment
+  // and BackgroundTrackStrip.tsx), right after whichever clip currently
+  // contains the playhead, or at the playhead itself. History-tracked (see
+  // EditSelectionsSnapshot.musicClips' own doc comment), unlike the dead
+  // catalog-track picker this superseded. Mirrors handleAddVideoOverlay's
+  // own probe-before-placing shape exactly, right down to the Infinity
+  // fallback on a failed probe (applyAddMusicClip just fills whatever
+  // space is available in that case, rather than guessing a duration).
+  async function handleAddMusicClip(asset: Asset) {
+    let sourceDurationSeconds = backgroundTrackDurationSeconds[asset.id];
+    if (sourceDurationSeconds === undefined) {
       try {
-        duration = await getAudioDuration(asset.url);
-        setBackgroundTrackDurationSeconds((prev) => ({ ...prev, [asset.id]: duration! }));
+        sourceDurationSeconds = await getAudioDuration(asset.url);
+        setBackgroundTrackDurationSeconds((prev) => ({ ...prev, [asset.id]: sourceDurationSeconds! }));
       } catch {
-        duration = 0; // probe failed -- don't block the add over an unrelated decode issue
+        sourceDurationSeconds = Infinity;
       }
     }
-
-    const queuedSeconds = backgroundSequenceAssetIds.reduce(
-      (sum, id) => sum + (backgroundTrackDurationSeconds[id] ?? 0),
-      0
-    );
-    if (backgroundSequenceAssetIds.length > 0 && videoDurationSeconds > 0 && queuedSeconds >= videoDurationSeconds) {
-      const proceed = window.confirm(
-        `Your current background music already runs ${Math.round(queuedSeconds)}s -- longer than this ${Math.round(videoDurationSeconds)}s reel. "${asset.filename}" would be queued after it and never actually play unless you remove the existing track(s) first. Add it anyway?`
-      );
-      if (!proceed) return;
-    }
-
-    setBackgroundSequenceAssetIds((prev) => [...prev, asset.id]);
-    setSelectedBackgroundTrackId("none");
+    const { label, state } = applyAddMusicClip(selections, asset.id, sourceDurationSeconds, currentTimeSeconds, videoDurationSeconds);
+    pushChange(label, state);
   }
 
-  // BackgroundTrackStrip's own per-track remove control -- the only way to
-  // actually swap background music, since Add always appends (see that
-  // handler's own comment on why a second track alone doesn't do it).
-  function handleRemoveBackgroundTrack(assetId: string) {
-    setBackgroundSequenceAssetIds((prev) => prev.filter((id) => id !== assetId));
+  // BackgroundTrackStrip's own edge-drag (trim) -- live preview while
+  // dragging, committed to history on pointerup. See that file's own module
+  // comment on why this ALSO moves sourceStartSeconds, unlike
+  // handleChangeVideoOverlayRange below.
+  function handleChangeMusicClipRange(clipIndex: number, startTimeSeconds: number, endTimeSeconds: number, sourceStartSeconds: number) {
+    setLiveMusicClipRangeEdit({ index: clipIndex, startTimeSeconds, endTimeSeconds, sourceStartSeconds });
+  }
+  function handleCommitMusicClipRange(clipIndex: number, startTimeSeconds: number, endTimeSeconds: number, sourceStartSeconds: number) {
+    setLiveMusicClipRangeEdit(null);
+    const { label, state } = applyMusicClipRangeChange(selections, clipIndex, startTimeSeconds, endTimeSeconds, sourceStartSeconds);
+    pushChange(label, state);
+  }
+
+  // BackgroundTrackStrip's own body-drag (move) -- same live-edit/commit
+  // split as every other draggable rail.
+  function handleChangeMusicClipPosition(clipIndex: number, startTimeSeconds: number) {
+    setLiveMusicClipPositionEdit({ index: clipIndex, startTimeSeconds });
+  }
+  function handleCommitMusicClipPosition(clipIndex: number, startTimeSeconds: number) {
+    setLiveMusicClipPositionEdit(null);
+    const { label, state } = applyMusicClipPositionChange(selections, clipIndex, startTimeSeconds);
+    pushChange(label, state);
+  }
+
+  // BackgroundTrackStrip's own right-click "Remove music."
+  function handleDeleteMusicClip(clipIndex: number) {
+    const { label, state } = applyDeleteMusicClip(selections, clipIndex);
+    pushChange(label, state);
   }
 
   // Image overlay's own Picture-in-Picture box, dragged via the reused
@@ -2065,7 +2171,7 @@ export function ThreePaneEditor({
   function cleanupOrphanedTtsAsset(assetId: string, nextState: EditSelectionsSnapshot) {
     const stillReferenced =
       nextState.ttsOverlays.some((overlay) => overlay.assetId === assetId) ||
-      backgroundSequenceAssetIds.includes(assetId);
+      nextState.musicClips.some((clip) => clip.assetId === assetId);
     if (stillReferenced) return;
     setAssets((prev) => prev.filter((asset) => asset.id !== assetId));
     void deleteAsset(assetId).catch(() => {
@@ -2316,34 +2422,37 @@ export function ThreePaneEditor({
   });
 
   // Every asset currently referenced by at least one overlay, in the video
-  // sequence, or in the background-music sequence -- drives AssetGallery's
-  // "+" in-use badge.
+  // sequence, or by a background-music clip -- drives AssetGallery's "+"
+  // in-use badge.
   const usedAssetIds = new Set([
     ...selections.overlayImages.map((overlay) => overlay.assetId),
     ...selections.sequenceClips.map((entry) => entry.assetId),
     ...selections.videoOverlays.map((overlay) => overlay.assetId),
-    ...backgroundSequenceAssetIds,
+    ...selections.musicClips.map((clip) => clip.assetId),
   ]);
 
-  // Resolves the background-music sequence into the ordered
-  // {assetId, name, url} list BackgroundTrackStrip needs to visualize
-  // (concatenated, then looped across the video's duration) and
-  // handleRenderClick needs to compile -- a project asset sequence takes
-  // precedence over the curated catalog entry, if any. `assetId` is null
-  // for a catalog track (no project asset backing it, so nothing for a
-  // render to resolve a fresh URL from) -- see gatherRenderClips.ts's own
-  // comment on why that case is skipped at render time today.
-  const backgroundAssetTracks = backgroundSequenceAssetIds
-    .map((id) => assets.find((asset) => asset.id === id))
-    .filter((asset): asset is Asset => Boolean(asset))
-    .map((asset) => ({ assetId: asset.id, name: asset.filename, url: asset.url }));
-  const backgroundCatalogTrack = BACKGROUND_TRACK_OPTIONS.find((option) => option.id === selectedBackgroundTrackId);
-  const resolvedBackgroundTracks =
-    backgroundAssetTracks.length > 0
-      ? backgroundAssetTracks
-      : backgroundCatalogTrack?.url
-        ? [{ assetId: null, name: backgroundCatalogTrack.name, url: backgroundCatalogTrack.url }]
-        : [];
+  // assetId -> filename, for BackgroundTrackStrip's own per-segment labels
+  // (musicClips carries only assetId, same convention as videoOverlays).
+  const assetNameById = Object.fromEntries(assets.map((asset) => [asset.id, asset.filename]));
+
+  // Splices any in-progress BackgroundTrackStrip drag/trim edit into the
+  // persisted array at its own index, same pattern as displayedTtsOverlays
+  // above.
+  const displayedMusicClips = selections.musicClips.map((clip, index) => {
+    if (liveMusicClipPositionEdit?.index === index) {
+      const durationSeconds = clip.endTimeSeconds - clip.startTimeSeconds;
+      return { ...clip, startTimeSeconds: liveMusicClipPositionEdit.startTimeSeconds, endTimeSeconds: liveMusicClipPositionEdit.startTimeSeconds + durationSeconds };
+    }
+    if (liveMusicClipRangeEdit?.index === index) {
+      return {
+        ...clip,
+        startTimeSeconds: liveMusicClipRangeEdit.startTimeSeconds,
+        endTimeSeconds: liveMusicClipRangeEdit.endTimeSeconds,
+        sourceStartSeconds: liveMusicClipRangeEdit.sourceStartSeconds,
+      };
+    }
+    return clip;
+  });
 
   // The green Render button in FeedbackArea -- cloud (Creatomate) rendering
   // is temporarily disabled, so this just surfaces a "coming soon" popup
@@ -2392,19 +2501,12 @@ export function ThreePaneEditor({
     const freshAssets = await listAssets(projectId);
     const freshAssetUrlById = Object.fromEntries(freshAssets.map((asset) => [asset.id, asset.url]));
     const freshSequenceClips = effectiveSequenceEntries.map((entry) => ({ ...entry, url: freshAssetUrlById[entry.assetId] }));
-    const freshBackgroundAssetTracks = backgroundSequenceAssetIds
-      .map((id) => freshAssets.find((asset) => asset.id === id))
-      .filter((asset): asset is Asset => Boolean(asset))
-      .map((asset) => ({ assetId: asset.id, name: asset.filename, url: asset.url }));
-    const freshResolvedBackgroundTracks =
-      freshBackgroundAssetTracks.length > 0
-        ? freshBackgroundAssetTracks
-        : backgroundCatalogTrack?.url
-          ? [{ assetId: null, name: backgroundCatalogTrack.name, url: backgroundCatalogTrack.url }]
-          : [];
 
     const gatheredSequenceClips = await gatherLocalSequenceClips(freshSequenceClips);
-    const gatheredBackgroundClips = await gatherLocalBackgroundClips(freshResolvedBackgroundTracks);
+    // Position/duration are fully authored on MusicClip already -- unlike
+    // gatherLocalSequenceClips above, this is a synchronous URL resolve, no
+    // probing needed (see gatherLocalMusicClips' own doc comment).
+    const gatheredMusicClips = gatherLocalMusicClips(selections.musicClips, freshAssetUrlById);
 
     const clipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selections.clipRectId);
     const targetRatio = clipRectOption
@@ -2415,7 +2517,7 @@ export function ThreePaneEditor({
     await startLocalRender({
       selections,
       sequenceClips: gatheredSequenceClips,
-      backgroundClips: gatheredBackgroundClips,
+      musicClips: gatheredMusicClips,
       assetUrlById: freshAssetUrlById,
       // A single-asset re-resolve for exportTimeline.ts's own mid-render
       // retry (see its loadOverlayImage) -- listAssets is the only lookup
@@ -2503,7 +2605,7 @@ export function ThreePaneEditor({
           onAddToSequence={handleAddToSequence}
           onAddVideoOverlay={handleAddVideoOverlay}
           onOpenVideoOverlayPickerForAsset={handleOpenVideoOverlayPickerForAsset}
-          onAddToBackgroundSequence={handleAddToBackgroundSequence}
+          onAddMusicClip={handleAddMusicClip}
           onOpenCutawayDialogForAsset={handleOpenCutawayDialogForAsset}
           usedAssetIds={usedAssetIds}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
@@ -2604,7 +2706,7 @@ export function ThreePaneEditor({
           ttsOverlays={displayedTtsOverlays}
           sequenceClips={playbackClips}
           videoOverlays={displayedVideoOverlays}
-          backgroundTracks={resolvedBackgroundTracks}
+          musicClips={displayedMusicClips}
           mainAudioVolume={mainAudioVolume}
           backgroundVolume={backgroundVolume}
           assetUrlById={assetUrlById}
@@ -2629,8 +2731,14 @@ export function ThreePaneEditor({
 
       <section className="min-h-0 flex-[7] overflow-hidden border-b border-border">
         <Playground
-          backgroundTracks={resolvedBackgroundTracks}
-          onRemoveBackgroundTrack={handleRemoveBackgroundTrack}
+          musicClips={displayedMusicClips}
+          assetNameById={assetNameById}
+          musicClipSourceDurationSeconds={backgroundTrackDurationSeconds}
+          onChangeMusicClipRange={handleChangeMusicClipRange}
+          onCommitMusicClipRange={handleCommitMusicClipRange}
+          onChangeMusicClipPosition={handleChangeMusicClipPosition}
+          onCommitMusicClipPosition={handleCommitMusicClipPosition}
+          onDeleteMusicClip={handleDeleteMusicClip}
           videoDurationSeconds={videoDurationSeconds}
           thumbnails={thumbnails}
           thumbnailTimestampsSeconds={thumbnailTimestampsSeconds}

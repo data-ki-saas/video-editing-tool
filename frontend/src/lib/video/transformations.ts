@@ -35,6 +35,7 @@ import {
   type BackgroundRemovalState,
   type CropRect,
   type ImageOverlayClip,
+  type MusicClip,
   type OverlayFraming,
   type SequenceEntry,
   type TextOverlay,
@@ -1658,5 +1659,91 @@ export function applyDeleteVideoOverlay(selections: EditSelectionsSnapshot, over
   return {
     label: "Removed overlay",
     state: { ...selections, videoOverlays: selections.videoOverlays.filter((_, index) => index !== overlayIndex) },
+  };
+}
+
+/** AssetGallery's right-click "Add" on a music tile -- places a new,
+ * freely-movable/resizable MusicClip (see video_math.ts's own doc comment
+ * and BackgroundTrackStrip.tsx), mirroring applyAddVideoOverlay's own
+ * placement rule: right after whichever existing clip currently contains
+ * the playhead, or at the playhead itself if none does, capped by the next
+ * clip's own start and the sequence's end. Every music clip is
+ * unconditionally "exclusive" (one row, never overlapping another), unlike
+ * VideoOverlayClip's own layout-dependent version of this check.
+ *
+ * UNLIKE applyAddVideoOverlay's short DEFAULT_VIDEO_OVERLAY_DURATION_SECONDS
+ * default (a fresh overlay is a short accent), a fresh music bed defaults to
+ * as much of its own real length as fits -- that's the whole point of this
+ * rail, filling the reel with a track, not dropping in a brief clip.
+ * `sourceDurationSeconds` is Infinity when the caller's getAudioDuration
+ * probe failed (same convention handleAddVideoOverlay already uses for its
+ * own failed getVideoDuration probe) -- Math.min against maxEnd below
+ * handles that directly, filling whatever space is actually available
+ * rather than guessing a duration. */
+export function applyAddMusicClip(
+  selections: EditSelectionsSnapshot,
+  assetId: string,
+  sourceDurationSeconds: number,
+  currentTimeSeconds: number,
+  videoDurationSeconds: number
+): TransformationResult {
+  const clips = selections.musicClips;
+  const containing = clips.find((c) => currentTimeSeconds >= c.startTimeSeconds && currentTimeSeconds < c.endTimeSeconds);
+  const startTimeSeconds = containing ? containing.endTimeSeconds : currentTimeSeconds;
+  const nextClipStart = clips
+    .filter((c) => c.startTimeSeconds >= startTimeSeconds)
+    .reduce((min, c) => Math.min(min, c.startTimeSeconds), Infinity);
+  const sequenceCap = videoDurationSeconds > startTimeSeconds ? videoDurationSeconds : Infinity;
+  const maxEnd = Math.min(nextClipStart, sequenceCap);
+  const endTimeSeconds = Math.min(startTimeSeconds + Math.max(sourceDurationSeconds, 0), maxEnd);
+  if (endTimeSeconds <= startTimeSeconds) return { label: "Added music", state: selections };
+
+  const newClip: MusicClip = { assetId, startTimeSeconds, endTimeSeconds, sourceStartSeconds: 0 };
+  return { label: "Added music", state: { ...selections, musicClips: [...clips, newClip] } };
+}
+
+/** Dragging a music clip's segment edges on BackgroundTrackStrip -- trims
+ * how much of the source plays, and (unlike VideoOverlayTrack's own
+ * edge-drag today) may deliberately stretch the on-timeline window PAST one
+ * play-through of the source -- BackgroundTrackStrip's own drag math is
+ * what omits VideoOverlayTrack's sourceCapEnd clamp, and what computes
+ * sourceStartSeconds; this just commits the result. */
+export function applyMusicClipRangeChange(
+  selections: EditSelectionsSnapshot,
+  clipIndex: number,
+  startTimeSeconds: number,
+  endTimeSeconds: number,
+  sourceStartSeconds: number
+): TransformationResult {
+  const clip = selections.musicClips[clipIndex];
+  if (!clip) return { label: "Trimmed music", state: selections };
+  const nextClips = [...selections.musicClips];
+  nextClips[clipIndex] = { ...clip, startTimeSeconds, endTimeSeconds, sourceStartSeconds };
+  return { label: "Trimmed music", state: { ...selections, musicClips: nextClips } };
+}
+
+/** Dragging the MIDDLE of a music clip's segment on BackgroundTrackStrip --
+ * slides the whole block along the timeline, keeping duration and source
+ * in-point both fixed. */
+export function applyMusicClipPositionChange(
+  selections: EditSelectionsSnapshot,
+  clipIndex: number,
+  startTimeSeconds: number
+): TransformationResult {
+  const clip = selections.musicClips[clipIndex];
+  if (!clip) return { label: "Moved music", state: selections };
+  const durationSeconds = clip.endTimeSeconds - clip.startTimeSeconds;
+  const nextClips = [...selections.musicClips];
+  nextClips[clipIndex] = { ...clip, startTimeSeconds, endTimeSeconds: startTimeSeconds + durationSeconds };
+  return { label: "Moved music", state: { ...selections, musicClips: nextClips } };
+}
+
+/** Removes one music clip outright -- from BackgroundTrackStrip's own
+ * right-click/delete affordance. */
+export function applyDeleteMusicClip(selections: EditSelectionsSnapshot, clipIndex: number): TransformationResult {
+  if (!selections.musicClips[clipIndex]) return { label: "Removed music", state: selections };
+  return {
+    label: "Removed music",
+    state: { ...selections, musicClips: selections.musicClips.filter((_, index) => index !== clipIndex) },
   };
 }

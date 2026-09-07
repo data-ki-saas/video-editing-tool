@@ -12,10 +12,10 @@
  * happen to match the available height), the main sequence's own audio
  * rail immediately below it (MainAudioTrackStrip -- a solid span, not a
  * waveform; see that file's own comment on why), and the background-music
- * rail at the very bottom (concatenates every track in the sequence and
- * loops the whole thing across the video's duration, see
- * BackgroundTrackStrip) -- furthest from the main video content it plays
- * under. Both audio rails share the SAME fixed height (RAIL_HEIGHT_PX) --
+ * rail at the very bottom (one freely movable/resizable MusicClip per
+ * segment, packed into a single non-overlapping row -- see
+ * BackgroundTrackStrip.tsx) -- furthest from the main video content it
+ * plays under. Both audio rails share the SAME fixed height (RAIL_HEIGHT_PX) --
  * just another rail, same tier as every other track in the strip -- with a
  * rail-identity icon (MicrophoneIcon
  * for MainAudioTrackStrip, MusicNoteIcon for BackgroundTrackStrip -- see
@@ -70,6 +70,7 @@ import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
 import type {
   CropRect,
   ImageOverlayClip,
+  MusicClip,
   SequenceEntry,
   TextOverlay,
   TrimRange,
@@ -111,8 +112,14 @@ const MAIN_AUDIO_STRIP_INDEX = 2;
 const PROXY_SCROLLBAR_INDEX = 3;
 
 export function Playground({
-  backgroundTracks,
-  onRemoveBackgroundTrack,
+  musicClips,
+  assetNameById,
+  musicClipSourceDurationSeconds,
+  onChangeMusicClipRange,
+  onCommitMusicClipRange,
+  onChangeMusicClipPosition,
+  onCommitMusicClipPosition,
+  onDeleteMusicClip,
   videoDurationSeconds,
   thumbnails,
   thumbnailTimestampsSeconds,
@@ -209,8 +216,14 @@ export function Playground({
   onTogglePinMarker,
   onOpenSourceStart,
 }: {
-  backgroundTracks: { assetId: string | null; name: string; url: string }[];
-  onRemoveBackgroundTrack: (assetId: string) => void;
+  musicClips: MusicClip[];
+  assetNameById: Record<string, string>;
+  musicClipSourceDurationSeconds: Record<string, number>;
+  onChangeMusicClipRange: (clipIndex: number, start: number, end: number, sourceStart: number) => void;
+  onCommitMusicClipRange: (clipIndex: number, start: number, end: number, sourceStart: number) => void;
+  onChangeMusicClipPosition: (clipIndex: number, start: number) => void;
+  onCommitMusicClipPosition: (clipIndex: number, start: number) => void;
+  onDeleteMusicClip: (clipIndex: number) => void;
   videoDurationSeconds: number;
   thumbnails: string[];
   thumbnailTimestampsSeconds: number[];
@@ -335,6 +348,19 @@ export function Playground({
   onOpenSourceStart: (overlayIndex: number) => void;
 }) {
   const { bindRef, bindOnScroll } = useSyncedHorizontalScroll(4);
+
+  // What BackgroundTrackStrip's own edge/body drag snaps against -- the
+  // sequence's own bounds, the playhead, and every OTHER music clip's own
+  // edges. FrameStrip's own richer overlaySnapPointsSeconds lives one level
+  // down in a sibling subtree and isn't reachable from here, so this rail
+  // computes its own smaller list, same "each track computes what's
+  // meaningful to itself" principle already in play elsewhere in this file.
+  const musicClipSnapPointsSeconds = [
+    0,
+    videoDurationSeconds,
+    currentTimeSeconds,
+    ...musicClips.flatMap((clip) => [clip.startTimeSeconds, clip.endTimeSeconds]),
+  ];
 
   return (
     <div className="flex h-full flex-col overflow-y-auto bg-surface px-2">
@@ -489,12 +515,19 @@ export function Playground({
             />
           </div>
           <BackgroundTrackStrip
-            tracks={backgroundTracks}
-            onRemoveTrack={onRemoveBackgroundTrack}
+            musicClips={musicClips}
+            assetNameById={assetNameById}
+            musicClipSourceDurationSeconds={musicClipSourceDurationSeconds}
             videoDurationSeconds={videoDurationSeconds}
+            snapPointsSeconds={musicClipSnapPointsSeconds}
             pixelsPerSecond={PIXELS_PER_SECOND}
             scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}
             onScroll={bindOnScroll(BACKGROUND_STRIP_INDEX)}
+            onChangeRange={onChangeMusicClipRange}
+            onCommitRange={onCommitMusicClipRange}
+            onChangePosition={onChangeMusicClipPosition}
+            onCommitPosition={onCommitMusicClipPosition}
+            onDelete={onDeleteMusicClip}
           />
         </div>
 

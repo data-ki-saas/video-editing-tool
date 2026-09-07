@@ -59,6 +59,7 @@ import type { EditSelectionsSnapshot } from "@/lib/projects";
 import type {
   CropRect,
   ImageOverlayClip,
+  MusicClip,
   OverlayFraming,
   SequenceEntry,
   TextOverlay,
@@ -204,7 +205,7 @@ export function ActionArea({
   onAddToSequence,
   onAddVideoOverlay,
   onOpenVideoOverlayPickerForAsset,
-  onAddToBackgroundSequence,
+  onAddMusicClip,
   onOpenCutawayDialogForAsset,
   usedAssetIds,
   videoThumbnailUrlByAssetId,
@@ -298,7 +299,7 @@ export function ActionArea({
   ttsOverlays,
   sequenceClips,
   videoOverlays,
-  backgroundTracks,
+  musicClips,
   mainAudioVolume,
   backgroundVolume,
   assetUrlById,
@@ -326,7 +327,7 @@ export function ActionArea({
   onAddToSequence: (asset: Asset) => void;
   onAddVideoOverlay: (asset: Asset, options?: { removeBackground?: boolean; chromaKeyColor?: string }) => void;
   onOpenVideoOverlayPickerForAsset: (asset: Asset) => void;
-  onAddToBackgroundSequence: (asset: Asset) => void;
+  onAddMusicClip: (asset: Asset) => void;
   onOpenCutawayDialogForAsset: (asset: Asset) => void;
   usedAssetIds: Set<string>;
   videoThumbnailUrlByAssetId: Record<string, string>;
@@ -469,7 +470,7 @@ export function ActionArea({
   ttsOverlays: TtsOverlay[];
   sequenceClips: (SequenceEntry & { url: string })[];
   videoOverlays: VideoOverlayClip[];
-  backgroundTracks: { name: string; url: string }[];
+  musicClips: MusicClip[];
   mainAudioVolume: number;
   backgroundVolume: number;
   assetUrlById: Record<string, string>;
@@ -557,7 +558,7 @@ export function ActionArea({
           onAddImageOverlay={onAddImageOverlay}
           onAddToSequence={onAddToSequence}
           onOpenVideoOverlayPickerForAsset={onOpenVideoOverlayPickerForAsset}
-          onAddToBackgroundSequence={onAddToBackgroundSequence}
+          onAddMusicClip={onAddMusicClip}
           onOpenCutawayDialogForAsset={onOpenCutawayDialogForAsset}
           usedAssetIds={usedAssetIds}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
@@ -608,7 +609,7 @@ export function ActionArea({
             textOverlays={textOverlays}
             ttsOverlays={ttsOverlays}
             videoOverlays={videoOverlays}
-            backgroundTracks={backgroundTracks}
+            musicClips={musicClips}
             mainAudioVolume={mainAudioVolume}
             backgroundVolume={backgroundVolume}
             assetUrlById={assetUrlById}
