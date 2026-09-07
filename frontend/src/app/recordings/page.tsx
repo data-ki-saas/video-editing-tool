@@ -23,7 +23,15 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { deleteRecording, listRecordings, updateRecording, type Recording } from "@/lib/api";
-import { CropToolIcon, SpeakerFullIcon, SpeakerMutedIcon, TrashIcon, UploadIcon } from "@/components/icons/UIIcons";
+import {
+  CropToolIcon,
+  DownloadIcon,
+  ShareIcon,
+  SpeakerFullIcon,
+  SpeakerMutedIcon,
+  TrashIcon,
+  UploadIcon,
+} from "@/components/icons/UIIcons";
 import { PauseIcon, PlayIcon, RecordIcon } from "@/components/editor-v2/icons/PlayerIcons";
 import { InlineEditableText } from "@/components/InlineEditableText";
 import { RecordingEditDialog } from "@/components/recordings/RecordingEditDialog";
@@ -41,6 +49,50 @@ function formatDuration(seconds: number | null): string | null {
 
 function formatSavedAt(iso: string): string {
   return new Date(iso).toLocaleString();
+}
+
+function fileExtensionFor(recording: Recording): string {
+  return recording.kind === "video" ? "mp4" : "jpg";
+}
+
+// Forces a real download of a cross-origin file -- a plain <a download> is
+// silently ignored cross-origin by most browsers, same reasoning as
+// app/library/page.tsx's own downloadVideo. Re-fetching as a Blob first
+// sidesteps that restriction.
+async function downloadRecording(recording: Recording) {
+  const blob = await fetch(recording.url).then((res) => res.blob());
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = `${recording.name || "recording"}.${fileExtensionFor(recording)}`;
+  link.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
+// Recordings live in the PRIVATE uploads bucket (no public URL to hand out
+// -- unlike library/page.tsx's shareVideo, which copies a /share/[videoId]
+// link backed by the public renders bucket), so "Share" here hands the OS
+// share sheet the actual file bytes instead of a link -- AirDrop/Messages/
+// etc. all accept that. Falls back to a plain download when the browser
+// can't share files at all (desktop Safari/Firefox, or no Web Share
+// support), since there's no link to fall back to.
+async function shareRecording(recording: Recording) {
+  const blob = await fetch(recording.url).then((res) => res.blob());
+  const file = new File([blob], `${recording.name || "recording"}.${fileExtensionFor(recording)}`, {
+    type: recording.mimeType,
+  });
+
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: recording.name });
+      return;
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return; // user dismissed the share sheet
+      throw err;
+    }
+  }
+
+  await downloadRecording(recording);
 }
 
 function RecordingCard({
@@ -62,12 +114,31 @@ function RecordingCard({
   const [isMuted, setIsMuted] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [description, setDescription] = useState(recording.description ?? "");
+  const [actionError, setActionError] = useState<string | null>(null);
   const duration = formatDuration(recording.durationSeconds);
 
   function handleDescriptionBlur() {
     const trimmed = description.trim();
     if (trimmed === (recording.description ?? "")) return;
     onUpdateMetadata(recording, { name: recording.name, description: trimmed || null });
+  }
+
+  async function handleDownload() {
+    setActionError(null);
+    try {
+      await downloadRecording(recording);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to download this recording");
+    }
+  }
+
+  async function handleShare() {
+    setActionError(null);
+    try {
+      await shareRecording(recording);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to share this recording");
+    }
   }
 
   function togglePlayback() {
@@ -158,6 +229,24 @@ function RecordingCard({
         </button>
         <button
           type="button"
+          onClick={() => void handleDownload()}
+          title="Download"
+          aria-label="Download"
+          className="rounded-full p-1.5 text-muted hover:bg-background hover:text-foreground"
+        >
+          <DownloadIcon className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleShare()}
+          title="Share"
+          aria-label="Share"
+          className="rounded-full p-1.5 text-muted hover:bg-background hover:text-foreground"
+        >
+          <ShareIcon className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
           onClick={() => onDelete(recording)}
           title="Delete"
           aria-label="Delete"
@@ -166,6 +255,7 @@ function RecordingCard({
           <TrashIcon className="h-4 w-4" />
         </button>
       </div>
+      {actionError && <p className="text-[10px] text-red-600">{actionError}</p>}
     </div>
   );
 }
