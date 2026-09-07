@@ -391,6 +391,29 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
           return;
         }
         streamRef.current = mediaStream;
+        // Some multi-lens phones (mainly Android/Chrome) hand back a stream
+        // whose HARDWARE zoom the OS already nudged above 1x -- nothing to
+        // do with this page's own digital `zoom` state (still MIN_CAMERA_ZOOM
+        // here) or the cover-fit crop above, which only ever sees whatever
+        // frame the track already produced. Where the track exposes a `zoom`
+        // capability (Chrome's own MediaTrackConstraints extension, not
+        // standard -- Safari/Firefox simply won't have it), reset it to that
+        // capability's own minimum so this page always starts from the
+        // widest optical framing the lens can actually deliver.
+        const [videoTrack] = mediaStream.getVideoTracks();
+        // `zoom` is a real, shipped Chrome MediaTrackCapabilities/Constraints
+        // extension (https://w3c.github.io/mediacapture-image/#zoom) that
+        // TypeScript's DOM lib doesn't model -- cast through `unknown` rather
+        // than widening the whole capabilities/constraints object.
+        const zoomCapability = (videoTrack?.getCapabilities?.() as unknown as { zoom?: { min: number } } | undefined)?.zoom;
+        if (zoomCapability && zoomCapability.min !== undefined) {
+          try {
+            await videoTrack.applyConstraints({ advanced: [{ zoom: zoomCapability.min } as unknown as MediaTrackConstraintSet] });
+          } catch {
+            // Best-effort -- an unsupported/rejected constraint just leaves
+            // the OS's own default zoom in place.
+          }
+        }
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
           try {
