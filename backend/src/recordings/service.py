@@ -1,3 +1,4 @@
+import io
 import logging
 import re
 import tempfile
@@ -6,6 +7,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import HTTPException, UploadFile
+from mutagen.mp4 import MP4
 
 from src.assets import repository as assets_repository
 from src.assets.schemas import AssetInfo
@@ -20,6 +22,35 @@ logger = logging.getLogger(__name__)
 
 _ALLOWED_TYPES = {"video/mp4": "video", "image/jpeg": "image"}
 _UNSAFE_FILENAME_CHARS = re.compile(r"[^a-zA-Z0-9._-]")
+
+# A free (or any role without the recordings_unlimited feature -- see
+# permissions/features.py) account can keep at most this many recordings at
+# once. A total-row-count cap, not a time-windowed daily one, so it's a
+# plain count_for_user() check rather than usage/service.py's
+# count_recent_events machinery (built entirely around a rolling 24h
+# window -- a poor fit here).
+FREE_RECORDINGS_LIMIT = 15
+
+# Applies to every upload_recording call (both the Record button's own
+# capture, which already client-side-caps itself at this same length via
+# CameraCapturePage's MAX_RECORDING_SECONDS, and the Recordings page's
+# Upload button, which accepts arbitrary pre-existing files with no such
+# built-in bound) -- keeps this library's storage/size in check.
+MAX_RECORDING_DURATION_SECONDS = 180
+
+
+def _probe_video_duration_seconds(body: bytes) -> float | None:
+    """Authoritative server-side duration for an uploaded mp4, via mutagen
+    (pure-Python, no ffprobe/ffmpeg binary -- same technique already used by
+    avatar/service.py to probe a HeyGen video). Returns None (fail OPEN, not
+    closed) on a probe failure -- same convention as avatar/service.py's own
+    probe -- rather than blocking an upload mutagen simply can't parse; the
+    duration cap below only applies when a duration was actually measured."""
+    try:
+        return MP4(io.BytesIO(body)).info.length
+    except Exception:
+        logger.warning("could not probe uploaded recording's duration -- skipping the length check for this upload")
+        return None
 
 
 def _to_recording_info(record: repository.RecordingRecord) -> RecordingInfo:
@@ -78,7 +109,27 @@ async def upload_recording(
     if not kind or not file.filename:
         raise HTTPException(status_code=400, detail="Only .mp4 video or .jpg photo recordings are supported")
 
+    if "recordings_unlimited" not in user.features and repository.count_for_user(user.id) >= FREE_RECORDINGS_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Free accounts are limited to {FREE_RECORDINGS_LIMIT} recordings -- delete one to add another.",
+        )
+
     body = await file.read()
+
+    if kind == "video":
+        probed_duration = _probe_video_duration_seconds(body)
+        if probed_duration is not None:
+            if probed_duration > MAX_RECORDING_DURATION_SECONDS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Videos are limited to {MAX_RECORDING_DURATION_SECONDS // 60} minutes",
+                )
+            # Authoritative over whatever the client sent (or omitted) --
+            # e.g. the Upload button's own arbitrary pre-existing files,
+            # unlike CameraCapturePage's own recording timer.
+            duration_seconds = probed_duration
+
     storage_key = _write_to_r2(user_id=user.id, filename=file.filename, content_type=file.content_type, body=body)
 
     try:

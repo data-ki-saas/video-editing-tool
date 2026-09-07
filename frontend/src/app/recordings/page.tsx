@@ -2,23 +2,32 @@
 
 /**
  * This user's own camera recordings/photos -- everything saved via the
- * Record button (CameraCapturePage.tsx, dashboard/[projectId]/record),
- * reachable from TopMenuBar's spool icon next to Library. Structured as a
- * close cousin of app/library/page.tsx's LibraryCard/LibraryPageContent
- * (same InlineEditableText name, description textarea, optimistic update/
- * delete convention) -- the two differ mainly in what a card can DO: a
- * recording additionally opens RecordingEditDialog to trim (video) or crop
- * (photo) it in place, and there's no All/Templates tab split here (not
- * asked for -- recordings are just one flat "newest first" list). Pulling a
- * recording into a specific reel happens from the editor's own "+Asset"
- * popup (its new Recordings tab), not from this page.
+ * Record button (CameraCapturePage.tsx, either project-scoped at
+ * dashboard/[projectId]/record or this page's own project-agnostic
+ * recordings/record), reachable from TopMenuBar's spool icon next to
+ * Library. Structured as a close cousin of app/library/page.tsx's
+ * LibraryCard/LibraryPageContent (same InlineEditableText name, description
+ * textarea, optimistic update/delete convention) -- the two differ mainly
+ * in what a card can DO: a recording additionally opens RecordingEditDialog
+ * to trim (video) or crop (photo) it in place, and there's no All/Templates
+ * tab split here (not asked for -- recordings are just one flat "newest
+ * first" list). Pulling a recording into a specific reel happens from the
+ * editor's own "+Asset" popup (its own Recordings tab), not from this page.
+ *
+ * This page's own Record/Upload buttons are the two ways a recording gets
+ * added here directly (as opposed to via a project's own record button):
+ * Record opens the same CameraCapturePage as every other Record entry
+ * point; Upload opens RecordingUploadDialog, which is where the "3 minutes
+ * / 30fps" limits on an uploaded (not recorded) video are enforced.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { deleteRecording, listRecordings, updateRecording, type Recording } from "@/lib/api";
-import { CropToolIcon, SpeakerFullIcon, SpeakerMutedIcon, TrashIcon } from "@/components/icons/UIIcons";
+import { CropToolIcon, SpeakerFullIcon, SpeakerMutedIcon, TrashIcon, UploadIcon } from "@/components/icons/UIIcons";
+import { PauseIcon, PlayIcon, RecordIcon } from "@/components/editor-v2/icons/PlayerIcons";
 import { InlineEditableText } from "@/components/InlineEditableText";
 import { RecordingEditDialog } from "@/components/recordings/RecordingEditDialog";
+import { RecordingUploadDialog } from "@/components/recordings/RecordingUploadDialog";
 
 const DESCRIPTION_MAX_LENGTH = 120;
 
@@ -45,9 +54,13 @@ function RecordingCard({
   onDelete: (recording: Recording) => void;
   onEdit: (recording: Recording) => void;
 }) {
-  // Autoplays muted+looped by default, same reasoning as LibraryCard's own
-  // isMuted -- browsers only allow autoplay at all when muted.
+  // Unlike LibraryCard's video (which autoplays muted+looped, feed-style),
+  // a recording starts paused on its first frame -- explicit Play/Stop
+  // below is the whole point of this control, not just a mute toggle on
+  // something already running.
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [isMuted, setIsMuted] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [description, setDescription] = useState(recording.description ?? "");
   const duration = formatDuration(recording.durationSeconds);
 
@@ -57,19 +70,43 @@ function RecordingCard({
     onUpdateMetadata(recording, { name: recording.name, description: trimmed || null });
   }
 
+  function togglePlayback() {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play();
+    } else {
+      // A "Stop", not a "Pause" -- rewinds to the start so replaying always
+      // begins from the top rather than resuming mid-clip.
+      video.pause();
+      video.currentTime = 0;
+    }
+  }
+
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border p-2">
       <div className="relative aspect-[9/16] overflow-hidden rounded-md bg-black">
         {recording.kind === "video" ? (
           <>
             <video
+              ref={videoRef}
               src={recording.url}
-              autoPlay
               loop
               muted={isMuted}
               playsInline
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
               className="h-full w-full object-cover"
             />
+            <button
+              type="button"
+              onClick={togglePlayback}
+              title={isPlaying ? "Stop" : "Play"}
+              aria-label={isPlaying ? "Stop" : "Play"}
+              className="absolute left-1 top-1 rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80"
+            >
+              {isPlaying ? <PauseIcon className="h-3.5 w-3.5" /> : <PlayIcon className="h-3.5 w-3.5" />}
+            </button>
             <button
               type="button"
               onClick={() => setIsMuted((prev) => !prev)}
@@ -137,6 +174,7 @@ export default function RecordingsPage() {
   const [recordings, setRecordings] = useState<Recording[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingRecording, setEditingRecording] = useState<Recording | null>(null);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
 
   useEffect(() => {
     listRecordings()
@@ -174,15 +212,34 @@ export default function RecordingsPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-12">
-      <div>
-        <Link href="/dashboard" className="text-sm text-muted hover:underline">
-          ← Reels
-        </Link>
-        <h1 className="text-2xl font-semibold">Recordings</h1>
-        <p className="text-sm text-muted">
-          Videos and photos you&apos;ve recorded from the app, newest first. Add one to a reel from that
-          project&apos;s &quot;+Asset&quot; panel.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <Link href="/dashboard" className="text-sm text-muted hover:underline">
+            ← Reels
+          </Link>
+          <h1 className="text-2xl font-semibold">Recordings</h1>
+          <p className="text-sm text-muted">
+            Videos and photos you&apos;ve recorded from the app, newest first. Add one to a reel from that
+            project&apos;s &quot;+Asset&quot; panel.
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Link
+            href="/recordings/record"
+            className="flex items-center gap-1.5 rounded-md bg-neutral-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-600"
+          >
+            <RecordIcon className="h-4 w-4" />
+            Record
+          </Link>
+          <button
+            type="button"
+            onClick={() => setIsUploadDialogOpen(true)}
+            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-surface"
+          >
+            <UploadIcon className="h-4 w-4" />
+            Upload
+          </button>
+        </div>
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
@@ -215,6 +272,13 @@ export default function RecordingsPage() {
             setEditingRecording(null);
           }}
           onClose={() => setEditingRecording(null)}
+        />
+      )}
+
+      {isUploadDialogOpen && (
+        <RecordingUploadDialog
+          onUploaded={(recording) => setRecordings((prev) => (prev ? [recording, ...prev] : [recording]))}
+          onClose={() => setIsUploadDialogOpen(false)}
         />
       )}
     </main>

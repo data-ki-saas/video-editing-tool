@@ -3,8 +3,11 @@
 /**
  * Full-screen live camera capture -- opened from TopMenuBar's Record button
  * (right after the Cover thumbnail) and AssetGallery/MobileAssetStrip's own
- * "+ Record"/"Record" action, at dashboard/[projectId]/record. Works the
- * same way on desktop (webcam) and mobile (front/back switch): one
+ * "+ Record"/"Record" action, at dashboard/[projectId]/record, AND
+ * project-agnostically from the Recordings library's own Record button, at
+ * recordings/record (projectId null there -- see this file's own
+ * `projectId` prop comment). Works the same way on desktop (webcam) and
+ * mobile (front/back switch): one
  * `<video>` reads the live camera+mic stream, one `<canvas>` redraws it
  * every frame with whatever Filter/Ambience/Face effect is picked baked in
  * -- that composited canvas is simultaneously what the user sees, what gets
@@ -140,8 +143,14 @@ function PillRow<T extends string>({
   );
 }
 
-export function CameraCapturePage({ projectId }: { projectId: string }) {
+export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   const router = useRouter();
+  // Recordings are user-scoped, not project-scoped (see this file's own
+  // module comment) -- projectId is only used below for the ambient-effect
+  // seed and where to navigate back to on close/finish, both of which have
+  // a sensible fallback when this page was opened from the Recordings
+  // library itself rather than from a specific project's editor.
+  const returnPath = projectId ? `/dashboard/${projectId}` : "/recordings";
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -298,7 +307,7 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
       if (currentFaceEffect) {
         getCamera3DRenderer().drawImage3D(
           ctx, video, NEUTRAL_POSE, crop.sx, crop.sy, crop.sWidth, crop.sHeight, 0, 0, canvas.width, canvas.height, false, false,
-          currentAmbientEffect ? { effectId: currentAmbientEffect, elapsedSeconds, seed: ambientEffectSeed(projectId) } : null,
+          currentAmbientEffect ? { effectId: currentAmbientEffect, elapsedSeconds, seed: ambientEffectSeed(projectId ?? "recordings") } : null,
           currentFaceEffect === "halo" ? liveSubjectCutoutRef.current : null,
           liveFaceGeometryRef.current ? { effectId: currentFaceEffect, geometry: liveFaceGeometryRef.current, elapsedSeconds } : null
         );
@@ -306,7 +315,7 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
         ctx.drawImage(video, crop.sx, crop.sy, crop.sWidth, crop.sHeight, 0, 0, canvas.width, canvas.height);
         ctx.filter = "none";
         if (currentAmbientEffect) {
-          drawAmbientEffect(ctx, currentAmbientEffect, 0, 0, canvas.width, canvas.height, elapsedSeconds, ambientEffectSeed(projectId));
+          drawAmbientEffect(ctx, currentAmbientEffect, 0, 0, canvas.width, canvas.height, elapsedSeconds, ambientEffectSeed(projectId ?? "recordings"));
         }
       }
       ctx.filter = "none";
@@ -450,7 +459,7 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
         durationSeconds,
         (fraction) => setProcessingStage(`Saving to your recordings… ${Math.round(fraction * 100)}%`)
       );
-      router.push(`/dashboard/${projectId}`);
+      router.push(returnPath);
     } catch (err) {
       setIsProcessing(false);
       setSaveError(err instanceof Error ? err.message : "Failed to save this recording");
@@ -474,7 +483,7 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
         null,
         (fraction) => setProcessingStage(`Saving to your recordings… ${Math.round(fraction * 100)}%`)
       );
-      router.push(`/dashboard/${projectId}`);
+      router.push(returnPath);
     } catch (err) {
       setIsProcessing(false);
       setSaveError(err instanceof Error ? err.message : "Failed to save this photo");
@@ -484,7 +493,7 @@ export function CameraCapturePage({ projectId }: { projectId: string }) {
   function handleClose() {
     const hasProgress = recorderState !== "idle" || recordedChunksRef.current.length > 0;
     if (hasProgress && !window.confirm("Discard this recording?")) return;
-    router.push(`/dashboard/${projectId}`);
+    router.push(returnPath);
   }
 
   const isBusy = isProcessing;

@@ -21,6 +21,7 @@ FEATURES: list[Feature] = [
     Feature("social_posting", "Post reels to social media", "Rendering & AI"),
     Feature("assets_manage", "Upload & manage media", "Media"),
     Feature("stock_media_use", "Stock photo/video/music library", "Media"),
+    Feature("recordings_unlimited", "Unlimited recordings (skip the free 15-item cap)", "Media"),
     Feature("projects_manage", "Create/delete/reset projects", "Projects"),
     Feature("niches_use", "Niche catalog & config", "Projects"),
     Feature("admin_manage_roles", "Manage roles, permissions & user assignment", "Admin"),

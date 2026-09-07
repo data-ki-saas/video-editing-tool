@@ -218,6 +218,9 @@ class FakeRecordingsTable:
             if row["user_id"] == user_id
         ]
 
+    def count_for_user(self, user_id: str) -> int:
+        return sum(1 for row in self.recordings.values() if row["user_id"] == user_id)
+
     def get_owned(self, recording_id: str, user_id: str) -> recordings_repository.RecordingRecord | None:
         row = self.recordings.get(recording_id)
         if row is None or row["user_id"] != user_id:
@@ -252,6 +255,7 @@ def fake_recordings_table(monkeypatch):
     table = FakeRecordingsTable()
     monkeypatch.setattr(recordings_repository, "create", lambda **kwargs: table.create(id=str(uuid.uuid4()), **kwargs))
     monkeypatch.setattr(recordings_repository, "list_for_user", table.list_for_user)
+    monkeypatch.setattr(recordings_repository, "count_for_user", table.count_for_user)
     monkeypatch.setattr(recordings_repository, "get_owned", table.get_owned)
     monkeypatch.setattr(recordings_repository, "update_metadata", table.update_metadata)
     monkeypatch.setattr(recordings_repository, "replace_content", table.replace_content)

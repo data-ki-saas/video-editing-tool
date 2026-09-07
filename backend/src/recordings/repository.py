@@ -59,6 +59,16 @@ def list_for_user(user_id: str) -> list[RecordingRecord]:
     return [RecordingRecord(**row) for row in result.data or []]
 
 
+def count_for_user(user_id: str) -> int:
+    """Total LIVE row count for this user -- not time-windowed, unlike
+    usage/repository.py's count_recent_events (a rolling 24h count). Backs
+    recordings/service.py's free-account cap: upload increments this simply
+    by inserting a row, delete decrements it by removing one, no separate
+    counter to keep in sync."""
+    result = get_supabase_client().table(_TABLE).select("id", count="exact").eq("user_id", user_id).execute()
+    return result.count or 0
+
+
 def get_owned(recording_id: str, user_id: str) -> RecordingRecord | None:
     result = (
         get_supabase_client()
