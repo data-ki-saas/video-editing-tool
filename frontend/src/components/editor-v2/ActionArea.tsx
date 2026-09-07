@@ -586,7 +586,7 @@ export function ActionArea({
         />
       </div>
 
-      <div className="flex flex-1 items-center justify-start p-2">
+      <div className="flex flex-1 items-center justify-start px-2">
         {sequenceClips.length > 0 ? (
           // CanvasPlayer sizes its own visible panel from the canvas's real
           // intrinsic aspect ratio (already correct -- see its own module

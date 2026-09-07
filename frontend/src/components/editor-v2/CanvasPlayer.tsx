@@ -2495,7 +2495,7 @@ export const CanvasPlayer = forwardRef<
     <div
       ref={playerRootRef}
       className={
-        "flex h-full w-full min-w-0 flex-col items-center gap-2 p-2" + (isFullscreen ? " bg-black" : "")
+        "flex h-full w-full min-w-0 flex-col items-center gap-2 px-2" + (isFullscreen ? " bg-black" : "")
       }
       style={{ containerType: "size" }}
     >
