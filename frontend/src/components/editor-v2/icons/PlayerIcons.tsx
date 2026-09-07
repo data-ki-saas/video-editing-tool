@@ -175,6 +175,26 @@ export function FlipCameraIcon(props: IconProps) {
   );
 }
 
+/** Counter-clockwise refresh arrow -- CameraCapturePage's "Reset" button
+ * (discard what's recorded so far and start over), same outline stroke
+ * style as ExpandIcon/CollapseIcon. */
+export function ResetIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4v5h5" />
+    </svg>
+  );
+}
+
 /** Simple picture/image glyph for the cover/thumbnail picker action --
  * outline, matching LocalRenderIcon/RenderIcon's stroke style. */
 export function CoverIcon(props: IconProps) {

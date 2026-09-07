@@ -52,7 +52,7 @@ import { segmentVideoFrameApproximate } from "@/lib/video/backgroundSegmentation
 import { Camera3DRenderer, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { computeCoverFitSourceRect } from "@/lib/video/video_math";
 import { pickMediaRecorderMimeType, toMp4Asset } from "@/lib/media/cameraRecording";
-import { FlipCameraIcon, PlayIcon, PauseIcon } from "./icons/PlayerIcons";
+import { FlipCameraIcon, PlayIcon, PauseIcon, ResetIcon } from "./icons/PlayerIcons";
 
 const MAX_RECORDING_SECONDS = 180;
 const FACE_DETECT_INTERVAL_MS = 150;
@@ -71,16 +71,25 @@ const TIMER_TICK_MS = 250;
 // re-crop later, and so the live preview -- once sized via CSS to match --
 // shows exactly the framing that gets saved.
 const CAPTURE_ASPECT_RATIO = 9 / 16;
-// Reveals a bit more of the raw camera frame than the bare minimum crop
-// needed to hit CAPTURE_ASPECT_RATIO -- passed as both `zoom` and `minZoom`
-// to computeCoverFitSourceRect below (same "reveal past cover" mechanism as
-// VideoOverlayFramingDialog's Zoom slider, video_math.ts's OverlayFraming.zoom
-// doc comment) so a person recording themselves handheld has visible room
-// around their body instead of a tight, face-filling crop. Harmless on a
-// device/browser that negotiates a camera stream already exactly 9:16 (no
-// slack to reveal) -- drawImage silently clips the request back down to
-// whatever the source frame actually has, per spec.
-const CAPTURE_ZOOM_OUT = 0.82;
+// A plain cover-fit (zoom=1, minZoom=1) is the ONLY safe setting here.
+// computeCoverFitSourceRect's own doc comment is explicit that a `minZoom`
+// below 1 (zooming out past cover) is only ever safe for a Picture-in-Picture
+// box that has a backdrop behind it worth revealing once the requested
+// window exceeds the source's real bounds and gets clipped back down. This
+// canvas has no such backdrop -- it's the sole, full-bleed content, redrawn
+// every rAF tick without ever being cleared -- so an earlier attempt at a
+// zoom-out-past-cover value here (0.82, to reveal a bit more room around the
+// body) didn't "harmlessly" no-op on a 9:16-exact source as its own comment
+// assumed: a "cover" crop already has ZERO slack in at least one axis by
+// construction (that's what makes it a cover crop), so ANY value below 1
+// always pushed that axis's sWidth/sHeight past the source's actual
+// dimensions, got clipped by drawImage per spec, and left a shrinking
+// stale-pixel border/gap around the live feed instead of filling the full
+// reel frame -- on every device, not just an edge case (reported as the
+// recording not fitting the mobile reel clip size, on both laptop and
+// mobile). The "reveal a bit more" intent is instead already satisfied by
+// requesting a camera stream wider than 9:16 in the first place (see the
+// width/height `ideal` hints below) and cover-cropping THAT down to 9:16.
 
 type RecorderState = "idle" | "recording" | "paused";
 type EffectPicker = "filter" | "ambience" | "face" | null;
@@ -221,10 +230,14 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
           // Deliberately NOT hinting CAPTURE_ASPECT_RATIO (9:16) here --
           // asking the camera driver itself for that exact portrait shape
           // invites it to digitally crop/zoom in before this page's own
-          // compositing loop ever sees the frame, with no pixels left for
-          // CAPTURE_ZOOM_OUT below to reveal back. A wider ideal width
-          // leaves the actual 9:16 shaping entirely to this page's own crop
-          // step, which has room to zoom out.
+          // compositing loop ever sees the frame, leaving no extra frame
+          // around the body for the cover-fit crop below to work with. A
+          // wider (3:4) ideal leaves the actual 9:16 shaping entirely to
+          // that cover-fit crop step, which reveals more of the raw frame
+          // than a camera negotiated already-9:16 would have left to crop
+          // from -- see CAPTURE_ASPECT_RATIO's own comment for why that's
+          // the ONLY safe way to get "a bit more room around the body"
+          // here.
           width: { ideal: 960 },
           height: { ideal: 1280 },
           frameRate: { ideal: TARGET_FPS, max: TARGET_FPS },
@@ -285,11 +298,10 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
       // Center-crop whatever the camera actually delivers down to this app's
       // 9:16 reel shape -- see CAPTURE_ASPECT_RATIO's own comment -- rather
       // than letting the buffer just track the negotiated stream's own
-      // (unpredictable) ratio. zoom/minZoom both pinned to CAPTURE_ZOOM_OUT
-      // reveal a bit more than the bare minimum crop -- see its own comment.
-      const crop = computeCoverFitSourceRect(
-        video.videoWidth, video.videoHeight, CAPTURE_ASPECT_RATIO, 1, 0.5, 0.5, CAPTURE_ZOOM_OUT, CAPTURE_ZOOM_OUT
-      );
+      // (unpredictable) ratio. A plain cover fit (zoom=1, minZoom=1, the
+      // defaults) -- see CAPTURE_ASPECT_RATIO's own comment for why this is
+      // the only setting that always fully fills the buffer.
+      const crop = computeCoverFitSourceRect(video.videoWidth, video.videoHeight, CAPTURE_ASPECT_RATIO, 1);
       const bufferWidth = Math.round(crop.sWidth);
       const bufferHeight = Math.round(crop.sHeight);
       if (canvas.width !== bufferWidth || canvas.height !== bufferHeight) {
@@ -466,6 +478,32 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
     }
   }
 
+  // Discards everything recorded in this session so far (no upload) and
+  // drops back to "idle" so the user can record again without leaving the
+  // page -- distinct from handleStop, which finalizes+uploads and navigates
+  // away. Shares handleStop's isStoppingRef guard so the two can't race
+  // (e.g. the 3-minute auto-cap firing handleStop in the same tick as a
+  // Reset tap).
+  async function handleReset() {
+    if (isStoppingRef.current) return;
+    if (recorderState === "idle" && recordedChunksRef.current.length === 0) return;
+    if (!window.confirm("Discard this recording and start over?")) return;
+    isStoppingRef.current = true;
+    try {
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") await stopMediaRecorder(recorder);
+      mediaRecorderRef.current = null;
+      recordedChunksRef.current = [];
+      accumulatedRecordedMsRef.current = 0;
+      segmentStartMsRef.current = 0;
+      setRecordedMs(0);
+      setCapWarning(false);
+      setRecorderState("idle");
+    } finally {
+      isStoppingRef.current = false;
+    }
+  }
+
   async function handleSnapPhoto() {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -594,6 +632,21 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
 
       {!cameraError && (
         <div className="flex items-center justify-center gap-8 p-4 pb-6">
+          {recorderState !== "idle" ? (
+            <button
+              type="button"
+              onClick={() => void handleReset()}
+              disabled={isBusy}
+              aria-label="Reset recording"
+              title="Discard and start over"
+              className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white disabled:opacity-40"
+            >
+              <ResetIcon className="h-6 w-6 text-white" />
+            </button>
+          ) : (
+            <span className="h-12 w-12" />
+          )}
+
           <button
             type="button"
             onClick={() => void handleSnapPhoto()}

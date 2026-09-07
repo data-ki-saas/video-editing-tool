@@ -101,7 +101,7 @@ export default function DocsPage() {
         </Topic>
         <VideoExample
           title="3D Ken Burns, pulsing with the beat"
-          shareUrl="https://video-editing-tool-gamma.vercel.app/share/20c39cf7-f4ab-4baf-8cc3-fc67834ef8a8"
+          shareUrl="https://video-editing-tool-gamma.vercel.app/share/2cd5793b-5db8-4902-a2af-6075f1ef98f3"
         >
           Make it 3D turns the same cutaway into a real camera move — the photo&apos;s own subject
           lifts off its background as the camera pushes in and pans, genuine depth rather than a
