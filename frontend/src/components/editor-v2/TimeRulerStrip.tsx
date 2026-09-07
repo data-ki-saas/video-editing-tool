@@ -18,18 +18,30 @@
  * click handler -- this row is part of the same shared timeline, so it
  * doubles as a seek control, same as the space it's replacing inside
  * MainAudioTrackStrip used to.
+ *
+ * Draws its own horizontal baseline (a literal x-axis line the ticks hang
+ * down from) plus its own segment of the shared red playhead line -- every
+ * rail above (FrameStrip, MainAudioTrackStrip, BackgroundTrackStrip) draws
+ * that same line at the same `currentTimeSeconds * pixelsPerSecond` offset,
+ * so stacked together they read as one continuous line down the whole
+ * group. The axis line sits at this rail's own very top, so this rail's own
+ * playhead segment (spanning its own full height, same as every other
+ * rail's) starts right at the axis and visibly crosses it rather than
+ * stopping flush with it.
  */
 import { useRef } from "react";
 
 export function TimeRulerStrip({
   videoDurationSeconds,
   pixelsPerSecond,
+  currentTimeSeconds,
   onSeek,
   scrollContainerRef,
   onScroll,
 }: {
   videoDurationSeconds: number;
   pixelsPerSecond: number;
+  currentTimeSeconds: number;
   onSeek: (seconds: number) => void;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
@@ -52,6 +64,11 @@ export function TimeRulerStrip({
   // strip's previous home inside MainAudioTrackStrip.
   const secondTicks = Array.from({ length: Math.floor(videoDurationSeconds) + 1 }, (_, second) => second);
 
+  // Same pixel math every other synced rail's own playhead line uses --
+  // see MainAudioTrackStrip's own comment on why this is a raw pixel
+  // offset rather than a %.
+  const playheadLeftPx = Math.min(Math.max(currentTimeSeconds, 0), videoDurationSeconds) * pixelsPerSecond;
+
   return (
     <div
       ref={scrollContainerRef}
@@ -65,6 +82,8 @@ export function TimeRulerStrip({
         className="relative h-full cursor-pointer"
         style={{ width: videoDurationSeconds * pixelsPerSecond }}
       >
+        {/* The x-axis line itself -- ticks hang down from it. */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/40" />
         {secondTicks.map((second) => (
           <div
             key={second}
@@ -75,6 +94,10 @@ export function TimeRulerStrip({
             <div className="absolute top-2 whitespace-nowrap text-[8px] leading-none text-muted">{second}</div>
           </div>
         ))}
+        <div
+          className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-red-500"
+          style={{ left: playheadLeftPx }}
+        />
       </div>
     </div>
   );

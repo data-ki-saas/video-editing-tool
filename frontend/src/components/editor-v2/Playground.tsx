@@ -534,6 +534,7 @@ export function Playground({
             assetNameById={assetNameById}
             musicClipSourceDurationSeconds={musicClipSourceDurationSeconds}
             videoDurationSeconds={videoDurationSeconds}
+            currentTimeSeconds={currentTimeSeconds}
             snapPointsSeconds={musicClipSnapPointsSeconds}
             pixelsPerSecond={PIXELS_PER_SECOND}
             scrollContainerRef={bindRef(BACKGROUND_STRIP_INDEX)}
@@ -550,6 +551,7 @@ export function Playground({
           <TimeRulerStrip
             videoDurationSeconds={videoDurationSeconds}
             pixelsPerSecond={PIXELS_PER_SECOND}
+            currentTimeSeconds={currentTimeSeconds}
             onSeek={onSeek}
             scrollContainerRef={bindRef(TIME_RULER_INDEX)}
             onScroll={bindOnScroll(TIME_RULER_INDEX)}

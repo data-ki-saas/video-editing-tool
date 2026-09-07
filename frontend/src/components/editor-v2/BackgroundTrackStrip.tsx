@@ -217,6 +217,7 @@ export function BackgroundTrackStrip({
   assetNameById,
   musicClipSourceDurationSeconds,
   videoDurationSeconds,
+  currentTimeSeconds,
   snapPointsSeconds,
   pixelsPerSecond,
   scrollContainerRef,
@@ -231,6 +232,11 @@ export function BackgroundTrackStrip({
   assetNameById: Record<string, string>;
   musicClipSourceDurationSeconds: Record<string, number>;
   videoDurationSeconds: number;
+  // Draws this rail's own segment of the shared red playhead line -- see
+  // TimeRulerStrip's own module comment on why every rail in the group
+  // draws its own segment at this same pixel offset instead of one element
+  // spanning the whole stack.
+  currentTimeSeconds: number;
   snapPointsSeconds: number[];
   pixelsPerSecond: number;
   scrollContainerRef: (el: HTMLDivElement | null) => void;
@@ -241,14 +247,20 @@ export function BackgroundTrackStrip({
   onCommitPosition: (clipIndex: number, start: number) => void;
   onDelete: (clipIndex: number) => void;
 }) {
+  const playheadLeftPx = Math.min(Math.max(currentTimeSeconds, 0), videoDurationSeconds) * pixelsPerSecond;
+
   if (musicClips.length === 0) {
     return (
       <div
         ref={scrollContainerRef}
         onScroll={onScroll}
-        className="hide-scrollbar flex h-full items-center overflow-x-auto bg-neutral-950 px-2 text-xs text-muted"
+        className="hide-scrollbar relative flex h-full items-center overflow-x-auto bg-neutral-950 px-2 text-xs text-muted"
       >
         No background music yet -- right-click a music asset to add it
+        <div
+          className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-red-500"
+          style={{ left: playheadLeftPx }}
+        />
       </div>
     );
   }
@@ -279,6 +291,10 @@ export function BackgroundTrackStrip({
             onDelete={() => onDelete(index)}
           />
         ))}
+        <div
+          className="pointer-events-none absolute inset-y-0 z-10 w-0.5 bg-red-500"
+          style={{ left: playheadLeftPx }}
+        />
       </div>
     </div>
   );
