@@ -52,9 +52,24 @@ import { segmentVideoFrameApproximate } from "@/lib/video/backgroundSegmentation
 import { Camera3DRenderer, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { computeCoverFitSourceRect } from "@/lib/video/video_math";
 import { pickMediaRecorderMimeType, toMp4Asset } from "@/lib/media/cameraRecording";
-import { FlipCameraIcon, PlayIcon, PauseIcon, ResetIcon } from "./icons/PlayerIcons";
+import { useIsMobile } from "@/lib/useIsMobile";
+import { FlipCameraIcon, PlayIcon, PauseIcon, ResetIcon, TeleprompterIcon, EyeIcon, EyeOffIcon } from "./icons/PlayerIcons";
 
 const MAX_RECORDING_SECONDS = 180;
+// Smart-default teleprompter scroll pace -- no manual speed knob (see this
+// app's driving vision on favoring sensible defaults over exposing every
+// control): an average comfortable read-aloud pace, so a script scrolls
+// past in roughly the time it actually takes to read it out loud. Very
+// short scripts still get at least TELEPROMPTER_MIN_SCROLL_SECONDS so a
+// one-line script doesn't whip past in under a second.
+const TELEPROMPTER_WORDS_PER_SECOND = 150 / 60;
+const TELEPROMPTER_MIN_SCROLL_SECONDS = 6;
+// Pause at the top once a full pass finishes, before looping back to the
+// start -- lets the same script be reused for several takes in a row
+// without having to reopen the popup or manually rewind.
+const TELEPROMPTER_LOOP_PAUSE_MS = 1500;
+const MIN_CAMERA_ZOOM = 1;
+const MAX_CAMERA_ZOOM = 3;
 const FACE_DETECT_INTERVAL_MS = 150;
 // Heavier than face-landmark detection (a full selfie-segmentation model
 // pass, not just landmark math), and only ever needed for "halo" -- see
@@ -152,6 +167,73 @@ function PillRow<T extends string>({
   );
 }
 
+/** Popup for typing/editing the teleprompter script -- opened from the
+ * Teleprompter icon in CameraCapturePage's header. Same hand-built
+ * backdrop-plus-card dialog pattern as this app's other popups (e.g.
+ * UpgradeRequiredDialog), since this codebase has no dialog component
+ * library. */
+function TeleprompterDialog({
+  initialText,
+  onCancel,
+  onClear,
+  onSave,
+}: {
+  initialText: string;
+  onCancel: () => void;
+  onClear: () => void;
+  onSave: (text: string) => void;
+}) {
+  const [draft, setDraft] = useState(initialText);
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Teleprompter script"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="flex w-full max-w-md flex-col gap-3 rounded-lg bg-neutral-900 p-4 text-white"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="text-sm font-medium">What do you want to read out?</p>
+        <textarea
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Type or paste your script here…"
+          rows={8}
+          className="w-full resize-none rounded-md border border-white/20 bg-black/40 p-2 text-sm text-white placeholder:text-white/40 focus:border-accent focus:outline-none"
+        />
+        <div className="flex justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              onClear();
+              onCancel();
+            }}
+            className="rounded-md px-3 py-1.5 text-sm text-white/60"
+          >
+            Clear
+          </button>
+          <div className="flex gap-2">
+            <button type="button" onClick={onCancel} className="rounded-md bg-white/10 px-3 py-1.5 text-sm">
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => onSave(draft)}
+              className="rounded-md bg-accent px-3 py-1.5 text-sm text-accent-foreground"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   const router = useRouter();
   // Recordings are user-scoped, not project-scoped (see this file's own
@@ -160,6 +242,13 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   // a sensible fallback when this page was opened from the Recordings
   // library itself rather than from a specific project's editor.
   const returnPath = projectId ? `/dashboard/${projectId}` : "/recordings";
+  // Same responsive check the editor uses to pick MobileEditor vs
+  // ThreePaneEditor -- this page has no separate mobile build, one
+  // component serves both (see this file's own module comment), but a
+  // touch phone's front/back cameras and cramped screen still warrant a
+  // different default facing mode and a zoom control desktop webcams have
+  // no equivalent need for.
+  const { isMobile, isReady: isMobileCheckReady } = useIsMobile();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -178,6 +267,11 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   // Guards against handleStop running twice concurrently -- e.g. the
   // 3-minute cap firing in the same tick the user taps "Finish".
   const isStoppingRef = useRef(false);
+  // Makes sure the mobile selfie-mode default (below) is only ever applied
+  // once, right when isMobileCheckReady first turns true -- otherwise it'd
+  // re-fire and stomp on a manual flip-camera tap every time isMobile is
+  // merely re-evaluated (e.g. a window resize crossing the breakpoint).
+  const didApplyMobileDefaultFacingModeRef = useRef(false);
 
   const [facingMode, setFacingMode] = useState<"user" | "environment">("environment");
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
@@ -200,6 +294,34 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   const [processingStage, setProcessingStage] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Digital zoom -- mobile-only UI (see the zoom slider below), but wired
+  // generically so it's a no-op (always 1) on desktop. Applied as the
+  // `zoom` factor of the SAME cover-fit crop the draw loop already takes
+  // (see CAPTURE_ASPECT_RATIO's own comment) -- cropping IN past cover is
+  // always safe there; only cropping OUT past it isn't, which is why this
+  // never goes below MIN_CAMERA_ZOOM (1).
+  const [zoom, setZoom] = useState(MIN_CAMERA_ZOOM);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+
+  // The script the user wants to read out loud, shown scrolling over the
+  // live preview so their eyes stay near the camera lens instead of down at
+  // a phone/paper -- see this file's own module comment for the recording
+  // pipeline this overlay sits on top of (it's a DOM overlay, not baked
+  // into the recorded canvas -- the recording is just the person looking at
+  // camera, not the prompter text itself).
+  const [teleprompterText, setTeleprompterText] = useState("");
+  const [showTeleprompterDialog, setShowTeleprompterDialog] = useState(false);
+  // Lets the text stay entered (no need to retype between takes) while
+  // temporarily getting it off the screen -- independent of whether any
+  // text has been typed at all.
+  const [teleprompterVisible, setTeleprompterVisible] = useState(true);
+  const teleprompterInnerRef = useRef<HTMLDivElement | null>(null);
+  const teleprompterScrollPxRef = useRef(0);
+  const teleprompterPauseUntilMsRef = useRef(0);
+  const teleprompterLastTsRef = useRef<number | null>(null);
+  const teleprompterDurationSecondsRef = useRef(TELEPROMPTER_MIN_SCROLL_SECONDS);
+
   // Read by the rAF draw loop below without needing to restart it (and thus
   // re-create the camera/renderer) every time an effect toggle changes --
   // same lightweight "assign during render" ref-mirroring as several other
@@ -216,8 +338,28 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
     return camera3DRendererRef.current;
   }
 
-  // Acquires (and re-acquires on camera flip) the camera+mic stream.
+  // Defaults a touch/phone-sized session to the front (selfie) camera --
+  // the influencer/creator this app targets is filming themselves, and
+  // starting on the back camera (this page's original, desktop-webcam-era
+  // default) means an extra flip tap on every single mobile recording.
+  // Deferred until isMobileCheckReady (rather than read synchronously into
+  // facingMode's own useState initializer) so the very first
+  // getUserMedia request below already asks for the right camera instead of
+  // opening the back one first and immediately re-requesting the front --
+  // see the acquisition effect's own `if (!isMobileCheckReady) return`
+  // guard, which holds off that request until this has had a chance to run.
   useEffect(() => {
+    if (!isMobileCheckReady || didApplyMobileDefaultFacingModeRef.current) return;
+    didApplyMobileDefaultFacingModeRef.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time default applied the instant isMobileCheckReady turns true (guarded by the ref above), same "can't know earlier" reasoning as useIsMobile's own first matchMedia read
+    if (isMobile) setFacingMode("user");
+  }, [isMobileCheckReady, isMobile]);
+
+  // Acquires (and re-acquires on camera flip) the camera+mic stream. Holds
+  // off until isMobileCheckReady so it never has to acquire twice just to
+  // pick up the mobile selfie-mode default above.
+  useEffect(() => {
+    if (!isMobileCheckReady) return;
     let cancelled = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change (facingMode/retryToken), same pattern as CutawayDialog's own re-sync effects
     setCameraError(null);
@@ -277,7 +419,7 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     };
-  }, [facingMode, retryToken]);
+  }, [facingMode, retryToken, isMobileCheckReady]);
 
   // The compositing loop -- redraws the live camera frame onto the visible
   // canvas every rAF tick, with the current filter/ambience/face effect
@@ -300,14 +442,23 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
       // than letting the buffer just track the negotiated stream's own
       // (unpredictable) ratio. A plain cover fit (zoom=1, minZoom=1, the
       // defaults) -- see CAPTURE_ASPECT_RATIO's own comment for why this is
-      // the only setting that always fully fills the buffer.
-      const crop = computeCoverFitSourceRect(video.videoWidth, video.videoHeight, CAPTURE_ASPECT_RATIO, 1);
-      const bufferWidth = Math.round(crop.sWidth);
-      const bufferHeight = Math.round(crop.sHeight);
+      // the only setting that always fully fills the buffer. The BUFFER's
+      // own size is always taken from this unzoomed cover fit -- kept
+      // separate from the (possibly zoomed-in) crop actually drawn below --
+      // so the mobile zoom slider changes how much of the source is sampled
+      // without ever shrinking the recorded/canvas resolution itself.
+      const bufferCrop = computeCoverFitSourceRect(video.videoWidth, video.videoHeight, CAPTURE_ASPECT_RATIO, 1);
+      const bufferWidth = Math.round(bufferCrop.sWidth);
+      const bufferHeight = Math.round(bufferCrop.sHeight);
       if (canvas.width !== bufferWidth || canvas.height !== bufferHeight) {
         canvas.width = bufferWidth;
         canvas.height = bufferHeight;
       }
+      const zoomLevel = zoomRef.current;
+      const crop =
+        zoomLevel === MIN_CAMERA_ZOOM
+          ? bufferCrop
+          : computeCoverFitSourceRect(video.videoWidth, video.videoHeight, CAPTURE_ASPECT_RATIO, 1, 0.5, 0.5, zoomLevel);
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
@@ -404,6 +555,73 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleStop is stable enough here (reads refs/latest state internally); re-running this effect on every render would restart the interval needlessly
   }, [recorderState]);
 
+  // Recomputes the smart-default scroll pace whenever the script itself
+  // changes -- see TELEPROMPTER_WORDS_PER_SECOND's own comment. Read from a
+  // ref (not plain state) by the scroll rAF loop below so editing the
+  // script doesn't need to restart that loop.
+  useEffect(() => {
+    const wordCount = teleprompterText.trim().length === 0 ? 0 : teleprompterText.trim().split(/\s+/).length;
+    teleprompterDurationSecondsRef.current = Math.max(wordCount / TELEPROMPTER_WORDS_PER_SECOND, TELEPROMPTER_MIN_SCROLL_SECONDS);
+  }, [teleprompterText]);
+
+  function resetTeleprompterScroll() {
+    teleprompterScrollPxRef.current = 0;
+    teleprompterPauseUntilMsRef.current = 0;
+    teleprompterLastTsRef.current = null;
+    if (teleprompterInnerRef.current) teleprompterInnerRef.current.style.transform = "translateY(0px)";
+  }
+
+  // Auto-scrolls the teleprompter text upward, karaoke-style, at the smart
+  // default pace computed above -- active whenever there's a script to show
+  // AND it isn't hidden, so it also runs during idle (letting the creator
+  // rehearse before hitting record), but holds still while actually paused
+  // mid-recording. Applies the scroll offset straight to the DOM node via a
+  // ref rather than React state, same reasoning as the compositing loop
+  // above reading its own effect toggles from refs -- a per-frame re-render
+  // for a value nothing else derives from would be pure waste.
+  useEffect(() => {
+    const active = teleprompterText.trim().length > 0 && teleprompterVisible && recorderState !== "paused";
+    if (!active) return;
+
+    let rafId: number;
+    function tick(ts: number) {
+      rafId = requestAnimationFrame(tick);
+      const inner = teleprompterInnerRef.current;
+      if (!inner) return;
+
+      if (teleprompterLastTsRef.current === null) teleprompterLastTsRef.current = ts;
+      const deltaMs = ts - teleprompterLastTsRef.current;
+      teleprompterLastTsRef.current = ts;
+
+      if (performance.now() < teleprompterPauseUntilMsRef.current) return;
+
+      const textHeight = inner.scrollHeight;
+      const pxPerMs = textHeight / (teleprompterDurationSecondsRef.current * 1000);
+      teleprompterScrollPxRef.current += deltaMs * pxPerMs;
+      // Loops back to the top (after a short pause, so it's readable as
+      // "starting over" rather than a jarring snap) once the full script
+      // has scrolled past -- lets the same script serve several takes in a
+      // row without reopening the popup.
+      if (teleprompterScrollPxRef.current >= textHeight) {
+        teleprompterScrollPxRef.current = 0;
+        teleprompterPauseUntilMsRef.current = performance.now() + TELEPROMPTER_LOOP_PAUSE_MS;
+      }
+      inner.style.transform = `translateY(-${teleprompterScrollPxRef.current}px)`;
+    }
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(rafId);
+      teleprompterLastTsRef.current = null;
+    };
+  }, [teleprompterText, teleprompterVisible, recorderState]);
+
+  function handleSaveTeleprompterText(text: string) {
+    setTeleprompterText(text);
+    setTeleprompterVisible(true);
+    resetTeleprompterScroll();
+    setShowTeleprompterDialog(false);
+  }
+
   function handleFlipCamera() {
     setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
   }
@@ -431,6 +649,9 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
       segmentStartMsRef.current = performance.now();
       setRecordedMs(0);
       setCapWarning(false);
+      // A fresh take always reads from the top of the script, regardless of
+      // how far a rehearsal scroll had already gotten.
+      resetTeleprompterScroll();
       setRecorderState("recording");
     } else if (recorderState === "paused") {
       mediaRecorderRef.current?.resume();
@@ -542,11 +763,22 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
         <button type="button" onClick={handleClose} aria-label="Close" className="rounded-full bg-white/10 p-2 text-xl leading-none">
           ✕
         </button>
-        {hasMultipleCameras && recorderState === "idle" && (
-          <button type="button" onClick={handleFlipCamera} aria-label="Flip camera" className="rounded-full bg-white/10 p-2">
-            <FlipCameraIcon className="h-5 w-5" />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowTeleprompterDialog(true)}
+            aria-label="Teleprompter script"
+            title="Teleprompter"
+            className={`rounded-full p-2 ${teleprompterText.trim().length > 0 ? "bg-accent text-accent-foreground" : "bg-white/10"}`}
+          >
+            <TeleprompterIcon className="h-5 w-5" />
           </button>
-        )}
+          {hasMultipleCameras && recorderState === "idle" && (
+            <button type="button" onClick={handleFlipCamera} aria-label="Flip camera" className="rounded-full bg-white/10 p-2">
+              <FlipCameraIcon className="h-5 w-5" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="relative flex flex-1 items-center justify-center overflow-hidden">
@@ -575,6 +807,58 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
                 whatever raw resolution the camera happened to negotiate. */}
             <canvas ref={canvasRef} className="h-full w-full object-contain" />
 
+            {teleprompterText.trim().length > 0 &&
+              (teleprompterVisible ? (
+                // Positioned toward the top -- a phone's front camera (and a
+                // laptop's webcam) sits above the screen, so keeping the
+                // text close to it is what actually keeps the recorded eyes
+                // reading as "looking at camera" rather than looking down.
+                // The mask-image fades both this box's own backdrop and the
+                // text near its top/bottom edges -- the "karaoke" scrolling
+                // look, and a visual cue that more text is coming.
+                <div
+                  onClick={resetTeleprompterScroll}
+                  role="button"
+                  aria-label="Restart teleprompter from the top"
+                  title="Tap to restart from the top"
+                  className="absolute inset-x-3 top-14 z-10 h-[32%] cursor-pointer overflow-hidden rounded-lg bg-black/45"
+                  style={{
+                    WebkitMaskImage: "linear-gradient(to bottom, transparent, black 15%, black 85%, transparent)",
+                    maskImage: "linear-gradient(to bottom, transparent, black 15%, black 85%, transparent)",
+                  }}
+                >
+                  <div
+                    ref={teleprompterInnerRef}
+                    className="px-8 py-3 text-center text-lg font-medium leading-snug whitespace-pre-wrap text-white"
+                  >
+                    {teleprompterText}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTeleprompterVisible(false);
+                    }}
+                    aria-label="Hide teleprompter"
+                    title="Hide"
+                    className="absolute top-1.5 right-1.5 rounded-full bg-black/60 p-1.5"
+                  >
+                    <EyeIcon className="h-4 w-4 text-white" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setTeleprompterVisible(true)}
+                  aria-label="Show teleprompter"
+                  title="Show script"
+                  className="absolute top-14 right-3 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs text-white"
+                >
+                  <EyeOffIcon className="h-4 w-4" />
+                  Script hidden
+                </button>
+              ))}
+
             {recorderState !== "idle" && (
               <div className="absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/60 px-3 py-1 text-sm">
                 <span className={recorderState === "recording" ? "text-red-500" : "text-white/70"}>●</span>
@@ -588,6 +872,26 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
             {capWarning && (
               <div className="absolute bottom-4 left-1/2 w-[90%] max-w-sm -translate-x-1/2 rounded-md bg-black/80 px-3 py-2 text-center text-xs text-white">
                 Recording can&apos;t exceed 3 minutes — stopped automatically.
+              </div>
+            )}
+
+            {/* Digital zoom (see the draw loop's own comment on how this
+                stays resolution-safe) -- mobile only, a desktop webcam has
+                no equivalent "step back/get closer" gesture a slider here
+                would help with. */}
+            {isMobile && (
+              <div className="absolute inset-x-10 bottom-3 z-10 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5">
+                <input
+                  type="range"
+                  min={MIN_CAMERA_ZOOM}
+                  max={MAX_CAMERA_ZOOM}
+                  step={0.1}
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                  className="h-1.5 w-full cursor-ew-resize accent-accent"
+                  aria-label="Camera zoom"
+                />
+                <span className="w-9 shrink-0 text-right text-xs text-white/80">{zoom.toFixed(1)}x</span>
               </div>
             )}
           </>
@@ -696,6 +1000,15 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
         <div className="absolute inset-0 flex items-center justify-center bg-black/80">
           <ReelLoader stage={processingStage} />
         </div>
+      )}
+
+      {showTeleprompterDialog && (
+        <TeleprompterDialog
+          initialText={teleprompterText}
+          onCancel={() => setShowTeleprompterDialog(false)}
+          onClear={() => setTeleprompterText("")}
+          onSave={handleSaveTeleprompterText}
+        />
       )}
     </div>
   );

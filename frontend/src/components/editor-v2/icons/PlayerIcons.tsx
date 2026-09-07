@@ -214,3 +214,62 @@ export function CoverIcon(props: IconProps) {
     </svg>
   );
 }
+
+/** A page of text lines -- CameraCapturePage's Teleprompter button, which
+ * opens the popup where a script is typed in. Outline, matching
+ * FlipCameraIcon/ResetIcon's stroke style. */
+export function TeleprompterIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <rect x="4" y="3" width="16" height="18" rx="1.5" />
+      <path d="M7.5 8h9M7.5 11.5h9M7.5 15h5.5" />
+    </svg>
+  );
+}
+
+/** Open eye -- CameraCapturePage's "show teleprompter" state, toggled with
+ * EyeOffIcon below. */
+export function EyeIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="2.75" />
+    </svg>
+  );
+}
+
+/** Eye with a slash through it -- CameraCapturePage's "teleprompter hidden"
+ * state (the script text is kept, just not shown over the preview). */
+export function EyeOffIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M3.5 3.5l17 17" />
+      <path d="M10.6 5.6A10.6 10.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a15.6 15.6 0 0 1-3.2 3.9M6.7 7.2C4.2 8.9 2.5 12 2.5 12s3.5 6.5 9.5 6.5a9.9 9.9 0 0 0 3.4-.6" />
+      <path d="M9.7 9.7a2.75 2.75 0 0 0 3.9 3.9" />
+    </svg>
+  );
+}
