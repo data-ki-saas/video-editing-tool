@@ -16,11 +16,17 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-09-07",
+    title: "Teleprompter for in-app recording",
+    description:
+      "Recording yourself straight from the app now has a built-in teleprompter — paste your script and it scrolls on its own, right near the camera lens, so you can read while still looking at the camera. Recording on your phone also now defaults to the front camera, with a digital zoom slider to frame your shot.",
+    isLatest: true,
+  },
+  {
     date: "2026-09-06",
     title: "Face effects: a glowing torus or halo",
     description:
       "A glowing ring can now lock onto a photo's detected head — spinning just above it like a torus, or glowing softly behind it like a halo. Pick one from the same cutaway options as “Make it 3D” and Ambience, and combine it freely with either.",
-    isLatest: true,
   },
   {
     date: "2026-09-05",

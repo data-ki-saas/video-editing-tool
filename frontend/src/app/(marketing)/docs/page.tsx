@@ -83,6 +83,13 @@ export default function DocsPage() {
           than one music track and they play one after another, looping for as long as your video
           runs.
         </Topic>
+        <Topic title="Teleprompter">
+          Recording yourself straight from the app? Tap the script icon to open the teleprompter,
+          paste in what you want to say, and it scrolls on its own — right near the camera lens,
+          not off to the side — so you can read your script while still looking at the camera. It
+          picks a comfortable reading pace automatically, and hiding it between takes keeps your
+          script ready without starting over.
+        </Topic>
       </Category>
 
       <Category title="Actions">
