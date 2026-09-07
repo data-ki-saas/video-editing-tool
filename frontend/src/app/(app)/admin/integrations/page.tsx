@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 
@@ -188,11 +187,8 @@ export default function AdminIntegrationsPage() {
   if (isAdmin !== true) return null;
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-12">
+    <div className="flex w-full max-w-2xl flex-col gap-6">
       <div>
-        <Link href="/admin" className="text-sm text-muted hover:underline">
-          ← Admin
-        </Link>
         <h1 className="text-2xl font-semibold">Third-party integrations</h1>
         <p className="text-sm text-muted">
           Reference info only -- pricing and plan notes, which env vars each
@@ -257,6 +253,6 @@ export default function AdminIntegrationsPage() {
           </div>
         ))}
       </div>
-    </main>
+    </div>
   );
 }

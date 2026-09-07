@@ -65,13 +65,8 @@ export default function AdminRolesPage() {
   if (isAdmin !== true) return null;
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-12">
-      <div>
-        <Link href="/admin" className="text-sm text-muted hover:underline">
-          ← Admin
-        </Link>
-        <h1 className="text-2xl font-semibold">Roles & permissions</h1>
-      </div>
+    <div className="flex w-full max-w-3xl flex-col gap-6">
+      <h1 className="text-2xl font-semibold">Roles & permissions</h1>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -161,6 +156,6 @@ export default function AdminRolesPage() {
         </div>
         {createError && <p className="text-sm text-red-600">{createError}</p>}
       </form>
-    </main>
+    </div>
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import { getAdminUsageSummary, getCapWarnings, type AdminUsageSummary, type CapWarning } from "@/lib/api";
@@ -58,11 +57,8 @@ export default function AdminUsagePage() {
   const maxDailyCost = summary ? Math.max(...summary.daily.map((d) => d.costEstimateCents), 1) : 1;
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-12">
+    <div className="flex w-full max-w-3xl flex-col gap-6">
       <div>
-        <Link href="/admin" className="text-sm text-muted hover:underline">
-          ← Admin
-        </Link>
         <h1 className="text-2xl font-semibold">Usage & cost dashboard</h1>
         <p className="text-sm text-muted">
           Estimated cost across all users, from usage_ledger -- see backend/src/metering/pricing.py for the
@@ -173,6 +169,6 @@ export default function AdminUsagePage() {
           </div>
         )}
       </section>
-    </main>
+    </div>
   );
 }

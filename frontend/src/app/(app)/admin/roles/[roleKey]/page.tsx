@@ -88,14 +88,14 @@ export default function AdminRoleDetailPage({ params }: { params: Promise<{ role
   if (isAdmin !== true) return null;
   if (!role || !features) {
     return (
-      <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 py-12">
+      <div className="flex w-full max-w-2xl flex-col gap-4">
         {error ? <p className="text-sm text-red-600">{error}</p> : <p className="text-sm text-muted">Loading…</p>}
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-12">
+    <div className="flex w-full max-w-2xl flex-col gap-6">
       <div>
         <Link href="/admin/roles" className="text-sm text-muted hover:underline">
           ← Roles
@@ -164,6 +164,6 @@ export default function AdminRoleDetailPage({ params }: { params: Promise<{ role
         </button>
         {savedAt && !isSaving && <span className="text-xs text-green-600">Saved</span>}
       </div>
-    </main>
+    </div>
   );
 }

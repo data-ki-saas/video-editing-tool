@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import { listRoles, listUsers, updateUserRole, type AdminUserInfo, type RoleInfo } from "@/lib/api";
@@ -57,13 +56,8 @@ export default function AdminUsersPage() {
   if (isAdmin !== true) return null;
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-12">
-      <div>
-        <Link href="/admin" className="text-sm text-muted hover:underline">
-          ← Admin
-        </Link>
-        <h1 className="text-2xl font-semibold">Users</h1>
-      </div>
+    <div className="flex w-full max-w-2xl flex-col gap-6">
+      <h1 className="text-2xl font-semibold">Users</h1>
 
       <form onSubmit={runSearch} className="flex gap-2">
         <input
@@ -119,6 +113,6 @@ export default function AdminUsersPage() {
           ))}
         </div>
       )}
-    </main>
+    </div>
   );
 }

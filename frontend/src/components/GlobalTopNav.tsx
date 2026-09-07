@@ -2,10 +2,10 @@
 
 /**
  * Persistent top bar for every authenticated page (see
- * app/(app)/layout.tsx) -- Home on the left, then Library/Recordings/
- * Templates/Admin(admins only)/Record(project routes only)/Account/
- * Settings/Sign out on the right. Reel-specific actions (Render, Edge
- * Render) live in the video preview's own toolbar instead (see
+ * app/(app)/layout.tsx) -- Home on the left, then Dashboard/Library/
+ * Recordings/Templates/Admin(admins only)/Record(project routes only)/
+ * Account/Settings/Sign out on the right. Reel-specific actions (Render,
+ * Edge Render) live in the video preview's own toolbar instead (see
  * CanvasPlayer.tsx) since they act on the reel being previewed, not on
  * navigation.
  */
@@ -14,7 +14,7 @@ import { useParams } from "next/navigation";
 import { RecordIcon } from "./editor-v2/icons/PlayerIcons";
 import { SignOutButton } from "@/components/SignOutButton";
 import { ReelIcon } from "@/components/IconButton";
-import { AccountIcon, BookmarkIcon, LibraryIcon, RecordingsIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
+import { AccountIcon, BookmarkIcon, DashboardIcon, LibraryIcon, RecordingsIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 
 export function GlobalTopNav() {
@@ -36,6 +36,14 @@ export function GlobalTopNav() {
       </Link>
 
       <div className="flex items-center gap-2 pr-1">
+        <Link
+          href="/dashboard"
+          aria-label="Dashboard"
+          title="Dashboard"
+          className="rounded-full p-2 text-muted hover:bg-foreground/10"
+        >
+          <DashboardIcon className="h-5 w-5" />
+        </Link>
         <Link
           href="/library"
           aria-label="Library"
