@@ -185,10 +185,14 @@ function createGlowSpriteTexture(colorHex: number): THREE.CanvasTexture {
   canvas.height = size;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Camera3DRenderer: 2D context unavailable for glow sprite texture");
-  const color = new THREE.Color(colorHex);
-  const r = Math.round(color.r * 255);
-  const g = Math.round(color.g * 255);
-  const b = Math.round(color.b * 255);
+  // Read the hex's raw sRGB bytes directly rather than going through
+  // THREE.Color -- under three.js's default color management, THREE.Color
+  // decodes an sRGB hex into ITS linear working-space r/g/b, and writing
+  // those linear numbers straight into a 2D canvas (which always
+  // interprets pixel values as sRGB) would produce a dimmer/off-hue glow.
+  const r = (colorHex >> 16) & 255;
+  const g = (colorHex >> 8) & 255;
+  const b = colorHex & 255;
   const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
   gradient.addColorStop(0, `rgba(${r},${g},${b},0.9)`);
   gradient.addColorStop(0.5, `rgba(${r},${g},${b},0.35)`);
@@ -196,6 +200,7 @@ function createGlowSpriteTexture(colorHex: number): THREE.CanvasTexture {
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, size, size);
   const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace; // this canvas holds sRGB bytes (see the r/g/b comment above) -- same reasoning as this.texture's own colorSpace comment
   texture.needsUpdate = true;
   return texture;
 }
@@ -352,6 +357,18 @@ export class Camera3DRenderer {
     this.scratchCtx = scratchCtx;
 
     this.texture = new THREE.CanvasTexture(this.scratchCanvas);
+    // The scratch canvas holds ordinary sRGB pixel data (a photo drawn via
+    // drawImageFlipped) -- CanvasTexture defaults to NoColorSpace (treated
+    // as already-linear), which under three.js's default color management
+    // (renderer.outputColorSpace = SRGBColorSpace) applies the sRGB encode
+    // curve a SECOND time on top of data that's already sRGB-encoded,
+    // washing the whole image out (flatter contrast, lifted midtones --
+    // reported as the photo looking "hazy"/"faded"). Marking it explicitly
+    // tells three.js to decode it once before shading, so encode-then-decode
+    // round-trips back to the original pixels. Same fix applied to
+    // subjectTexture/effectTexture below and inside resizeTexture (which
+    // recreates the texture object and would otherwise drop this).
+    this.texture.colorSpace = THREE.SRGBColorSpace;
     // Anisotropic filtering: even face-on, the push-in dolly minifies the
     // texture more along one screen-space direction than the other once the
     // camera has panned off-center -- without this, mip selection alone
@@ -368,6 +385,7 @@ export class Camera3DRenderer {
     if (!subjectScratchCtx) throw new Error("Camera3DRenderer: 2D context unavailable for subject scratch canvas");
     this.subjectScratchCtx = subjectScratchCtx;
     this.subjectTexture = new THREE.CanvasTexture(this.subjectScratchCanvas);
+    this.subjectTexture.colorSpace = THREE.SRGBColorSpace; // see this.texture's own comment above
     const subjectMaterial = new THREE.MeshBasicMaterial({ map: this.subjectTexture, transparent: true, depthWrite: false });
     this.subjectMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), subjectMaterial);
     this.subjectMesh.position.set(0, 0, CAMERA_DISTANCE * SUBJECT_DEPTH_FRACTION);
@@ -382,6 +400,7 @@ export class Camera3DRenderer {
     if (!effectScratchCtx) throw new Error("Camera3DRenderer: 2D context unavailable for ambient-effect scratch canvas");
     this.effectScratchCtx = effectScratchCtx;
     this.effectTexture = new THREE.CanvasTexture(this.effectScratchCanvas);
+    this.effectTexture.colorSpace = THREE.SRGBColorSpace; // see this.texture's own comment above
     const effectMaterial = new THREE.MeshBasicMaterial({ map: this.effectTexture, transparent: true, depthWrite: false });
     this.effectMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), effectMaterial);
     this.effectMesh.position.set(0, 0, CAMERA_DISTANCE * EFFECT_DEPTH_FRACTION);
@@ -541,6 +560,7 @@ export class Camera3DRenderer {
     texture.dispose();
     const next = new THREE.CanvasTexture(canvas);
     next.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    next.colorSpace = texture.colorSpace; // preserve the SRGBColorSpace set at construction -- a fresh CanvasTexture defaults back to NoColorSpace otherwise
     return next;
   }
 
