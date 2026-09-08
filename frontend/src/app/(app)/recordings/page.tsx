@@ -32,7 +32,14 @@ import {
   TrashIcon,
   UploadIcon,
 } from "@/components/icons/UIIcons";
-import { CollapseIcon, ExpandIcon, PauseIcon, PlayIcon, RecordIcon } from "@/components/editor-v2/icons/PlayerIcons";
+import {
+  CollapseIcon,
+  ExpandIcon,
+  PauseIcon,
+  PlayIcon,
+  RecordIcon,
+  TeleprompterIcon,
+} from "@/components/editor-v2/icons/PlayerIcons";
 import { InlineEditableText } from "@/components/InlineEditableText";
 import { RecordingEditDialog } from "@/components/recordings/RecordingEditDialog";
 import { RecordingUploadDialog } from "@/components/recordings/RecordingUploadDialog";
@@ -367,6 +374,13 @@ export default function RecordingsPage() {
           >
             <RecordIcon className="h-4 w-4" />
             Record
+          </Link>
+          <Link
+            href="/recordings/scripts"
+            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-surface"
+          >
+            <TeleprompterIcon className="h-4 w-4" />
+            Script
           </Link>
           <button
             type="button"

@@ -15,6 +15,7 @@ from src.niches.router import router as niches_router
 from src.permissions.router import router as permissions_router
 from src.projects.router import router as projects_router
 from src.recordings.router import router as recordings_router
+from src.scripts.router import router as scripts_router
 from src.social.router import router as social_router
 from src.stock_media.router import router as stock_media_router
 from src.tts.router import router as tts_router
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
     app.include_router(permissions_router)
     app.include_router(projects_router)
     app.include_router(recordings_router)
+    app.include_router(scripts_router)
     app.include_router(social_router)
     app.include_router(stock_media_router)
     app.include_router(tts_router)

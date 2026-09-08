@@ -106,8 +106,12 @@ const FRAMING_TIP_DISMISSED_KEY = "reel-creator-camera-framing-tip-seen";
 // close -- same "reel-creator-" prefixed localStorage convention as the
 // framing tip above. Without this, a script the user had already typed in
 // was silently gone after any reload (reported as "the script vanishes on
-// refresh") since it previously lived only in React state.
-const TELEPROMPTER_SCRIPT_STORAGE_KEY = "reel-creator-teleprompter-script";
+// refresh") since it previously lived only in React state. Exported so the
+// /recordings/scripts library page can write a saved script's text here
+// before navigating to this page's own Record entry point -- the mount
+// effect below then picks it up exactly like a restored draft, with no
+// separate query-param/session-storage plumbing needed.
+export const TELEPROMPTER_SCRIPT_STORAGE_KEY = "reel-creator-teleprompter-script";
 // A plain cover-fit (zoom=1, minZoom=1) is the ONLY safe setting here.
 // computeCoverFitSourceRect's own doc comment is explicit that a `minZoom`
 // below 1 (zooming out past cover) is only ever safe for a Picture-in-Picture

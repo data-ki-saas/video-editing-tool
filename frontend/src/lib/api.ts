@@ -1235,6 +1235,65 @@ export async function addRecordingToProject(recordingId: string, projectId: stri
   return handleResponse<Asset>(response);
 }
 
+export interface Script {
+  id: string;
+  userId: string;
+  name: string;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ScriptWire {
+  id: string;
+  user_id: string;
+  name: string;
+  text: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function scriptFromWire(w: ScriptWire): Script {
+  return {
+    id: w.id,
+    userId: w.user_id,
+    name: w.name,
+    text: w.text,
+    createdAt: w.created_at,
+    updatedAt: w.updated_at,
+  };
+}
+
+/** GET /api/scripts -- this user's saved teleprompter scripts, newest first
+ * (backed by scripts_user_time_idx). */
+export async function listScripts(): Promise<Script[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/scripts`, { headers: await authHeader() });
+  const body = await handleResponse<{ scripts: ScriptWire[] }>(response);
+  return body.scripts.map(scriptFromWire);
+}
+
+/** POST /api/scripts -- backs the scripts page's "Add Script" card. 429s
+ * (surfaced as a plain Error via errorFromDetail) once the account already
+ * has backend/src/scripts/service.py's MAX_SCRIPTS_PER_USER scripts, or 422
+ * once the pasted text is over its own MAX_SCRIPT_WORDS (~3 minutes read
+ * aloud). */
+export async function createScript(name: string, text: string): Promise<Script> {
+  const response = await apiFetch(`${API_BASE_URL}/api/scripts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ name, text }),
+  });
+  return scriptFromWire(await handleResponse<ScriptWire>(response));
+}
+
+export async function deleteScript(scriptId: string): Promise<void> {
+  const response = await apiFetch(`${API_BASE_URL}/api/scripts/${encodeURIComponent(scriptId)}`, {
+    method: "DELETE",
+    headers: await authHeader(),
+  });
+  await throwIfNotOk(response);
+}
+
 export interface SocialAccount {
   provider: string;
   accountName: string;
