@@ -77,15 +77,22 @@ const FACE_DETECT_INTERVAL_MS = 150;
 const SUBJECT_CUTOUT_INTERVAL_MS = 200;
 const TARGET_FPS = 24;
 const TIMER_TICK_MS = 250;
-// Whatever the camera actually negotiates (getUserMedia's own 9:16 hints
-// below are only `ideal`, not binding -- plenty of devices/browsers hand
-// back a different ratio, e.g. a landscape-sensor default), the recorded
-// buffer is always center-cropped to this app's canonical reel shape (see
+// Whatever the camera actually negotiates (getUserMedia's own aspectRatio/
+// width hints below are only `ideal`, not binding -- plenty of devices/
+// browsers hand back a different ratio, e.g. a landscape-sensor default),
+// the recorded buffer is always center-cropped to this app's canonical
+// reel shape (see
 // lib/projects.ts's resetProject / lib/timeline/resolve.ts's REEL_WIDTH/
 // REEL_HEIGHT) so footage recorded here never needs an unpredictable
 // re-crop later, and so the live preview -- once sized via CSS to match --
 // shows exactly the framing that gets saved.
 const CAPTURE_ASPECT_RATIO = 9 / 16;
+// Gates the one-time "hold your phone farther away" framing tip (see the
+// acquireCameraStream aspectRatio comment above for why this app's camera
+// framing can run narrower than the phone's own native camera app) --
+// shown once ever, same "reel-creator-" prefixed localStorage convention as
+// this app's saved theme (see app/layout.tsx).
+const FRAMING_TIP_DISMISSED_KEY = "reel-creator-camera-framing-tip-seen";
 // A plain cover-fit (zoom=1, minZoom=1) is the ONLY safe setting here.
 // computeCoverFitSourceRect's own doc comment is explicit that a `minZoom`
 // below 1 (zooming out past cover) is only ever safe for a Picture-in-Picture
@@ -104,7 +111,8 @@ const CAPTURE_ASPECT_RATIO = 9 / 16;
 // recording not fitting the mobile reel clip size, on both laptop and
 // mobile). The "reveal a bit more" intent is instead already satisfied by
 // requesting a camera stream wider than 9:16 in the first place (see the
-// width/height `ideal` hints below) and cover-cropping THAT down to 9:16.
+// aspectRatio/width `ideal` hints below) and cover-cropping THAT down to
+// 9:16.
 
 type RecorderState = "idle" | "recording" | "paused";
 type EffectPicker = "filter" | "ambience" | "face" | null;
@@ -267,6 +275,21 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   // Guards against handleStop running twice concurrently -- e.g. the
   // 3-minute cap firing in the same tick the user taps "Finish".
   const isStoppingRef = useRef(false);
+  // Holds the screen awake for the duration of a take -- mobile screens
+  // dimming/locking mid-recording is a real failure mode for a browser-
+  // based recorder that a native camera app never has to worry about
+  // (the OS itself already knows a camera app is active). Feature-detected
+  // and best-effort (see acquireWakeLock below), same pattern as the
+  // camera `zoom` capability reset above.
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  // Ticks 3-2-1 before a FRESH take's recording actually starts (see
+  // beginCountdownThenRecord) -- null whenever no countdown is in flight.
+  // recorderState deliberately stays "idle" for the whole countdown (the
+  // recorder itself hasn't started yet), so every `recorderState !==
+  // "idle"` check that hides Reset/Finish already keeps them hidden with
+  // no extra logic needed.
+  const [countdownValue, setCountdownValue] = useState<number | null>(null);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Makes sure the mobile selfie-mode default (below) is only ever applied
   // once, right when isMobileCheckReady first turns true -- otherwise it'd
   // re-fire and stomp on a manual flip-camera tap every time isMobile is
@@ -304,6 +327,10 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
 
+  // One-time "hold farther away" framing tip -- see
+  // FRAMING_TIP_DISMISSED_KEY's own comment.
+  const [showFramingTip, setShowFramingTip] = useState(false);
+
   // The script the user wants to read out loud, shown scrolling over the
   // live preview so their eyes stay near the camera lens instead of down at
   // a phone/paper -- see this file's own module comment for the recording
@@ -316,6 +343,15 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   // temporarily getting it off the screen -- independent of whether any
   // text has been typed at all.
   const [teleprompterVisible, setTeleprompterVisible] = useState(true);
+  // Whether the script is actually auto-scrolling right now -- independent
+  // of recorderState (see the scroll-active effect below). Defaults false
+  // (a freshly saved script sits paused at the top) rather than scrolling
+  // the instant it's saved, so it never moves before the user is actually
+  // ready -- reported as "it starts as soon as the recording starts,"
+  // provide ways to pause and reset it. handleStartOrResume's fresh-take
+  // branch flips this true once the countdown below actually finishes, so
+  // the common "type script, hit record" flow still needs no extra tap.
+  const [teleprompterPlaying, setTeleprompterPlaying] = useState(false);
   const teleprompterInnerRef = useRef<HTMLDivElement | null>(null);
   const teleprompterScrollPxRef = useRef(0);
   const teleprompterPauseUntilMsRef = useRef(0);
@@ -338,6 +374,18 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
     return camera3DRendererRef.current;
   }
 
+  // Best-effort -- unsupported browsers (feature-detected) or a refusal
+  // (e.g. low battery mode) just leave the OS's own screen-timeout in
+  // place, same as this file's other best-effort hardware calls.
+  async function acquireWakeLock() {
+    if (!("wakeLock" in navigator)) return;
+    try {
+      wakeLockRef.current = await navigator.wakeLock.request("screen");
+    } catch {
+      // Ignored -- see this function's own doc comment.
+    }
+  }
+
   // Defaults a touch/phone-sized session to the front (selfie) camera --
   // the influencer/creator this app targets is filming themselves, and
   // starting on the back camera (this page's original, desktop-webcam-era
@@ -355,6 +403,34 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
     if (isMobile) setFacingMode("user");
   }, [isMobileCheckReady, isMobile]);
 
+  // Shows the framing tip once ever, only on the mobile handheld case the
+  // complaint was actually about (a desktop webcam isn't held at arm's
+  // length) -- auto-dismisses itself after a few seconds either way.
+  useEffect(() => {
+    if (!isMobileCheckReady || !isMobile) return;
+    let alreadySeen = false;
+    try {
+      alreadySeen = localStorage.getItem(FRAMING_TIP_DISMISSED_KEY) === "1";
+    } catch {
+      // Ignored -- private browsing / storage access can throw; falls
+      // through to showing the tip this once rather than erroring out.
+    }
+    if (alreadySeen) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time reveal gated by a client-only localStorage read, same reasoning as the mobile-default-facing-mode effect above
+    setShowFramingTip(true);
+    const timeout = setTimeout(dismissFramingTip, 6000);
+    return () => clearTimeout(timeout);
+  }, [isMobileCheckReady, isMobile]);
+
+  function dismissFramingTip() {
+    setShowFramingTip(false);
+    try {
+      localStorage.setItem(FRAMING_TIP_DISMISSED_KEY, "1");
+    } catch {
+      // Ignored -- best-effort persistence only, same as the read above.
+    }
+  }
+
   // Acquires (and re-acquires on camera flip) the camera+mic stream. Holds
   // off until isMobileCheckReady so it never has to acquire twice just to
   // pick up the mobile selfie-mode default above.
@@ -364,27 +440,49 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change (facingMode/retryToken), same pattern as CutawayDialog's own re-sync effects
     setCameraError(null);
 
-    navigator.mediaDevices
-      .getUserMedia({
-        audio: true,
-        video: {
-          facingMode,
-          // Deliberately NOT hinting CAPTURE_ASPECT_RATIO (9:16) here --
-          // asking the camera driver itself for that exact portrait shape
-          // invites it to digitally crop/zoom in before this page's own
-          // compositing loop ever sees the frame, leaving no extra frame
-          // around the body for the cover-fit crop below to work with. A
-          // wider (3:4) ideal leaves the actual 9:16 shaping entirely to
-          // that cover-fit crop step, which reveals more of the raw frame
-          // than a camera negotiated already-9:16 would have left to crop
-          // from -- see CAPTURE_ASPECT_RATIO's own comment for why that's
-          // the ONLY safe way to get "a bit more room around the body"
-          // here.
-          width: { ideal: 960 },
-          height: { ideal: 1280 },
-          frameRate: { ideal: TARGET_FPS, max: TARGET_FPS },
-        },
-      })
+    async function acquireCameraStream(): Promise<MediaStream> {
+      const baseVideoConstraints: MediaTrackConstraints = {
+        facingMode,
+        frameRate: { ideal: TARGET_FPS, max: TARGET_FPS },
+      };
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: {
+            ...baseVideoConstraints,
+            // Deliberately an ASPECT RATIO, not a fixed width+height --
+            // pinning BOTH dimensions as "ideal" (this page's original
+            // 960x1280 request) is exactly the kind of ask that steers a
+            // phone's camera HAL toward a specific, often reduced/
+            // pre-cropped capture mode instead of its native full-sensor
+            // one, which is the actual reason a handheld selfie here
+            // frames much tighter than the same phone's own native camera
+            // app at the same arm's-length distance (reported as "only
+            // get my head, the regular camera gets almost half my body").
+            // The cover-fit crop below already preserves full height (zero
+            // slack there once cropped to this app's 9:16 canvas -- see
+            // CAPTURE_ASPECT_RATIO's own comment), so the narrow framing
+            // traces back to the raw stream negotiated HERE, not anything
+            // cropped away afterward. Asking for the RATIO (with only a
+            // loose width, no height) instead lets the browser pick its
+            // own best/native resolution satisfying it -- the standard
+            // technique for recovering full sensor field-of-view. Not a
+            // guaranteed fix: which capture mode a given phone/browser
+            // actually picks is an OS/HAL behavior outside this app's
+            // control.
+            aspectRatio: { ideal: 3 / 4 },
+            width: { ideal: 1280 },
+          },
+        });
+      } catch (err) {
+        if (!(err instanceof DOMException) || err.name !== "OverconstrainedError") throw err;
+        // Some devices reject the aspectRatio/width hint outright -- retry
+        // with the bare minimum rather than hard-failing camera access.
+        return navigator.mediaDevices.getUserMedia({ audio: true, video: baseVideoConstraints });
+      }
+    }
+
+    acquireCameraStream()
       .then(async (mediaStream) => {
         if (cancelled) {
           mediaStream.getTracks().forEach((track) => track.stop());
@@ -564,8 +662,26 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
       liveSubjectCutoutRef.current?.close();
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== "inactive") recorder.stop();
+      if (countdownIntervalRef.current !== null) clearInterval(countdownIntervalRef.current);
+      void wakeLockRef.current?.release();
     };
   }, []);
+
+  // The Wake Lock API auto-releases whenever the tab loses visibility (a
+  // documented quirk, not something this app's own code triggers) -- so a
+  // take left running while the phone's screen was off/backgrounded (a
+  // notification pulled the browser away, say) needs it re-requested once
+  // the page is actually visible again, or the screen could still dim mid
+  // takes for the rest of that recording.
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible" && recorderState === "recording" && !wakeLockRef.current) {
+        void acquireWakeLock();
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [recorderState]);
 
   // The visible timer + the actual 3-minute cap -- ticks only while
   // genuinely recording (not paused), a coarser 250ms cadence than the draw
@@ -602,15 +718,20 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   }
 
   // Auto-scrolls the teleprompter text upward, karaoke-style, at the smart
-  // default pace computed above -- active whenever there's a script to show
-  // AND it isn't hidden, so it also runs during idle (letting the creator
-  // rehearse before hitting record), but holds still while actually paused
-  // mid-recording. Applies the scroll offset straight to the DOM node via a
-  // ref rather than React state, same reasoning as the compositing loop
-  // above reading its own effect toggles from refs -- a per-frame re-render
-  // for a value nothing else derives from would be pure waste.
+  // default pace computed above -- active whenever there's a script to
+  // show, it isn't hidden, AND the user has actually pressed its own
+  // Play (teleprompterPlaying -- see that state's own doc comment: a
+  // fresh take flips this true once recording actually starts, but it's
+  // independent of recorderState the rest of the time, so it can be
+  // paused/resumed/reset without touching the recording itself). Pausing
+  // the RECORDING still force-holds it too (recorderState !== "paused"),
+  // since stepping away from a take should stop the script along with it.
+  // Applies the scroll offset straight to the DOM node via a ref rather
+  // than React state, same reasoning as the compositing loop above reading
+  // its own effect toggles from refs -- a per-frame re-render for a value
+  // nothing else derives from would be pure waste.
   useEffect(() => {
-    const active = teleprompterText.trim().length > 0 && teleprompterVisible && recorderState !== "paused";
+    const active = teleprompterText.trim().length > 0 && teleprompterVisible && teleprompterPlaying && recorderState !== "paused";
     if (!active) return;
 
     let rafId: number;
@@ -643,11 +764,12 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
       cancelAnimationFrame(rafId);
       teleprompterLastTsRef.current = null;
     };
-  }, [teleprompterText, teleprompterVisible, recorderState]);
+  }, [teleprompterText, teleprompterVisible, teleprompterPlaying, recorderState]);
 
   function handleSaveTeleprompterText(text: string) {
     setTeleprompterText(text);
     setTeleprompterVisible(true);
+    setTeleprompterPlaying(false);
     resetTeleprompterScroll();
     setShowTeleprompterDialog(false);
   }
@@ -656,33 +778,82 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
     setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
   }
 
-  function handleStartOrResume() {
-    if (recorderState === "idle") {
-      const canvas = canvasRef.current;
-      const mimeType = pickMediaRecorderMimeType();
-      if (!canvas || !mimeType) {
-        setSaveError("This browser can't record video.");
-        return;
-      }
-      const canvasStream = canvas.captureStream(TARGET_FPS);
-      const audioTrack = streamRef.current?.getAudioTracks()[0];
-      if (audioTrack) canvasStream.addTrack(audioTrack);
+  // The actual MediaRecorder setup -- pulled out of handleStartOrResume so
+  // a fresh take's countdown (beginCountdownThenRecord below) can delay
+  // calling this until the user has actually had time to get in frame,
+  // without duplicating any of the setup itself.
+  function startRecordingNow() {
+    const canvas = canvasRef.current;
+    const mimeType = pickMediaRecorderMimeType();
+    if (!canvas || !mimeType) {
+      setSaveError("This browser can't record video.");
+      return;
+    }
+    const canvasStream = canvas.captureStream(TARGET_FPS);
+    const audioTrack = streamRef.current?.getAudioTracks()[0];
+    if (audioTrack) canvasStream.addTrack(audioTrack);
 
-      const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 2_500_000 });
-      recordedChunksRef.current = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
-      };
-      mediaRecorderRef.current = recorder;
-      recorder.start(1000);
-      accumulatedRecordedMsRef.current = 0;
-      segmentStartMsRef.current = performance.now();
-      setRecordedMs(0);
-      setCapWarning(false);
-      // A fresh take always reads from the top of the script, regardless of
-      // how far a rehearsal scroll had already gotten.
-      resetTeleprompterScroll();
-      setRecorderState("recording");
+    const recorder = new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 2_500_000 });
+    recordedChunksRef.current = [];
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+    };
+    mediaRecorderRef.current = recorder;
+    recorder.start(1000);
+    accumulatedRecordedMsRef.current = 0;
+    segmentStartMsRef.current = performance.now();
+    setRecordedMs(0);
+    setCapWarning(false);
+    // A fresh take always reads from the top of the script, regardless of
+    // how far a rehearsal scroll had already gotten, and starts it running
+    // automatically -- see teleprompterPlaying's own doc comment.
+    resetTeleprompterScroll();
+    setTeleprompterPlaying(true);
+    void acquireWakeLock();
+    setRecorderState("recording");
+  }
+
+  // Ticks 3-2-1 before a FRESH take's recording actually starts -- gives
+  // time to get positioned/settled in frame right after tapping the
+  // shutter, the way a phone camera's own self-timer does. Deliberately
+  // NOT used for resuming from a pause (see handleStartOrResume below) --
+  // only a take's very first start warrants the "get ready" window.
+  function beginCountdownThenRecord() {
+    setCountdownValue(3);
+    // Tracked in a plain local (not read back from state) so the actual
+    // "start recording" side effect below runs from a normal interval tick
+    // rather than from inside a setState updater callback, which React can
+    // invoke more than once (e.g. under StrictMode) since updaters are
+    // expected to be pure.
+    let remainingSeconds = 3;
+    countdownIntervalRef.current = setInterval(() => {
+      remainingSeconds -= 1;
+      if (remainingSeconds <= 0) {
+        if (countdownIntervalRef.current !== null) clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+        setCountdownValue(null);
+        startRecordingNow();
+      } else {
+        setCountdownValue(remainingSeconds);
+      }
+    }, 1000);
+  }
+
+  function cancelCountdown() {
+    if (countdownIntervalRef.current !== null) clearInterval(countdownIntervalRef.current);
+    countdownIntervalRef.current = null;
+    setCountdownValue(null);
+  }
+
+  function handleStartOrResume() {
+    // Mid-countdown, the shutter button (see the render below) doubles as
+    // a Cancel -- tapping it again shouldn't stack a second countdown.
+    if (countdownValue !== null) {
+      cancelCountdown();
+      return;
+    }
+    if (recorderState === "idle") {
+      beginCountdownThenRecord();
     } else if (recorderState === "paused") {
       mediaRecorderRef.current?.resume();
       segmentStartMsRef.current = performance.now();
@@ -705,7 +876,10 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
       accumulatedRecordedMsRef.current += performance.now() - segmentStartMsRef.current;
     }
     setRecorderState("idle");
+    setTeleprompterPlaying(false);
     await stopMediaRecorder(recorder);
+    void wakeLockRef.current?.release();
+    wakeLockRef.current = null;
 
     setIsProcessing(true);
     setSaveError(null);
@@ -741,6 +915,7 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
     if (!window.confirm("Discard this recording and start over?")) return;
     isStoppingRef.current = true;
     try {
+      cancelCountdown();
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== "inactive") await stopMediaRecorder(recorder);
       mediaRecorderRef.current = null;
@@ -750,6 +925,12 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
       setRecordedMs(0);
       setCapWarning(false);
       setRecorderState("idle");
+      // A discarded take goes back to a clean, paused-at-top prompter --
+      // same reasoning as teleprompterPlaying's own doc comment.
+      setTeleprompterPlaying(false);
+      resetTeleprompterScroll();
+      void wakeLockRef.current?.release();
+      wakeLockRef.current = null;
     } finally {
       isStoppingRef.current = false;
     }
@@ -786,83 +967,112 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   }
 
   const isBusy = isProcessing;
+  // Everything below the header shares this same "just under the header,
+  // safe-area aware" top offset -- the recording timer badge, the
+  // teleprompter box, its hidden-state pill, and the framing tip all used
+  // to sit relative to a video box that already started below a separate
+  // header row; now that the canvas is a true full-bleed layer (see this
+  // section's own comment below), each of them needs to account for the
+  // floating header's own height instead.
+  const BELOW_HEADER_TOP = "top-[calc(env(safe-area-inset-top)+56px)]";
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black text-white">
-      <div className="flex items-center justify-between p-3">
-        <button type="button" onClick={handleClose} aria-label="Close" className="rounded-full bg-white/10 p-2 text-xl leading-none">
-          ✕
-        </button>
-        <div className="flex items-center gap-2">
+    <div className="fixed inset-0 z-50 overflow-hidden overscroll-none bg-black text-white">
+      {cameraError ? (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center text-sm text-white/80">
+          <p className="max-w-xs">{cameraError}</p>
           <button
             type="button"
-            onClick={() => setShowTeleprompterDialog(true)}
-            aria-label="Teleprompter script"
-            title="Teleprompter"
-            className={`rounded-full p-2 ${teleprompterText.trim().length > 0 ? "bg-accent text-accent-foreground" : "bg-white/10"}`}
+            onClick={() => setRetryToken((n) => n + 1)}
+            className="rounded-md bg-white/10 px-3 py-1.5 text-white"
           >
-            <TeleprompterIcon className="h-5 w-5" />
+            Try again
           </button>
-          {hasMultipleCameras && recorderState === "idle" && (
-            <button type="button" onClick={handleFlipCamera} aria-label="Flip camera" className="rounded-full bg-white/10 p-2">
-              <FlipCameraIcon className="h-5 w-5" />
-            </button>
-          )}
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Off-screen but still playing/decoding -- the canvas below is
+              the only thing actually shown; see this file's own module
+              comment for why every consumer (preview/record/snap) reads
+              from that composited canvas instead of this raw feed. */}
+          <video ref={videoRef} muted playsInline className="absolute h-px w-px opacity-0" />
+          {/* Full-bleed base layer -- fills the entire page so every control
+              below floats OVER the live feed as a semi-transparent overlay,
+              the same visual language a native camera app uses, instead of
+              the feed being squeezed by chrome rows that eat into its own
+              height. object-contain scales the canvas's actual pixel buffer
+              (its width/height attributes, kept at a 9:16 ratio by the draw
+              loop above) up to fill this box, letterboxing only if the
+              viewport itself isn't 9:16. */}
+          <canvas ref={canvasRef} className="absolute inset-0 h-full w-full object-contain" />
 
-      <div className="relative flex flex-1 items-center justify-center overflow-hidden">
-        {cameraError ? (
-          <div className="flex max-w-xs flex-col items-center gap-3 p-6 text-center text-sm text-white/80">
-            <p>{cameraError}</p>
-            <button
-              type="button"
-              onClick={() => setRetryToken((n) => n + 1)}
-              className="rounded-md bg-white/10 px-3 py-1.5 text-white"
+          {showFramingTip && (
+            <div
+              className={`absolute inset-x-6 z-10 rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white/90 ${BELOW_HEADER_TOP}`}
             >
-              Try again
-            </button>
-          </div>
-        ) : (
-          <>
-            {/* Off-screen but still playing/decoding -- the canvas below is
-                the only thing actually shown; see this file's own module
-                comment for why every consumer (preview/record/snap) reads
-                from that composited canvas instead of this raw feed. */}
-            <video ref={videoRef} muted playsInline className="absolute h-px w-px opacity-0" />
-            {/* object-contain scales the canvas's actual pixel buffer (its
-                width/height attributes, kept at a 9:16 ratio by the draw
-                loop above) up to fill this box -- unlike a bare max-h/max-w
-                cap, which only ever shrinks and left the preview stuck at
-                whatever raw resolution the camera happened to negotiate. */}
-            <canvas ref={canvasRef} className="h-full w-full object-contain" />
+              Tip: hold your phone a bit farther away for a wider shot, closer
+              to what your regular camera app shows.
+              <button type="button" onClick={dismissFramingTip} className="ml-2 underline">
+                Got it
+              </button>
+            </div>
+          )}
 
-            {teleprompterText.trim().length > 0 &&
-              (teleprompterVisible ? (
-                // Positioned toward the top -- a phone's front camera (and a
-                // laptop's webcam) sits above the screen, so keeping the
-                // text close to it is what actually keeps the recorded eyes
-                // reading as "looking at camera" rather than looking down.
-                // The mask-image fades both this box's own backdrop and the
-                // text near its top/bottom edges -- the "karaoke" scrolling
-                // look, and a visual cue that more text is coming.
+          {teleprompterText.trim().length > 0 &&
+            (teleprompterVisible ? (
+              // Positioned toward the top -- a phone's front camera (and a
+              // laptop's webcam) sits above the screen, so keeping the
+              // text close to it is what actually keeps the recorded eyes
+              // reading as "looking at camera" rather than looking down.
+              // The mask-image fades both this box's own backdrop and the
+              // text near its top/bottom edges -- the "karaoke" scrolling
+              // look, and a visual cue that more text is coming.
+              <div
+                onClick={resetTeleprompterScroll}
+                role="button"
+                aria-label="Restart teleprompter from the top"
+                title="Tap to restart from the top"
+                className={`absolute inset-x-3 z-10 h-[32%] cursor-pointer overflow-hidden rounded-lg bg-black/45 ${BELOW_HEADER_TOP}`}
+                style={{
+                  WebkitMaskImage: "linear-gradient(to bottom, transparent, black 15%, black 85%, transparent)",
+                  maskImage: "linear-gradient(to bottom, transparent, black 15%, black 85%, transparent)",
+                }}
+              >
                 <div
-                  onClick={resetTeleprompterScroll}
-                  role="button"
-                  aria-label="Restart teleprompter from the top"
-                  title="Tap to restart from the top"
-                  className="absolute inset-x-3 top-14 z-10 h-[32%] cursor-pointer overflow-hidden rounded-lg bg-black/45"
-                  style={{
-                    WebkitMaskImage: "linear-gradient(to bottom, transparent, black 15%, black 85%, transparent)",
-                    maskImage: "linear-gradient(to bottom, transparent, black 15%, black 85%, transparent)",
-                  }}
+                  ref={teleprompterInnerRef}
+                  className="px-8 py-3 text-center text-lg font-medium leading-snug whitespace-pre-wrap text-white"
                 >
-                  <div
-                    ref={teleprompterInnerRef}
-                    className="px-8 py-3 text-center text-lg font-medium leading-snug whitespace-pre-wrap text-white"
+                  {teleprompterText}
+                </div>
+                {/* Independent of the recording's own Pause -- see
+                    teleprompterPlaying's own doc comment -- so the script
+                    can be paused/resumed/restarted without touching the
+                    take itself. */}
+                <div className="absolute top-1.5 right-1.5 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTeleprompterPlaying((prev) => !prev);
+                    }}
+                    aria-label={teleprompterPlaying ? "Pause teleprompter" : "Play teleprompter"}
+                    title={teleprompterPlaying ? "Pause script" : "Play script"}
+                    className="rounded-full bg-black/60 p-1.5"
                   >
-                    {teleprompterText}
-                  </div>
+                    {teleprompterPlaying ? <PauseIcon className="h-4 w-4 text-white" /> : <PlayIcon className="h-4 w-4 text-white" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      resetTeleprompterScroll();
+                    }}
+                    aria-label="Restart teleprompter from the top"
+                    title="Restart from top"
+                    className="rounded-full bg-black/60 p-1.5"
+                  >
+                    <ResetIcon className="h-4 w-4 text-white" />
+                  </button>
                   <button
                     type="button"
                     onClick={(e) => {
@@ -871,65 +1081,109 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
                     }}
                     aria-label="Hide teleprompter"
                     title="Hide"
-                    className="absolute top-1.5 right-1.5 rounded-full bg-black/60 p-1.5"
+                    className="rounded-full bg-black/60 p-1.5"
                   >
                     <EyeIcon className="h-4 w-4 text-white" />
                   </button>
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setTeleprompterVisible(true)}
-                  aria-label="Show teleprompter"
-                  title="Show script"
-                  className="absolute top-14 right-3 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs text-white"
-                >
-                  <EyeOffIcon className="h-4 w-4" />
-                  Script hidden
-                </button>
-              ))}
-
-            {recorderState !== "idle" && (
-              <div className="absolute top-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/60 px-3 py-1 text-sm">
-                <span className={recorderState === "recording" ? "text-red-500" : "text-white/70"}>●</span>
-                <span>{recorderState === "paused" ? "Paused" : "Recording"}</span>
-                <span className="text-white/70">
-                  {formatTimer(recordedMs)} / {formatTimer(MAX_RECORDING_SECONDS * 1000)}
-                </span>
               </div>
-            )}
+            ) : (
+              <button
+                type="button"
+                onClick={() => setTeleprompterVisible(true)}
+                aria-label="Show teleprompter"
+                title="Show script"
+                className={`absolute right-3 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs text-white ${BELOW_HEADER_TOP}`}
+              >
+                <EyeOffIcon className="h-4 w-4" />
+                Script hidden
+              </button>
+            ))}
 
-            {capWarning && (
-              <div className="absolute bottom-4 left-1/2 w-[90%] max-w-sm -translate-x-1/2 rounded-md bg-black/80 px-3 py-2 text-center text-xs text-white">
-                Recording can&apos;t exceed 3 minutes — stopped automatically.
-              </div>
-            )}
+          {recorderState !== "idle" && countdownValue === null && (
+            <div className={`absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-black/60 px-3 py-1 text-sm ${BELOW_HEADER_TOP}`}>
+              <span className={recorderState === "recording" ? "text-red-500" : "text-white/70"}>●</span>
+              <span>{recorderState === "paused" ? "Paused" : "Recording"}</span>
+              <span className="text-white/70">
+                {formatTimer(recordedMs)} / {formatTimer(MAX_RECORDING_SECONDS * 1000)}
+              </span>
+            </div>
+          )}
 
-            {/* Digital zoom (see the draw loop's own comment on how this
-                stays resolution-safe) -- mobile only, a desktop webcam has
-                no equivalent "step back/get closer" gesture a slider here
-                would help with. */}
-            {isMobile && (
-              <div className="absolute inset-x-10 bottom-3 z-10 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5">
-                <input
-                  type="range"
-                  min={MIN_CAMERA_ZOOM}
-                  max={MAX_CAMERA_ZOOM}
-                  step={0.1}
-                  value={zoom}
-                  onChange={(e) => setZoom(Number(e.target.value))}
-                  className="h-1.5 w-full cursor-ew-resize accent-accent"
-                  aria-label="Camera zoom"
-                />
-                <span className="w-9 shrink-0 text-right text-xs text-white/80">{zoom.toFixed(1)}x</span>
-              </div>
-            )}
-          </>
-        )}
+          {/* 3-2-1 countdown before a fresh take's recording actually
+              starts -- see beginCountdownThenRecord's own doc comment.
+              Tapping the shutter button again (still visible underneath,
+              unchanged) cancels it back to idle. */}
+          {countdownValue !== null && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30">
+              <span className="text-8xl font-bold text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.7)]">{countdownValue}</span>
+            </div>
+          )}
+
+          {capWarning && (
+            <div className="absolute bottom-56 left-1/2 z-10 w-[90%] max-w-sm -translate-x-1/2 rounded-md bg-black/80 px-3 py-2 text-center text-xs text-white">
+              Recording can&apos;t exceed 3 minutes — stopped automatically.
+            </div>
+          )}
+
+          {/* Digital zoom (see the draw loop's own comment on how this
+              stays resolution-safe) -- mobile only, a desktop webcam has
+              no equivalent "step back/get closer" gesture a slider here
+              would help with. Sits just above the floating bottom controls
+              below. */}
+          {isMobile && (
+            <div className="absolute inset-x-10 bottom-40 z-10 flex items-center gap-2 rounded-full bg-black/50 px-3 py-1.5">
+              <input
+                type="range"
+                min={MIN_CAMERA_ZOOM}
+                max={MAX_CAMERA_ZOOM}
+                step={0.1}
+                value={zoom}
+                onChange={(e) => setZoom(Number(e.target.value))}
+                className="h-1.5 w-full cursor-ew-resize accent-accent"
+                aria-label="Camera zoom"
+              />
+              <span className="w-9 shrink-0 text-right text-xs text-white/80">{zoom.toFixed(1)}x</span>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Floating header -- always rendered (even on a camera error) so
+          Close stays reachable. A gradient scrim (not a solid bar) keeps
+          the icons legible over arbitrary video/background content while
+          still reading as "floating over the feed" rather than a fixed
+          opaque toolbar. */}
+      <div
+        className="absolute inset-x-0 top-0 z-20 flex items-start justify-between bg-gradient-to-b from-black/60 to-transparent p-3 pb-8 pt-[calc(env(safe-area-inset-top)+0.75rem)]"
+      >
+        <button type="button" onClick={handleClose} aria-label="Close" className="rounded-full bg-black/40 p-2 text-xl leading-none backdrop-blur-sm">
+          ✕
+        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowTeleprompterDialog(true)}
+            aria-label="Teleprompter script"
+            title="Teleprompter"
+            className={`rounded-full p-2 backdrop-blur-sm ${teleprompterText.trim().length > 0 ? "bg-accent text-accent-foreground" : "bg-black/40"}`}
+          >
+            <TeleprompterIcon className="h-5 w-5" />
+          </button>
+          {hasMultipleCameras && recorderState === "idle" && countdownValue === null && (
+            <button type="button" onClick={handleFlipCamera} aria-label="Flip camera" className="rounded-full bg-black/40 p-2 backdrop-blur-sm">
+              <FlipCameraIcon className="h-5 w-5" />
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* Floating bottom controls -- effects pill row + the main action
+          row, both overlaid on the feed on a gradient scrim instead of
+          sitting in their own opaque band below it (see this file's own
+          module comment on why the canvas is now full-bleed). */}
       {!cameraError && (
-        <div className="flex flex-col gap-2 px-3 pb-1">
+        <div className="absolute inset-x-0 bottom-0 z-20 flex flex-col gap-2 bg-gradient-to-t from-black/70 to-transparent px-3 pt-10 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
           {openPicker === "filter" && (
             <PillRow options={FILTER_PRESET_OPTIONS.filter((o) => o.id !== "none").map((o) => ({ id: o.id, label: o.name }))} selectedId={filterId} onSelect={setFilterId} />
           )}
@@ -959,75 +1213,83 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
               </button>
             ))}
           </div>
-        </div>
-      )}
 
-      {saveError && <p className="px-3 pb-1 text-center text-xs text-red-400">{saveError}</p>}
+          {saveError && <p className="text-center text-xs text-red-400">{saveError}</p>}
 
-      {!cameraError && (
-        <div className="flex items-center justify-center gap-8 p-4 pb-6">
-          {recorderState !== "idle" ? (
+          <div className="flex items-center justify-center gap-8 py-2">
+            {recorderState !== "idle" ? (
+              <button
+                type="button"
+                onClick={() => void handleReset()}
+                disabled={isBusy}
+                aria-label="Reset recording"
+                title="Discard and start over"
+                className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white disabled:opacity-40"
+              >
+                <ResetIcon className="h-6 w-6 text-white" />
+              </button>
+            ) : (
+              <span className="h-12 w-12" />
+            )}
+
             <button
               type="button"
-              onClick={() => void handleReset()}
-              disabled={isBusy}
-              aria-label="Reset recording"
-              title="Discard and start over"
+              onClick={() => void handleSnapPhoto()}
+              disabled={isBusy || countdownValue !== null}
+              aria-label="Take photo"
+              title="Take a photo"
               className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white disabled:opacity-40"
             >
-              <ResetIcon className="h-6 w-6 text-white" />
+              <span className="h-8 w-8 rounded-full bg-white" />
             </button>
-          ) : (
-            <span className="h-12 w-12" />
-          )}
 
-          <button
-            type="button"
-            onClick={() => void handleSnapPhoto()}
-            disabled={isBusy}
-            aria-label="Take photo"
-            title="Take a photo"
-            className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white disabled:opacity-40"
-          >
-            <span className="h-8 w-8 rounded-full bg-white" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => (recorderState === "recording" ? handlePause() : handleStartOrResume())}
-            disabled={isBusy}
-            aria-label={recorderState === "recording" ? "Pause recording" : recorderState === "paused" ? "Resume recording" : "Start recording"}
-            title={recorderState === "recording" ? "Pause" : recorderState === "paused" ? "Resume" : "Start recording"}
-            className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 disabled:opacity-40"
-          >
-            {recorderState === "recording" ? (
-              <PauseIcon className="h-7 w-7 text-white" />
-            ) : recorderState === "paused" ? (
-              <PlayIcon className="h-7 w-7 text-white" />
-            ) : (
-              <span className="h-6 w-6 rounded-full bg-white" />
-            )}
-          </button>
-
-          {recorderState !== "idle" ? (
             <button
               type="button"
-              onClick={() => void handleStop()}
+              onClick={() => (recorderState === "recording" ? handlePause() : handleStartOrResume())}
               disabled={isBusy}
-              aria-label="Finish recording"
-              title="Finish"
-              className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white text-xl disabled:opacity-40"
+              aria-label={
+                countdownValue !== null
+                  ? "Cancel countdown"
+                  : recorderState === "recording"
+                    ? "Pause recording"
+                    : recorderState === "paused"
+                      ? "Resume recording"
+                      : "Start recording"
+              }
+              title={countdownValue !== null ? "Cancel" : recorderState === "recording" ? "Pause" : recorderState === "paused" ? "Resume" : "Start recording"}
+              className="flex h-16 w-16 items-center justify-center rounded-full bg-red-600 disabled:opacity-40"
             >
-              ✓
+              {countdownValue !== null ? (
+                <span className="h-6 w-6 rounded-md bg-white" />
+              ) : recorderState === "recording" ? (
+                <PauseIcon className="h-7 w-7 text-white" />
+              ) : recorderState === "paused" ? (
+                <PlayIcon className="h-7 w-7 text-white" />
+              ) : (
+                <span className="h-6 w-6 rounded-full bg-white" />
+              )}
             </button>
-          ) : (
-            <span className="h-12 w-12" />
-          )}
+
+            {recorderState !== "idle" ? (
+              <button
+                type="button"
+                onClick={() => void handleStop()}
+                disabled={isBusy}
+                aria-label="Finish recording"
+                title="Finish"
+                className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white text-xl disabled:opacity-40"
+              >
+                ✓
+              </button>
+            ) : (
+              <span className="h-12 w-12" />
+            )}
+          </div>
         </div>
       )}
 
       {isProcessing && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
           <ReelLoader stage={processingStage} />
         </div>
       )}

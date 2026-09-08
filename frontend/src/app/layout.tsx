@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -19,6 +19,15 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: { default: "Reel Creator", template: "%s | Reel Creator" },
   description: "Turn your photos and clips into a share-ready video reel, for any business.",
+};
+
+// Lets full-bleed pages (CameraCapturePage's `env(safe-area-inset-*)`
+// padding, so its floating controls clear a notched phone's status bar/home
+// indicator) actually draw under the notch instead of Safari reserving a
+// plain black bar there with those env() vars all resolving to 0. Additive
+// site-wide -- no other page reads those vars today.
+export const viewport: Viewport = {
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
