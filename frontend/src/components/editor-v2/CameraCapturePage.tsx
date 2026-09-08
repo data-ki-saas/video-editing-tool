@@ -896,7 +896,13 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
         durationSeconds,
         (fraction) => setProcessingStage(`Saving to your recordings… ${Math.round(fraction * 100)}%`)
       );
-      router.push(returnPath);
+      // Always to the Recordings library, not back to wherever this page
+      // was opened from (returnPath) -- a finished take is saved into that
+      // library regardless of which project's editor opened this page (see
+      // this file's own module comment on why recordings are user-scoped,
+      // not project-scoped), so that's the useful place to land, showing
+      // the take that was just saved.
+      router.push("/recordings");
     } catch (err) {
       setIsProcessing(false);
       setSaveError(err instanceof Error ? err.message : "Failed to save this recording");
@@ -953,7 +959,9 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
         null,
         (fraction) => setProcessingStage(`Saving to your recordings… ${Math.round(fraction * 100)}%`)
       );
-      router.push(returnPath);
+      // Same reasoning as handleStop's own redirect above -- lands on the
+      // library holding what was just saved, regardless of returnPath.
+      router.push("/recordings");
     } catch (err) {
       setIsProcessing(false);
       setSaveError(err instanceof Error ? err.message : "Failed to save this photo");
@@ -967,14 +975,17 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   }
 
   const isBusy = isProcessing;
-  // Everything below the header shares this same "just under the header,
-  // safe-area aware" top offset -- the recording timer badge, the
-  // teleprompter box, its hidden-state pill, and the framing tip all used
-  // to sit relative to a video box that already started below a separate
-  // header row; now that the canvas is a true full-bleed layer (see this
-  // section's own comment below), each of them needs to account for the
-  // floating header's own height instead.
+  // The recording timer badge sits directly under the floating header
+  // (safe-area aware, same offset a video box relative to a separate
+  // header row used to give it for free before the canvas became a true
+  // full-bleed layer -- see that section's own comment below).
   const BELOW_HEADER_TOP = "top-[calc(env(safe-area-inset-top)+56px)]";
+  // The teleprompter box/pill and the framing tip sit a further row below
+  // THAT -- they used to share the timer badge's own offset, which put the
+  // recording-time readout directly on top of the script's first line
+  // whenever both were visible at once (reported as "the teleprompter
+  // script came below the ticker").
+  const BELOW_TIMER_TOP = "top-[calc(env(safe-area-inset-top)+96px)]";
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden overscroll-none bg-black text-white">
@@ -1008,7 +1019,7 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
 
           {showFramingTip && (
             <div
-              className={`absolute inset-x-6 z-10 rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white/90 ${BELOW_HEADER_TOP}`}
+              className={`absolute inset-x-6 z-10 rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white/90 ${BELOW_TIMER_TOP}`}
             >
               Tip: hold your phone a bit farther away for a wider shot, closer
               to what your regular camera app shows.
@@ -1032,7 +1043,7 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
                 role="button"
                 aria-label="Restart teleprompter from the top"
                 title="Tap to restart from the top"
-                className={`absolute inset-x-3 z-10 h-[32%] cursor-pointer overflow-hidden rounded-lg bg-black/45 ${BELOW_HEADER_TOP}`}
+                className={`absolute inset-x-3 z-10 h-[32%] cursor-pointer overflow-hidden rounded-lg bg-black/45 ${BELOW_TIMER_TOP}`}
                 style={{
                   WebkitMaskImage: "linear-gradient(to bottom, transparent, black 15%, black 85%, transparent)",
                   maskImage: "linear-gradient(to bottom, transparent, black 15%, black 85%, transparent)",
@@ -1093,7 +1104,7 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
                 onClick={() => setTeleprompterVisible(true)}
                 aria-label="Show teleprompter"
                 title="Show script"
-                className={`absolute right-3 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs text-white ${BELOW_HEADER_TOP}`}
+                className={`absolute right-3 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-xs text-white ${BELOW_TIMER_TOP}`}
               >
                 <EyeOffIcon className="h-4 w-4" />
                 Script hidden
