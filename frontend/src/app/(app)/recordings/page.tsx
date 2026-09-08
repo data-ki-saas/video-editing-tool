@@ -32,7 +32,7 @@ import {
   TrashIcon,
   UploadIcon,
 } from "@/components/icons/UIIcons";
-import { PauseIcon, PlayIcon, RecordIcon } from "@/components/editor-v2/icons/PlayerIcons";
+import { CollapseIcon, ExpandIcon, PauseIcon, PlayIcon, RecordIcon } from "@/components/editor-v2/icons/PlayerIcons";
 import { InlineEditableText } from "@/components/InlineEditableText";
 import { RecordingEditDialog } from "@/components/recordings/RecordingEditDialog";
 import { RecordingUploadDialog } from "@/components/recordings/RecordingUploadDialog";
@@ -111,11 +111,32 @@ function RecordingCard({
   // below is the whole point of this control, not just a mute toggle on
   // something already running.
   const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaContainerRef = useRef<HTMLDivElement>(null);
   const [isMuted, setIsMuted] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [description, setDescription] = useState(recording.description ?? "");
   const [actionError, setActionError] = useState<string | null>(null);
   const duration = formatDuration(recording.durationSeconds);
+
+  // Tracks isFullscreen off the browser's own state (not just the click
+  // handler) so Escape / the browser's native "exit fullscreen" affordance
+  // stay in sync too -- same pattern as CanvasPlayer.tsx's own toggle.
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setIsFullscreen(document.fullscreenElement === mediaContainerRef.current);
+    }
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  function handleToggleFullscreen() {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void mediaContainerRef.current?.requestFullscreen();
+    }
+  }
 
   function handleDescriptionBlur() {
     const trimmed = description.trim();
@@ -156,7 +177,7 @@ function RecordingCard({
 
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border p-2">
-      <div className="relative aspect-[9/16] overflow-hidden rounded-md bg-black">
+      <div ref={mediaContainerRef} className="relative aspect-[9/16] overflow-hidden rounded-md bg-black">
         {recording.kind === "video" ? (
           <>
             <video
@@ -197,6 +218,15 @@ function RecordingCard({
           // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned R2 URL, not a Next-optimizable static asset
           <img src={recording.url} alt={recording.name} className="h-full w-full object-cover" />
         )}
+        <button
+          type="button"
+          onClick={handleToggleFullscreen}
+          title={isFullscreen ? "Exit full screen" : "Full screen"}
+          aria-label={isFullscreen ? "Exit full screen" : "Full screen"}
+          className="absolute bottom-1 left-1 rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80"
+        >
+          {isFullscreen ? <CollapseIcon className="h-3.5 w-3.5" /> : <ExpandIcon className="h-3.5 w-3.5" />}
+        </button>
       </div>
 
       <InlineEditableText

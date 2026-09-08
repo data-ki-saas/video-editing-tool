@@ -531,6 +531,13 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
         if (now - lastSubjectCutoutAtRef.current > SUBJECT_CUTOUT_INTERVAL_MS) {
           lastSubjectCutoutAtRef.current = now;
           segmentVideoFrameApproximate(video, now).then((bitmap) => {
+            // A null result is a transient failure for THIS pass only (see
+            // segmentVideoFrameApproximate's own doc comment) -- keep the
+            // last good cutout rather than dropping it, otherwise the halo
+            // has nothing to occlude it and visibly pops in front of the
+            // face for this throttle window (reported as "halo comes in
+            // front, sometimes").
+            if (!bitmap) return;
             liveSubjectCutoutRef.current?.close();
             liveSubjectCutoutRef.current = bitmap;
           });

@@ -2,8 +2,8 @@
 
 /**
  * Persistent top bar for every authenticated page (see
- * app/(app)/layout.tsx) -- Home on the left, then Dashboard/Library/
- * Recordings/Templates/Admin(admins only)/Record(project routes only)/
+ * app/(app)/layout.tsx) -- Home on the left, then Record(project routes
+ * only)/Dashboard/Library/Recordings/Templates/Admin(admins only)/
  * Account/Settings/Sign out on the right. Reel-specific actions (Render,
  * Edge Render) live in the video preview's own toolbar instead (see
  * CanvasPlayer.tsx) since they act on the reel being previewed, not on
@@ -58,6 +58,16 @@ export function GlobalTopNav() {
       </Link>
 
       <div className="flex items-center gap-2 pr-1">
+        {projectId && (
+          <Link
+            href={`/dashboard/${projectId}/record`}
+            aria-label="Record"
+            title="Record a video or take a photo"
+            className="rounded-full bg-neutral-700 p-2 text-white hover:bg-neutral-600"
+          >
+            <RecordIcon className="h-5 w-5" />
+          </Link>
+        )}
         <Link
           href="/dashboard"
           aria-label="Dashboard"
@@ -98,16 +108,6 @@ export function GlobalTopNav() {
             className="rounded-full p-2 text-muted hover:bg-foreground/10"
           >
             <ToolsIcon className="h-5 w-5" />
-          </Link>
-        )}
-        {projectId && (
-          <Link
-            href={`/dashboard/${projectId}/record`}
-            aria-label="Record"
-            title="Record a video or take a photo"
-            className="rounded-full bg-neutral-700 p-2 text-white hover:bg-neutral-600"
-          >
-            <RecordIcon className="h-5 w-5" />
           </Link>
         )}
         <Link

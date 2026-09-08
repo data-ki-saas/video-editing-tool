@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -11,6 +11,7 @@ import {
   type LibraryVideo,
 } from "@/lib/api";
 import { BookmarkIcon, DownloadIcon, ShareIcon, SpeakerFullIcon, SpeakerMutedIcon, TrashIcon } from "@/components/icons/UIIcons";
+import { CollapseIcon, ExpandIcon } from "@/components/editor-v2/icons/PlayerIcons";
 import { InlineEditableText } from "@/components/InlineEditableText";
 import { PostToYoutubeButton } from "@/components/PostToYoutubeButton";
 
@@ -80,6 +81,27 @@ function LibraryCard({
   const [isMuted, setIsMuted] = useState(true);
   const [description, setDescription] = useState(video.description ?? "");
   const duration = formatDuration(video.durationSeconds);
+  const mediaContainerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Tracks isFullscreen off the browser's own state (not just the click
+  // handler) so Escape / the browser's native "exit fullscreen" affordance
+  // stay in sync too -- same pattern as CanvasPlayer.tsx's own toggle.
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setIsFullscreen(document.fullscreenElement === mediaContainerRef.current);
+    }
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  function handleToggleFullscreen() {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void mediaContainerRef.current?.requestFullscreen();
+    }
+  }
 
   async function handleShare() {
     const copiedUrl = await shareVideo(video);
@@ -97,7 +119,7 @@ function LibraryCard({
 
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border p-2">
-      <div className="relative aspect-[9/16] overflow-hidden rounded-md bg-black">
+      <div ref={mediaContainerRef} className="relative aspect-[9/16] overflow-hidden rounded-md bg-black">
         <video
           src={video.videoUrl}
           poster={video.thumbnailUrl ?? undefined}
@@ -115,6 +137,15 @@ function LibraryCard({
           className="absolute right-1 top-1 rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80"
         >
           {isMuted ? <SpeakerMutedIcon className="h-3.5 w-3.5" /> : <SpeakerFullIcon className="h-3.5 w-3.5" />}
+        </button>
+        <button
+          type="button"
+          onClick={handleToggleFullscreen}
+          title={isFullscreen ? "Exit full screen" : "Full screen"}
+          aria-label={isFullscreen ? "Exit full screen" : "Full screen"}
+          className="absolute bottom-1 left-1 rounded-full bg-black/60 p-1.5 text-white hover:bg-black/80"
+        >
+          {isFullscreen ? <CollapseIcon className="h-3.5 w-3.5" /> : <ExpandIcon className="h-3.5 w-3.5" />}
         </button>
         {duration && (
           <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[10px] text-white">
