@@ -185,7 +185,10 @@ function RecordingCard({
 
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border p-2">
-      <div ref={mediaContainerRef} className="relative aspect-[9/16] overflow-hidden rounded-md bg-black">
+      <div
+        ref={mediaContainerRef}
+        className={`relative overflow-hidden bg-black ${isFullscreen ? "h-full w-full" : "aspect-[9/16] rounded-md"}`}
+      >
         {recording.kind === "video" ? (
           <>
             <video
@@ -196,7 +199,7 @@ function RecordingCard({
               playsInline
               onPlay={() => setIsPlaying(true)}
               onPause={() => setIsPlaying(false)}
-              className="h-full w-full object-cover"
+              className={`h-full w-full ${isFullscreen ? "object-contain" : "object-cover"}`}
             />
             <button
               type="button"
@@ -223,8 +226,14 @@ function RecordingCard({
             )}
           </>
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element -- a same-origin blob: URL (useCrossOriginImageSrc), not a Next-optimizable static asset
-          imageSrc && <img src={imageSrc} alt={recording.name} className="h-full w-full object-cover" />
+          imageSrc && (
+            // eslint-disable-next-line @next/next/no-img-element -- a same-origin blob: URL (useCrossOriginImageSrc), not a Next-optimizable static asset
+            <img
+              src={imageSrc}
+              alt={recording.name}
+              className={`h-full w-full ${isFullscreen ? "object-contain" : "object-cover"}`}
+            />
+          )
         )}
         <button
           type="button"

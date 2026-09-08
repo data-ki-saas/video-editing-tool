@@ -68,6 +68,15 @@ const TELEPROMPTER_MIN_SCROLL_SECONDS = 6;
 // start -- lets the same script be reused for several takes in a row
 // without having to reopen the popup or manually rewind.
 const TELEPROMPTER_LOOP_PAUSE_MS = 1500;
+// Holds the first line still for roughly one line's worth of reading time
+// once a fresh take's countdown actually finishes, before the auto-scroll
+// starts moving -- without this the script began sliding the instant
+// recording started, before there was time to look up from the countdown
+// and actually start reading (reported as "the first line scrolls up too
+// fast"). Applied the same way as the loop-restart pause above (via
+// teleprompterPauseUntilMsRef), just at the very start of a take instead of
+// between passes.
+const TELEPROMPTER_INITIAL_HOLD_MS = 2500;
 const MIN_CAMERA_ZOOM = 1;
 const MAX_CAMERA_ZOOM = 3;
 const FACE_DETECT_INTERVAL_MS = 150;
@@ -93,6 +102,12 @@ const CAPTURE_ASPECT_RATIO = 9 / 16;
 // shown once ever, same "reel-creator-" prefixed localStorage convention as
 // this app's saved theme (see app/layout.tsx).
 const FRAMING_TIP_DISMISSED_KEY = "reel-creator-camera-framing-tip-seen";
+// Persists the typed teleprompter script itself across a page refresh/tab
+// close -- same "reel-creator-" prefixed localStorage convention as the
+// framing tip above. Without this, a script the user had already typed in
+// was silently gone after any reload (reported as "the script vanishes on
+// refresh") since it previously lived only in React state.
+const TELEPROMPTER_SCRIPT_STORAGE_KEY = "reel-creator-teleprompter-script";
 // A plain cover-fit (zoom=1, minZoom=1) is the ONLY safe setting here.
 // computeCoverFitSourceRect's own doc comment is explicit that a `minZoom`
 // below 1 (zooming out past cover) is only ever safe for a Picture-in-Picture
@@ -336,7 +351,11 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
   // a phone/paper -- see this file's own module comment for the recording
   // pipeline this overlay sits on top of (it's a DOM overlay, not baked
   // into the recorded canvas -- the recording is just the person looking at
-  // camera, not the prompter text itself).
+  // camera, not the prompter text itself). Starts empty here (not read
+  // synchronously from localStorage -- that would run during server
+  // rendering, where it doesn't exist) and is filled in by the
+  // localStorage-restore effect below, same as showFramingTip's own
+  // client-only read -- see TELEPROMPTER_SCRIPT_STORAGE_KEY's own comment.
   const [teleprompterText, setTeleprompterText] = useState("");
   const [showTeleprompterDialog, setShowTeleprompterDialog] = useState(false);
   // Lets the text stay entered (no need to retype between takes) while
@@ -710,6 +729,35 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
     teleprompterDurationSecondsRef.current = Math.max(wordCount / TELEPROMPTER_WORDS_PER_SECOND, TELEPROMPTER_MIN_SCROLL_SECONDS);
   }, [teleprompterText]);
 
+  // One-time restore of whatever script was last saved, once this client-only
+  // read can actually happen (see TELEPROMPTER_SCRIPT_STORAGE_KEY's own
+  // comment) -- deliberately a mount effect, not read straight into
+  // teleprompterText's own useState initializer, so this component still
+  // renders identically on the server and on the client's first paint.
+  useEffect(() => {
+    let saved = "";
+    try {
+      saved = localStorage.getItem(TELEPROMPTER_SCRIPT_STORAGE_KEY) ?? "";
+    } catch {
+      // Ignored -- private browsing / storage access can throw; falls
+      // through to leaving the script empty, same as the framing tip read.
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time client-only restore, same reasoning as the framing-tip/mobile-default-facing-mode effects above
+    if (saved) setTeleprompterText(saved);
+  }, []);
+
+  // Keeps that same storage in sync with every edit (typing a new script,
+  // clearing it) so a refresh mid-session never loses it -- see
+  // TELEPROMPTER_SCRIPT_STORAGE_KEY's own comment.
+  useEffect(() => {
+    try {
+      if (teleprompterText) localStorage.setItem(TELEPROMPTER_SCRIPT_STORAGE_KEY, teleprompterText);
+      else localStorage.removeItem(TELEPROMPTER_SCRIPT_STORAGE_KEY);
+    } catch {
+      // Ignored -- best-effort persistence only, same as the framing tip write.
+    }
+  }, [teleprompterText]);
+
   function resetTeleprompterScroll() {
     teleprompterScrollPxRef.current = 0;
     teleprompterPauseUntilMsRef.current = 0;
@@ -806,8 +854,11 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
     setCapWarning(false);
     // A fresh take always reads from the top of the script, regardless of
     // how far a rehearsal scroll had already gotten, and starts it running
-    // automatically -- see teleprompterPlaying's own doc comment.
+    // automatically -- see teleprompterPlaying's own doc comment. Holds the
+    // first line still for a beat before it actually starts moving -- see
+    // TELEPROMPTER_INITIAL_HOLD_MS's own comment.
     resetTeleprompterScroll();
+    teleprompterPauseUntilMsRef.current = performance.now() + TELEPROMPTER_INITIAL_HOLD_MS;
     setTeleprompterPlaying(true);
     void acquireWakeLock();
     setRecorderState("recording");
@@ -989,6 +1040,16 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden overscroll-none bg-black text-white">
+      {/* Bounds the whole camera view (canvas + every floating control) to a
+          phone-shaped column matching the recorded 9:16 buffer, centered via
+          mx-auto -- on a narrow mobile viewport max-w never kicks in (the
+          viewport itself is already narrower than a 9:16-tall column), so
+          this is a no-op there, but on a wide desktop window it stops the
+          teleprompter/header/bottom controls from spreading across the full
+          browser width while the actual video is a pillarboxed column in the
+          middle (reported as "the teleprompter script is widely spread
+          across the screen" on web). */}
+      <div className="relative mx-auto h-full w-full max-w-[calc(100dvh*9/16)]">
       {cameraError ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center text-sm text-white/80">
           <p className="max-w-xs">{cameraError}</p>
@@ -1298,6 +1359,8 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
           </div>
         </div>
       )}
+
+      </div>
 
       {isProcessing && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
