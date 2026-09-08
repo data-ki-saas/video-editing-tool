@@ -12,6 +12,8 @@
 import { useEffect, useState } from "react";
 import { UploadPanel } from "@/components/editor-panels/UploadPanel";
 import { addRecordingToProject, listRecordings, type Asset, type Recording } from "@/lib/api";
+import { useCrossOriginImageSrc } from "@/lib/useCrossOriginImageSrc";
+import { useCrossOriginVideoSrc } from "@/lib/useCrossOriginVideoSrc";
 
 type Tab = "upload" | "recordings";
 
@@ -26,14 +28,21 @@ function RecordingTile({
   isAdded: boolean;
   onAdd: () => void;
 }) {
+  // Never a plain <video src>/<img src> against recording.url -- see
+  // crossOriginVideo.ts's own module comment for why that can poison the
+  // browser's cache against a LATER CORS-mode fetch of the identical URL
+  // (this same recording, opened for Trim/Crop from /recordings).
+  const videoSrc = useCrossOriginVideoSrc(recording.kind === "video" ? recording.url : null);
+  const imageSrc = useCrossOriginImageSrc(recording.kind === "image" ? recording.url : null);
+
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-md border border-border bg-background">
       <div className="relative aspect-[9/16] w-full overflow-hidden bg-neutral-900">
         {recording.kind === "video" ? (
-          <video src={recording.url} muted playsInline className="h-full w-full object-cover" />
+          <video src={videoSrc ?? undefined} muted playsInline className="h-full w-full object-cover" />
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element -- a presigned R2 URL, not a Next-optimizable static asset
-          <img src={recording.url} alt={recording.name} className="h-full w-full object-cover" />
+          // eslint-disable-next-line @next/next/no-img-element -- a same-origin blob: URL (useCrossOriginImageSrc), not a Next-optimizable static asset
+          imageSrc && <img src={imageSrc} alt={recording.name} className="h-full w-full object-cover" />
         )}
       </div>
       <div className="flex items-center justify-between gap-1 p-1.5">

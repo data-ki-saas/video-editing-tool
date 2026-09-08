@@ -36,6 +36,8 @@ import { CollapseIcon, ExpandIcon, PauseIcon, PlayIcon, RecordIcon } from "@/com
 import { InlineEditableText } from "@/components/InlineEditableText";
 import { RecordingEditDialog } from "@/components/recordings/RecordingEditDialog";
 import { RecordingUploadDialog } from "@/components/recordings/RecordingUploadDialog";
+import { useCrossOriginImageSrc } from "@/lib/useCrossOriginImageSrc";
+import { useCrossOriginVideoSrc } from "@/lib/useCrossOriginVideoSrc";
 
 const DESCRIPTION_MAX_LENGTH = 120;
 
@@ -118,6 +120,12 @@ function RecordingCard({
   const [description, setDescription] = useState(recording.description ?? "");
   const [actionError, setActionError] = useState<string | null>(null);
   const duration = formatDuration(recording.durationSeconds);
+  // Never a plain <video src>/<img src> against recording.url -- see
+  // crossOriginVideo.ts's own module comment for why that can poison the
+  // browser's cache against RecordingEditDialog's later CORS-mode fetch of
+  // the identical URL when Trim/Crop is opened on this same card.
+  const videoSrc = useCrossOriginVideoSrc(recording.kind === "video" ? recording.url : null);
+  const imageSrc = useCrossOriginImageSrc(recording.kind === "image" ? recording.url : null);
 
   // Tracks isFullscreen off the browser's own state (not just the click
   // handler) so Escape / the browser's native "exit fullscreen" affordance
@@ -182,7 +190,7 @@ function RecordingCard({
           <>
             <video
               ref={videoRef}
-              src={recording.url}
+              src={videoSrc ?? undefined}
               loop
               muted={isMuted}
               playsInline
@@ -215,8 +223,8 @@ function RecordingCard({
             )}
           </>
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned R2 URL, not a Next-optimizable static asset
-          <img src={recording.url} alt={recording.name} className="h-full w-full object-cover" />
+          // eslint-disable-next-line @next/next/no-img-element -- a same-origin blob: URL (useCrossOriginImageSrc), not a Next-optimizable static asset
+          imageSrc && <img src={imageSrc} alt={recording.name} className="h-full w-full object-cover" />
         )}
         <button
           type="button"
