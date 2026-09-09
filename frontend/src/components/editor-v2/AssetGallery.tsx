@@ -7,8 +7,11 @@
  * is visually distinct enough on its own, but grouping by kind up front
  * makes each column scannable rather than needing to spot the odd tile out
  * of a mixed strip). "+ Asset" opens UploadDialog instead of a permanent drop target
- * taking up space; right-click offers Delete, plus two actions for video and
- * image assets, symmetric across both kinds -- "Cutaway" and "Overlay":
+ * taking up space; right-click offers Delete, plus three actions for video and
+ * image assets, symmetric across both kinds -- "View", "Cutaway" and "Overlay":
+ *  - "View" opens AssetPreviewPopup -- playing the video, or showing a
+ *    larger look at the photo -- without committing to adding it anywhere
+ *    first.
  *  - Video "Cutaway" appends it to the concatenated video sequence as-is
  *    (handleAddToSequence -- the first one is what starts rendering frames
  *    at all, every later one plays right after whatever's already there).
@@ -47,6 +50,7 @@ import { ReelLoader } from "@/components/ReelLoader";
 import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import { PauseIcon } from "./icons/PlayerIcons";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
+import { AssetPreviewPopup } from "./AssetPreviewPopup";
 
 // SVG circumference for the progress ring (r=16 in a 36x36 viewBox) --
 // shared by the ring's own stroke-dasharray and its progress-driven offset.
@@ -127,6 +131,7 @@ export function AssetGallery({
   const [deletingAssetIds, setDeletingAssetIds] = useState<Set<string>>(new Set());
   const [playingAssetId, setPlayingAssetId] = useState<string | null>(null);
   const [playbackProgress, setPlaybackProgress] = useState(0);
+  const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
 
@@ -239,11 +244,13 @@ export function AssetGallery({
               : []),
             ...(asset.kind === "image"
               ? [
+                  { label: "View", onSelect: () => setPreviewAsset(asset) },
                   { label: "Cutaway", onSelect: () => onOpenCutawayDialogForAsset(asset) },
                   { label: "Overlay", onSelect: () => onAddImageOverlay(asset) },
                 ]
               : asset.kind === "video"
                 ? [
+                    { label: "View", onSelect: () => setPreviewAsset(asset) },
                     { label: "Cutaway", onSelect: () => onAddToSequence(asset) },
                     // Opens the "Video Overlay" tab's own picker dialog
                     // (VideoOverlayPickerDialog.tsx) with this tile
@@ -372,6 +379,7 @@ export function AssetGallery({
       )}
 
       <ContextMenu state={contextMenuState} onClose={closeContextMenu} />
+      {previewAsset && <AssetPreviewPopup asset={previewAsset} onClose={() => setPreviewAsset(null)} />}
     </div>
   );
 }

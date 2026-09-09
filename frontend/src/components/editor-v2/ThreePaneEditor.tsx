@@ -698,7 +698,23 @@ export function ThreePaneEditor({
   const refreshAssets = useCallback(async (): Promise<Asset[]> => {
     try {
       const data = await listAssets(projectId);
-      setAssets(data);
+      // Merge rather than blindly replace -- this call's own listAssets()
+      // can be in flight for a while (the very first call, on mount, is the
+      // usual case: a project with several existing assets re-signing every
+      // one of their URLs), and if a stock-media import (StockMediaDialog's
+      // handleImport -> handleUploaded) or a direct upload finishes and
+      // optimistically appends to `assets` state WHILE this fetch is still
+      // pending, `data` here is a snapshot from before that asset existed
+      // server-side. A wholesale setAssets(data) would silently drop it
+      // again -- invisible until the next full page reload, since that's
+      // the only thing that re-fetches after the import actually landed.
+      // Same "merge in only what's missing" fix handleSaveTtsOverlay's own
+      // listAssets().then() already uses below, for the same reason.
+      setAssets((prev) => {
+        const dataIds = new Set(data.map((asset) => asset.id));
+        const missingFromData = prev.filter((asset) => !dataIds.has(asset.id));
+        return missingFromData.length > 0 ? [...missingFromData, ...data] : data;
+      });
       setAssetsError(null);
       // Defaults the gallery's highlighted asset to the most recently
       // uploaded video once assets first load -- doesn't override a

@@ -16,25 +16,33 @@
  *
  * Grouped into three clusters, left to right, each with its own micro
  * uppercase label (same convention AssetGallery.tsx's own section headers
- * use) so the tab bar reads as organized roles rather than one flat row:
- *  - BASE: Clip, Cutaway -- what the base sequence itself is made of. Plain/
- *    untinted icons. Color filters are no longer a whole-clip setting here --
- *    each cutaway (Cutaways rail, CutawayTrack.tsx) and each overlay
- *    (ImageOverlayTrack.tsx/VideoOverlayTrack.tsx) gets its own, via that
- *    clip's own right-click "Filter".
- *  - OVERLAYS: Video Overlay, Image Overlay, Text, TTS, TTS + Avatar -- what
- *    composites ON TOP of the base. Video Overlay's icon is tinted amber
- *    (matching its rail's dominant Full-Screen color, VideoOverlayTrack.tsx),
- *    Image Overlay's is tinted sky (matching ImageOverlayTrack.tsx's own
- *    palette), TTS and TTS + Avatar are both tinted violet (both are
- *    speech-driven) -- distinct hue families so each reads as a different
- *    overlay kind at a glance, same as the rails that have one already do.
- *    TTS + Avatar has no count badge of its own: it doesn't create its own
- *    overlay type, it generates a talking-avatar video and hands off to
- *    the SAME Video Overlay mechanism (that tab's own count already
+ * use) so the tab bar reads as organized roles rather than one flat row.
+ * Each cluster owns exactly one fixed hue (also tinting its own GroupLabel,
+ * so the label reads as that group's color key), and every tab inside it
+ * gets its own shade of that same hue -- lightest for the first tab,
+ * darkest for the last -- so a tab's color says both "which group" (hue)
+ * and "which one within it" (shade) at a glance, rather than an unrelated
+ * hue per tab:
+ *  - BASE (blue): Clip, Thumbnail, Cutaway, Text Slide -- what the base
+ *    sequence itself is made of (plus Thumbnail, a fixed property of the
+ *    reel as a whole -- see its own note below). Color filters are no
+ *    longer a whole-clip setting here -- each cutaway (Cutaways rail,
+ *    CutawayTrack.tsx) and each overlay (ImageOverlayTrack.tsx/
+ *    VideoOverlayTrack.tsx) gets its own, via that clip's own right-click
+ *    "Filter".
+ *  - OVERLAYS (amber): Video Overlay, Image Overlay, Text, TTS,
+ *    TTS + Avatar -- what composites ON TOP of the base. All five share the
+ *    same amber family now (previously each had its own unrelated hue --
+ *    amber/sky/violet -- which read as five unrelated colors rather than
+ *    one "overlays" group); shade alone now distinguishes them within the
+ *    cluster. TTS + Avatar has no count badge of its own: it doesn't create
+ *    its own overlay type, it generates a talking-avatar video and hands
+ *    off to the SAME Video Overlay mechanism (that tab's own count already
  *    covers it).
- *  - CAPTIONS: Auto-Caption -- its own cluster since it's a different kind
- *    of thing (server-side transcription, not a user-placed clip/overlay).
+ *  - CAPTIONS (emerald): Auto-Caption -- its own cluster since it's a
+ *    different kind of thing (server-side transcription, not a user-placed
+ *    clip/overlay). Only one member, so it just gets the group's own
+ *    mid-range shade.
  *
  * Thumbnail (moved here from the top bar -- it's an editing decision about
  * this reel's own content, not a global nav/render action) sits in BASE
@@ -197,8 +205,14 @@ function AutoCaptionStatus({ enabled }: { enabled: boolean }) {
 
 // A tab's own group micro-label, shared across every group below -- same
 // tiny uppercase convention AssetGallery.tsx's own section headers use.
-function GroupLabel({ children }: { children: React.ReactNode }) {
-  return <p className="pointer-events-none absolute -top-4 left-0 whitespace-nowrap text-[9px] font-medium uppercase tracking-wide text-muted">{children}</p>;
+// `colorClassName` ties the label to its group's own fixed hue (see this
+// file's module comment), so the label doubles as that group's color key.
+function GroupLabel({ children, colorClassName }: { children: React.ReactNode; colorClassName: string }) {
+  return (
+    <p className={`pointer-events-none absolute -top-4 left-0 whitespace-nowrap text-[9px] font-medium uppercase tracking-wide ${colorClassName}`}>
+      {children}
+    </p>
+  );
 }
 
 export function UserActions({
@@ -245,14 +259,14 @@ export function UserActions({
   const selectedClipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selectedClipRectId) ?? null;
   return (
     <div className="flex h-full items-stretch gap-4 overflow-x-auto pt-4">
-      {/* BASE */}
+      {/* BASE -- blue family, lightest to darkest: Clip, Thumbnail, Cutaway, Text Slide */}
       <div className="relative flex h-full gap-3">
-        <GroupLabel>Base</GroupLabel>
+        <GroupLabel colorClassName="text-blue-600">Base</GroupLabel>
         <button
           type="button"
           onClick={onOpenClipRectDialog}
           title="Clip rectangle"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-500 hover:bg-background"
         >
           <CropToolIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -268,7 +282,7 @@ export function UserActions({
           type="button"
           onClick={onOpenCoverPicker}
           title="Thumbnail -- pick the frame shown before this reel plays"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-600 hover:bg-background"
         >
           <CoverIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -283,7 +297,7 @@ export function UserActions({
           type="button"
           onClick={onOpenCutawayDialog}
           title="Add a Cutaway -- a video clip or an animated photo, appended to the reel"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-700 hover:bg-background"
         >
           <ImageMotionIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -295,7 +309,7 @@ export function UserActions({
           type="button"
           onClick={onOpenTextSlideDialog}
           title="Add a Text Slide -- a full-frame slide of text and/or an image, with its own duration, that slides in and out of the reel"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-800 hover:bg-background"
         >
           <TextSlideIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -305,14 +319,14 @@ export function UserActions({
         </button>
       </div>
 
-      {/* OVERLAYS */}
+      {/* OVERLAYS -- amber family, lightest to darkest: Video Overlay, Image Overlay, Text, TTS, TTS + Avatar */}
       <div className="relative flex h-full gap-3">
-        <GroupLabel>Overlays</GroupLabel>
+        <GroupLabel colorClassName="text-amber-600">Overlays</GroupLabel>
         <button
           type="button"
           onClick={onOpenVideoOverlayPicker}
           title="Video Overlay -- a second video on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-600 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-400 hover:bg-background"
         >
           <VideoOverlayIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -324,7 +338,7 @@ export function UserActions({
           type="button"
           onClick={onOpenImageOverlayPicker}
           title="Image Overlay -- a photo on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-sky-600 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-500 hover:bg-background"
         >
           <PhotoOverlayIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -336,7 +350,7 @@ export function UserActions({
           type="button"
           onClick={onOpenTextDialog}
           title="Add text"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-600 hover:bg-background"
         >
           <TextGlyphIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -348,7 +362,7 @@ export function UserActions({
           type="button"
           onClick={onOpenTtsDialog}
           title="TTS Narration -- type a script, generate speech, and caption it as background text or word-by-word karaoke"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-violet-600 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-700 hover:bg-background"
         >
           <TtsIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -360,7 +374,7 @@ export function UserActions({
           type="button"
           onClick={onOpenTtsAvatarDialog}
           title="TTS + Avatar -- generate a talking-avatar video reading a script, added as a Video Overlay"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-violet-600 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-800 hover:bg-background"
         >
           <TtsAvatarIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -369,14 +383,14 @@ export function UserActions({
         </button>
       </div>
 
-      {/* CAPTIONS */}
+      {/* CAPTIONS -- emerald family (single member, so its own mid shade) */}
       <div className="relative flex h-full gap-3">
-        <GroupLabel>Captions</GroupLabel>
+        <GroupLabel colorClassName="text-emerald-600">Captions</GroupLabel>
         <button
           type="button"
           onClick={onOpenTranscriptDialog}
           title="Auto-captions"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-emerald-600 hover:bg-background"
         >
           <ClosedCaptionIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
