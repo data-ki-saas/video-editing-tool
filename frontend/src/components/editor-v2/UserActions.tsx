@@ -36,11 +36,13 @@
  *  - CAPTIONS: Auto-Caption -- its own cluster since it's a different kind
  *    of thing (server-side transcription, not a user-placed clip/overlay).
  *
- * Below the tab row, pinned to the bottom of the panel: a Thumbnail trigger
- * (moved here from the top bar -- it's an editing decision about this
- * reel's own content, not a global nav/render action). Its own row rather
- * than another tab, since "the frame shown before this reel plays" isn't a
- * clip/overlay being added to the timeline the way every tab above is.
+ * Thumbnail (moved here from the top bar -- it's an editing decision about
+ * this reel's own content, not a global nav/render action) sits in BASE
+ * right after Clip: it isn't a clip/overlay added to the timeline like the
+ * other tabs, but it's still a fixed property of the reel as a whole, same
+ * category as Clip. It follows Clip's own convention of a bottom-pinned
+ * preview swatch (the picked frame) instead of a CountBadge, since there's
+ * only ever one thumbnail, not a count of them.
  *
  * There is no separate "Transform" or "Arrange" menu (Zoom In/Out, Pan &
  * Tilt, Flip, Mirror, Delete, Trim, Drag) -- the clip rectangle is the
@@ -242,150 +244,147 @@ export function UserActions({
 }) {
   const selectedClipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selectedClipRectId) ?? null;
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex flex-1 items-stretch gap-4 overflow-x-auto pt-4">
-        {/* BASE */}
-        <div className="relative flex h-full gap-3">
-          <GroupLabel>Base</GroupLabel>
-          <button
-            type="button"
-            onClick={onOpenClipRectDialog}
-            title="Clip rectangle"
-            className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
-          >
-            <CropToolIcon className="h-4 w-4" />
-            <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-              Clip
+    <div className="flex h-full items-stretch gap-4 overflow-x-auto pt-4">
+      {/* BASE */}
+      <div className="relative flex h-full gap-3">
+        <GroupLabel>Base</GroupLabel>
+        <button
+          type="button"
+          onClick={onOpenClipRectDialog}
+          title="Clip rectangle"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+        >
+          <CropToolIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            Clip
+          </span>
+          {selectedClipRectOption && (
+            <span className="mt-auto text-foreground" title={`${selectedClipRectOption.name} -- ${selectedClipRectOption.ratioLabel}`}>
+              <ClipRectIcon option={selectedClipRectOption} size={16} />
             </span>
-            {selectedClipRectOption && (
-              <span className="mt-auto text-foreground" title={`${selectedClipRectOption.name} -- ${selectedClipRectOption.ratioLabel}`}>
-                <ClipRectIcon option={selectedClipRectOption} size={16} />
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={onOpenCutawayDialog}
-            title="Add a Cutaway -- a video clip or an animated photo, appended to the reel"
-            className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
-          >
-            <ImageMotionIcon className="h-4 w-4" />
-            <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-              Cutaway
-            </span>
-            <CountBadge count={cutawayCount} />
-          </button>
-          <button
-            type="button"
-            onClick={onOpenTextSlideDialog}
-            title="Add a Text Slide -- a full-frame slide of text and/or an image, with its own duration, that slides in and out of the reel"
-            className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
-          >
-            <TextSlideIcon className="h-4 w-4" />
-            <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-              Text Slide
-            </span>
-            <CountBadge count={textSlideCount} />
-          </button>
-        </div>
-
-        {/* OVERLAYS */}
-        <div className="relative flex h-full gap-3">
-          <GroupLabel>Overlays</GroupLabel>
-          <button
-            type="button"
-            onClick={onOpenVideoOverlayPicker}
-            title="Video Overlay -- a second video on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
-            className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-600 hover:bg-background"
-          >
-            <VideoOverlayIcon className="h-4 w-4" />
-            <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-              Video Overlay
-            </span>
-            <CountBadge count={videoOverlayCount} />
-          </button>
-          <button
-            type="button"
-            onClick={onOpenImageOverlayPicker}
-            title="Image Overlay -- a photo on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
-            className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-sky-600 hover:bg-background"
-          >
-            <PhotoOverlayIcon className="h-4 w-4" />
-            <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-              Image Overlay
-            </span>
-            <CountBadge count={imageOverlayCount} />
-          </button>
-          <button
-            type="button"
-            onClick={onOpenTextDialog}
-            title="Add text"
-            className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
-          >
-            <TextGlyphIcon className="h-4 w-4" />
-            <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-              Text
-            </span>
-            <CountBadge count={textOverlayCount} />
-          </button>
-          <button
-            type="button"
-            onClick={onOpenTtsDialog}
-            title="TTS Narration -- type a script, generate speech, and caption it as background text or word-by-word karaoke"
-            className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-violet-600 hover:bg-background"
-          >
-            <TtsIcon className="h-4 w-4" />
-            <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-              TTS
-            </span>
-            <CountBadge count={ttsOverlayCount} />
-          </button>
-          <button
-            type="button"
-            onClick={onOpenTtsAvatarDialog}
-            title="TTS + Avatar -- generate a talking-avatar video reading a script, added as a Video Overlay"
-            className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-violet-600 hover:bg-background"
-          >
-            <TtsAvatarIcon className="h-4 w-4" />
-            <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-              TTS + Avatar
-            </span>
-          </button>
-        </div>
-
-        {/* CAPTIONS */}
-        <div className="relative flex h-full gap-3">
-          <GroupLabel>Captions</GroupLabel>
-          <button
-            type="button"
-            onClick={onOpenTranscriptDialog}
-            title="Auto-captions"
-            className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
-          >
-            <ClosedCaptionIcon className="h-4 w-4" />
-            <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-              Auto-Caption
-            </span>
-            <AutoCaptionStatus enabled={autoCaptionEnabled} />
-          </button>
-        </div>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={onOpenCoverPicker}
+          title="Thumbnail -- pick the frame shown before this reel plays"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+        >
+          <CoverIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            Thumbnail
+          </span>
+          {coverThumbnailUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- a permanent R2 URL swatch, not a Next-optimizable remote image worth configuring
+            <img src={coverThumbnailUrl} alt="" className="mt-auto h-4 w-4 rounded object-cover" />
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={onOpenCutawayDialog}
+          title="Add a Cutaway -- a video clip or an animated photo, appended to the reel"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+        >
+          <ImageMotionIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            Cutaway
+          </span>
+          <CountBadge count={cutawayCount} />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenTextSlideDialog}
+          title="Add a Text Slide -- a full-frame slide of text and/or an image, with its own duration, that slides in and out of the reel"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+        >
+          <TextSlideIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            Text Slide
+          </span>
+          <CountBadge count={textSlideCount} />
+        </button>
       </div>
 
-      {/* THUMBNAIL -- its own row, pinned to the bottom of the panel */}
-      <button
-        type="button"
-        onClick={onOpenCoverPicker}
-        title="Thumbnail -- pick the frame shown before this reel plays"
-        className="flex shrink-0 items-center gap-2 border-t border-border px-1 py-2 text-muted hover:bg-background"
-      >
-        {coverThumbnailUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- a permanent R2 URL swatch, not a Next-optimizable remote image worth configuring
-          <img src={coverThumbnailUrl} alt="" className="h-6 w-6 shrink-0 rounded object-cover" />
-        ) : (
-          <CoverIcon className="h-4 w-4 shrink-0" />
-        )}
-        <span className="text-[11px] font-medium">Thumbnail</span>
-      </button>
+      {/* OVERLAYS */}
+      <div className="relative flex h-full gap-3">
+        <GroupLabel>Overlays</GroupLabel>
+        <button
+          type="button"
+          onClick={onOpenVideoOverlayPicker}
+          title="Video Overlay -- a second video on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-600 hover:bg-background"
+        >
+          <VideoOverlayIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            Video Overlay
+          </span>
+          <CountBadge count={videoOverlayCount} />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenImageOverlayPicker}
+          title="Image Overlay -- a photo on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-sky-600 hover:bg-background"
+        >
+          <PhotoOverlayIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            Image Overlay
+          </span>
+          <CountBadge count={imageOverlayCount} />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenTextDialog}
+          title="Add text"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+        >
+          <TextGlyphIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            Text
+          </span>
+          <CountBadge count={textOverlayCount} />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenTtsDialog}
+          title="TTS Narration -- type a script, generate speech, and caption it as background text or word-by-word karaoke"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-violet-600 hover:bg-background"
+        >
+          <TtsIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            TTS
+          </span>
+          <CountBadge count={ttsOverlayCount} />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenTtsAvatarDialog}
+          title="TTS + Avatar -- generate a talking-avatar video reading a script, added as a Video Overlay"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-violet-600 hover:bg-background"
+        >
+          <TtsAvatarIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            TTS + Avatar
+          </span>
+        </button>
+      </div>
+
+      {/* CAPTIONS */}
+      <div className="relative flex h-full gap-3">
+        <GroupLabel>Captions</GroupLabel>
+        <button
+          type="button"
+          onClick={onOpenTranscriptDialog}
+          title="Auto-captions"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+        >
+          <ClosedCaptionIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            Auto-Caption
+          </span>
+          <AutoCaptionStatus enabled={autoCaptionEnabled} />
+        </button>
+      </div>
     </div>
   );
 }

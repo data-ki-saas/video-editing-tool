@@ -530,7 +530,7 @@ export function ActionArea({
   // this reel" list -- jumps the live preview to an existing overlay's
   // start time when its row is clicked.
   onSeek: (seconds: number) => void;
-  // UserActions' own Thumbnail row -- opens CoverPicker, which is owned
+  // UserActions' own Thumbnail tab -- opens CoverPicker, which is owned
   // (and rendered) by ThreePaneEditor, not ActionArea, same reason
   // isCutawayDialogOpen etc. are all lifted that high.
   onOpenCoverPicker: () => void;
