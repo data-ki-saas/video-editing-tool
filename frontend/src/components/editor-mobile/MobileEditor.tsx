@@ -682,7 +682,7 @@ export function MobileEditor({
 
       {filterDialogEntry && (
         <FilterPresetDialog
-          selectedFilterId={filterDialogEntry.colorFilterId ?? null}
+          selectedFilterId={(filterDialogEntry.kind !== "text" ? filterDialogEntry.colorFilterId : null) ?? null}
           onSelect={handleSelectFilter}
           onClose={() => setFilterDialogEntry(null)}
           previewFrameUrl={previewFrameUrlForEntry(filterDialogEntry)}
@@ -693,7 +693,7 @@ export function MobileEditor({
 
       {transitionDialogEntry && (
         <CutTransitionDialog
-          selectedTransitionId={transitionDialogEntry.cutTransitionInId ?? null}
+          selectedTransitionId={(transitionDialogEntry.kind !== "text" ? transitionDialogEntry.cutTransitionInId : null) ?? null}
           onSelect={handleSelectTransition}
           onClose={() => setTransitionDialogEntry(null)}
           outgoingFrameUrl={previewFrameUrlForEntry(outgoingTransitionEntry ?? undefined)}

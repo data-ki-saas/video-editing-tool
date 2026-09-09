@@ -1399,12 +1399,21 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const appMeta: Record<string, AppMetaEntry> = {};
 
   const totalOriginalDurationSeconds = totalSequenceDuration(sequenceClips);
-  const cutTransitionByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.cutTransitionInId ?? null]));
+  // A Text Slide has no cutTransitionInId of its own -- see video_math.ts's
+  // own doc comment -- always null here. Text Slides are otherwise not
+  // compiled to real Creatomate elements at all yet (see buildMediaSegments'
+  // own "text" branch below) -- cloud rendering is currently UI-disabled,
+  // so this is a "never crash if reached" guard, not a real integration.
+  const cutTransitionByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [entry.id, entry.kind === "text" ? null : (entry.cutTransitionInId ?? null)])
+  );
   const segments = buildRenderSegments(sequenceClips, selections.trimRanges, cutTransitionByEntryId);
   // Overlapping segments overcount a naive sum -- see totalRenderOutputDuration's own doc comment.
   const totalOutputDurationSeconds = totalRenderOutputDuration(segments);
 
-  const cutawayFilterByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.colorFilterId ?? null]));
+  const cutawayFilterByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [entry.id, entry.kind === "text" ? null : (entry.colorFilterId ?? null)])
+  );
   // Per-cutaway canvas-fill lookup, same "each clip carries its own"
   // shape as cutawayFilterByEntryId above -- see canvasFillPresets.ts.
   const canvasFillByEntryId = new Map(
@@ -1419,7 +1428,10 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   // right shape (video's masked-matte Composition vs. an image's simpler
   // transparent-cutout swap).
   const backgroundRemovalMatteByEntryId = new Map(
-    selections.sequenceClips.map((entry) => [entry.id, entry.backgroundRemoval?.enabled ? entry.backgroundRemoval.matteAssetId : null])
+    selections.sequenceClips.map((entry) => [
+      entry.id,
+      entry.kind !== "text" && entry.backgroundRemoval?.enabled ? entry.backgroundRemoval.matteAssetId : null,
+    ])
   );
   // `selections.cropRect`/a user-dragged pan-zoom ZoomEffect are always
   // authored against the sequence's REFERENCE clip -- the first one (see

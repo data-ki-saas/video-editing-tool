@@ -26,11 +26,19 @@ export async function gatherLocalSequenceClips(
     assetId: string;
     url: string;
     durationSeconds: number;
-    kind: "video" | "image";
+    kind: "video" | "image" | "text";
     width?: number;
     height?: number;
   }[] = [];
   for (const clip of clips) {
+    if (clip.kind === "text") {
+      // No file to probe at all -- duration is authored (same as an image
+      // cutaway), and drawTextSlide (textSlideRenderer.ts) reads its
+      // optional image's real dimensions directly off the loaded
+      // HTMLImageElement at draw time, not from here.
+      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: clip.durationSeconds, kind: "text" });
+      continue;
+    }
     if (clip.kind === "image") {
       // Duration is authored (see lib/video/imageTemplates.ts), not read
       // from anywhere -- but dimensions still need probing, same as a

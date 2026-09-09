@@ -860,7 +860,8 @@ export function FrameStrip({
     return thumbnailTimestampsSeconds.map((timestamp) => {
       const entryIndex = clipBoundarySeconds.findIndex((boundary) => timestamp < boundary);
       const resolvedIndex = entryIndex === -1 ? clipBoundarySeconds.length : entryIndex;
-      return sequenceEntries[resolvedIndex]?.colorFilterId ?? null;
+      const entry = sequenceEntries[resolvedIndex];
+      return (entry && entry.kind !== "text" ? entry.colorFilterId : null) ?? null;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
   }, [thumbnails.length, thumbnailTimestampsSeconds, clipBoundarySeconds, sequenceEntries]);
@@ -1038,6 +1039,23 @@ export function FrameStrip({
           ambientEffect: entry.ambientEffect,
           faceEffect: entry.faceEffect,
           audioReactive: entry.audioReactive,
+        };
+      }
+      if (entry.kind === "text") {
+        return {
+          kind: "text" as const,
+          entryId: entry.id,
+          text: entry.text,
+          style: entry.style,
+          layout: entry.layout,
+          assetId: entry.assetId,
+          canvasFillMode: entry.canvasFillMode ?? null,
+          canvasFillColor: entry.canvasFillColor,
+          canvasFillGradientColor: entry.canvasFillGradientColor,
+          entranceId: entry.entranceId,
+          exitId: entry.exitId,
+          startTimeSeconds,
+          durationSeconds: endTimeSeconds - startTimeSeconds,
         };
       }
       return {
@@ -1325,7 +1343,12 @@ export function FrameStrip({
               ) : (
                 <div className="absolute inset-y-0 w-px bg-white/60" />
               )}
-              {incomingEntry && (
+              {/* A Text Slide has no cutTransitionInId of its own -- it
+                  animates itself in/out via its own entranceId/exitId
+                  instead (see video_math.ts's own doc comment) -- so this
+                  badge (which sets that field) is simply not offered when
+                  the incoming clip is one. */}
+              {incomingEntry && incomingEntry.kind !== "text" && (
                 <button
                   type="button"
                   onClick={(e) => {

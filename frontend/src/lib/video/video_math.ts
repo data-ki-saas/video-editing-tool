@@ -13,6 +13,7 @@ import { CUT_TRANSITION_DURATION_SECONDS, type CutTransitionId } from "./cutTran
 import type { CanvasFillMode } from "./canvasFillPresets";
 import type { AmbientEffectId } from "./ambientEffects";
 import type { FaceEffectId } from "./faceLandmarks";
+import type { TextSlideTransitionId } from "./textSlideTransitions";
 
 /**
  * Timestamps (seconds) to sample a clip of the given duration at a fixed
@@ -1280,11 +1281,18 @@ export interface SequenceClipInfo {
   // buildRenderSegments below so the compiler can resolve each rendered
   // segment back to the cutaway it came from.
   id?: string;
+  // Always a real string -- a "text" kind clip with no imageAssetId of its
+  // own is given a synthetic assetId (its own entry id) by the gatherer
+  // functions (gatherRenderClips.ts/gatherLocalRenderClips.ts) purely so
+  // every OTHER per-clip map keyed by assetId (filters, canvas fill, etc.)
+  // stays a simple non-nullable lookup; nothing ever fetches `url` for it
+  // (both render loops branch on `kind === "text"` before any decode/fetch
+  // is attempted -- see CanvasPlayer.tsx/exportTimeline.ts).
   assetId: string;
   url: string;
   durationSeconds: number;
   startTimeSeconds: number;
-  kind: "video" | "image";
+  kind: "video" | "image" | "text";
   // This clip's own real pixel dimensions -- absent for a background-music
   // track (no visual shape) or wherever it hasn't been probed yet.
   // reprojectCropRect (above) needs a clip's OWN aspect ratio to correctly
@@ -1303,7 +1311,7 @@ export function buildSequenceClipInfos(
     assetId: string;
     url: string;
     durationSeconds: number;
-    kind?: "video" | "image";
+    kind?: "video" | "image" | "text";
     width?: number;
     height?: number;
   }[]
@@ -1415,16 +1423,65 @@ export type SequenceEntry =
       // combine freely). Same image-only scoping as camera3D/ambientEffect,
       // for now. Absent/false means today's flat scale, unchanged.
       audioReactive?: boolean;
+    }
+  | {
+      id: string;
+      kind: "text";
+      durationSeconds: number;
+      // Plain string, "\n" separates paragraphs -- the Tiptap editor
+      // (TextSlideDialog.tsx) is deliberately configured with no marks, so
+      // there's nothing richer than line breaks to preserve here. See
+      // textSlideRenderer.ts's drawTextSlide, which wraps/auto-shrinks this
+      // via textTemplates.ts's fitTextToRect, same as every other authored
+      // caption in this app.
+      text: string;
+      // Whole-slide (not per-character) style choices -- same "no knob
+      // soup" reasoning as textTemplates.ts's own module comment. Bold/
+      // italic here are plain toggles, not Tiptap marks the editor could
+      // apply-then-silently-drop.
+      style: {
+        bold: boolean;
+        italic: boolean;
+        align: "left" | "center" | "right";
+        color: string;
+      };
+      // A few fixed layouts, not a freeform canvas -- see this feature's
+      // own plan doc for why. "text-only" ignores assetId entirely (kept ""
+      // -- an empty string, not optional/null, same "always a plain string"
+      // convention every other SequenceEntry variant's assetId already
+      // follows, so `entry.assetId` keeps working unnarrowed everywhere it's
+      // already read that way, e.g. ThreePaneEditor's playbackClips
+      // mapping); the other three layouts require a real one.
+      layout: "text-only" | "image-full" | "image-left" | "image-right";
+      assetId: string;
+      // Meaningful for every layout except "image-full" (whose image
+      // already covers the whole frame, with its own fixed scrim behind
+      // the text -- see textSlideRenderer.ts): the whole frame's own
+      // background for "text-only", or the backdrop behind the text's own
+      // half for "image-left"/"image-right". The SAME solid/gradient
+      // fields canvasFillPresets.ts's CanvasFillMode already defines for a
+      // clip's letterbox fill, reused here (no "blur"/"crop" -- meaningless
+      // with no source image to blur or crop against).
+      canvasFillMode?: Extract<CanvasFillMode, "solid" | "gradient"> | null;
+      canvasFillColor?: string;
+      canvasFillGradientColor?: string;
+      // Which way the slide animates in/out of its own duration window --
+      // see textSlideTransitions.ts. Deliberately independent of
+      // cutTransitionInId below (a text slide has no decoded source to
+      // cross-fade against another clip's own).
+      entranceId: TextSlideTransitionId;
+      exitId: TextSlideTransitionId;
     };
 
-// Both SequenceEntry variants above carry a `cutTransitionInId` -- which
-// blended-cut transition (see cutTransitionPresets.ts) plays INTO this clip
-// from whichever clip precedes it in sequenceClips. Deliberately named
-// "cutTransition", never bare "transition" -- this codebase already uses
-// "transition" for the OLDER, unrelated pan/zoom Ken Burns effect (see
+// The video/image SequenceEntry variants above carry a `cutTransitionInId`
+// -- which blended-cut transition (see cutTransitionPresets.ts) plays INTO
+// this clip from whichever clip precedes it in sequenceClips. Deliberately
+// named "cutTransition", never bare "transition" -- this codebase already
+// uses "transition" for the OLDER, unrelated pan/zoom Ken Burns effect (see
 // ZoomEffect below and transformations.ts's own "transition" labels).
 // Meaningless (never set/read) on sequenceClips[0], since nothing precedes
-// it.
+// it. The "text" variant has no cutTransitionInId of its own -- see its own
+// entranceId/exitId fields and textSlideTransitions.ts instead.
 
 export function sequenceEntryAssetId(entry: SequenceEntry): string {
   return entry.assetId;
@@ -1557,8 +1614,10 @@ export interface RenderSegment {
   /** Which kind of clip this segment came from -- determines whether the
    * compiler emits a Creatomate Video (with trimStart/trimDuration) or an
    * Image (no source trim, since a still image has no timeline of its own)
-   * for it. See lib/timeline/compileCreatomateTimeline.ts. */
-  kind: "video" | "image";
+   * for it. See lib/timeline/compileCreatomateTimeline.ts. "text" is a Text
+   * Slide (textSlideRenderer.ts) -- deferred/guarded in the Creatomate
+   * compiler for now, see that file's own comment. */
+  kind: "video" | "image" | "text";
   // The originating SequenceClipInfo's own real pixel dimensions, when
   // known -- see that field's own doc comment (reprojectCropRect needs
   // this to re-project the sequence's reference-clip-authored crop rect

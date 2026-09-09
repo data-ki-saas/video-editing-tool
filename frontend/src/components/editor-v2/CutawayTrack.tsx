@@ -39,6 +39,8 @@ import type { AmbientEffectId } from "@/lib/video/ambientEffects";
 import type { FaceEffectId } from "@/lib/video/faceLandmarks";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 import { MattingProgressBadge } from "./MattingProgressBadge";
+import type { TextSlideLayout, TextSlideStyle } from "@/lib/video/transformations";
+import type { TextSlideTransitionId } from "@/lib/video/textSlideTransitions";
 
 // Pixel movement, from the initial pointerdown, before a press-and-move
 // counts as a drag rather than a click -- keeps a plain click still working
@@ -96,6 +98,21 @@ export type CutawaySegment =
       canvasFillGradientColor?: string;
       // Same AI background removal as the "image" variant above.
       backgroundRemoval?: BackgroundRemovalState | null;
+    }
+  | {
+      kind: "text";
+      entryId: string;
+      text: string;
+      style: TextSlideStyle;
+      layout: TextSlideLayout;
+      assetId: string;
+      canvasFillMode?: "solid" | "gradient" | null;
+      canvasFillColor?: string;
+      canvasFillGradientColor?: string;
+      entranceId: TextSlideTransitionId;
+      exitId: TextSlideTransitionId;
+      startTimeSeconds: number;
+      durationSeconds: number;
     };
 
 function CutawaySegmentButton({
@@ -121,8 +138,9 @@ function CutawaySegmentButton({
 }) {
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
   const isImage = segment.kind === "image";
-  const filterOption = segment.colorFilterId ? getFilterPresetOption(segment.colorFilterId) : null;
-  const canvasFillOption = segment.canvasFillMode ? getCanvasFillOption(segment.canvasFillMode) : null;
+  const isText = segment.kind === "text";
+  const filterOption = segment.kind !== "text" && segment.colorFilterId ? getFilterPresetOption(segment.colorFilterId) : null;
+  const canvasFillOption = segment.kind !== "text" && segment.canvasFillMode ? getCanvasFillOption(segment.canvasFillMode) : null;
 
   return (
     <>
@@ -130,7 +148,7 @@ function CutawaySegmentButton({
         type="button"
         onPointerDown={onDragPointerDown}
         onClick={
-          isImage
+          isImage || isText
             ? (e) => {
                 e.stopPropagation();
                 onEdit();
@@ -138,23 +156,32 @@ function CutawaySegmentButton({
             : undefined
         }
         onContextMenu={(e) =>
-          openContextMenu(e, [
-            { label: "Filter…", onSelect: onOpenFilter },
-            { label: "Canvas fill…", onSelect: onOpenCanvasFill },
-            { label: "Remove Cutaway", danger: true, onSelect: onDelete },
-          ])
+          openContextMenu(
+            e,
+            isText
+              ? [{ label: "Remove Text Slide", danger: true, onSelect: onDelete }]
+              : [
+                  { label: "Filter…", onSelect: onOpenFilter },
+                  { label: "Canvas fill…", onSelect: onOpenCanvasFill },
+                  { label: "Remove Cutaway", danger: true, onSelect: onDelete },
+                ]
+          )
         }
         title={
           segment.kind === "image"
             ? `Drag to reorder -- ${segment.templateIds.map((id) => getImageTemplateOption(id).name).join(" + ")}; click to edit, right-click for more`
-            : "Drag to reorder this video cutaway -- right-click for more"
+            : segment.kind === "text"
+              ? `Drag to reorder this text slide -- "${segment.text}"; click to edit, right-click to remove`
+              : "Drag to reorder this video cutaway -- right-click for more"
         }
         className={
           "absolute top-0 flex h-full items-center gap-1 overflow-hidden rounded-sm border text-[9px] leading-none cursor-grab active:cursor-grabbing " +
           (isDragging ? "z-10 opacity-80 ring-2 ring-accent " : "transition-[left] duration-150 ") +
           (isImage
             ? "border-accent bg-accent/30 text-accent hover:bg-accent/50"
-            : "border-neutral-500/70 bg-neutral-500/20 text-neutral-300 hover:bg-neutral-500/30")
+            : isText
+              ? "border-sky-400 bg-sky-400/30 text-sky-200 hover:bg-sky-400/50"
+              : "border-neutral-500/70 bg-neutral-500/20 text-neutral-300 hover:bg-neutral-500/30")
         }
         style={{
           left: `${leftPercent}%`,
@@ -162,8 +189,8 @@ function CutawaySegmentButton({
           touchAction: "none",
         }}
       >
-        <span className="pointer-events-none shrink-0 pl-1">{isImage ? "🖼" : "▶"}</span>
-        <span className="pointer-events-none truncate pr-1">Cutaway</span>
+        <span className="pointer-events-none shrink-0 pl-1">{isImage ? "🖼" : isText ? "📝" : "▶"}</span>
+        <span className="pointer-events-none truncate pr-1">{isText ? segment.text || "Text Slide" : "Cutaway"}</span>
         {filterOption && (
           <span className="pointer-events-none shrink-0 truncate rounded-full bg-black/30 px-1 pr-1" title={filterOption.name}>
             {filterOption.name}
@@ -174,7 +201,7 @@ function CutawaySegmentButton({
             {canvasFillOption.name}
           </span>
         )}
-        {segment.backgroundRemoval?.enabled && (
+        {segment.kind !== "text" && segment.backgroundRemoval?.enabled && (
           segment.backgroundRemoval.matteAssetId ? (
             <span
               className="pointer-events-none shrink-0 truncate rounded-full bg-black/30 px-1 pr-1"

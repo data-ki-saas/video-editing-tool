@@ -127,6 +127,7 @@ import {
   type TranscriptCaption,
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
+import { drawTextSlide, type TextSlideEntry } from "@/lib/video/textSlideRenderer";
 import { getFilterPresetOption } from "@/lib/video/filterPresets";
 import {
   getCanvasFillMode,
@@ -392,7 +393,7 @@ export const CanvasPlayer = forwardRef<
   // (via loadedClipsRef's own `.id`, see its comment below) rather than by
   // position, since a clip that failed to load shifts every later index out
   // of alignment with the `clips` prop.
-  const clipFilterById = new Map(clips.map((clip) => [clip.id, clip.colorFilterId ?? null]));
+  const clipFilterById = new Map(clips.map((clip) => [clip.id, clip.kind === "text" ? null : (clip.colorFilterId ?? null)]));
   // Each clip's own canvas fill (see canvasFillPresets.ts) -- same id-keyed
   // lookup shape as clipFilterById above.
   const clipCanvasFillById = new Map(
@@ -407,7 +408,15 @@ export const CanvasPlayer = forwardRef<
   // (the pan/zoom Ken Burns effect) -- see video_math.ts's
   // SequenceEntry.cutTransitionInId doc comment.
   const cutTransitionById: Map<string, CutTransitionId | null | undefined> = new Map(
-    clips.map((clip) => [clip.id, clip.cutTransitionInId ?? null])
+    clips.map((clip) => [clip.id, clip.kind === "text" ? null : (clip.cutTransitionInId ?? null)])
+  );
+  // Every Text Slide entry, keyed by id -- looked up in drawFrameAt's own
+  // early-return branch below via loadedClipsRef's reduced per-clip meta
+  // (which only carries id/assetId/url/durationSeconds/kind, not this
+  // entry's own text/style/layout/transitions), same "look it up by id from
+  // the ORIGINAL clips prop" reasoning as clipFilterById above.
+  const textSlideEntryById = new Map(
+    clips.filter((clip): clip is TextSlideEntry & { url: string } => clip.kind === "text").map((clip) => [clip.id, clip])
   );
   // AI background removal for a Ken Burns (image) cutaway -- true means
   // "draw a backdrop first, then this clip's own (already-transparent)
@@ -498,6 +507,12 @@ export const CanvasPlayer = forwardRef<
   // (see the loading effect below), so drawFrameAt just skips an overlay
   // whose image hasn't resolved yet rather than waiting on it.
   const overlayImagesRef = useRef<Record<string, HTMLImageElement>>({});
+  // A Text Slide's own optional background/layout image, keyed by assetId --
+  // same "load once, cache by assetId, redraw once ready" shape as
+  // overlayImagesRef above, kept as its own ref/effect since text slides
+  // come from `clips` (the base sequence) rather than the `overlayImages`
+  // prop (see the loading effect further below).
+  const textSlideImagesRef = useRef<Record<string, HTMLImageElement>>({});
   // Face detection (faceLandmarks.ts) for an image overlay with a faceEffect
   // picked -- keyed by assetId, same sharing convention as overlayImagesRef
   // above (one-shot per unique asset, populated by the SAME loading effect).
@@ -720,6 +735,30 @@ export const CanvasPlayer = forwardRef<
     const canvas = canvasRef.current;
     const position = resolveSequencePosition(loadedClipsRef.current, elapsedSeconds);
     if (!canvas || !position) return;
+
+    // A Text Slide fully replaces the frame for its own duration, same as
+    // an image Cutaway -- but unlike every other clip kind, its content is
+    // drawn fresh every frame (textSlideRenderer.ts's drawTextSlide, for
+    // the live entrance/exit animation) rather than sourced from a
+    // pre-extracted image/crop rect, so it's handled here as its own early
+    // return, before any of the crop/matte/camera3D/filter machinery below
+    // (none of which applies to it) ever touches `position.clipIndex`.
+    const currentClipMeta = loadedClipsRef.current[position.clipIndex];
+    if (currentClipMeta?.kind === "text") {
+      const textEntry = textSlideEntryById.get(currentClipMeta.id ?? "");
+      const ctx = canvas.getContext("2d");
+      if (textEntry && ctx) {
+        const { width: targetWidth, height: targetHeight } = computeOutputDimensions(outputAspectRatio);
+        if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
+        }
+        const backgroundImage = textEntry.assetId ? (textSlideImagesRef.current[textEntry.assetId] ?? null) : null;
+        drawTextSlide(ctx, textEntry, { x: 0, y: 0, width: canvas.width, height: canvas.height }, position.localSeconds, backgroundImage);
+      }
+      return;
+    }
+
     const images = clipImagesRef.current[position.clipIndex];
     if (!images || images.length === 0) return;
     const ctx = canvas.getContext("2d");
@@ -1903,7 +1942,7 @@ export const CanvasPlayer = forwardRef<
       if (clips.length === 0) return;
       const audioContext = ensureAudioContext();
 
-      type LoadedClipMeta = { id: string; assetId: string; url: string; durationSeconds: number; kind: "video" | "image" };
+      type LoadedClipMeta = { id: string; assetId: string; url: string; durationSeconds: number; kind: "video" | "image" | "text" };
       type ClipLoadResult =
         | {
             ok: true;
@@ -1938,6 +1977,33 @@ export const CanvasPlayer = forwardRef<
       async function loadClipAt(index: number): Promise<ClipLoadResult> {
         const clip = clips[index];
         try {
+          if (clip.kind === "text") {
+            // A text slide has no file to decode at all -- its content is
+            // drawn fresh every frame by drawFrameAt's own early-return
+            // branch below (textSlideRenderer.ts's drawTextSlide), never
+            // from a pre-extracted frame array. `images` still needs ONE
+            // non-empty entry so the generic per-clip bookkeeping below
+            // (audio-buffer concatenation, etc.) has something to hold --
+            // it's never actually drawn. Kept off `referenceFrameSizeRef`
+            // (see the firstImage lookup below, which skips text clips) so
+            // a 1x1 placeholder can never corrupt every other clip's own
+            // crop reprojection.
+            const duration = clip.durationSeconds;
+            const placeholderImage = await createImageBitmap(new ImageData(1, 1));
+            const silentAudioBuffer = audioContext.createBuffer(1, Math.max(1, Math.round(duration * audioContext.sampleRate)), audioContext.sampleRate);
+            clipProgress[index] = 1;
+            reportProgress();
+            return {
+              ok: true,
+              images: [placeholderImage],
+              frameRate: 1,
+              audioBuffer: silentAudioBuffer,
+              meta: { id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "text" },
+              mattes: null,
+              camera3DSubjectCutout: null,
+              faceGeometry: null,
+            };
+          }
           if (clip.kind === "image") {
             // An image clip is "a video with exactly one frame, held for
             // its authored duration, with silent audio" -- no file to
@@ -2120,7 +2186,13 @@ export const CanvasPlayer = forwardRef<
       durationRef.current = totalSequenceDuration(loadedClipsRef.current);
       audioBufferRef.current = concatenateAudioBuffers(audioContext, loadedAudioBuffers);
 
-      const firstImage = loadedImages[0]?.[0];
+      // Skips a "text" clip's own 1x1 placeholder bitmap -- see loadClipAt's
+      // own text branch above for why it must never be trusted for sizing.
+      // If the WHOLE sequence is text slides, no real frame exists to seed
+      // this from; referenceFrameSizeRef simply keeps whatever it already
+      // had (its own initial default covers a fresh player).
+      const firstNonTextIndex = loadedClipMeta.findIndex((meta) => meta.kind !== "text");
+      const firstImage = firstNonTextIndex !== -1 ? loadedImages[firstNonTextIndex]?.[0] : undefined;
       if (firstImage) {
         referenceFrameSizeRef.current = { width: firstImage.width, height: firstImage.height };
         onFrameDimensions?.({ width: firstImage.width, height: firstImage.height });
@@ -2224,6 +2296,42 @@ export const CanvasPlayer = forwardRef<
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
   }, [overlayImages, assetUrlById, isReady, isPlaying]);
+
+  // Loads each currently-referenced Text Slide's own optional background/
+  // layout image once (cached in textSlideImagesRef by assetId) and
+  // redraws once any of them finish -- same shape as the overlay-image
+  // loading effect immediately above, just sourced from `clips` (the base
+  // sequence) rather than the `overlayImages` prop.
+  useEffect(() => {
+    let cancelled = false;
+    const toLoad = clips
+      .filter((clip): clip is TextSlideEntry & { url: string } => clip.kind === "text" && Boolean(clip.assetId))
+      .map((clip) => ({ assetId: clip.assetId, url: assetUrlById[clip.assetId] }))
+      .filter(({ url }) => url);
+
+    Promise.all(
+      toLoad.map(({ assetId, url }) =>
+        loadImage(url)
+          .then((img) => ({ assetId, img }))
+          .catch(() => null)
+      )
+    ).then((loaded) => {
+      if (cancelled) return;
+      let didLoadAny = false;
+      for (const entry of loaded) {
+        if (!entry) continue;
+        textSlideImagesRef.current[entry.assetId] = entry.img;
+        didLoadAny = true;
+      }
+      if (cancelled) return;
+      if (didLoadAny && isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
+  }, [clips, assetUrlById, isReady, isPlaying]);
 
   // Extracts every video overlay's own source asset's preview frames once
   // (cached in videoOverlayFramesByAssetIdRef by assetId, shared across

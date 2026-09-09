@@ -134,12 +134,18 @@ import {
   applyMusicClipRangeChange,
   applyMusicClipPositionChange,
   applyDeleteMusicClip,
+  applyAddTextSequenceClip,
+  applyEditTextSequenceClip,
+  type TextSlideStyle,
+  type TextSlideLayout,
 } from "@/lib/video/transformations";
 import type { FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import type { CanvasFillMode } from "@/lib/video/canvasFillPresets";
 import type { AmbientEffectId } from "@/lib/video/ambientEffects";
 import type { FaceEffectId } from "@/lib/video/faceLandmarks";
+import type { TextSlideTransitionId } from "@/lib/video/textSlideTransitions";
+import { drawTextSlide } from "@/lib/video/textSlideRenderer";
 import {
   DEFAULT_EDIT_SELECTIONS,
   type Timeline,
@@ -165,6 +171,10 @@ import { LocalRenderPopup } from "./LocalRenderPopup";
 import { CoverPicker } from "./CoverPicker";
 
 const THUMBNAIL_INTERVAL_SECONDS = 1;
+// A text slide's own placeholder filmstrip tile -- small, fixed size, just
+// enough to read as "there's a slide here" at FrameStrip's own tile scale.
+const TEXT_SLIDE_THUMBNAIL_WIDTH = 160;
+const TEXT_SLIDE_THUMBNAIL_HEIGHT = 90;
 
 export function ThreePaneEditor({
   projectId,
@@ -412,6 +422,15 @@ export function ThreePaneEditor({
   // above stays null), just pre-selects that photo in the dialog's own
   // picker instead of defaulting to the first one.
   const [cutawayDialogPreselectedAssetId, setCutawayDialogPreselectedAssetId] = useState<string | null>(null);
+
+  // TextSlideDialog's own open/edit-target state -- same add-vs-edit
+  // duality as isCutawayDialogOpen/editingCutaway above, kept as its own
+  // separate dialog/state pair rather than a third CutawayDialog mode (see
+  // this feature's own plan doc for why); reopened by clicking a "text"
+  // segment on the SAME Cutaways rail (CutawayTrack) -- see
+  // handleEditCutaway's own kind branch.
+  const [isTextSlideDialogOpen, setIsTextSlideDialogOpen] = useState(false);
+  const [editingTextSlide, setEditingTextSlide] = useState<CutawaySegment | null>(null);
 
   // FilterPresetDialog's open/edit-target state -- three separate targets
   // (same "one state var per dialog target type" convention as
@@ -937,7 +956,14 @@ export function ThreePaneEditor({
   // FrameStrip/the extraction effect below) alongside whatever the entry
   // itself already has -- `durationSeconds` is authored for an image entry,
   // still absent (probed below) for a video one.
-  const resolvedSequenceEntries = sequenceClips.filter((entry) => assetUrlById[entry.assetId]);
+  // A "text" entry with layout "text-only" carries assetId === "" (no
+  // asset to resolve at all -- see video_math.ts's own comment on the
+  // "text" SequenceEntry variant); only drop a text entry here when it
+  // authored a real image assetId that no longer resolves (same "deleted
+  // asset silently drops out" reasoning as every other kind).
+  const resolvedSequenceEntries = sequenceClips.filter(
+    (entry) => (entry.kind === "text" && !entry.assetId) || assetUrlById[entry.assetId]
+  );
   const fallbackVideoAsset = assets.find((asset) => asset.kind === "video") ?? null;
   const baseSequenceEntries: SequenceEntry[] =
     resolvedSequenceEntries.length > 0
@@ -950,6 +976,9 @@ export function ThreePaneEditor({
   // never persisted, so this stays a display-only overlay on top of the
   // real entries rather than folded into resolvedSequenceEntries itself.
   const effectiveSequenceEntries: SequenceEntry[] = baseSequenceEntries.map((entry) => {
+    // A text slide has no backgroundRemoval field at all -- nothing to
+    // splice matting progress into (there's no video/photo being matted).
+    if (entry.kind === "text") return entry;
     const progress = cutawayMattingProgress[entry.id];
     if (progress === undefined || !entry.backgroundRemoval?.enabled || entry.backgroundRemoval.matteAssetId) return entry;
     return { ...entry, backgroundRemoval: { ...entry.backgroundRemoval, progress } };
@@ -1019,6 +1048,46 @@ export function ThreePaneEditor({
         if (cancelled) return;
         if (cursor > 0) boundaries.push(cursor);
         const clipStartSeconds = cursor;
+
+        if (clip.kind === "text") {
+          // A text slide has no file to probe/decode either -- render one
+          // representative frame of the slide itself (mid-duration, so any
+          // entrance/exit animation reads as "settled" rather than
+          // caught mid-transition) and hold it for every sampled tick,
+          // same "one representative image, repeated" shortcut the image
+          // branch below uses for a Ken Burns cutaway. Renders without its
+          // optional image (null) to keep this synchronous and simple --
+          // the live preview/real export still show the real photo, this
+          // is just the filmstrip tile.
+          const clipDurationSeconds = clip.durationSeconds;
+          const clipTimestamps = generateSampleTimestamps(clipDurationSeconds, THUMBNAIL_INTERVAL_SECONDS).map(
+            (t) => t + clipStartSeconds
+          );
+          const placeholderCanvas = document.createElement("canvas");
+          placeholderCanvas.width = TEXT_SLIDE_THUMBNAIL_WIDTH;
+          placeholderCanvas.height = TEXT_SLIDE_THUMBNAIL_HEIGHT;
+          const placeholderCtx = placeholderCanvas.getContext("2d");
+          let placeholderImageUrl = "";
+          if (placeholderCtx) {
+            drawTextSlide(
+              placeholderCtx,
+              clip,
+              { x: 0, y: 0, width: TEXT_SLIDE_THUMBNAIL_WIDTH, height: TEXT_SLIDE_THUMBNAIL_HEIGHT },
+              clipDurationSeconds / 2,
+              null
+            );
+            placeholderImageUrl = placeholderCanvas.toDataURL("image/png");
+          }
+          accumulatedThumbnails = [...accumulatedThumbnails, ...clipTimestamps.map(() => placeholderImageUrl)];
+          accumulatedTimestamps = [...accumulatedTimestamps, ...clipTimestamps];
+          setThumbnails(accumulatedThumbnails);
+          setThumbnailTimestampsSeconds(accumulatedTimestamps);
+
+          cursor += clipDurationSeconds;
+          setVideoDurationSeconds(cursor);
+          setClipBoundarySeconds([...boundaries]);
+          continue;
+        }
 
         if (clip.kind === "image") {
           // An image clip has no file to probe/decode -- its duration is
@@ -1816,12 +1885,17 @@ export function ThreePaneEditor({
     setIsCutawayDialogOpen(true);
   }
 
-  // The Cutaways rail's own click (CutawayTrack's onEdit) -- image segments
-  // only (see CutawayTrack.tsx). Reopens CutawayDialog pre-filled with that
-  // cutaway's current photo/template/duration, so
-  // handleAddImageSequenceClip below edits it in place instead of appending
-  // a duplicate.
+  // The Cutaways rail's own click (CutawayTrack's onEdit) -- video segments
+  // have nothing authored to edit in place, so this only ever does
+  // something for "image" (reopens CutawayDialog) or "text" (reopens
+  // TextSlideDialog) segments. Both dialogs share this one rail/entry
+  // point (see CutawayTrack.tsx's own module comment).
   function handleEditCutaway(segment: CutawaySegment) {
+    if (segment.kind === "text") {
+      setEditingTextSlide(segment);
+      setIsTextSlideDialogOpen(true);
+      return;
+    }
     if (segment.kind !== "image") return;
     setEditingCutaway(segment);
     setIsCutawayDialogOpen(true);
@@ -1968,6 +2042,72 @@ export function ThreePaneEditor({
       (entry) => durationSecondsByEntryId.get(entry.id) ?? 0
     );
     pushChange(label, state);
+  }
+
+  // "Text Slide" button in UserActions -- opens TextSlideDialog fresh, to
+  // add a new slide (editingTextSlide is already null here, never set
+  // except by handleEditCutaway's own "text" branch above).
+  function handleOpenTextSlideDialog() {
+    setIsTextSlideDialogOpen(true);
+  }
+
+  function handleCloseTextSlideDialog() {
+    setIsTextSlideDialogOpen(false);
+    setEditingTextSlide(null);
+  }
+
+  // TextSlideDialog's "Add" / "Save changes" -- appends a new Text Slide to
+  // the end of the sequence, or, when editingTextSlide is set, edits that
+  // existing slide's content/layout/style/duration/transitions in place
+  // instead. Same one-history-entry-per-save shape as
+  // handleAddImageSequenceClip. `videoDurationSeconds` (already tracked
+  // from the extraction effect above) is the sequence's current total
+  // length, i.e. exactly where a freshly-added slide starts.
+  function handleSaveTextSlide(
+    text: string,
+    style: TextSlideStyle,
+    layout: TextSlideLayout,
+    durationSeconds: number,
+    entranceId: TextSlideTransitionId,
+    exitId: TextSlideTransitionId,
+    assetId?: string | null,
+    canvasFillMode?: "solid" | "gradient" | null,
+    canvasFillColor?: string,
+    canvasFillGradientColor?: string
+  ) {
+    const { label, state } =
+      editingTextSlide && editingTextSlide.kind === "text"
+        ? applyEditTextSequenceClip(
+            selections,
+            editingTextSlide.entryId,
+            text,
+            style,
+            layout,
+            durationSeconds,
+            entranceId,
+            exitId,
+            editingTextSlide.startTimeSeconds,
+            assetId,
+            canvasFillMode,
+            canvasFillColor,
+            canvasFillGradientColor
+          )
+        : applyAddTextSequenceClip(
+            selections,
+            text,
+            style,
+            layout,
+            durationSeconds,
+            entranceId,
+            exitId,
+            assetId,
+            canvasFillMode,
+            canvasFillColor,
+            canvasFillGradientColor
+          );
+    pushChange(label, state);
+    setIsTextSlideDialogOpen(false);
+    setEditingTextSlide(null);
   }
 
   // FrameStrip's post-add drag handle on an image clip's boundary --
@@ -2681,6 +2821,12 @@ export function ThreePaneEditor({
           onAddVideoSequenceClip={handleAddToSequence}
           onCloseCutawayDialog={handleCloseCutawayDialog}
           onDeleteCutaway={handleDeleteCutaway}
+          onOpenTextSlideDialog={handleOpenTextSlideDialog}
+          isTextSlideDialogOpen={isTextSlideDialogOpen}
+          editingTextSlide={editingTextSlide}
+          onSaveTextSlide={handleSaveTextSlide}
+          onCloseTextSlideDialog={handleCloseTextSlideDialog}
+          onDeleteTextSlide={handleDeleteCutaway}
           isVideoOverlayPickerOpen={isVideoOverlayPickerOpen}
           videoOverlayPickerPreselectedAssetId={videoOverlayPickerPreselectedAssetId}
           onOpenVideoOverlayPicker={() => setIsVideoOverlayPickerOpen(true)}

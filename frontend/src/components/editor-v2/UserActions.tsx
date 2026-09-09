@@ -98,6 +98,19 @@ function ImageMotionIcon({ className }: { className?: string }) {
   );
 }
 
+// A card with two text lines inside -- "Text Slide" 's identity, distinct
+// from ClosedCaptionIcon's "CC" glyph (auto-caption) and TextGlyphIcon's
+// bare "T" (a manually-typed caption over existing footage): this one is
+// its own full-frame slide, not an overlay on top of anything.
+function TextSlideIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className={className}>
+      <rect x="2.5" y="4.5" width="19" height="15" rx="2" />
+      <path d="M7 10.5h10M7 14.5h6" />
+    </svg>
+  );
+}
+
 // A small box overlapping a big box -- the universal Picture-in-Picture
 // glyph, used here as "Video Overlay" 's identity regardless of which
 // layout (Full-Screen/PiP/Split-Screen) is actually active on any given
@@ -191,6 +204,8 @@ export function UserActions({
   onOpenClipRectDialog,
   onOpenCutawayDialog,
   cutawayCount,
+  onOpenTextSlideDialog,
+  textSlideCount,
   onOpenVideoOverlayPicker,
   videoOverlayCount,
   onOpenImageOverlayPicker,
@@ -209,6 +224,8 @@ export function UserActions({
   onOpenClipRectDialog: () => void;
   onOpenCutawayDialog: () => void;
   cutawayCount: number;
+  onOpenTextSlideDialog: () => void;
+  textSlideCount: number;
   onOpenVideoOverlayPicker: () => void;
   videoOverlayCount: number;
   onOpenImageOverlayPicker: () => void;
@@ -257,6 +274,18 @@ export function UserActions({
               Cutaway
             </span>
             <CountBadge count={cutawayCount} />
+          </button>
+          <button
+            type="button"
+            onClick={onOpenTextSlideDialog}
+            title="Add a Text Slide -- a full-frame slide of text and/or an image, with its own duration, that slides in and out of the reel"
+            className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-muted hover:bg-background"
+          >
+            <TextSlideIcon className="h-4 w-4" />
+            <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+              Text Slide
+            </span>
+            <CountBadge count={textSlideCount} />
           </button>
         </div>
 

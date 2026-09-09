@@ -50,6 +50,7 @@ import { getCutTransitionOption, type CutTransitionId } from "./cutTransitionPre
 import { getCanvasFillOption, type CanvasFillMode } from "./canvasFillPresets";
 import type { AmbientEffectId } from "./ambientEffects";
 import type { FaceEffectId } from "./faceLandmarks";
+import type { TextSlideTransitionId } from "./textSlideTransitions";
 
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
@@ -220,7 +221,10 @@ export function applySelectCutawayFilterPreset(
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
   const entry = selections.sequenceClips[entryIndex];
   const label = `Cutaway filter: ${getFilterPresetOption(filterId === "none" ? null : filterId).name}`;
-  if (!entry) return { label, state: selections };
+  // Video/image only -- a Text Slide has no colorFilterId of its own (see
+  // video_math.ts's own doc comment), and CutawayTrack's right-click menu
+  // never offers "Filter…" for one anyway.
+  if (!entry || entry.kind === "text") return { label, state: selections };
   const nextEntries = [...selections.sequenceClips];
   nextEntries[entryIndex] = { ...entry, colorFilterId: filterId === "none" ? null : filterId };
   return { label, state: { ...selections, sequenceClips: nextEntries } };
@@ -246,7 +250,13 @@ export function applySelectCanvasFillMode(
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
   const entry = selections.sequenceClips[entryIndex];
   const label = `Canvas fill: ${getCanvasFillOption(mode).name}`;
-  if (!entry) return { label, state: selections };
+  // Video/image only -- this is the shared letterbox-fill dialog
+  // (CanvasFillDialog, "Canvas fill…" on the Cutaways rail), not a Text
+  // Slide's own background picker (set directly by applyAddTextSequenceClip/
+  // applyEditTextSequenceClip instead, with a narrower solid/gradient-only
+  // mode -- see video_math.ts's own doc comment). CutawayTrack's right-click
+  // menu never offers "Canvas fill…" for a text segment anyway.
+  if (!entry || entry.kind === "text") return { label, state: selections };
   const nextEntries = [...selections.sequenceClips];
   nextEntries[entryIndex] = {
     ...entry,
@@ -271,7 +281,10 @@ export function applySelectClipTransition(
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
   const entry = selections.sequenceClips[entryIndex];
   const label = `Transition: ${getCutTransitionOption(cutTransitionId)?.name ?? "Cut"}`;
-  if (!entry) return { label, state: selections };
+  // Video/image only -- a Text Slide has no cutTransitionInId of its own
+  // (see video_math.ts's own doc comment on why -- it animates itself in/
+  // out via its own entranceId/exitId instead).
+  if (!entry || entry.kind === "text") return { label, state: selections };
   const nextEntries = [...selections.sequenceClips];
   nextEntries[entryIndex] = { ...entry, cutTransitionInId: cutTransitionId };
   return { label, state: { ...selections, sequenceClips: nextEntries } };
@@ -642,7 +655,10 @@ export function applySetBackgroundRemoval(
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
   const entry = selections.sequenceClips[entryIndex];
   const label = backgroundRemoval?.enabled ? "Remove background" : "Restore background";
-  if (!entry) return { label, state: selections };
+  // Video/image only -- a Text Slide has no backgroundRemoval field (see
+  // video_math.ts's own doc comment); nothing ever offers this toggle for
+  // a text segment.
+  if (!entry || entry.kind === "text") return { label, state: selections };
   const nextEntries = [...selections.sequenceClips];
   nextEntries[entryIndex] = { ...entry, backgroundRemoval };
   return { label, state: { ...selections, sequenceClips: nextEntries } };
@@ -875,6 +891,184 @@ export function applyEditImageSequenceClip(
       ...selections,
       sequenceClips: nextEntries,
       zoomEffects: nextZoomEffects,
+      overlayImages: selections.overlayImages.map(shiftEffectRange),
+      textOverlays: selections.textOverlays.map(shiftEffectRange),
+      trimRanges: selections.trimRanges.map(shiftEffectRange),
+      videoOverlays: selections.videoOverlays.map(shiftEffectRange),
+      ttsOverlays: selections.ttsOverlays.map((overlay) =>
+        overlay.startTimeSeconds >= clipStartSeconds + entry.durationSeconds
+          ? { ...overlay, startTimeSeconds: overlay.startTimeSeconds + delta }
+          : overlay
+      ),
+      flipHorizontalToggles: selections.flipHorizontalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
+      flipVerticalToggles: selections.flipVerticalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
+    },
+  };
+}
+
+export interface TextSlideStyle {
+  bold: boolean;
+  italic: boolean;
+  align: "left" | "center" | "right";
+  color: string;
+}
+
+export type TextSlideLayout = "text-only" | "image-full" | "image-left" | "image-right";
+
+/** Appends a Text Slide (video_math.ts's SequenceEntry "text" variant) to
+ * the base sequence -- same "always appends, one history entry" shape as
+ * applyAddImageSequenceClip, minus the Ken-Burns-specific ZoomEffect: a
+ * text slide's own entrance/exit animation lives entirely in its
+ * entranceId/exitId fields, computed at draw time (see
+ * textSlideTransitions.ts), not as an authored keyframe list. Reuses the
+ * same duration bounds as an image cutaway (MIN/MAX_IMAGE_CLIP_DURATION_
+ * SECONDS) -- same "a deliberate beat in the reel" reasoning, no need for a
+ * parallel set of constants. */
+export function applyAddTextSequenceClip(
+  selections: EditSelectionsSnapshot,
+  text: string,
+  style: TextSlideStyle,
+  layout: TextSlideLayout,
+  durationSeconds: number,
+  entranceId: TextSlideTransitionId,
+  exitId: TextSlideTransitionId,
+  assetId?: string | null,
+  canvasFillMode?: "solid" | "gradient" | null,
+  canvasFillColor?: string,
+  canvasFillGradientColor?: string
+): TransformationResult {
+  const clampedDuration = Math.min(
+    MAX_IMAGE_CLIP_DURATION_SECONDS,
+    Math.max(MIN_IMAGE_CLIP_DURATION_SECONDS, durationSeconds)
+  );
+  const newEntry: SequenceEntry = {
+    id: crypto.randomUUID(),
+    kind: "text",
+    durationSeconds: clampedDuration,
+    text,
+    style,
+    layout,
+    assetId: assetId ?? "",
+    canvasFillMode,
+    canvasFillColor,
+    canvasFillGradientColor,
+    entranceId,
+    exitId,
+  };
+  return {
+    label: "Added text slide",
+    state: { ...selections, sequenceClips: [...selections.sequenceClips, newEntry] },
+  };
+}
+
+/** Changes an existing text slide's content/layout/style/duration/
+ * transitions in place -- from TextSlideDialog's "Save changes", reopened
+ * by clicking a segment on the Cutaways rail (CutawayTrack.tsx). Same
+ * duration-change reflow as applyEditImageSequenceClip (shifts every later
+ * timed selection by the resulting delta) -- there's no ZoomEffect to
+ * rebuild here, so this is otherwise a straight field replacement. */
+export function applyEditTextSequenceClip(
+  selections: EditSelectionsSnapshot,
+  entryId: string,
+  text: string,
+  style: TextSlideStyle,
+  layout: TextSlideLayout,
+  durationSeconds: number,
+  entranceId: TextSlideTransitionId,
+  exitId: TextSlideTransitionId,
+  clipStartSeconds: number,
+  assetId?: string | null,
+  canvasFillMode?: "solid" | "gradient" | null,
+  canvasFillColor?: string,
+  canvasFillGradientColor?: string
+): TransformationResult {
+  const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
+  const entry = selections.sequenceClips[entryIndex];
+  if (!entry || entry.kind !== "text") return { label: "Edited text slide", state: selections };
+
+  const clampedDuration = Math.min(
+    MAX_IMAGE_CLIP_DURATION_SECONDS,
+    Math.max(MIN_IMAGE_CLIP_DURATION_SECONDS, durationSeconds)
+  );
+  const delta = clampedDuration - entry.durationSeconds;
+
+  const shiftEffectRange = <T extends { startTimeSeconds: number; endTimeSeconds: number }>(item: T): T =>
+    item.startTimeSeconds >= clipStartSeconds + entry.durationSeconds
+      ? { ...item, startTimeSeconds: item.startTimeSeconds + delta, endTimeSeconds: item.endTimeSeconds + delta }
+      : item;
+
+  const nextEntries = [...selections.sequenceClips];
+  nextEntries[entryIndex] = {
+    id: entry.id,
+    kind: "text",
+    durationSeconds: clampedDuration,
+    text,
+    style,
+    layout,
+    assetId: assetId ?? "",
+    canvasFillMode,
+    canvasFillColor,
+    canvasFillGradientColor,
+    entranceId,
+    exitId,
+  };
+
+  return {
+    label: "Edited text slide",
+    state: {
+      ...selections,
+      sequenceClips: nextEntries,
+      zoomEffects: selections.zoomEffects.map(shiftEffectRange),
+      overlayImages: selections.overlayImages.map(shiftEffectRange),
+      textOverlays: selections.textOverlays.map(shiftEffectRange),
+      trimRanges: selections.trimRanges.map(shiftEffectRange),
+      videoOverlays: selections.videoOverlays.map(shiftEffectRange),
+      ttsOverlays: selections.ttsOverlays.map((overlay) =>
+        overlay.startTimeSeconds >= clipStartSeconds + entry.durationSeconds
+          ? { ...overlay, startTimeSeconds: overlay.startTimeSeconds + delta }
+          : overlay
+      ),
+      flipHorizontalToggles: selections.flipHorizontalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
+      flipVerticalToggles: selections.flipVerticalToggles.map((t) => (t >= clipStartSeconds + entry.durationSeconds ? t + delta : t)),
+    },
+  };
+}
+
+/** Resizing a text slide's duration from its own drag handle on
+ * FrameStrip's clip-boundary marker (post-add) -- same shape as
+ * applyResizeImageClip, minus the ZoomEffect rescale (a text slide has
+ * none). */
+export function applyResizeTextClip(
+  selections: EditSelectionsSnapshot,
+  entryId: string,
+  newDurationSeconds: number,
+  clipStartSeconds: number
+): TransformationResult {
+  const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
+  const entry = selections.sequenceClips[entryIndex];
+  if (!entry || entry.kind !== "text") return { label: "Resized text slide", state: selections };
+
+  const clampedDuration = Math.min(
+    MAX_IMAGE_CLIP_DURATION_SECONDS,
+    Math.max(MIN_IMAGE_CLIP_DURATION_SECONDS, newDurationSeconds)
+  );
+  const delta = clampedDuration - entry.durationSeconds;
+  if (delta === 0) return { label: "Resized text slide", state: selections };
+
+  const shiftEffectRange = <T extends { startTimeSeconds: number; endTimeSeconds: number }>(item: T): T =>
+    item.startTimeSeconds >= clipStartSeconds + entry.durationSeconds
+      ? { ...item, startTimeSeconds: item.startTimeSeconds + delta, endTimeSeconds: item.endTimeSeconds + delta }
+      : item;
+
+  const nextEntries = [...selections.sequenceClips];
+  nextEntries[entryIndex] = { ...entry, durationSeconds: clampedDuration };
+
+  return {
+    label: "Resized text slide",
+    state: {
+      ...selections,
+      sequenceClips: nextEntries,
+      zoomEffects: selections.zoomEffects.map(shiftEffectRange),
       overlayImages: selections.overlayImages.map(shiftEffectRange),
       textOverlays: selections.textOverlays.map(shiftEffectRange),
       trimRanges: selections.trimRanges.map(shiftEffectRange),

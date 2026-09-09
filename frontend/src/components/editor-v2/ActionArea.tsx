@@ -37,7 +37,10 @@ import { TtsOverlayDialog } from "./TtsOverlayDialog";
 import { TtsAvatarDialog } from "./TtsAvatarDialog";
 import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
 import { CutawayDialog } from "./CutawayDialog";
+import { TextSlideDialog } from "./TextSlideDialog";
 import type { CutawaySegment } from "./CutawayTrack";
+import type { TextSlideStyle, TextSlideLayout } from "@/lib/video/transformations";
+import type { TextSlideTransitionId } from "@/lib/video/textSlideTransitions";
 import { ClipRectangleDialog } from "./ClipRectangleDialog";
 import { FilterPresetDialog } from "./FilterPresetDialog";
 import { CanvasFillDialog } from "./CanvasFillDialog";
@@ -99,7 +102,7 @@ function ActiveTransformationsList({
     rows.push(`Clip rectangle: ${option?.ratioLabel ?? selections.clipRectId}`);
   }
   for (const entry of selections.sequenceClips) {
-    if (entry.colorFilterId) rows.push(`Cutaway filter: ${getFilterPresetOption(entry.colorFilterId).name}`);
+    if (entry.kind !== "text" && entry.colorFilterId) rows.push(`Cutaway filter: ${getFilterPresetOption(entry.colorFilterId).name}`);
   }
   for (const effect of selections.zoomEffects) {
     rows.push(`Zoom/pan ${formatTimeRange(effect.startTimeSeconds, effect.endTimeSeconds)}`);
@@ -113,7 +116,7 @@ function ActiveTransformationsList({
   for (const range of selections.trimRanges) {
     rows.push(`Trimmed ${formatTimeRange(range.startTimeSeconds, range.endTimeSeconds)}`);
   }
-  const filterSuffix = (colorFilterId: EditSelectionsSnapshot["sequenceClips"][number]["colorFilterId"]) =>
+  const filterSuffix = (colorFilterId: FilterPresetId | null | undefined) =>
     colorFilterId ? `, ${getFilterPresetOption(colorFilterId).name} filter` : "";
   for (const overlay of selections.overlayImages) {
     rows.push(
@@ -277,6 +280,12 @@ export function ActionArea({
   onAddVideoSequenceClip,
   onCloseCutawayDialog,
   onDeleteCutaway,
+  onOpenTextSlideDialog,
+  isTextSlideDialogOpen,
+  editingTextSlide,
+  onSaveTextSlide,
+  onCloseTextSlideDialog,
+  onDeleteTextSlide,
   isVideoOverlayPickerOpen,
   videoOverlayPickerPreselectedAssetId,
   onOpenVideoOverlayPicker,
@@ -438,6 +447,25 @@ export function ActionArea({
   onAddVideoSequenceClip: (asset: Asset, options?: { removeBackground?: boolean }) => void;
   onCloseCutawayDialog: () => void;
   onDeleteCutaway: (segment: CutawaySegment) => void;
+  onOpenTextSlideDialog: () => void;
+  isTextSlideDialogOpen: boolean;
+  // Non-null when TextSlideDialog was reopened from the Cutaways rail to
+  // edit an existing text slide -- see that dialog's own `editing` prop.
+  editingTextSlide: CutawaySegment | null;
+  onSaveTextSlide: (
+    text: string,
+    style: TextSlideStyle,
+    layout: TextSlideLayout,
+    durationSeconds: number,
+    entranceId: TextSlideTransitionId,
+    exitId: TextSlideTransitionId,
+    assetId?: string | null,
+    canvasFillMode?: "solid" | "gradient" | null,
+    canvasFillColor?: string,
+    canvasFillGradientColor?: string
+  ) => void;
+  onCloseTextSlideDialog: () => void;
+  onDeleteTextSlide: (segment: CutawaySegment) => void;
   isVideoOverlayPickerOpen: boolean;
   // Set by AssetGallery's right-click "Overlay" on a specific video tile --
   // see VideoOverlayPickerDialog's own preselectedAssetId prop comment.
@@ -570,7 +598,9 @@ export function ActionArea({
           selectedClipRectId={selectedClipRectId}
           onOpenClipRectDialog={() => setIsClipRectDialogOpen(true)}
           onOpenCutawayDialog={onOpenCutawayDialog}
-          cutawayCount={sequenceClips.length}
+          cutawayCount={sequenceClips.filter((entry) => entry.kind !== "text").length}
+          onOpenTextSlideDialog={onOpenTextSlideDialog}
+          textSlideCount={sequenceClips.filter((entry) => entry.kind === "text").length}
           onOpenVideoOverlayPicker={onOpenVideoOverlayPicker}
           videoOverlayCount={videoOverlays.length}
           onOpenImageOverlayPicker={onOpenImageOverlayPicker}
@@ -745,6 +775,32 @@ export function ActionArea({
         />
       )}
 
+      {isTextSlideDialogOpen && (
+        <TextSlideDialog
+          assets={assets}
+          clipRectAspectRatio={playAreaRatio}
+          editing={
+            editingTextSlide?.kind === "text"
+              ? {
+                  text: editingTextSlide.text,
+                  style: editingTextSlide.style,
+                  layout: editingTextSlide.layout,
+                  assetId: editingTextSlide.assetId,
+                  canvasFillMode: editingTextSlide.canvasFillMode ?? null,
+                  canvasFillColor: editingTextSlide.canvasFillColor,
+                  canvasFillGradientColor: editingTextSlide.canvasFillGradientColor,
+                  entranceId: editingTextSlide.entranceId,
+                  exitId: editingTextSlide.exitId,
+                  durationSeconds: editingTextSlide.durationSeconds,
+                }
+              : null
+          }
+          onSave={onSaveTextSlide}
+          onClose={onCloseTextSlideDialog}
+          onDelete={editingTextSlide ? () => onDeleteTextSlide(editingTextSlide) : undefined}
+        />
+      )}
+
       {isClipRectDialogOpen && (
         <ClipRectangleDialog
           selectedClipRectId={selectedClipRectId}
@@ -757,7 +813,7 @@ export function ActionArea({
 
       {filterDialogCutawayEntry && (
         <FilterPresetDialog
-          selectedFilterId={filterDialogCutawayEntry.colorFilterId ?? null}
+          selectedFilterId={(filterDialogCutawayEntry.kind !== "text" ? filterDialogCutawayEntry.colorFilterId : null) ?? null}
           onSelect={onSelectCutawayFilter}
           onClose={onCloseFilterDialog}
           previewFrameUrl={filterDialogCutawayPreviewFrameUrl ?? previewFrameUrl}
@@ -781,7 +837,7 @@ export function ActionArea({
 
       {transitionDialogEntry && (
         <CutTransitionDialog
-          selectedTransitionId={transitionDialogEntry.cutTransitionInId ?? null}
+          selectedTransitionId={(transitionDialogEntry.kind !== "text" ? transitionDialogEntry.cutTransitionInId : null) ?? null}
           onSelect={onSelectClipTransition}
           onClose={onCloseTransitionDialog}
           outgoingFrameUrl={transitionDialogOutgoingFrameUrl}

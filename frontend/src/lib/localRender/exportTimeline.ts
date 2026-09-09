@@ -87,6 +87,7 @@ import {
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
+import { drawTextSlide, type TextSlideEntry } from "@/lib/video/textSlideRenderer";
 import { drawBrandWatermark } from "@/lib/video/brandWatermark";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import {
@@ -570,7 +571,9 @@ export async function exportVideoLocally(
   // Per-cutaway/per-overlay filter lookup, same "each clip carries its own
   // colorFilterId" model as compileCreatomateTimeline.ts's identical map --
   // see that file's own comment on cutawayFilterByEntryId.
-  const cutawayFilterByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.colorFilterId ?? null]));
+  const cutawayFilterByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [entry.id, entry.kind === "text" ? null : (entry.colorFilterId ?? null)])
+  );
   // Per-cutaway canvas fill (see canvasFillPresets.ts) -- same "each clip
   // carries its own" shape as cutawayFilterByEntryId above.
   const canvasFillByEntryId = new Map(
@@ -592,11 +595,26 @@ export async function exportVideoLocally(
   // so a still-processing job (matteAssetId null) or a matte asset that
   // fails to load just renders this clip unmasked, exactly like today.
   const backgroundRemovalMatteByEntryId = new Map(
-    selections.sequenceClips.map((entry) => [entry.id, entry.backgroundRemoval?.enabled ? entry.backgroundRemoval.matteAssetId : null])
+    selections.sequenceClips.map((entry) => [
+      entry.id,
+      entry.kind !== "text" && entry.backgroundRemoval?.enabled ? entry.backgroundRemoval.matteAssetId : null,
+    ])
   );
   // Same cut-transition lookup compileCreatomateTimeline.ts builds -- see
-  // that file's own cutTransitionByEntryId comment.
-  const cutTransitionByEntryId = new Map(selections.sequenceClips.map((entry) => [entry.id, entry.cutTransitionInId ?? null]));
+  // that file's own cutTransitionByEntryId comment. A text slide has no
+  // cutTransitionInId of its own (see video_math.ts's own doc comment on
+  // the "text" variant) -- always null here.
+  const cutTransitionByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [entry.id, entry.kind === "text" ? null : (entry.cutTransitionInId ?? null)])
+  );
+  // Every Text Slide entry, keyed by id -- looked up in the main frame
+  // loop's own early branch below via each RenderSegment's entryId (which
+  // only carries assetId/kind/timing, not this entry's own text/style/
+  // layout/transitions), same "look it up by id from the ORIGINAL
+  // selections" reasoning as cutawayFilterByEntryId above.
+  const textSlideEntryById = new Map(
+    selections.sequenceClips.filter((entry): entry is TextSlideEntry => entry.kind === "text").map((entry) => [entry.id, entry])
+  );
   // "Make it 3D" (lib/video/camera3D.ts) -- same per-entryId lookup shape as
   // cutawayFilterByEntryId above, mirroring CanvasPlayer.tsx's identical
   // clipCamera3DById/clipTemplateIdsById maps so both render paths agree on
@@ -696,6 +714,27 @@ export async function exportVideoLocally(
     }
 
     for (const clip of sequenceClips) {
+      if (clip.kind === "text") {
+        // No REQUIRED source to load -- a Text Slide's content is drawn
+        // fresh per output frame (textSlideRenderer.ts's drawTextSlide),
+        // not sourced from a decoded video/image element like every other
+        // kind. Its OPTIONAL background/layout image (if any) loads into
+        // the SAME imageClipElementsByAssetId cache below, keyed by
+        // assetId same as an image cutaway's own photo -- best-effort (a
+        // missing/failed image just falls back to drawTextSlide's own
+        // neutral placeholder fill, unlike a base image cutaway's photo,
+        // which is mandatory content and fails the whole render).
+        if (clip.assetId && !imageClipElementsByAssetId.has(clip.assetId)) {
+          try {
+            const { image, blobUrl } = await loadOverlayImage(clip.url, { assetId: clip.assetId, refreshUrl: refreshAssetUrl });
+            imageClipElementsByAssetId.set(clip.assetId, image);
+            overlayBlobUrls.push(blobUrl);
+          } catch {
+            // Best-effort, see comment above.
+          }
+        }
+        continue;
+      }
       if (clip.kind === "image") {
         if (imageClipElementsByAssetId.has(clip.assetId)) continue;
         // Unlike an overlay image (decorative, skippable -- see the
@@ -836,6 +875,7 @@ export async function exportVideoLocally(
     const matteVideoAssetIds = new Set<string>();
     const matteImageAssetIds = new Set<string>();
     for (const entry of selections.sequenceClips) {
+      if (entry.kind === "text") continue;
       const matteAssetId = entry.backgroundRemoval?.enabled ? entry.backgroundRemoval.matteAssetId : null;
       if (!matteAssetId) continue;
       (entry.kind === "video" ? matteVideoAssetIds : matteImageAssetIds).add(matteAssetId);
@@ -928,6 +968,26 @@ export async function exportVideoLocally(
 
       const sourceTimeSeconds = segment.sourceStartSeconds + (outputTimeSeconds - segment.outputStartSeconds);
       const localSeconds = segment.clipLocalStartSeconds + (outputTimeSeconds - segment.outputStartSeconds);
+
+      if (segment.kind === "text") {
+        // A Text Slide fully replaces the frame for its own duration (same
+        // as an image Cutaway) and, for this v1 pass, its own clean
+        // full-screen moment intentionally suppresses every other overlay
+        // track (captions, TTS, video/image overlays) while it's showing --
+        // see this feature's own plan doc. The brand watermark still draws
+        // over it (a persistent corner badge, not content-dependent), and
+        // the frame still encodes exactly like every other frame below.
+        const textEntry = segment.entryId ? textSlideEntryById.get(segment.entryId) : undefined;
+        if (textEntry) {
+          const backgroundImage = textEntry.assetId ? (imageClipElementsByAssetId.get(textEntry.assetId) ?? null) : null;
+          drawTextSlide(ctx, textEntry, { x: 0, y: 0, width: canvas.width, height: canvas.height }, localSeconds, backgroundImage);
+        }
+        drawBrandWatermark(ctx, canvas.width, canvas.height, outputTimeSeconds, totalDurationSeconds);
+        await videoSource.add(outputTimeSeconds, 1 / OUTPUT_FPS);
+        onProgress?.({ framesDone: frameIndex + 1, totalFrames });
+        continue;
+      }
+
       // AI background removal -- a real, already-loaded matte only (see
       // backgroundRemovalMatteByEntryId's own comment). An IMAGE-kind
       // cutout REPLACES `source` outright right here (it's a full
