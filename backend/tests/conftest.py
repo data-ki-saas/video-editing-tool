@@ -11,6 +11,7 @@ from src.core.config import settings
 from src.permissions.features import FEATURE_KEYS
 from src.projects import repository as projects_repository
 from src.recordings import repository as recordings_repository
+from src.tickets import repository as tickets_repository
 
 # Full access by default so existing router/service tests (written before
 # the permissions module existed) keep exercising real behavior rather than
@@ -376,6 +377,192 @@ def fake_roles_table(monkeypatch):
     monkeypatch.setattr(permissions_repository, "list_users", table.list_users)
     monkeypatch.setattr(permissions_repository, "get_user_basic", table.get_user_basic)
     monkeypatch.setattr(permissions_repository, "upsert_user_role", table.upsert_user_role)
+    return table
+
+
+class FakeTicketsTable:
+    """In-memory stand-in for the `support_tickets`/`support_ticket_messages`/
+    `support_ticket_attachments` tables (plus the `role_features`/`users`
+    lookups tickets/repository.py's list_assignable_admins/get_users_basic
+    do) -- same purpose as FakeAssetsTable above, avoids hitting a real
+    Supabase project. A tiny internal clock keeps created_at/updated_at
+    strings monotonically increasing so tickets/service.py's own lexical
+    has_unread comparison behaves the same way it would against real
+    timestamptz values."""
+
+    def __init__(self):
+        self.tickets: dict[str, dict] = {}
+        self.messages: dict[str, dict] = {}
+        self.attachments: dict[str, dict] = {}
+        self.users: dict[str, dict] = {}
+        self.assignable_admin_ids: set[str] = set()
+        self.recent_ticket_events: dict[str, int] = {}
+        self._clock = 0
+
+    def _tick(self) -> str:
+        self._clock += 1
+        return f"2026-01-01T00:{self._clock // 60:02d}:{self._clock % 60:02d}+00:00"
+
+    def add_user(self, user_id: str, *, email: str | None = None, display_name: str | None = None, assignable: bool = False) -> str:
+        self.users[user_id] = {"id": user_id, "email": email, "display_name": display_name}
+        if assignable:
+            self.assignable_admin_ids.add(user_id)
+        return user_id
+
+    def create_ticket(self, *, user_id, subject, priority, context_project_id, context_user_agent) -> tickets_repository.TicketRecord:
+        ticket_id = str(uuid.uuid4())
+        now = self._tick()
+        row = {
+            "id": ticket_id,
+            "user_id": user_id,
+            "subject": subject,
+            "priority": priority,
+            "layer": None,
+            "state": "new",
+            "assigned_to": None,
+            "user_last_viewed_at": None,
+            "context_project_id": context_project_id,
+            "context_user_agent": context_user_agent,
+            "created_at": now,
+            "updated_at": now,
+        }
+        self.tickets[ticket_id] = row
+        return tickets_repository.TicketRecord(**row)
+
+    def get_ticket(self, ticket_id):
+        row = self.tickets.get(ticket_id)
+        return tickets_repository.TicketRecord(**row) if row else None
+
+    def list_tickets_for_user(self, user_id):
+        rows = sorted((r for r in self.tickets.values() if r["user_id"] == user_id), key=lambda r: r["updated_at"], reverse=True)
+        return [tickets_repository.TicketRecord(**r) for r in rows]
+
+    def list_tickets_admin(self, *, state, priority, layer, assigned_to):
+        rows = list(self.tickets.values())
+        if state:
+            rows = [r for r in rows if r["state"] == state]
+        if priority:
+            rows = [r for r in rows if r["priority"] == priority]
+        if layer:
+            rows = [r for r in rows if r["layer"] == layer]
+        if assigned_to:
+            rows = [r for r in rows if r["assigned_to"] == assigned_to]
+        rows.sort(key=lambda r: r["updated_at"], reverse=True)
+        return [tickets_repository.TicketRecord(**r) for r in rows]
+
+    def count_new_tickets(self) -> int:
+        return sum(1 for r in self.tickets.values() if r["state"] == "new")
+
+    def update_triage(self, ticket_id, **fields):
+        row = self.tickets.get(ticket_id)
+        if row is None:
+            return None
+        row.update(fields)
+        row["updated_at"] = self._tick()
+        return tickets_repository.TicketRecord(**row)
+
+    def touch_updated_at(self, ticket_id) -> None:
+        row = self.tickets.get(ticket_id)
+        if row is not None:
+            row["updated_at"] = self._tick()
+
+    def mark_seen(self, ticket_id) -> None:
+        row = self.tickets.get(ticket_id)
+        if row is not None and row["state"] == "new":
+            row["state"] = "seen"
+
+    def mark_viewed_by_owner(self, ticket_id) -> None:
+        row = self.tickets.get(ticket_id)
+        if row is not None:
+            row["user_last_viewed_at"] = self._tick()
+
+    def create_message(self, *, ticket_id, author_id, is_admin_reply, is_internal, body):
+        message_id = str(uuid.uuid4())
+        row = {
+            "id": message_id,
+            "ticket_id": ticket_id,
+            "author_id": author_id,
+            "is_admin_reply": is_admin_reply,
+            "is_internal": is_internal,
+            "body": body,
+            "created_at": self._tick(),
+        }
+        self.messages[message_id] = row
+        return tickets_repository.MessageRecord(**row)
+
+    def list_messages_with_attachments(self, ticket_id, *, include_internal):
+        rows = [r for r in self.messages.values() if r["ticket_id"] == ticket_id]
+        if not include_internal:
+            rows = [r for r in rows if not r["is_internal"]]
+        rows.sort(key=lambda r: r["created_at"])
+        result = []
+        for row in rows:
+            atts = [tickets_repository.AttachmentRecord(**a) for a in self.attachments.values() if a["message_id"] == row["id"]]
+            result.append((tickets_repository.MessageRecord(**row), atts))
+        return result
+
+    def count_messages(self, ticket_id, *, include_internal) -> int:
+        rows = [r for r in self.messages.values() if r["ticket_id"] == ticket_id]
+        if not include_internal:
+            rows = [r for r in rows if not r["is_internal"]]
+        return len(rows)
+
+    def latest_customer_visible_message_at(self, ticket_id):
+        rows = [r["created_at"] for r in self.messages.values() if r["ticket_id"] == ticket_id and not r["is_internal"]]
+        return max(rows) if rows else None
+
+    def create_attachment(self, *, message_id, filename, mime_type, size_bytes, storage_key):
+        attachment_id = str(uuid.uuid4())
+        row = {
+            "id": attachment_id,
+            "message_id": message_id,
+            "filename": filename,
+            "mime_type": mime_type,
+            "size_bytes": size_bytes,
+            "storage_key": storage_key,
+            "created_at": self._tick(),
+        }
+        self.attachments[attachment_id] = row
+        return tickets_repository.AttachmentRecord(**row)
+
+    def get_users_basic(self, user_ids):
+        return {uid: self.users[uid] for uid in user_ids if uid in self.users}
+
+    def list_assignable_admins(self):
+        return [self.users[uid] for uid in self.assignable_admin_ids if uid in self.users]
+
+    def get_project_name(self, project_id):
+        return None
+
+    def count_recent_ticket_events(self, user_id) -> int:
+        return self.recent_ticket_events.get(user_id, 0)
+
+    def record_ticket_event(self, user_id) -> None:
+        self.recent_ticket_events[user_id] = self.recent_ticket_events.get(user_id, 0) + 1
+
+
+@pytest.fixture
+def fake_tickets_table(monkeypatch):
+    table = FakeTicketsTable()
+    monkeypatch.setattr(tickets_repository, "create_ticket", table.create_ticket)
+    monkeypatch.setattr(tickets_repository, "get_ticket", table.get_ticket)
+    monkeypatch.setattr(tickets_repository, "list_tickets_for_user", table.list_tickets_for_user)
+    monkeypatch.setattr(tickets_repository, "list_tickets_admin", table.list_tickets_admin)
+    monkeypatch.setattr(tickets_repository, "count_new_tickets", table.count_new_tickets)
+    monkeypatch.setattr(tickets_repository, "update_triage", table.update_triage)
+    monkeypatch.setattr(tickets_repository, "touch_updated_at", table.touch_updated_at)
+    monkeypatch.setattr(tickets_repository, "mark_seen", table.mark_seen)
+    monkeypatch.setattr(tickets_repository, "mark_viewed_by_owner", table.mark_viewed_by_owner)
+    monkeypatch.setattr(tickets_repository, "create_message", table.create_message)
+    monkeypatch.setattr(tickets_repository, "list_messages_with_attachments", table.list_messages_with_attachments)
+    monkeypatch.setattr(tickets_repository, "count_messages", table.count_messages)
+    monkeypatch.setattr(tickets_repository, "latest_customer_visible_message_at", table.latest_customer_visible_message_at)
+    monkeypatch.setattr(tickets_repository, "create_attachment", table.create_attachment)
+    monkeypatch.setattr(tickets_repository, "get_users_basic", table.get_users_basic)
+    monkeypatch.setattr(tickets_repository, "list_assignable_admins", table.list_assignable_admins)
+    monkeypatch.setattr(tickets_repository, "get_project_name", table.get_project_name)
+    monkeypatch.setattr(tickets_repository, "count_recent_ticket_events", table.count_recent_ticket_events)
+    monkeypatch.setattr(tickets_repository, "record_ticket_event", table.record_ticket_event)
     return table
 
 

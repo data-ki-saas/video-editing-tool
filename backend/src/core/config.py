@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     # number is ever set.
     render_daily_cap: int = 10
 
+    # Abuse guardrail on FILING a support ticket (not replying to one --
+    # see tickets/service.py's create_ticket) -- same fixed-daily-cap
+    # precedent as tts_daily_cap/render_daily_cap above, backed by the same
+    # usage_events table (event_type='ticket_filed', see supabase/migrations/
+    # 0029's widened check constraint).
+    tickets_daily_cap: int = 10
+
     # This server's own publicly reachable base URL -- needed only so
     # avatar/service.py can hand HeyGen a callback_url pointing back at
     # itself (POST /api/render never needed this, since Creatomate's

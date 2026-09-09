@@ -3,7 +3,7 @@
 /**
  * Persistent top bar for every authenticated page (see
  * app/(app)/layout.tsx) -- Home on the left, then Record(project routes
- * only)/Dashboard/Library/Recordings/Templates/Admin(admins only)/
+ * only)/Dashboard/Library/Recordings/Templates/Admin(admins only)/Support/
  * Account/Settings/Sign out on the right. Reel-specific actions (Render,
  * Edge Render) live in the video preview's own toolbar instead (see
  * CanvasPlayer.tsx) since they act on the reel being previewed, not on
@@ -15,9 +15,10 @@ import { useParams, useRouter } from "next/navigation";
 import { RecordIcon } from "./editor-v2/icons/PlayerIcons";
 import { SignOutButton } from "@/components/SignOutButton";
 import { ReelIcon } from "@/components/IconButton";
-import { AccountIcon, BookmarkIcon, DashboardIcon, LibraryIcon, RecordingsIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
+import { AccountIcon, BookmarkIcon, DashboardIcon, LibraryIcon, RecordingsIcon, SettingsIcon, SupportIcon, ToolsIcon } from "@/components/icons/UIIcons";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import { getActiveImpersonation, stopImpersonation, type ActiveImpersonation } from "@/lib/impersonation";
+import { getTicketUnreadCount } from "@/lib/api";
 
 export function GlobalTopNav() {
   const isAdmin = useIsAdmin();
@@ -27,10 +28,20 @@ export function GlobalTopNav() {
 
   const [impersonation, setImpersonation] = useState<ActiveImpersonation | null>(null);
   const [stopping, setStopping] = useState(false);
+  const [hasUnreadTickets, setHasUnreadTickets] = useState(false);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- first client-side read of localStorage, can't happen any earlier
     setImpersonation(getActiveImpersonation());
+  }, []);
+
+  useEffect(() => {
+    // One-shot on mount, not a live poll -- refreshes again on the next full
+    // navigation into a page that remounts this bar. Errors are swallowed
+    // (e.g. signed-out on a marketing page) since a missing dot is harmless.
+    getTicketUnreadCount()
+      .then((count) => setHasUnreadTickets(count > 0))
+      .catch(() => undefined);
   }, []);
 
   async function handleStopImpersonation() {
@@ -110,6 +121,17 @@ export function GlobalTopNav() {
             <ToolsIcon className="h-5 w-5" />
           </Link>
         )}
+        <Link
+          href="/support"
+          aria-label="Support"
+          title="Support center"
+          className="relative rounded-full p-2 text-muted hover:bg-foreground/10"
+        >
+          <SupportIcon className="h-5 w-5" />
+          {hasUnreadTickets && (
+            <span className="absolute right-1.5 top-1.5 block h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
+          )}
+        </Link>
         <Link
           href="/account/usage"
           aria-label="Account"

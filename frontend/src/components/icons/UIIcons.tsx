@@ -72,6 +72,20 @@ export function AccountIcon(props: IconProps) {
   );
 }
 
+// A life-ring: outer ring, inner ring, four corner ticks -- links to
+// /support from the header, left of AccountIcon (see GlobalTopNav.tsx).
+// Deliberately a distinct glyph from ToolsIcon's wrench (admin tooling) and
+// AccountIcon's person-in-circle -- reads as "help" at a glance.
+export function SupportIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="4" />
+      <path d="M5.5 5.5l3.3 3.3M18.5 5.5l-3.3 3.3M5.5 18.5l3.3-3.3M18.5 18.5l-3.3-3.3" />
+    </svg>
+  );
+}
+
 // A wrench glyph -- links to /admin from the header, left of AccountIcon,
 // shown only when useIsAdmin() resolves true.
 export function ToolsIcon(props: IconProps) {
@@ -338,6 +352,19 @@ export function DashboardIcon(props: IconProps) {
       <rect x="13" y="3" width="8" height="8" rx="1.5" />
       <rect x="3" y="13" width="8" height="8" rx="1.5" />
       <rect x="13" y="13" width="8" height="8" rx="1.5" />
+    </svg>
+  );
+}
+
+// A page with a folded corner -- non-image ticket attachment thumbnails
+// (components/support/AttachmentPicker.tsx, AttachmentThumbnail.tsx) fall
+// back to this since there's no cheap client-side PDF thumbnail without a
+// rendering library.
+export function FileIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z" />
+      <path d="M15 2v5h5" />
     </svg>
   );
 }

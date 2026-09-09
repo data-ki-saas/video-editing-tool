@@ -1,11 +1,14 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { getAdminNewTicketCount } from "@/lib/api";
 
 const ADMIN_NAV_ITEMS = [
   { href: "/admin/roles", label: "Roles" },
   { href: "/admin/users", label: "Users" },
+  { href: "/admin/tickets", label: "Tickets" },
   { href: "/admin/integrations", label: "Integrations" },
   { href: "/admin/usage", label: "Usage" },
 ];
@@ -16,6 +19,15 @@ const ADMIN_NAV_ITEMS = [
 // it inside app/(app)/layout.tsx's own scrolling <main>.
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [newTicketCount, setNewTicketCount] = useState(0);
+
+  useEffect(() => {
+    // One-shot on mount, same lightweight-badge precedent as
+    // GlobalTopNav.tsx's own unread-tickets dot.
+    getAdminNewTicketCount()
+      .then(setNewTicketCount)
+      .catch(() => undefined);
+  }, []);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl gap-8 px-4 py-12">
@@ -28,11 +40,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 key={item.href}
                 href={item.href}
                 className={
-                  "rounded-md px-3 py-2 text-sm font-medium " +
+                  "flex items-center justify-between rounded-md px-3 py-2 text-sm font-medium " +
                   (isActive ? "bg-surface text-foreground" : "text-muted hover:bg-foreground/10")
                 }
               >
                 {item.label}
+                {item.href === "/admin/tickets" && newTicketCount > 0 && (
+                  <span className="rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                    {newTicketCount}
+                  </span>
+                )}
               </Link>
             );
           })}

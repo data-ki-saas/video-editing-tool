@@ -1,3 +1,4 @@
+import { getLastProjectId } from "@/lib/lastProject";
 import { createClient } from "@/lib/supabase/client";
 import type { CompileTimelineInput } from "@/lib/timeline/compileCreatomateTimeline";
 
@@ -1373,4 +1374,278 @@ export async function getSocialPost(id: string): Promise<SocialPost> {
     response
   );
   return { id: body.id, status: body.status, providerUrl: body.provider_url, error: body.error };
+}
+
+// --- Support tickets (backend/src/tickets/*) --------------------------------
+
+export type TicketPriority = "critical" | "high" | "low";
+export type TicketLayer = "frontend" | "backend" | "database" | "storage";
+export type TicketState = "new" | "seen" | "assigned" | "resolved";
+
+export interface TicketAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  // A presigned R2 URL, same not-a-permanent-link convention as Asset.url.
+  url: string;
+  createdAt: string;
+}
+
+export interface TicketMessage {
+  id: string;
+  authorId: string;
+  isAdminReply: boolean;
+  // True only for an admin-authored internal note -- the backend never
+  // sends one of these to a non-admin caller in the first place, so a
+  // plain user-facing thread never has to filter this out itself.
+  isInternal: boolean;
+  body: string;
+  attachments: TicketAttachment[];
+  createdAt: string;
+}
+
+export interface TicketSummary {
+  id: string;
+  subject: string;
+  priority: TicketPriority;
+  layer: TicketLayer | null;
+  state: TicketState;
+  assignedTo: string | null;
+  hasUnread: boolean;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  // Populated only when the caller is admin (both on the admin queue LIST
+  // and the detail view) -- null for a response built for the ticket's own
+  // owner, who already knows who they are. See backend's _to_ticket_summary.
+  submitterEmail: string | null;
+  submitterDisplayName: string | null;
+  assigneeEmail: string | null;
+  assigneeDisplayName: string | null;
+}
+
+export interface TicketDetail extends TicketSummary {
+  messages: TicketMessage[];
+  contextProjectName: string | null;
+  contextUserAgent: string | null;
+}
+
+export interface AssignableAdmin {
+  id: string;
+  email: string | null;
+  displayName: string | null;
+}
+
+interface TicketAttachmentWire {
+  id: string;
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  url: string;
+  created_at: string;
+}
+
+interface TicketMessageWire {
+  id: string;
+  author_id: string;
+  is_admin_reply: boolean;
+  is_internal: boolean;
+  body: string;
+  attachments: TicketAttachmentWire[];
+  created_at: string;
+}
+
+interface TicketSummaryWire {
+  id: string;
+  subject: string;
+  priority: TicketPriority;
+  layer: TicketLayer | null;
+  state: TicketState;
+  assigned_to: string | null;
+  has_unread: boolean;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  submitter_email: string | null;
+  submitter_display_name: string | null;
+  assignee_email: string | null;
+  assignee_display_name: string | null;
+}
+
+interface TicketDetailWire extends TicketSummaryWire {
+  messages: TicketMessageWire[];
+  context_project_name: string | null;
+  context_user_agent: string | null;
+}
+
+function ticketAttachmentFromWire(w: TicketAttachmentWire): TicketAttachment {
+  return { id: w.id, filename: w.filename, mimeType: w.mime_type, sizeBytes: w.size_bytes, url: w.url, createdAt: w.created_at };
+}
+
+function ticketMessageFromWire(w: TicketMessageWire): TicketMessage {
+  return {
+    id: w.id,
+    authorId: w.author_id,
+    isAdminReply: w.is_admin_reply,
+    isInternal: w.is_internal,
+    body: w.body,
+    attachments: w.attachments.map(ticketAttachmentFromWire),
+    createdAt: w.created_at,
+  };
+}
+
+function ticketSummaryFromWire(w: TicketSummaryWire): TicketSummary {
+  return {
+    id: w.id,
+    subject: w.subject,
+    priority: w.priority,
+    layer: w.layer,
+    state: w.state,
+    assignedTo: w.assigned_to,
+    hasUnread: w.has_unread,
+    createdAt: w.created_at,
+    updatedAt: w.updated_at,
+    messageCount: w.message_count,
+    submitterEmail: w.submitter_email,
+    submitterDisplayName: w.submitter_display_name,
+    assigneeEmail: w.assignee_email,
+    assigneeDisplayName: w.assignee_display_name,
+  };
+}
+
+function ticketDetailFromWire(w: TicketDetailWire): TicketDetail {
+  return {
+    ...ticketSummaryFromWire(w),
+    messages: w.messages.map(ticketMessageFromWire),
+    contextProjectName: w.context_project_name,
+    contextUserAgent: w.context_user_agent,
+  };
+}
+
+/** POST /api/tickets (multipart) -- silently attaches navigator.userAgent
+ * and lib/lastProject.ts's stored project id as diagnostic context (see
+ * that file's own comment); callers never pass these themselves, and
+ * nothing about them is shown to the filer -- only in the admin thread
+ * view (TicketThread.tsx). */
+export async function createTicket(params: {
+  subject: string;
+  body: string;
+  priority: TicketPriority;
+  files: File[];
+}): Promise<TicketDetail> {
+  const formData = new FormData();
+  formData.append("subject", params.subject);
+  formData.append("body", params.body);
+  formData.append("priority", params.priority);
+  const projectId = getLastProjectId();
+  if (projectId) formData.append("context_project_id", projectId);
+  if (typeof navigator !== "undefined") formData.append("context_user_agent", navigator.userAgent);
+  for (const file of params.files) formData.append("files", file);
+
+  const response = await apiFetch(`${API_BASE_URL}/api/tickets`, {
+    method: "POST",
+    headers: await authHeader(),
+    body: formData,
+  });
+  return ticketDetailFromWire(await handleResponse<TicketDetailWire>(response));
+}
+
+export async function listMyTickets(): Promise<TicketSummary[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/tickets`, { headers: await authHeader() });
+  const body = await handleResponse<{ tickets: TicketSummaryWire[] }>(response);
+  return body.tickets.map(ticketSummaryFromWire);
+}
+
+export async function getTicket(ticketId: string): Promise<TicketDetail> {
+  const response = await apiFetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(ticketId)}`, {
+    headers: await authHeader(),
+  });
+  return ticketDetailFromWire(await handleResponse<TicketDetailWire>(response));
+}
+
+/** GET /api/tickets/unread-count -- backs the top-bar Support icon's dot
+ * (GlobalTopNav.tsx), fetched once on mount. */
+export async function getTicketUnreadCount(): Promise<number> {
+  const response = await apiFetch(`${API_BASE_URL}/api/tickets/unread-count`, { headers: await authHeader() });
+  const body = await handleResponse<{ count: number }>(response);
+  return body.count;
+}
+
+/** POST /api/tickets/{id}/messages (multipart) -- works for both a user
+ * replying to their own ticket and an admin replying to anyone's.
+ * `isInternal: true` is only ever sent from the admin thread view's
+ * "Add internal note" action -- the backend forces it false for anyone
+ * who isn't posting as an admin regardless of what's sent here. */
+export async function addTicketMessage(
+  ticketId: string,
+  params: { body: string; files: File[]; isInternal?: boolean }
+): Promise<TicketDetail> {
+  const formData = new FormData();
+  formData.append("body", params.body);
+  if (params.isInternal) formData.append("is_internal", "true");
+  for (const file of params.files) formData.append("files", file);
+
+  const response = await apiFetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(ticketId)}/messages`, {
+    method: "POST",
+    headers: await authHeader(),
+    body: formData,
+  });
+  return ticketDetailFromWire(await handleResponse<TicketDetailWire>(response));
+}
+
+/** GET /api/tickets/admin -- admin-only (require_feature("tickets_manage_all")). */
+export async function listAllTicketsAdmin(filters?: {
+  state?: TicketState;
+  priority?: TicketPriority;
+  layer?: TicketLayer;
+  assignedTo?: string;
+}): Promise<TicketSummary[]> {
+  const url = new URL(`${API_BASE_URL}/api/tickets/admin`);
+  if (filters?.state) url.searchParams.set("state", filters.state);
+  if (filters?.priority) url.searchParams.set("priority", filters.priority);
+  if (filters?.layer) url.searchParams.set("layer", filters.layer);
+  if (filters?.assignedTo) url.searchParams.set("assigned_to", filters.assignedTo);
+
+  const response = await apiFetch(url.toString(), { headers: await authHeader() });
+  const body = await handleResponse<{ tickets: TicketSummaryWire[] }>(response);
+  return body.tickets.map(ticketSummaryFromWire);
+}
+
+/** GET /api/tickets/admin/new-count -- backs the small badge on
+ * admin/layout.tsx's "Tickets" nav item, fetched once on mount. */
+export async function getAdminNewTicketCount(): Promise<number> {
+  const response = await apiFetch(`${API_BASE_URL}/api/tickets/admin/new-count`, { headers: await authHeader() });
+  const body = await handleResponse<{ count: number }>(response);
+  return body.count;
+}
+
+/** GET /api/tickets/admin/assignees -- users whose CURRENT role grants
+ * tickets_manage_all, for the triage panel's Assignee picker. */
+export async function listAssignableAdmins(): Promise<AssignableAdmin[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/tickets/admin/assignees`, { headers: await authHeader() });
+  const body = await handleResponse<{ admins: { id: string; email: string | null; display_name: string | null }[] }>(
+    response
+  );
+  return body.admins.map((a) => ({ id: a.id, email: a.email, displayName: a.display_name }));
+}
+
+/** PATCH /api/tickets/{id}/triage -- admin-only, a partial update: an
+ * omitted key leaves that field unchanged, `assignedTo: null` unassigns
+ * (same omit-vs-explicit-null convention as updateRole). */
+export async function updateTicketTriage(
+  ticketId: string,
+  params: { state?: TicketState; priority?: TicketPriority; layer?: TicketLayer; assignedTo?: string | null }
+): Promise<TicketDetail> {
+  const response = await apiFetch(`${API_BASE_URL}/api/tickets/${encodeURIComponent(ticketId)}/triage`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({
+      ...(params.state !== undefined ? { state: params.state } : {}),
+      ...(params.priority !== undefined ? { priority: params.priority } : {}),
+      ...(params.layer !== undefined ? { layer: params.layer } : {}),
+      ...(params.assignedTo !== undefined ? { assigned_to: params.assignedTo } : {}),
+    }),
+  });
+  return ticketDetailFromWire(await handleResponse<TicketDetailWire>(response));
 }

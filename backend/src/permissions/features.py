@@ -26,6 +26,7 @@ FEATURES: list[Feature] = [
     Feature("niches_use", "Niche catalog & config", "Projects"),
     Feature("admin_manage_roles", "Manage roles, permissions & user assignment", "Admin"),
     Feature("metering_admin_view", "Usage & cost dashboard", "Admin"),
+    Feature("tickets_manage_all", "View & respond to all support tickets", "Admin"),
 ]
 
 FEATURE_KEYS = frozenset(f.key for f in FEATURES)

@@ -18,6 +18,7 @@ from src.recordings.router import router as recordings_router
 from src.scripts.router import router as scripts_router
 from src.social.router import router as social_router
 from src.stock_media.router import router as stock_media_router
+from src.tickets.router import router as tickets_router
 from src.tts.router import router as tts_router
 from src.usage.router import router as usage_router
 
@@ -98,6 +99,7 @@ def create_app() -> FastAPI:
     app.include_router(scripts_router)
     app.include_router(social_router)
     app.include_router(stock_media_router)
+    app.include_router(tickets_router)
     app.include_router(tts_router)
     app.include_router(usage_router)
 
