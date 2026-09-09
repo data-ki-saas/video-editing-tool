@@ -47,6 +47,7 @@ import { getAudioDuration } from "@/lib/video/audio";
 import { usePermissions } from "@/lib/usePermissions";
 import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
 import { TransliterateTextarea } from "@/components/TransliterateField";
+import { NICHE_LANGUAGES, localeForNicheLanguage, nicheLanguageForVoiceLocale } from "@/lib/niches";
 
 const PREVIEW_PROGRESS = 0.6;
 const DEFAULT_PREVIEW_TEXT = "Your narration here";
@@ -87,6 +88,17 @@ export function TtsOverlayDialog({
   onClose: () => void;
 }) {
   const [text, setText] = useState(editingOverlay?.text ?? "");
+  // Which language's voices the Voice select below is narrowed to, and which
+  // locale drives the script textarea's live transliteration -- picked here,
+  // per narration, rather than inherited from a project-wide setting (see
+  // this dialog's own module comment update: pasting/typing plain English
+  // used to get its trailing word silently transliterated because the
+  // catalog's first voice, and therefore the transliteration locale, is
+  // Hindi -- see edge_provider.py's own "Indian-language voices come first"
+  // comment). Defaults to English for a fresh "Add"; derived from the
+  // existing voice's own locale when editing, so reopening an existing
+  // Hindi narration still shows Hindi selected.
+  const [language, setLanguage] = useState(() => nicheLanguageForVoiceLocale(editingOverlay?.voice ?? null));
   const [voice, setVoice] = useState(editingOverlay?.voice ?? "");
   const [displayMode, setDisplayMode] = useState<"background" | "karaoke" | "none">(editingOverlay?.displayMode ?? "background");
   const [templateId, setTemplateId] = useState<TextTemplateId>(
@@ -141,6 +153,7 @@ export function TtsOverlayDialog({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setText(editingOverlay?.text ?? "");
+    setLanguage((prev) => (editingOverlay ? nicheLanguageForVoiceLocale(editingOverlay.voice) : prev));
     setVoice((prev) => editingOverlay?.voice ?? prev);
     setDisplayMode(editingOverlay?.displayMode ?? "background");
     setTemplateId((editingOverlay?.templateId as TextTemplateId) ?? TEXT_TEMPLATE_OPTIONS[0].id);
@@ -171,10 +184,6 @@ export function TtsOverlayDialog({
         if (cancelled) return;
         setVoices(res.voices);
         setVoicesError(null);
-        // Defaults to the first available voice once the catalog loads --
-        // doesn't override a voice already chosen (a fresh "Add" with none
-        // picked yet, or an editingOverlay's own voice pre-filled above).
-        setVoice((prev) => prev || res.voices[0]?.id || "");
       })
       .catch((err) => {
         if (!cancelled) setVoicesError(err instanceof Error ? err.message : "Failed to load voices");
@@ -186,6 +195,23 @@ export function TtsOverlayDialog({
       cancelled = true;
     };
   }, []);
+
+  // Keeps `voice` pointing at a voice that actually belongs to the selected
+  // language -- reseeds to that language's first voice once the catalog
+  // loads, and again whenever the Language picker moves to a language the
+  // current voice doesn't match (e.g. Hindi -> English mid-dialog). A no-op
+  // once the pick already matches -- covers an editingOverlay's own voice,
+  // or one just chosen from the (already language-filtered) Voice select
+  // below, so this never fights the user's own selection.
+  useEffect(() => {
+    if (voices.length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVoice((prevVoice) => {
+      if (voices.some((v) => v.id === prevVoice && v.locale.toLowerCase().startsWith(language))) return prevVoice;
+      const forLanguage = voices.filter((v) => v.locale.toLowerCase().startsWith(language));
+      return (forLanguage[0] ?? voices[0])?.id ?? "";
+    });
+  }, [voices, language]);
 
   async function handleGenerateSpeech() {
     const trimmed = text.trim();
@@ -212,6 +238,12 @@ export function TtsOverlayDialog({
       setIsSynthesizing(false);
     }
   }
+
+  // Narrows the Voice select to the chosen language -- falls back to the
+  // full catalog if that ever yields nothing, same defensive fallback the
+  // niche wizard's own narrationVoicesForLanguage uses (dashboard/new/page.tsx).
+  const voicesForLanguageFiltered = voices.filter((v) => v.locale.toLowerCase().startsWith(language));
+  const voicesForLanguage = voicesForLanguageFiltered.length > 0 ? voicesForLanguageFiltered : voices;
 
   const trimmedText = text.trim();
   const canSave = Boolean(synthesis) && synthesizedText === trimmedText;
@@ -317,22 +349,37 @@ export function TtsOverlayDialog({
             <TransliterateTextarea
               value={text}
               onChange={setText}
-              locale={voices.find((option) => option.id === voice)?.locale ?? null}
+              locale={localeForNicheLanguage(language)}
               placeholder="Type what the narrator should say…"
               rows={3}
               className="mb-2 w-full resize-none rounded-md border border-border bg-background px-2 py-1 text-sm"
             />
 
             <label className="mb-2 flex flex-col gap-1 text-xs text-muted">
+              Language
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+              >
+                {NICHE_LANGUAGES.map((option) => (
+                  <option key={option.code} value={option.code}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="mb-2 flex flex-col gap-1 text-xs text-muted">
               Voice
               <select
                 value={voice}
                 onChange={(e) => setVoice(e.target.value)}
-                disabled={isLoadingVoices || voices.length === 0}
+                disabled={isLoadingVoices || voicesForLanguage.length === 0}
                 className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground disabled:opacity-50"
               >
-                {voices.length === 0 && <option value="">{isLoadingVoices ? "Loading voices…" : "No voices available"}</option>}
-                {voices.map((option) => (
+                {voicesForLanguage.length === 0 && <option value="">{isLoadingVoices ? "Loading voices…" : "No voices available"}</option>}
+                {voicesForLanguage.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
                   </option>

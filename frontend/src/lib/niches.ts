@@ -69,6 +69,21 @@ export function localeForNicheLanguage(languageCode: string): string | null {
   return prefix ? `${prefix}-IN` : null;
 }
 
+/** Inverse of localeForNicheLanguage: which niche language code a given TTS
+ * voice id/locale belongs to (e.g. "hi-IN-SwaraNeural" or "hi-IN" -> "hi"),
+ * so a dialog reopening an already-chosen voice can preselect the matching
+ * language. Works off a plain prefix match, which is safe because every
+ * voice id in the catalog IS its locale followed by a name (see
+ * backend/src/tts/providers/edge_provider.py's _VOICES) -- defaults to "en"
+ * for anything that doesn't match one of the Indic prefixes (every en-*
+ * locale included, since English has no voiceLocalePrefix of its own). */
+export function nicheLanguageForVoiceLocale(localeOrVoiceId: string | null | undefined): string {
+  if (!localeOrVoiceId) return "en";
+  const lower = localeOrVoiceId.toLowerCase();
+  const match = NICHE_LANGUAGES.find((l) => l.voiceLocalePrefix && lower.startsWith(l.voiceLocalePrefix));
+  return match?.code ?? "en";
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));

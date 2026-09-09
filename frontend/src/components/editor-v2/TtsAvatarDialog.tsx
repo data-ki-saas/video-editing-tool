@@ -34,6 +34,7 @@ import { pollAvatarGeneration } from "@/lib/avatarGeneration";
 import { usePermissions } from "@/lib/usePermissions";
 import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
 import { TransliterateTextarea } from "@/components/TransliterateField";
+import { NICHE_LANGUAGES, localeForNicheLanguage } from "@/lib/niches";
 
 export function TtsAvatarDialog({
   projectId,
@@ -49,6 +50,13 @@ export function TtsAvatarDialog({
   onClose: () => void;
 }) {
   const [text, setText] = useState("");
+  // Narrows the Voice select and drives the script's live transliteration --
+  // see TtsOverlayDialog's own comment on this same pattern. Defaults to
+  // English rather than inheriting whatever's first in the voice catalog
+  // (Hindi -- see edge_provider.py's "Indian-language voices come first"),
+  // which used to mean plain English narration got its trailing word
+  // silently transliterated.
+  const [language, setLanguage] = useState("en");
   const [voice, setVoice] = useState("");
   const [voices, setVoices] = useState<TtsVoiceOption[]>([]);
   const [isLoadingVoices, setIsLoadingVoices] = useState(true);
@@ -76,7 +84,6 @@ export function TtsAvatarDialog({
       .then((res) => {
         if (cancelled) return;
         setVoices(res.voices);
-        setVoice((prev) => prev || res.voices[0]?.id || "");
       })
       .catch((err) => {
         if (!cancelled) setVoicesError(err instanceof Error ? err.message : "Failed to load voices");
@@ -88,6 +95,20 @@ export function TtsAvatarDialog({
       cancelled = true;
     };
   }, []);
+
+  // Keeps `voice` pointing at a voice that actually belongs to the selected
+  // language -- see TtsOverlayDialog's identical effect for the full
+  // reasoning (reseeds on catalog load and on every language switch, no-ops
+  // once the pick already matches).
+  useEffect(() => {
+    if (voices.length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVoice((prevVoice) => {
+      if (voices.some((v) => v.id === prevVoice && v.locale.toLowerCase().startsWith(language))) return prevVoice;
+      const forLanguage = voices.filter((v) => v.locale.toLowerCase().startsWith(language));
+      return (forLanguage[0] ?? voices[0])?.id ?? "";
+    });
+  }, [voices, language]);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +128,11 @@ export function TtsAvatarDialog({
       cancelled = true;
     };
   }, []);
+
+  // Narrows the Voice select to the chosen language -- same defensive
+  // fallback as TtsOverlayDialog's own voicesForLanguage.
+  const voicesForLanguageFiltered = voices.filter((v) => v.locale.toLowerCase().startsWith(language));
+  const voicesForLanguage = voicesForLanguageFiltered.length > 0 ? voicesForLanguageFiltered : voices;
 
   const trimmedText = text.trim();
   const canGenerate = Boolean(trimmedText && voice && avatarId) && !isGenerating;
@@ -171,22 +197,37 @@ export function TtsAvatarDialog({
         <TransliterateTextarea
           value={text}
           onChange={setText}
-          locale={voices.find((option) => option.id === voice)?.locale ?? null}
+          locale={localeForNicheLanguage(language)}
           placeholder="Type what the avatar should say…"
           rows={3}
           className="w-full shrink-0 resize-none rounded-md border border-border bg-background px-2 py-1 text-sm"
         />
 
         <label className="flex shrink-0 flex-col gap-1 text-xs text-muted">
+          Language
+          <select
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+            className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+          >
+            {NICHE_LANGUAGES.map((option) => (
+              <option key={option.code} value={option.code}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex shrink-0 flex-col gap-1 text-xs text-muted">
           Voice
           <select
             value={voice}
             onChange={(e) => setVoice(e.target.value)}
-            disabled={isLoadingVoices || voices.length === 0}
+            disabled={isLoadingVoices || voicesForLanguage.length === 0}
             className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground disabled:opacity-50"
           >
-            {voices.length === 0 && <option value="">{isLoadingVoices ? "Loading voices…" : "No voices available"}</option>}
-            {voices.map((option) => (
+            {voicesForLanguage.length === 0 && <option value="">{isLoadingVoices ? "Loading voices…" : "No voices available"}</option>}
+            {voicesForLanguage.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.label} ({option.locale})
               </option>
