@@ -495,7 +495,17 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
             // control.
             aspectRatio: { ideal: 3 / 4 },
             width: { ideal: 1280 },
-          },
+            // Chrome-only, not modeled by TS's DOM lib (same reasoning as
+            // the videoTrack zoom-capability cast below) -- without this,
+            // Chrome is free to satisfy the aspectRatio/width ask above by
+            // crop-and-scaling a WIDER native capture down to fit, which
+            // looks exactly like an unwanted zoom-in even though none was
+            // requested (reported as "back camera is too zoomed in").
+            // "none" asks it to pick a native capture mode directly instead
+            // of cropping one down. Best-effort like the aspectRatio hint
+            // itself -- unsupported browsers just ignore the unknown key.
+            resizeMode: { ideal: "none" },
+          } as unknown as MediaTrackConstraints,
         });
       } catch (err) {
         if (!(err instanceof DOMException) || err.name !== "OverconstrainedError") throw err;
