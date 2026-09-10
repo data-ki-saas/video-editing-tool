@@ -8,17 +8,43 @@
  * Edge Render) live in the video preview's own toolbar instead (see
  * CanvasPlayer.tsx) since they act on the reel being previewed, not on
  * navigation.
+ *
+ * Below the `sm` breakpoint that right-hand icon row is wider than a phone
+ * screen, so it collapses into a single hamburger button opening a
+ * full-screen menu -- same overlay shape as the mobile editor's own
+ * MobileReelMenu.tsx (fixed inset-0, header+close, scrollable list) rather
+ * than a dropdown, since there's no room for a persistent panel at
+ * phone width either.
  */
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import type { SVGProps } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { RecordIcon } from "./editor-v2/icons/PlayerIcons";
 import { SignOutButton } from "@/components/SignOutButton";
 import { ReelIcon } from "@/components/IconButton";
-import { AccountIcon, BookmarkIcon, DashboardIcon, LibraryIcon, RecordingsIcon, SettingsIcon, SupportIcon, ToolsIcon } from "@/components/icons/UIIcons";
+import {
+  AccountIcon,
+  BookmarkIcon,
+  DashboardIcon,
+  LibraryIcon,
+  MenuIcon,
+  RecordingsIcon,
+  SettingsIcon,
+  SupportIcon,
+  ToolsIcon,
+} from "@/components/icons/UIIcons";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import { getActiveImpersonation, stopImpersonation, type ActiveImpersonation } from "@/lib/impersonation";
 import { getTicketUnreadCount } from "@/lib/api";
+
+type NavLink = {
+  key: string;
+  href: string;
+  label: string;
+  icon: (props: SVGProps<SVGSVGElement>) => React.ReactElement;
+  badge?: boolean;
+};
 
 export function GlobalTopNav() {
   const isAdmin = useIsAdmin();
@@ -29,6 +55,7 @@ export function GlobalTopNav() {
   const [impersonation, setImpersonation] = useState<ActiveImpersonation | null>(null);
   const [stopping, setStopping] = useState(false);
   const [hasUnreadTickets, setHasUnreadTickets] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- first client-side read of localStorage, can't happen any earlier
@@ -50,13 +77,25 @@ export function GlobalTopNav() {
       await stopImpersonation();
       router.push("/admin/users");
       router.refresh();
+      setIsMenuOpen(false);
     } finally {
       setStopping(false);
     }
   }
 
+  const navLinks: NavLink[] = [
+    { key: "dashboard", href: "/dashboard", label: "Dashboard", icon: DashboardIcon },
+    { key: "library", href: "/library", label: "Library", icon: LibraryIcon },
+    { key: "recordings", href: "/recordings", label: "Recordings", icon: RecordingsIcon },
+    { key: "templates", href: "/library?tab=templates", label: "Templates", icon: BookmarkIcon },
+    ...(isAdmin ? [{ key: "admin", href: "/admin", label: "Admin", icon: ToolsIcon }] : []),
+    { key: "support", href: "/support", label: "Support", icon: SupportIcon, badge: hasUnreadTickets },
+    { key: "account", href: "/account/usage", label: "Account", icon: AccountIcon },
+    { key: "settings", href: "/settings", label: "Settings", icon: SettingsIcon },
+  ];
+
   return (
-    <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+    <div className="relative flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
       <Link
         href="/"
         aria-label="Home"
@@ -68,7 +107,7 @@ export function GlobalTopNav() {
         </span>
       </Link>
 
-      <div className="flex items-center gap-2 pr-1">
+      <div className="hidden items-center gap-2 pr-1 sm:flex">
         {projectId && (
           <Link
             href={`/dashboard/${projectId}/record`}
@@ -79,75 +118,20 @@ export function GlobalTopNav() {
             <RecordIcon className="h-5 w-5" />
           </Link>
         )}
-        <Link
-          href="/dashboard"
-          aria-label="Dashboard"
-          title="Dashboard"
-          className="rounded-full p-2 text-muted hover:bg-foreground/10"
-        >
-          <DashboardIcon className="h-5 w-5" />
-        </Link>
-        <Link
-          href="/library"
-          aria-label="Library"
-          title="Library"
-          className="rounded-full p-2 text-muted hover:bg-foreground/10"
-        >
-          <LibraryIcon className="h-5 w-5" />
-        </Link>
-        <Link
-          href="/recordings"
-          aria-label="Recordings"
-          title="Recordings"
-          className="rounded-full p-2 text-muted hover:bg-foreground/10"
-        >
-          <RecordingsIcon className="h-5 w-5" />
-        </Link>
-        <Link
-          href="/library?tab=templates"
-          aria-label="Templates"
-          title="Templates"
-          className="rounded-full p-2 text-muted hover:bg-foreground/10"
-        >
-          <BookmarkIcon className="h-5 w-5" />
-        </Link>
-        {isAdmin && (
+        {navLinks.map((link) => (
           <Link
-            href="/admin"
-            aria-label="Admin"
-            title="Admin"
-            className="rounded-full p-2 text-muted hover:bg-foreground/10"
+            key={link.key}
+            href={link.href}
+            aria-label={link.label}
+            title={link.label}
+            className="relative rounded-full p-2 text-muted hover:bg-foreground/10"
           >
-            <ToolsIcon className="h-5 w-5" />
+            <link.icon className="h-5 w-5" />
+            {link.badge && (
+              <span className="absolute right-1.5 top-1.5 block h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
+            )}
           </Link>
-        )}
-        <Link
-          href="/support"
-          aria-label="Support"
-          title="Support center"
-          className="relative rounded-full p-2 text-muted hover:bg-foreground/10"
-        >
-          <SupportIcon className="h-5 w-5" />
-          {hasUnreadTickets && (
-            <span className="absolute right-1.5 top-1.5 block h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
-          )}
-        </Link>
-        <Link
-          href="/account/usage"
-          aria-label="Account"
-          title="Account"
-          className="rounded-full p-2 text-muted hover:bg-foreground/10"
-        >
-          <AccountIcon className="h-5 w-5" />
-        </Link>
-        <Link
-          href="/settings"
-          aria-label="Settings"
-          title="Settings"
-          className="rounded-full p-2 text-muted hover:bg-foreground/10"
-        >
-          <SettingsIcon className="h-5 w-5" />
-        </Link>
+        ))}
         {impersonation && (
           <button
             type="button"
@@ -162,6 +146,80 @@ export function GlobalTopNav() {
         )}
         <SignOutButton />
       </div>
+
+      <button
+        type="button"
+        onClick={() => setIsMenuOpen(true)}
+        aria-label="Menu"
+        title="Menu"
+        className="relative rounded-full p-2 text-muted hover:bg-foreground/10 sm:hidden"
+      >
+        <MenuIcon className="h-5 w-5" />
+        {hasUnreadTickets && (
+          <span className="absolute right-1.5 top-1.5 block h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
+        )}
+      </button>
+
+      {isMenuOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-background sm:hidden">
+          <div className="flex items-center justify-between border-b border-border p-3">
+            <h2 className="text-sm font-semibold text-foreground">Menu</h2>
+            <button
+              type="button"
+              onClick={() => setIsMenuOpen(false)}
+              aria-label="Close"
+              className="rounded-full p-2 text-muted hover:bg-foreground/10"
+            >
+              ✕
+            </button>
+          </div>
+
+          <nav className="flex-1 overflow-y-auto p-2">
+            {projectId && (
+              <Link
+                href={`/dashboard/${projectId}/record`}
+                onClick={() => setIsMenuOpen(false)}
+                className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm text-foreground hover:bg-foreground/5"
+              >
+                <RecordIcon className="h-5 w-5 shrink-0 text-muted" />
+                Record
+              </Link>
+            )}
+            {navLinks.map((link) => (
+              <Link
+                key={link.key}
+                href={link.href}
+                onClick={() => setIsMenuOpen(false)}
+                className="flex items-center gap-3 rounded-md px-3 py-2.5 text-sm text-foreground hover:bg-foreground/5"
+              >
+                <span className="relative h-5 w-5 shrink-0 text-muted">
+                  <link.icon className="h-5 w-5" />
+                  {link.badge && (
+                    <span className="absolute -right-0.5 -top-0.5 block h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
+                  )}
+                </span>
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+
+          <div className="flex items-center justify-between border-t border-border p-3">
+            {impersonation ? (
+              <button
+                type="button"
+                onClick={handleStopImpersonation}
+                disabled={stopping}
+                className="rounded-md bg-yellow-400 px-3 py-2 text-xs font-medium text-yellow-950 hover:bg-yellow-300 disabled:opacity-50"
+              >
+                Stop impersonating {impersonation.email ?? "user"}
+              </button>
+            ) : (
+              <span />
+            )}
+            <SignOutButton />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
