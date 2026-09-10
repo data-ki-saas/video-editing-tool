@@ -130,6 +130,7 @@ import {
   applySelectCanvasFillMode,
   applySetBackgroundRemoval,
   applySetVideoOverlayBackgroundRemoval,
+  applySetImageOverlayBackgroundRemoval,
   applyAddMusicClip,
   applyMusicClipRangeChange,
   applyMusicClipPositionChange,
@@ -349,6 +350,9 @@ export function ThreePaneEditor({
   // comment already carries for that index.
   const [cutawayMattingProgress, setCutawayMattingProgress] = useState<Record<string, number>>({});
   const [videoOverlayMattingProgress, setVideoOverlayMattingProgress] = useState<Record<number, number>>({});
+  // Image-overlay equivalent of videoOverlayMattingProgress above, keyed by
+  // position in `overlayImages` the same way.
+  const [imageOverlayMattingProgress, setImageOverlayMattingProgress] = useState<Record<number, number>>({});
   // FeedbackArea's own chatty activity ticker -- see that file's own module
   // comment for why this exists (fal.ai's background-removal integration
   // gives no real interim progress, so this is the "proof it's still
@@ -1596,6 +1600,31 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  // Image-overlay equivalent of requestAndPollVideoOverlayBackgroundRemoval
+  // above, indexed into `overlayImages` instead -- used from
+  // ImageOverlayFramingDialog's own Background-removal row (the first place
+  // this is settable for an image overlay at all, add-time or otherwise;
+  // see ImageOverlayClip.backgroundRemoval's own doc comment).
+  async function requestAndPollImageOverlayBackgroundRemoval(sourceAssetId: string, overlayIndex: number) {
+    const assetName = assets.find((asset) => asset.id === sourceAssetId)?.filename ?? "this image overlay";
+    const result = await requestAndPollMatte(sourceAssetId, assetName, (fraction) =>
+      setImageOverlayMattingProgress((prev) => ({ ...prev, [overlayIndex]: fraction }))
+    );
+    setImageOverlayMattingProgress((prev) => {
+      if (!(overlayIndex in prev)) return prev;
+      const next = { ...prev };
+      delete next[overlayIndex];
+      return next;
+    });
+    if (result.status !== "completed") return;
+    const { label, state } = applySetImageOverlayBackgroundRemoval(selections, overlayIndex, {
+      enabled: true,
+      matteAssetId: result.matteAssetId,
+      mode: "ai",
+    });
+    pushChange(label, state);
+  }
+
   // TtsAvatarDialog's own "Generate & add" -- the dialog already generated
   // the avatar video and resolved it to a real project Asset (fetching a
   // fresh listAssets() itself, since the backend just created this asset
@@ -1744,12 +1773,29 @@ export function ThreePaneEditor({
       camera3D?: boolean;
       ambientEffect?: AmbientEffectId | null;
       audioReactive?: boolean;
+      colorFilterId?: FilterPresetId | null;
+      removeBackground?: boolean;
+      chromaKeyColor?: string;
     }
   ) {
     if (framingDialogOverlayIndex === null) return;
-    const { label, state } = applyChangeOverlayFraming(selections, framingDialogOverlayIndex, framing, options);
+    const overlayIndex = framingDialogOverlayIndex;
+    const { label, state } = applyChangeOverlayFraming(selections, overlayIndex, framing, options);
     pushChange(label, state);
     setFramingDialogOverlayIndex(null);
+
+    // Same "add instantly, patch matteAssetId in once the job completes" as
+    // handleAddVideoOverlay's own add-time flow -- only fires when this
+    // save just turned AI removal on with no matteAssetId yet (chroma key
+    // never requests a job, and re-saving with an already-completed one
+    // left unchanged doesn't re-trigger, see applyChangeOverlayFraming's
+    // own matteAssetId-preservation logic).
+    if (options?.removeBackground && !options?.chromaKeyColor) {
+      const updatedOverlay = state.videoOverlays[overlayIndex];
+      if (updatedOverlay?.backgroundRemoval?.enabled && !updatedOverlay.backgroundRemoval.matteAssetId) {
+        void requestAndPollVideoOverlayBackgroundRemoval(updatedOverlay.assetId, overlayIndex);
+      }
+    }
   }
 
   // ImageOverlayTrack's right-click "Switch to..." entries -- image-overlay
@@ -1829,12 +1875,26 @@ export function ThreePaneEditor({
       ambientEffect?: AmbientEffectId | null;
       faceEffect?: FaceEffectId | null;
       audioReactive?: boolean;
+      colorFilterId?: FilterPresetId | null;
+      removeBackground?: boolean;
+      chromaKeyColor?: string;
     }
   ) {
     if (imageFramingDialogOverlayIndex === null) return;
-    const { label, state } = applyChangeImageOverlayFraming(selections, imageFramingDialogOverlayIndex, framing, options);
+    const overlayIndex = imageFramingDialogOverlayIndex;
+    const { label, state } = applyChangeImageOverlayFraming(selections, overlayIndex, framing, options);
     pushChange(label, state);
     setImageFramingDialogOverlayIndex(null);
+
+    // Image-overlay mirror of handleSaveVideoOverlayFraming's own trigger
+    // above -- the first place this is possible for an image overlay at
+    // all (see ImageOverlayClip.backgroundRemoval's own doc comment).
+    if (options?.removeBackground && !options?.chromaKeyColor) {
+      const updatedOverlay = state.overlayImages[overlayIndex];
+      if (updatedOverlay?.backgroundRemoval?.enabled && !updatedOverlay.backgroundRemoval.matteAssetId) {
+        void requestAndPollImageOverlayBackgroundRemoval(updatedOverlay.assetId, overlayIndex);
+      }
+    }
   }
 
   // MarkerTrack's click-to-place/drag/rename/delete on the main sequence's
@@ -2513,23 +2573,29 @@ export function ThreePaneEditor({
   // array at its own index, same pattern as displayedVideoOverlays below --
   // a rect edit only ever applies to a Picture-in-Picture layout (the only
   // one with a rect), checked defensively even though the UI never offers
-  // one for any other layout.
+  // one for any other layout. Also splices in this overlay's own live
+  // matting progress (see imageOverlayMattingProgress's own comment above)
+  // for ImageOverlayTrack's badge, same reasoning as displayedVideoOverlays'
+  // identical splice below.
   const displayedOverlayImages: ImageOverlayClip[] = selections.overlayImages.map((overlay, index) => {
+    let next = overlay;
     if (liveOverlayRangeEdit?.index === index) {
-      return {
-        ...overlay,
+      next = {
+        ...next,
         startTimeSeconds: liveOverlayRangeEdit.startTimeSeconds,
         endTimeSeconds: liveOverlayRangeEdit.endTimeSeconds,
       };
-    }
-    if (liveOverlayPositionEdit?.index === index) {
+    } else if (liveOverlayPositionEdit?.index === index) {
       const duration = overlay.endTimeSeconds - overlay.startTimeSeconds;
-      return { ...overlay, startTimeSeconds: liveOverlayPositionEdit.startTimeSeconds, endTimeSeconds: liveOverlayPositionEdit.startTimeSeconds + duration };
+      next = { ...next, startTimeSeconds: liveOverlayPositionEdit.startTimeSeconds, endTimeSeconds: liveOverlayPositionEdit.startTimeSeconds + duration };
+    } else if (liveOverlayRectEdit?.index === index && overlay.layout.type === "picture-in-picture") {
+      next = { ...next, layout: { ...overlay.layout, rect: liveOverlayRectEdit.rect } };
     }
-    if (liveOverlayRectEdit?.index === index && overlay.layout.type === "picture-in-picture") {
-      return { ...overlay, layout: { ...overlay.layout, rect: liveOverlayRectEdit.rect } };
+    const progress = imageOverlayMattingProgress[index];
+    if (progress !== undefined && next.backgroundRemoval?.enabled && !next.backgroundRemoval.matteAssetId) {
+      next = { ...next, backgroundRemoval: { ...next.backgroundRemoval, progress } };
     }
-    return overlay;
+    return next;
   });
 
   const displayedTextOverlays: TextOverlay[] = selections.textOverlays.map((overlay, index) => {

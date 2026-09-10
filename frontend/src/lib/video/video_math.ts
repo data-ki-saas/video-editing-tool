@@ -712,11 +712,12 @@ export interface VideoOverlayClip {
   // own doc comment) -- keys out this overlay's own footage (e.g. a
   // green-screen talking-head clip) so the Ken Burns/base track beneath it
   // shows through instead of a solid color. Set via
-  // VideoOverlayPickerDialog.tsx's "Remove background" toggle;
-  // ThreePaneEditor's requestAndPollVideoOverlayBackgroundRemoval patches
-  // in the real matteAssetId once VEED's job completes, same staging as
-  // the Cutaway path. Unlike SequenceEntry, only ever set at add-time --
-  // there's no dialog to flip it on afterward for an already-placed overlay.
+  // VideoOverlayPickerDialog.tsx's "Remove background" toggle at add-time,
+  // or VideoOverlayFramingDialog.tsx's own Background-removal row
+  // afterward; either way ThreePaneEditor's
+  // requestAndPollVideoOverlayBackgroundRemoval patches in the real
+  // matteAssetId once VEED's job completes, same staging as the Cutaway
+  // path.
   backgroundRemoval?: BackgroundRemovalState | null;
   // Same "Make it 3D" toggle as SequenceEntry's image variant (see its own
   // doc comment) -- since an overlay has only a static `framing` (no
@@ -767,6 +768,14 @@ export interface ImageOverlayClip {
   framing: OverlayFraming;
   // Same per-clip color filter as VideoOverlayClip.colorFilterId above.
   colorFilterId?: FilterPresetId | null;
+  // Same AI/chroma-key background removal as VideoOverlayClip.backgroundRemoval
+  // above -- settable via ImageOverlayFramingDialog.tsx's own
+  // Background-removal row (there's no add-time picker toggle for this one,
+  // unlike VideoOverlayPickerDialog's; ThreePaneEditor's
+  // requestAndPollImageOverlayBackgroundRemoval patches in the real
+  // matteAssetId once the job completes, same staging as the video overlay/
+  // Cutaway paths).
+  backgroundRemoval?: BackgroundRemovalState | null;
   // Same "Make it 3D" toggle as VideoOverlayClip.camera3D above.
   camera3D?: boolean;
   // Same ambient overlay as VideoOverlayClip.ambientEffect above.

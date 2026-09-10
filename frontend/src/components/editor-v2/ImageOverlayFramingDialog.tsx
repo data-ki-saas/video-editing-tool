@@ -26,6 +26,10 @@ import {
 import { FlipHorizontalIcon, FlipVerticalIcon } from "@/components/icons/UIIcons";
 import { AMBIENT_EFFECT_OPTIONS, type AmbientEffectId } from "@/lib/video/ambientEffects";
 import { FACE_EFFECT_OPTIONS, type FaceEffectId } from "@/lib/video/faceLandmarks";
+import { FILTER_PRESET_OPTIONS, getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
+import { CHROMA_KEY_PRESETS, DEFAULT_CHROMA_KEY_COLOR, chromaKeyImageToBitmap } from "@/lib/video/chromaKey";
+import { segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
+import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 
 // Keeps either half from being dragged down to a sliver too thin to grab
 // or usefully see.
@@ -82,6 +86,7 @@ function CoverFramingRegion({
   borderColorClassName,
   label,
   minZoom = 1,
+  colorFilterCss,
 }: {
   styleRect: CSSProperties;
   frameUrl: string;
@@ -95,6 +100,9 @@ function CoverFramingRegion({
   // for a Picture-in-Picture box, whose own render path (CanvasPlayer.tsx/
   // exportTimeline.ts) allows the matching MIN_PICTURE_IN_PICTURE_ZOOM.
   minZoom?: number;
+  // This overlay's own Filter pick, previewed live -- see
+  // VideoOverlayFramingDialog.tsx's identical prop for the full reasoning.
+  colorFilterCss?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -155,6 +163,7 @@ function CoverFramingRegion({
             style={{
               objectPosition: `${framing.panX * 100}% ${framing.panY * 100}%`,
               transform: `scale(${framing.flipHorizontal ? -1 : 1}, ${framing.flipVertical ? -1 : 1})`,
+              filter: colorFilterCss,
             }}
           />
         </div>
@@ -327,6 +336,9 @@ export function ImageOverlayFramingDialog({
       ambientEffect?: AmbientEffectId | null;
       faceEffect?: FaceEffectId | null;
       audioReactive?: boolean;
+      colorFilterId?: FilterPresetId | null;
+      removeBackground?: boolean;
+      chromaKeyColor?: string;
     }
   ) => void;
   onClose: () => void;
@@ -357,6 +369,17 @@ export function ImageOverlayFramingDialog({
   // "Pulse with music" (audioReactive.ts) -- same toggle as
   // VideoOverlayFramingDialog's own.
   const [audioReactive, setAudioReactive] = useState(Boolean(overlay.audioReactive));
+  // Color filter (filterPresets.ts) -- same shared field/picker as
+  // VideoOverlayFramingDialog's own.
+  const [colorFilterId, setColorFilterId] = useState<FilterPresetId | null>(overlay.colorFilterId ?? null);
+  // Background removal (chromaKey.ts / fal.ai rembg) -- same three-way
+  // "Keep"/"Solid color"/"AI removal" pick as VideoOverlayFramingDialog's
+  // own; the first place this is settable at all for an image overlay (see
+  // ImageOverlayClip.backgroundRemoval's own doc comment).
+  const [removalMode, setRemovalMode] = useState<"none" | "chromaKey" | "ai">(
+    overlay.backgroundRemoval?.mode === "chromaKey" ? "chromaKey" : overlay.backgroundRemoval?.enabled ? "ai" : "none"
+  );
+  const [chromaKeyColor, setChromaKeyColor] = useState(overlay.backgroundRemoval?.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR);
 
   // Re-syncs if a different overlay's framing dialog is opened while this
   // one is already mounted (same reasoning as TextOverlayDialog's own
@@ -371,8 +394,82 @@ export function ImageOverlayFramingDialog({
     setAmbientEffect(overlay.ambientEffect ?? null);
     setFaceEffect(overlay.faceEffect ?? null);
     setAudioReactive(Boolean(overlay.audioReactive));
+    setColorFilterId(overlay.colorFilterId ?? null);
+    setRemovalMode(overlay.backgroundRemoval?.mode === "chromaKey" ? "chromaKey" : overlay.backgroundRemoval?.enabled ? "ai" : "none");
+    setChromaKeyColor(overlay.backgroundRemoval?.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR);
     setSelectedSide("overlay");
   }, [overlay]);
+
+  // Loads this overlay's own photo once (safely, via loadCrossOriginImage)
+  // so the Background-removal row below can run a real chroma-key/segment
+  // pass against it -- see VideoOverlayFramingDialog.tsx's identical effect
+  // for the full reasoning.
+  const [previewSourceImage, setPreviewSourceImage] = useState<HTMLImageElement | null>(null);
+  useEffect(() => {
+    if (!overlayFrameUrl) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change
+      setPreviewSourceImage(null);
+      return;
+    }
+    let cancelled = false;
+    let ownBlobUrl: string | null = null;
+    loadCrossOriginImage(overlayFrameUrl)
+      .then(({ image, blobUrl }) => {
+        if (cancelled) {
+          URL.revokeObjectURL(blobUrl);
+          return;
+        }
+        ownBlobUrl = blobUrl;
+        setPreviewSourceImage(image);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewSourceImage(null);
+      });
+    return () => {
+      cancelled = true;
+      if (ownBlobUrl) URL.revokeObjectURL(ownBlobUrl);
+    };
+  }, [overlayFrameUrl]);
+
+  // The overlay's own preview photo, swapped for a live chroma-keyed cutout
+  // or an instant approximate AI cutout -- see
+  // VideoOverlayFramingDialog.tsx's identical effect for the full
+  // reasoning.
+  const [backgroundRemovalPreviewUrl, setBackgroundRemovalPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!previewSourceImage || removalMode === "none") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change
+      setBackgroundRemovalPreviewUrl(null);
+      return;
+    }
+    let cancelled = false;
+    let ownObjectUrl: string | null = null;
+    const cutoutPromise =
+      removalMode === "chromaKey" ? chromaKeyImageToBitmap(previewSourceImage, chromaKeyColor) : segmentImageApproximate(previewSourceImage);
+    cutoutPromise
+      .then(async (bitmap) => {
+        if (cancelled) return;
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve));
+        if (cancelled || !blob) return;
+        ownObjectUrl = URL.createObjectURL(blob);
+        setBackgroundRemovalPreviewUrl(ownObjectUrl);
+      })
+      .catch((err) => {
+        console.error("overlay background-removal preview failed", err);
+        if (!cancelled) setBackgroundRemovalPreviewUrl(null);
+      });
+    return () => {
+      cancelled = true;
+      if (ownObjectUrl) URL.revokeObjectURL(ownObjectUrl);
+    };
+  }, [previewSourceImage, removalMode, chromaKeyColor]);
+
+  const effectiveOverlayFrameUrl = backgroundRemovalPreviewUrl ?? overlayFrameUrl;
+  const overlayColorFilterCss = getFilterPresetOption(colorFilterId).cssFilter;
 
   function handleReset() {
     setFraming(DEFAULT_OVERLAY_FRAMING);
@@ -389,6 +486,9 @@ export function ImageOverlayFramingDialog({
       ambientEffect,
       faceEffect,
       audioReactive,
+      colorFilterId,
+      removeBackground: removalMode === "ai",
+      chromaKeyColor: removalMode === "chromaKey" ? chromaKeyColor : undefined,
     });
   }
 
@@ -444,13 +544,14 @@ export function ImageOverlayFramingDialog({
                   />
                   <CoverFramingRegion
                     styleRect={overlayStyle}
-                    frameUrl={overlayFrameUrl}
+                    frameUrl={effectiveOverlayFrameUrl}
                     framing={framing}
                     onChange={setFraming}
                     onSelect={() => setSelectedSide("overlay")}
                     highlighted={selectedSide === "overlay"}
                     borderColorClassName={overlayBorderColorClassName}
                     label="Overlay photo"
+                    colorFilterCss={overlayColorFilterCss}
                   />
                   <SplitScreenDivider orientation={splitScreenOrientation} ratio={ratio} onChange={setRatio} />
                 </>
@@ -463,25 +564,27 @@ export function ImageOverlayFramingDialog({
                   <PipFrame rect={pipRect} onChange={setPipRect} borderColorClassName={overlayBorderColorClassName}>
                     <CoverFramingRegion
                       styleRect={{ left: 0, top: 0, width: "100%", height: "100%" }}
-                      frameUrl={overlayFrameUrl}
+                      frameUrl={effectiveOverlayFrameUrl}
                       framing={framing}
                       onChange={setFraming}
                       highlighted={false}
                       borderColorClassName={overlayBorderColorClassName}
                       label="Overlay photo"
                       minZoom={MIN_PICTURE_IN_PICTURE_ZOOM}
+                      colorFilterCss={overlayColorFilterCss}
                     />
                   </PipFrame>
                 </>
               ) : (
                 <CoverFramingRegion
                   styleRect={{ left: 0, top: 0, width: "100%", height: "100%" }}
-                  frameUrl={overlayFrameUrl}
+                  frameUrl={effectiveOverlayFrameUrl}
                   framing={framing}
                   onChange={setFraming}
                   highlighted
                   borderColorClassName={overlayBorderColorClassName}
                   label="Overlay photo"
+                  colorFilterCss={overlayColorFilterCss}
                 />
               )}
             </div>
@@ -545,6 +648,69 @@ export function ImageOverlayFramingDialog({
                 className="h-1.5 w-full cursor-ew-resize accent-accent"
               />
               <span className="text-[10px] text-muted">{activeFraming.zoom.toFixed(2)}x</span>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium text-muted">Background</span>
+              <div className="flex gap-1 rounded-md border border-border p-0.5">
+                {([
+                  { value: "none" as const, label: "Keep" },
+                  { value: "chromaKey" as const, label: "Solid color" },
+                  { value: "ai" as const, label: "AI removal" },
+                ]).map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setRemovalMode(option.value)}
+                    className={
+                      "flex-1 rounded-sm px-1 py-1 text-[10px] font-medium " +
+                      (removalMode === option.value ? "bg-accent text-accent-foreground" : "text-muted hover:text-foreground")
+                    }
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              {removalMode === "chromaKey" && (
+                <div className="flex items-center gap-1.5">
+                  {CHROMA_KEY_PRESETS.map((preset) => (
+                    <button
+                      key={preset.hex}
+                      type="button"
+                      title={preset.label}
+                      onClick={() => setChromaKeyColor(preset.hex)}
+                      style={{ backgroundColor: preset.hex }}
+                      className={"h-5 w-5 rounded-full border-2 " + (chromaKeyColor === preset.hex ? "border-accent" : "border-transparent")}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium text-muted">Filter</span>
+              <div className="flex items-center gap-1 overflow-x-auto">
+                {FILTER_PRESET_OPTIONS.map((option) => {
+                  const isSelected = (colorFilterId ?? "none") === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      title={option.name}
+                      onClick={() => setColorFilterId(option.id === "none" ? null : option.id)}
+                      className={
+                        "h-6 w-6 shrink-0 overflow-hidden rounded-full border-2 bg-neutral-800 " +
+                        (isSelected ? "border-accent" : "border-transparent")
+                      }
+                    >
+                      {overlayFrameUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL / thumbnail data URL, not a Next-optimizable static asset
+                        <img src={overlayFrameUrl} alt="" className="h-full w-full object-cover" style={{ filter: option.cssFilter }} />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <label className="flex items-center gap-1.5 text-xs text-muted">

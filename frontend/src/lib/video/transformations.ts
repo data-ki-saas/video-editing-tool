@@ -574,6 +574,14 @@ export function applyChangeImageOverlayFraming(
     ambientEffect?: AmbientEffectId | null;
     faceEffect?: FaceEffectId | null;
     audioReactive?: boolean;
+    // Set from ImageOverlayFramingDialog's own Filter picker -- see
+    // applyChangeOverlayFraming's identical param for the "always
+    // authoritative" reasoning.
+    colorFilterId?: FilterPresetId | null;
+    // Set from ImageOverlayFramingDialog's own Background-removal row --
+    // see applyChangeOverlayFraming's identical pair of params.
+    removeBackground?: boolean;
+    chromaKeyColor?: string;
   }
 ): TransformationResult {
   const overlay = selections.overlayImages[overlayIndex];
@@ -597,6 +605,19 @@ export function applyChangeImageOverlayFraming(
     ambientEffect: options?.ambientEffect ?? overlay.ambientEffect,
     faceEffect: options?.faceEffect ?? overlay.faceEffect,
     audioReactive: options?.audioReactive ?? overlay.audioReactive,
+    // Falls back to the overlay's OLD value when omitted -- same guard
+    // applyEditImageSequenceClip's identical field uses, though every
+    // caller today (ImageOverlayFramingDialog's own "Save") always sends
+    // its own current picker state.
+    colorFilterId: options?.colorFilterId !== undefined ? options.colorFilterId : overlay.colorFilterId,
+    // Preserves an already-completed matteAssetId when AI mode is left on
+    // unchanged -- same reasoning as applyEditImageSequenceClip's identical
+    // logic.
+    backgroundRemoval: options?.chromaKeyColor
+      ? { enabled: true, matteAssetId: null, mode: "chromaKey" as const, chromaKeyColor: options.chromaKeyColor }
+      : options?.removeBackground
+        ? { enabled: true, matteAssetId: overlay.backgroundRemoval?.matteAssetId ?? null, mode: "ai" as const }
+        : null,
   };
   return { label: "Adjusted overlay framing", state: { ...selections, overlayImages: nextOverlays } };
 }
@@ -1688,6 +1709,23 @@ export function applySetVideoOverlayBackgroundRemoval(
   return { label, state: { ...selections, videoOverlays: nextOverlays } };
 }
 
+/** Image-overlay equivalent of applySetVideoOverlayBackgroundRemoval above,
+ * indexed into `overlayImages` instead -- used by ThreePaneEditor's own
+ * image-overlay request/poll flow to silently write in the real
+ * matteAssetId once the matting job completes. */
+export function applySetImageOverlayBackgroundRemoval(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  backgroundRemoval: BackgroundRemovalState | null
+): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  const label = backgroundRemoval?.enabled ? "Remove background" : "Restore background";
+  if (!overlay) return { label, state: selections };
+  const nextOverlays = [...selections.overlayImages];
+  nextOverlays[overlayIndex] = { ...overlay, backgroundRemoval };
+  return { label, state: { ...selections, overlayImages: nextOverlays } };
+}
+
 /** Switches a placed overlay's layout in place -- Full-Screen, Picture-in-
  * Picture, or Split Screen (Side by Side / Top & Bottom, both directly
  * selectable from the right-click menu, not hidden behind a follow-up
@@ -1823,6 +1861,15 @@ export function applyChangeOverlayFraming(
     camera3D?: boolean;
     ambientEffect?: AmbientEffectId | null;
     audioReactive?: boolean;
+    // Set from VideoOverlayFramingDialog's own Filter picker -- see
+    // applyAddSequenceClip's identical param for the "always authoritative"
+    // reasoning (this dialog's picker always reflects the current pick, on
+    // or off).
+    colorFilterId?: FilterPresetId | null;
+    // Set from VideoOverlayFramingDialog's own Background-removal row --
+    // same pairing as applyEditImageSequenceClip's identical params.
+    removeBackground?: boolean;
+    chromaKeyColor?: string;
   }
 ): TransformationResult {
   const overlay = selections.videoOverlays[overlayIndex];
@@ -1846,6 +1893,12 @@ export function applyChangeOverlayFraming(
     camera3D: options?.camera3D ?? overlay.camera3D,
     ambientEffect: options?.ambientEffect ?? overlay.ambientEffect,
     audioReactive: options?.audioReactive ?? overlay.audioReactive,
+    colorFilterId: options?.colorFilterId !== undefined ? options.colorFilterId : overlay.colorFilterId,
+    backgroundRemoval: options?.chromaKeyColor
+      ? { enabled: true, matteAssetId: null, mode: "chromaKey" as const, chromaKeyColor: options.chromaKeyColor }
+      : options?.removeBackground
+        ? { enabled: true, matteAssetId: overlay.backgroundRemoval?.matteAssetId ?? null, mode: "ai" as const }
+        : null,
   };
   return { label: "Adjusted overlay framing", state: { ...selections, videoOverlays: nextOverlays } };
 }

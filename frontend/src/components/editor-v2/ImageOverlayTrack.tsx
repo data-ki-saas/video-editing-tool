@@ -27,6 +27,7 @@ import {
   type VideoOverlayLayout,
 } from "@/lib/video/video_math";
 import { getFilterPresetOption } from "@/lib/video/filterPresets";
+import { MattingProgressBadge } from "./MattingProgressBadge";
 
 const SNAP_THRESHOLD_PX = 8;
 
@@ -218,6 +219,13 @@ function ImageOverlaySegment({
         >
           {getFilterPresetOption(overlay.colorFilterId).name}
         </span>
+      )}
+      {overlay.backgroundRemoval?.enabled && overlay.backgroundRemoval.mode !== "chromaKey" && !overlay.backgroundRemoval.matteAssetId && (
+        // Same "AI matting job still in flight" cue as VideoOverlayTrack's
+        // own identical badge -- see that file's own comment for the full
+        // reasoning ("ai" mode only, since chroma key's matteAssetId is
+        // permanently null).
+        <MattingProgressBadge progress={overlay.backgroundRemoval.progress ?? 0} />
       )}
       <div
         onPointerDown={(e) => startEdgeDrag(e, "start")}

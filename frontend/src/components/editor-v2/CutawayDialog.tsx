@@ -553,11 +553,9 @@ export function CutawayDialog({
     };
   }, [loadedImage, faceEffect, removalMode]);
 
-  // Live chroma-key preview -- unlike AI mode (never actually applied to
-  // this dialog's own preview canvas; there's a real matting job to wait on
-  // so it isn't worth simulating here), chroma key has nothing to wait on
-  // at all, so the draw loop below can show the REAL keyed-out result the
-  // instant a preset or the eyedropper picks a color, same instant feedback
+  // Live chroma-key preview -- chroma key has nothing to wait on at all, so
+  // the draw loop below can show the REAL keyed-out result the instant a
+  // preset or the eyedropper picks a color, same instant feedback
   // CanvasPlayer's live preview gives once this cutaway is actually added.
   const [chromaKeyedImage, setChromaKeyedImage] = useState<ImageBitmap | null>(null);
   useEffect(() => {
@@ -578,6 +576,35 @@ export function CutawayDialog({
       cancelled = true;
     };
   }, [loadedImage, removalMode, chromaKeyColor]);
+
+  // Live AI-removal preview -- there's a real matting job to wait on for the
+  // FINAL cutout, but showing nothing at all until it resolves would leave
+  // "AI removal" invisible in this dialog even though every other pick here
+  // previews instantly. Same instant-approximate-now/real-later fallback
+  // CanvasPlayer/exportTimeline already use while that job is in flight
+  // (segmentImageApproximate), just reused here for the dialog's own
+  // preview instead. Independent of subjectCutout above, which serves a
+  // different purpose (the camera3D/halo parallax foreground layer) and is
+  // gated on that toggle, not on removalMode.
+  const [aiRemovalPreviewCutout, setAiRemovalPreviewCutout] = useState<ImageBitmap | null>(null);
+  useEffect(() => {
+    if (!loadedImage || removalMode !== "ai") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change, same pattern as this file's other re-sync effects
+      setAiRemovalPreviewCutout(null);
+      return;
+    }
+    let cancelled = false;
+    segmentImageApproximate(loadedImage)
+      .then((cutout) => {
+        if (!cancelled) setAiRemovalPreviewCutout(cutout);
+      })
+      .catch((err) => {
+        console.error("AI background-removal preview failed", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadedImage, removalMode]);
 
   // Backs the "Pick from photo" eyedropper -- redrawn once per photo (not
   // per pick) so a click just re-reads a pixel from an already-drawn
@@ -645,7 +672,7 @@ export function CutawayDialog({
       // by construction (see chromaKeyImageToBitmap), so sx/sy/sw/sh stay
       // correct either way.
       const img = loadedImage!;
-      const drawSource: HTMLImageElement | ImageBitmap = chromaKeyedImage ?? img;
+      const drawSource: HTMLImageElement | ImageBitmap = chromaKeyedImage ?? (removalMode === "ai" ? aiRemovalPreviewCutout : null) ?? img;
       const sx = crop.x * img.naturalWidth;
       const sy = crop.y * img.naturalHeight;
       const sw = crop.width * img.naturalWidth;
@@ -685,7 +712,7 @@ export function CutawayDialog({
     }
     rafId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafId);
-  }, [loadedImage, templateIds, durationSeconds, photoCropRect, camera3D, ambientEffect, faceEffect, faceGeometry, selectedAssetId, subjectCutout, chromaKeyedImage, colorFilterId]);
+  }, [loadedImage, templateIds, durationSeconds, photoCropRect, camera3D, ambientEffect, faceEffect, faceGeometry, selectedAssetId, subjectCutout, chromaKeyedImage, colorFilterId, removalMode, aiRemovalPreviewCutout]);
 
   // Toggles one template id, one pick per axis (zoom / horizontal pan /
   // vertical pan) -- picking a second id from the SAME axis as an existing

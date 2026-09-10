@@ -507,6 +507,16 @@ export const CanvasPlayer = forwardRef<
   // (see the loading effect below), so drawFrameAt just skips an overlay
   // whose image hasn't resolved yet rather than waiting on it.
   const overlayImagesRef = useRef<Record<string, HTMLImageElement>>({});
+  // Background-removal cutout for an image overlay's own photo, keyed by
+  // assetId (shared across multiple overlay clips reusing the same asset,
+  // same convention as overlayImagesRef) -- populated by its own loading
+  // effect further below. An image overlay is a single static photo, so
+  // (unlike the video-overlay alpha-mask pair above) this follows the base
+  // sequence's still-image cutaway path instead: the cutout REPLACES the
+  // plain photo outright (a still image's own alpha channel needs no
+  // separate mask element), rather than being composited via a mask at
+  // draw time.
+  const imageOverlayCutoutsByAssetIdRef = useRef<Record<string, HTMLImageElement | ImageBitmap>>({});
   // A Text Slide's own optional background/layout image, keyed by assetId --
   // same "load once, cache by assetId, redraw once ready" shape as
   // overlayImagesRef above, kept as its own ref/effect since text slides
@@ -1172,7 +1182,14 @@ export const CanvasPlayer = forwardRef<
     // Split Screen fills its own half. Image wins over video when both are
     // active (see this function's own comment above on winningExclusiveLayout).
     if (activeExclusiveImageOverlay && overlayRect) {
-      const overlayImage = overlayImagesRef.current[activeExclusiveImageOverlay.assetId];
+      // Background removal (AI/chroma-key) replaces the plain photo outright
+      // with an already-transparent cutout -- see
+      // imageOverlayCutoutsByAssetIdRef's own loading-effect comment for why
+      // this mirrors the base sequence's still-image cutaway path rather
+      // than a separate alpha-mask layer.
+      const overlayImage =
+        (activeExclusiveImageOverlay.backgroundRemoval?.enabled && imageOverlayCutoutsByAssetIdRef.current[activeExclusiveImageOverlay.assetId]) ||
+        overlayImagesRef.current[activeExclusiveImageOverlay.assetId];
       if (overlayImage) {
         const destX = overlayRect.x * canvas.width;
         const destY = overlayRect.y * canvas.height;
@@ -1421,7 +1438,8 @@ export const CanvasPlayer = forwardRef<
     // -- same "image wins" convention as the exclusive layer above.
     for (const pip of findActivePictureInPictureOverlays(overlayImages, elapsedSeconds)) {
       if (pip.layout.type !== "picture-in-picture") continue; // narrows the type for pip.layout.rect below
-      const overlayImage = overlayImagesRef.current[pip.assetId];
+      const overlayImage =
+        (pip.backgroundRemoval?.enabled && imageOverlayCutoutsByAssetIdRef.current[pip.assetId]) || overlayImagesRef.current[pip.assetId];
       if (!overlayImage) continue;
       const destX = pip.layout.rect.x * canvas.width;
       const destY = pip.layout.rect.y * canvas.height;
@@ -2473,6 +2491,73 @@ export const CanvasPlayer = forwardRef<
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on videoOverlayRemovalLoadKey; drawFrameAt is freshly defined every render and always closes over the latest props
   }, [videoOverlayRemovalLoadKey, isReady, isPlaying]);
+
+  // AI/chroma-key background removal for an IMAGE overlay -- unlike the
+  // video-overlay pair above, an image overlay is a single static photo, so
+  // this follows the base sequence's still-image cutaway path instead (see
+  // imageOverlayCutoutsByAssetIdRef's own comment): the cutout REPLACES the
+  // plain photo outright rather than being composited via a separate alpha
+  // mask. Own key (same shape as videoOverlayRemovalLoadKey above) so a
+  // later-arriving matteAssetId (once ThreePaneEditor's
+  // requestAndPollImageOverlayBackgroundRemoval patches it in) still
+  // triggers a re-run even after this asset's plain photo is already
+  // cached.
+  const imageOverlayAssetIds = Array.from(new Set(overlayImages.map((overlay) => overlay.assetId)));
+  const imageOverlayRemovalLoadKey = imageOverlayAssetIds
+    .map((assetId) => {
+      const overlay = overlayImages.find((o) => o.assetId === assetId && o.backgroundRemoval?.enabled);
+      if (!overlay) return "";
+      const matteAssetId = overlay.backgroundRemoval?.matteAssetId ?? "";
+      return `${assetId}:${overlay.backgroundRemoval?.mode ?? "ai"}:${overlay.backgroundRemoval?.chromaKeyColor ?? ""}:${matteAssetId}:${assetUrlById[matteAssetId] ?? ""}`;
+    })
+    .join(",");
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadImageOverlayCutouts() {
+      for (const assetId of imageOverlayAssetIds) {
+        if (cancelled) return;
+        const overlay = overlayImages.find((o) => o.assetId === assetId && o.backgroundRemoval?.enabled);
+        if (!overlay) continue;
+        const matteAssetId = overlay.backgroundRemoval?.matteAssetId ?? null;
+        const matteUrl = matteAssetId ? assetUrlById[matteAssetId] : undefined;
+        try {
+          // The sibling overlay-image loading effect runs concurrently, not
+          // necessarily finished by the time this effect's own first pass
+          // reaches this assetId -- a short bounded wait rather than giving
+          // up, same reasoning as videoOverlayRemovalLoadKey's identical
+          // wait for its own frames.
+          let plainImage = overlayImagesRef.current[assetId];
+          for (let attempt = 0; !plainImage && attempt < 25 && !cancelled; attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            plainImage = overlayImagesRef.current[assetId];
+          }
+          if (!plainImage) continue;
+          // Chroma key ALWAYS keys locally (see lib/video/chromaKey.ts's own
+          // module comment); "ai" mode uses the real matte once resolved,
+          // else the same instant approximate cutout the base sequence's
+          // own image branch falls back to while its job is in flight.
+          const isChromaKey = overlay.backgroundRemoval?.mode === "chromaKey";
+          const cutout = isChromaKey
+            ? await chromaKeyImageToBitmap(plainImage, overlay.backgroundRemoval?.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR)
+            : matteUrl
+              ? await loadImage(matteUrl)
+              : await segmentImageApproximate(plainImage);
+          if (cancelled) continue;
+          imageOverlayCutoutsByAssetIdRef.current[assetId] = cutout;
+          if (isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
+        } catch (err) {
+          console.error("background-removal cutout failed for image overlay asset=%s", assetId, err);
+        }
+      }
+    }
+
+    void loadImageOverlayCutouts();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on imageOverlayRemovalLoadKey; drawFrameAt is freshly defined every render and always closes over the latest props
+  }, [imageOverlayRemovalLoadKey, isReady, isPlaying]);
 
   // Decodes audio ONLY for a video overlay source asset that at least one
   // overlay actually wants some audio from (audioBalance > 0) -- most

@@ -51,7 +51,7 @@ import { segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { detectFaceGeometry, type FaceGeometry } from "@/lib/video/faceLandmarks";
 import { computeAudioEnvelope, sampleMusicClipsEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
-import { DEFAULT_CHROMA_KEY_COLOR, hexToRgb } from "@/lib/video/chromaKey";
+import { DEFAULT_CHROMA_KEY_COLOR, hexToRgb, chromaKeyImageToBitmap } from "@/lib/video/chromaKey";
 import { decodeAudioBuffer } from "@/lib/video/audio";
 import {
   buildRenderSegments,
@@ -85,6 +85,7 @@ import {
   type SequenceClipInfo,
   type TtsOverlay,
   type VideoOverlayClip,
+  type ImageOverlayClip,
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
 import { drawTextSlide, type TextSlideEntry } from "@/lib/video/textSlideRenderer";
@@ -852,6 +853,31 @@ export async function exportVideoLocally(
       }
     }
 
+    // Chroma-key background removal for an IMAGE overlay -- unlike a video
+    // overlay's live per-frame keying (drawImageFlippedChromaKeyed further
+    // below; a video's frames change every frame so that mode can't be
+    // precomputed once there), a still image overlay behaves exactly like
+    // the base sequence's own image-kind cutaway: the cutout REPLACES the
+    // plain photo outright, computed ONCE here rather than per output
+    // frame. AI mode's real matte is collected into the shared
+    // matteImageElementsByAssetId map below instead (same one the base
+    // sequence's own image cutaways use).
+    const chromaKeyedOverlayImagesByAssetId = new Map<string, ImageBitmap>();
+    for (const overlay of selections.overlayImages) {
+      if (overlay.backgroundRemoval?.mode !== "chromaKey") continue;
+      if (chromaKeyedOverlayImagesByAssetId.has(overlay.assetId)) continue;
+      const original = overlayImagesByAssetId.get(overlay.assetId);
+      if (!original) continue;
+      try {
+        chromaKeyedOverlayImagesByAssetId.set(
+          overlay.assetId,
+          await chromaKeyImageToBitmap(original, overlay.backgroundRemoval.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR)
+        );
+      } catch (err) {
+        console.error("chroma-key cutout failed for image overlay asset=%s", overlay.assetId, err);
+      }
+    }
+
     const videoOverlayAssetIds = new Set(selections.videoOverlays.map((overlay) => overlay.assetId));
     for (const assetId of videoOverlayAssetIds) {
       const url = assetUrlById[assetId];
@@ -902,6 +928,13 @@ export async function exportVideoLocally(
       const matteAssetId = overlay.backgroundRemoval?.enabled ? overlay.backgroundRemoval.matteAssetId : null;
       if (matteAssetId) matteVideoAssetIds.add(matteAssetId);
     }
+    for (const overlay of selections.overlayImages) {
+      // "chromaKey" mode is precomputed above (chromaKeyedOverlayImagesByAssetId),
+      // never a matte -- same skip as every other loop here.
+      if (overlay.backgroundRemoval?.mode === "chromaKey") continue;
+      const matteAssetId = overlay.backgroundRemoval?.enabled ? overlay.backgroundRemoval.matteAssetId : null;
+      if (matteAssetId) matteImageAssetIds.add(matteAssetId);
+    }
     for (const matteAssetId of matteVideoAssetIds) {
       const url = assetUrlById[matteAssetId];
       if (!url) {
@@ -938,6 +971,30 @@ export async function exportVideoLocally(
         console.warn(`Edge Render: ${message}`);
         warnings.push(message);
       }
+    }
+
+    // Resolves which source an image overlay actually draws from -- the
+    // precomputed chroma-key cutout, the real AI matte once resolved (a
+    // still-processing job just falls through to the plain photo, same
+    // graceful "renders unmasked for now" degrade as everywhere else in
+    // this file -- export never runs live segmentation as a fallback,
+    // unlike the live preview), or the plain photo itself. Declared once
+    // here (not inlined at each of the two call sites below) since both the
+    // exclusive and Picture-in-Picture image-overlay loops need the exact
+    // same resolution.
+    function resolveImageOverlaySource(overlay: ImageOverlayClip): HTMLImageElement | ImageBitmap | undefined {
+      const chromaKeyed = chromaKeyedOverlayImagesByAssetId.get(overlay.assetId);
+      if (chromaKeyed) return chromaKeyed;
+      const matteAssetId =
+        overlay.backgroundRemoval?.enabled && overlay.backgroundRemoval.mode !== "chromaKey" ? overlay.backgroundRemoval.matteAssetId : null;
+      return (matteAssetId ? matteImageElementsByAssetId.get(matteAssetId) : undefined) ?? overlayImagesByAssetId.get(overlay.assetId);
+    }
+    // resolveImageOverlaySource can return either a plain HTMLImageElement
+    // (naturalWidth/naturalHeight) or an ImageBitmap cutout (width/height,
+    // see chromaKeyImageToBitmap) -- this normalizes either into the same
+    // {width, height} shape for the cover-fit math below.
+    function imageSourceSize(source: HTMLImageElement | ImageBitmap): { width: number; height: number } {
+      return source instanceof HTMLImageElement ? { width: source.naturalWidth, height: source.naturalHeight } : { width: source.width, height: source.height };
     }
 
     const canvas = document.createElement("canvas");
@@ -1377,14 +1434,15 @@ export async function exportVideoLocally(
       // Image wins over video when both are active (see this loop's own
       // comment above on winningExclusiveLayout).
       if (activeExclusiveImageOverlay && overlayRect) {
-        const overlayImage = overlayImagesByAssetId.get(activeExclusiveImageOverlay.assetId);
+        const overlayImage = resolveImageOverlaySource(activeExclusiveImageOverlay);
         if (overlayImage) {
           const destX = overlayRect.x * canvas.width;
           const destY = overlayRect.y * canvas.height;
           const destWidth = overlayRect.width * canvas.width;
           const destHeight = overlayRect.height * canvas.height;
+          const overlayImageSize = imageSourceSize(overlayImage);
           const { sx: osx, sy: osy, sWidth: osw, sHeight: osh } = computeCoverFitSourceRect(
-            overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight,
+            overlayImageSize.width, overlayImageSize.height, destWidth, destHeight,
             activeExclusiveImageOverlay.framing.panX, activeExclusiveImageOverlay.framing.panY, activeExclusiveImageOverlay.framing.zoom
           );
           ctx.filter = cssFilterFor(activeExclusiveImageOverlay.colorFilterId);
@@ -1610,14 +1668,15 @@ export async function exportVideoLocally(
       // -- same "image wins" convention as the exclusive layer above.
       for (const pip of findActivePictureInPictureOverlays(selections.overlayImages, sourceTimeSeconds)) {
         if (pip.layout.type !== "picture-in-picture") continue; // narrows the type for pip.layout.rect below
-        const overlayImage = overlayImagesByAssetId.get(pip.assetId);
+        const overlayImage = resolveImageOverlaySource(pip);
         if (!overlayImage) continue;
         const destX = pip.layout.rect.x * canvas.width;
         const destY = pip.layout.rect.y * canvas.height;
         const destWidth = pip.layout.rect.width * canvas.width;
         const destHeight = pip.layout.rect.height * canvas.height;
+        const pipImageSize = imageSourceSize(overlayImage);
         const { sx: psx, sy: psy, sWidth: psw, sHeight: psh } = computeCoverFitSourceRect(
-          overlayImage.naturalWidth, overlayImage.naturalHeight, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom, MIN_PICTURE_IN_PICTURE_ZOOM
+          pipImageSize.width, pipImageSize.height, destWidth, destHeight, pip.framing.panX, pip.framing.panY, pip.framing.zoom, MIN_PICTURE_IN_PICTURE_ZOOM
         );
         ctx.filter = cssFilterFor(pip.colorFilterId);
         // "Pulse with music" -- same treatment as the video-overlay PiP loop
