@@ -139,6 +139,7 @@ import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { ReelLoader } from "@/components/ReelLoader";
 import { PlayIcon, PauseIcon, LoopIcon, ExpandIcon, CollapseIcon, RenderIcon, LocalRenderIcon } from "./icons/PlayerIcons";
+import { SpeakerFullIcon, SpeakerMutedIcon } from "@/components/icons/UIIcons";
 
 const TERMINAL_RENDER_STATUSES = new Set(["completed", "failed"]);
 
@@ -582,6 +583,13 @@ export const CanvasPlayer = forwardRef<
   const cutTransitionAudioSourceNodesRef = useRef<AudioBufferSourceNode[]>([]);
 
   const audioContextRef = useRef<AudioContext | null>(null);
+  // Every gain node below (mainGainNode, overlayGainNode, ttsGainNode,
+  // previewGainNode, musicGainNode) connects here instead of straight to
+  // audioContext.destination -- one shared node the mute button can toggle
+  // without touching any of their own ducking/ramp automation. Created
+  // alongside the AudioContext itself (ensureAudioContext), so it's ready
+  // before the first resumePlaybackFrom ever schedules a source.
+  const masterGainNodeRef = useRef<GainNode | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
   // Decoded audio for every distinct music-clip source asset, keyed by
@@ -639,6 +647,14 @@ export const CanvasPlayer = forwardRef<
   // toggling the loop button WHILE already playing take effect the next
   // time playback reaches the end, not only the next time Play is pressed.
   const isLoopingRef = useRef(false);
+  // Same reason as isLoopingRef above: ensureAudioContext (called from the
+  // clip-loading effect, not a user gesture) reads this to seed a freshly
+  // created masterGainNode's initial gain, so toggling mute BEFORE the audio
+  // context exists yet still takes effect once it does. Starts true --
+  // preview audio is muted by default (matches every short-form feed's own
+  // default: sound is an opt-in the viewer/editor turns on, not something
+  // that should play out loud the moment the editor opens).
+  const isMutedRef = useRef(true);
 
   const [isLoading, setIsLoading] = useState(true);
   const [loadingStage, setLoadingStage] = useState("Loading video…");
@@ -650,6 +666,7 @@ export const CanvasPlayer = forwardRef<
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   // The whole player row (video panel + controls column, see the root div
   // below) is the fullscreen target -- not just the video panel -- so Play/
   // Loop/full-window stay reachable while it's blown up, instead of vanishing
@@ -672,7 +689,13 @@ export const CanvasPlayer = forwardRef<
   }
 
   function ensureAudioContext(): AudioContext {
-    if (!audioContextRef.current) audioContextRef.current = new AudioContext();
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+      const masterGainNode = audioContextRef.current.createGain();
+      masterGainNode.gain.value = isMutedRef.current ? 0 : 1;
+      masterGainNode.connect(audioContextRef.current.destination);
+      masterGainNodeRef.current = masterGainNode;
+    }
     return audioContextRef.current;
   }
 
@@ -1585,6 +1608,7 @@ export const CanvasPlayer = forwardRef<
     const audioBuffer = audioBufferRef.current;
     if (!audioBuffer) return;
     const audioContext = ensureAudioContext();
+    const masterGainNode = masterGainNodeRef.current!;
     // The context is first created back in the clip-loading effect (not a
     // user gesture), so browsers start it "suspended" -- this Play click is
     // the actual user gesture, so it's the one place that can legally
@@ -1604,7 +1628,7 @@ export const CanvasPlayer = forwardRef<
     // itself; nothing to clean up beyond what stopping/discarding the
     // source already does.
     const mainGainNode = audioContext.createGain();
-    source.connect(mainGainNode).connect(audioContext.destination);
+    source.connect(mainGainNode).connect(masterGainNode);
     source.start(0, adjustedOffsetSeconds);
     sourceNodeRef.current = source;
     playStartedAtCtxTimeRef.current = audioContext.currentTime;
@@ -1732,7 +1756,7 @@ export const CanvasPlayer = forwardRef<
       // overlapping overlay) sharing this window -- see scheduleDuckedGain
       // above and sampleAudioMixAt's own doc comment for the mixer spec.
       scheduleDuckedGain(overlayGainNode, overlay.audioBalance, windowStartSeconds, overlay.endTimeSeconds, startCtxTime, true);
-      overlaySource.connect(overlayGainNode).connect(audioContext.destination);
+      overlaySource.connect(overlayGainNode).connect(masterGainNode);
       overlaySource.start(startCtxTime, elapsedIntoWindowSeconds % overlayBuffer.duration, remainingDurationSeconds);
       overlayAudioSourceNodesRef.current.push(overlaySource);
     }
@@ -1769,7 +1793,7 @@ export const CanvasPlayer = forwardRef<
       // (nothing to fade from silence into, it's already playing) -- same
       // reasoning as before this mix became duck-aware.
       scheduleDuckedGain(ttsGainNode, nominalGain, windowStartSeconds, overlayEndSeconds, startCtxTime, elapsedIntoWindowSeconds <= 0);
-      ttsSource.connect(ttsGainNode).connect(audioContext.destination);
+      ttsSource.connect(ttsGainNode).connect(masterGainNode);
       ttsSource.start(startCtxTime, elapsedIntoWindowSeconds, remainingDurationSeconds);
       ttsAudioSourceNodesRef.current.push(ttsSource);
     }
@@ -1804,7 +1828,7 @@ export const CanvasPlayer = forwardRef<
       const previewGainNode = audioContext.createGain();
       previewGainNode.gain.setValueAtTime(0, startCtxTime);
       previewGainNode.gain.linearRampToValueAtTime(ambientGain, startCtxTime + overlapSeconds);
-      previewSource.connect(previewGainNode).connect(audioContext.destination);
+      previewSource.connect(previewGainNode).connect(masterGainNode);
       previewSource.start(startCtxTime, clip.startTimeSeconds, overlapSeconds);
       cutTransitionAudioSourceNodesRef.current.push(previewSource);
 
@@ -1830,7 +1854,7 @@ export const CanvasPlayer = forwardRef<
     // allowed, unlike VideoOverlayClip's own edge-drag today.
     const musicGainNode = audioContext.createGain();
     musicGainNode.gain.value = backgroundVolume;
-    musicGainNode.connect(audioContext.destination);
+    musicGainNode.connect(masterGainNode);
     musicSourceNodesRef.current = [];
     for (const clip of musicClips) {
       if (clip.endTimeSeconds <= adjustedOffsetSeconds) continue; // this window is entirely in the past
@@ -1884,6 +1908,17 @@ export const CanvasPlayer = forwardRef<
     const next = !isLooping;
     setIsLooping(next);
     isLoopingRef.current = next;
+  }
+
+  function handleToggleMute() {
+    const next = !isMuted;
+    setIsMuted(next);
+    isMutedRef.current = next;
+    // Takes effect immediately even mid-playback -- a plain value assignment
+    // (not scheduled via setValueAtTime/ramp) is fine here since it's a
+    // discrete user click, not something that needs to land at a precise
+    // audio-clock instant like the ducking automation elsewhere in this file.
+    if (masterGainNodeRef.current) masterGainNodeRef.current.gain.value = next ? 0 : 1;
   }
 
   // Tracks isFullscreen off the browser's own state rather than the click
@@ -2778,6 +2813,22 @@ export const CanvasPlayer = forwardRef<
           <p className="absolute inset-x-0 bottom-0 bg-black/70 px-2 py-1 text-center text-[11px] text-yellow-300">
             {partialLoadWarning}
           </p>
+        )}
+        {/* Floats over the frame itself (top corner, like every short-form
+            feed's own mute affordance) rather than living down in the
+            below-panel controls row with Play/Loop/Fullscreen -- sound is
+            the one control a viewer expects to reach without hunting for it. */}
+        {isReady && (
+          <button
+            type="button"
+            onClick={handleToggleMute}
+            aria-label={isMuted ? "Unmute" : "Mute"}
+            aria-pressed={isMuted}
+            title={isMuted ? "Unmute" : "Mute"}
+            className="absolute right-2 top-2 rounded-full bg-black/40 p-2 text-white backdrop-blur-sm hover:bg-black/60"
+          >
+            {isMuted ? <SpeakerMutedIcon className="h-4 w-4" /> : <SpeakerFullIcon className="h-4 w-4" />}
+          </button>
         )}
       </div>
 
