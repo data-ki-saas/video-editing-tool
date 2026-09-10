@@ -557,8 +557,13 @@ export function VideoOverlayFramingDialog({
 
   // What CoverFramingRegion actually renders for the OVERLAY's own footage
   // -- never the base/main-video region, since colorFilterId/backgroundRemoval
-  // belong to the overlay clip alone.
-  const effectiveOverlayFrameUrl = backgroundRemovalPreviewUrl ?? overlayFrameUrl;
+  // belong to the overlay clip alone. previewSourceImage.src (not the raw
+  // overlayFrameUrl prop) -- that image was already loaded via
+  // loadCrossOriginImage above, so its .src is a same-origin blob: URL;
+  // CoverFramingRegion renders this through a plain <img>, which would
+  // otherwise poison the browser's cache against this exact R2 URL for
+  // every other safe (cors-mode) reader of it.
+  const effectiveOverlayFrameUrl = backgroundRemovalPreviewUrl ?? previewSourceImage?.src ?? "";
   const overlayColorFilterCss = getFilterPresetOption(colorFilterId).cssFilter;
 
   function handleReset() {
@@ -811,9 +816,9 @@ export function VideoOverlayFramingDialog({
                         (isSelected ? "border-accent" : "border-transparent")
                       }
                     >
-                      {overlayFrameUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element -- a short-lived thumbnail data URL, not a Next-optimizable static asset
-                        <img src={overlayFrameUrl} alt="" className="h-full w-full object-cover" style={{ filter: option.cssFilter }} />
+                      {previewSourceImage?.src && (
+                        // eslint-disable-next-line @next/next/no-img-element -- a same-origin blob: URL (previewSourceImage.src), not a Next-optimizable static asset
+                        <img src={previewSourceImage.src} alt="" className="h-full w-full object-cover" style={{ filter: option.cssFilter }} />
                       )}
                     </button>
                   );

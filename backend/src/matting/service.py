@@ -154,9 +154,7 @@ async def _request_image_cutout(project_id: str, source_asset: AssetRecord, user
         cost_estimate_cents=metering_pricing.matting_image_cost_cents(),
     )
 
-    return RequestBackgroundRemovalResponse(
-        status="completed", matte_asset_id=asset.id, matte_url=r2_client.presigned_get_url(asset.storage_key), error=None
-    )
+    return RequestBackgroundRemovalResponse(status="completed", matte_asset_id=asset.id, matte_url=asset.url, error=None)
 
 
 def get_status(source_asset_id: str, user: CurrentUser) -> BackgroundRemovalDetail:

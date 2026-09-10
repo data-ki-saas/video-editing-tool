@@ -468,7 +468,14 @@ export function ImageOverlayFramingDialog({
     };
   }, [previewSourceImage, removalMode, chromaKeyColor]);
 
-  const effectiveOverlayFrameUrl = backgroundRemovalPreviewUrl ?? overlayFrameUrl;
+  // previewSourceImage.src (not the raw overlayFrameUrl prop) -- that image
+  // was already loaded via loadCrossOriginImage above, so its .src is a
+  // same-origin blob: URL. CoverFramingRegion below renders this through a
+  // plain <img>, which would otherwise poison the browser's cache against
+  // this exact R2 URL for every other safe (cors-mode) reader of it -- see
+  // crossOriginImage.ts's own module comment for the production incident
+  // this avoids.
+  const effectiveOverlayFrameUrl = backgroundRemovalPreviewUrl ?? previewSourceImage?.src ?? "";
   const overlayColorFilterCss = getFilterPresetOption(colorFilterId).cssFilter;
 
   function handleReset() {
@@ -703,9 +710,9 @@ export function ImageOverlayFramingDialog({
                         (isSelected ? "border-accent" : "border-transparent")
                       }
                     >
-                      {overlayFrameUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL / thumbnail data URL, not a Next-optimizable static asset
-                        <img src={overlayFrameUrl} alt="" className="h-full w-full object-cover" style={{ filter: option.cssFilter }} />
+                      {previewSourceImage?.src && (
+                        // eslint-disable-next-line @next/next/no-img-element -- a same-origin blob: URL (previewSourceImage.src), not a Next-optimizable static asset
+                        <img src={previewSourceImage.src} alt="" className="h-full w-full object-cover" style={{ filter: option.cssFilter }} />
                       )}
                     </button>
                   );
