@@ -19,6 +19,14 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
 
   const [project, setProject] = useState<Project | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by the error screen's "Retry" button to force the load effect
+  // below to re-run even though projectId hasn't changed -- the shared
+  // Supabase fetch wrapper already retries a transient network failure once
+  // on its own (see lib/supabase/client.ts), but a longer outage or a
+  // Supabase project waking up from a free-tier pause can outlast that, and
+  // shouldn't strand the user on a dead-end error page with no way back in
+  // short of a full reload.
+  const [retryToken, setRetryToken] = useState(0);
   // isReady stays false until the first client-side device check has
   // actually run (matchMedia can't be read during SSR/first paint) -- see
   // useIsMobile's own comment. Gated on below alongside `project` so this
@@ -26,6 +34,7 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
   const { isMobile, isReady: isMobileCheckReady } = useIsMobile();
 
   useEffect(() => {
+    setError(null);
     getProject(projectId)
       .then((loaded) => {
         setProject(loaded);
@@ -46,10 +55,21 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
         }
         setError(err instanceof Error ? err.message : "Failed to load this reel");
       });
-  }, [projectId, router]);
+  }, [projectId, router, retryToken]);
 
   if (error) {
-    return <p className="p-6 text-sm text-red-600">Couldn&apos;t load this reel: {error}</p>;
+    return (
+      <div className="flex flex-col items-start gap-3 p-6 text-sm text-red-600">
+        <p>Couldn&apos;t load this reel: {error}</p>
+        <button
+          type="button"
+          onClick={() => setRetryToken((n) => n + 1)}
+          className="rounded-md border border-red-600 px-3 py-1.5 text-red-600 hover:bg-red-50"
+        >
+          Retry
+        </button>
+      </div>
+    );
   }
   if (!project || !isMobileCheckReady) {
     return <ReelLoader stage="Loading your reel…" className="h-full p-6" />;

@@ -15,8 +15,24 @@ import { createBrowserClient } from "@supabase/ssr";
 // login POST mid-flight rather than letting it complete.
 const BROWSER_AUTH_TIMEOUT_MS = 20000;
 
-function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(BROWSER_AUTH_TIMEOUT_MS) });
+// A network-layer failure (QUIC protocol error, a dropped Wi-Fi/VPN packet,
+// a DNS hiccup) throws a plain TypeError before any Response comes back --
+// distinct from our own timeout above (an AbortError) and from a real HTTP
+// error status (which still resolves normally with a Response). These are
+// usually gone a moment later, so one quiet retry beats stranding a page load
+// (or any other Supabase call) on a blip that would've succeeded on its own.
+const TRANSIENT_FETCH_RETRY_DELAY_MS = 600;
+
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const doFetch = () =>
+    fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(BROWSER_AUTH_TIMEOUT_MS) });
+  try {
+    return await doFetch();
+  } catch (err) {
+    if (!(err instanceof TypeError)) throw err;
+    await new Promise((resolve) => setTimeout(resolve, TRANSIENT_FETCH_RETRY_DELAY_MS));
+    return doFetch();
+  }
 }
 
 export function createClient() {
