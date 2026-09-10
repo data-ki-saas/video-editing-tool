@@ -600,6 +600,14 @@ export async function exportVideoLocally(
       entry.kind !== "text" && entry.backgroundRemoval?.enabled ? entry.backgroundRemoval.matteAssetId : null,
     ])
   );
+  // Chroma key needs the full state (mode + chromaKeyColor), not just a
+  // matteAssetId (permanently null for that mode, see chromaKey.ts's own
+  // module comment) -- a separate lookup rather than widening
+  // backgroundRemovalMatteByEntryId above, which several other comments in
+  // this file already cite by its narrower "just the matte id" shape.
+  const cutawayBackgroundRemovalByEntryId = new Map(
+    selections.sequenceClips.map((entry) => [entry.id, entry.kind !== "text" ? (entry.backgroundRemoval ?? null) : null])
+  );
   // Same cut-transition lookup compileCreatomateTimeline.ts builds -- see
   // that file's own cutTransitionByEntryId comment. A text slide has no
   // cutTransitionInId of its own (see video_math.ts's own doc comment on
@@ -876,6 +884,11 @@ export async function exportVideoLocally(
     const matteImageAssetIds = new Set<string>();
     for (const entry of selections.sequenceClips) {
       if (entry.kind === "text") continue;
+      // "chromaKey" mode never uses a matte -- see the overlay loop's own
+      // identical skip below, and this segment's own draw branch further
+      // down, which routes "chromaKey" to drawImageFlippedChromaKeyed
+      // unconditionally.
+      if (entry.backgroundRemoval?.mode === "chromaKey") continue;
       const matteAssetId = entry.backgroundRemoval?.enabled ? entry.backgroundRemoval.matteAssetId : null;
       if (!matteAssetId) continue;
       (entry.kind === "video" ? matteVideoAssetIds : matteImageAssetIds).add(matteAssetId);
@@ -1079,6 +1092,44 @@ export async function exportVideoLocally(
             sWidth, sHeight, baseDestWidth, baseDestHeight, panX, panY, baseZoom
           );
           drawImageFlipped(ctx, source, sx + bsx, sy + bsy, bsw, bsh, baseDestX, baseDestY, baseDestWidth, baseDestHeight, baseFlipH, baseFlipV);
+        } else if (baseRect && cutawayBackgroundRemovalByEntryId.get(segment.entryId ?? "")?.mode === "chromaKey") {
+          // Chroma key never depends on fal.ai, not even at render time --
+          // see chromaKey.ts's own module comment. Keyed live, right here,
+          // from this exact seeked/held frame, over the same backdrop the
+          // AI-masked branch below draws (same DEFAULT_CANVAS_FILL_COLOR
+          // fallback -- no canvasFillMode of "crop" makes sense once the
+          // subject is cut out).
+          const rawFill = segment.entryId ? (canvasFillByEntryId.get(segment.entryId) ?? { mode: "crop" as const }) : { mode: "crop" as const };
+          const fill = rawFill.mode === "crop" ? { mode: "solid" as const, color: DEFAULT_CANVAS_FILL_COLOR, gradientColor: undefined as string | undefined } : rawFill;
+          const canvasAspectRatio = canvas.width / canvas.height;
+          const baseCssFilter = ctx.filter;
+          if (fill.mode === "blur") {
+            const bgCrop = computeMaxCoverageCropRect(sourceWidth, sourceHeight, canvasAspectRatio);
+            const blurRadiusPx = CANVAS_FILL_BLUR_RADIUS_FRACTION * Math.max(canvas.width, canvas.height);
+            ctx.filter = `${baseCssFilter === "none" ? "" : baseCssFilter} blur(${blurRadiusPx}px)`.trim();
+            ctx.drawImage(source, bgCrop.x, bgCrop.y, bgCrop.width, bgCrop.height, 0, 0, canvas.width, canvas.height);
+            ctx.filter = baseCssFilter;
+          } else {
+            ctx.filter = "none";
+            if (fill.mode === "solid") {
+              ctx.fillStyle = fill.color ?? DEFAULT_CANVAS_FILL_COLOR;
+            } else {
+              const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+              gradient.addColorStop(0, fill.color ?? DEFAULT_CANVAS_FILL_COLOR);
+              gradient.addColorStop(1, fill.gradientColor ?? DEFAULT_CANVAS_FILL_GRADIENT_COLOR);
+              ctx.fillStyle = gradient;
+            }
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.filter = baseCssFilter;
+          }
+          const destX = baseRect.x * canvas.width;
+          const destY = baseRect.y * canvas.height;
+          const destWidth = baseRect.width * canvas.width;
+          const destHeight = baseRect.height * canvas.height;
+          drawImageFlippedChromaKeyed(
+            ctx, maskCanvas, source, hexToRgb(cutawayBackgroundRemovalByEntryId.get(segment.entryId!)?.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR),
+            sx, sy, sWidth, sHeight, destX, destY, destWidth, destHeight, false, false
+          );
         } else if (baseRect && matteAssetId && (imageMatte || videoMatte)) {
           // AI background removal -- masked cutout over a new backdrop,
           // same priority CanvasPlayer's own drawFrameAt gives this over the

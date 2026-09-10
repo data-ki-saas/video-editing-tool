@@ -1408,13 +1408,16 @@ export function ThreePaneEditor({
   // necessarily current) -- same accepted risk handleAddVideoOverlay's own
   // getVideoDuration await already carries, just over a much longer window;
   // worth a real ref if this turns out to matter in practice.
-  function handleAddToSequence(asset: Asset, options?: { removeBackground?: boolean }) {
-    const { label, state } = applyAddSequenceClip(selections, asset.id, options?.removeBackground);
+  function handleAddToSequence(asset: Asset, options?: { removeBackground?: boolean; chromaKeyColor?: string; colorFilterId?: FilterPresetId | null }) {
+    const { label, state } = applyAddSequenceClip(selections, asset.id, options?.removeBackground, options?.chromaKeyColor, options?.colorFilterId);
     pushChange(label, state);
     setIsCutawayDialogOpen(false);
     setCutawayDialogPreselectedAssetId(null);
 
-    if (options?.removeBackground) {
+    // Chroma key never fires a fal.ai request -- it keys itself out
+    // entirely client-side, same reasoning as handleAddVideoOverlay's
+    // identical guard.
+    if (options?.removeBackground && !options?.chromaKeyColor) {
       const newEntryId = state.sequenceClips[state.sequenceClips.length - 1]?.id;
       if (newEntryId) void requestAndPollBackgroundRemoval(asset.id, newEntryId);
     }
@@ -1935,10 +1938,12 @@ export function ThreePaneEditor({
     cropRect: CropRect,
     options?: {
       removeBackground?: boolean;
+      chromaKeyColor?: string;
       camera3D?: boolean;
       ambientEffect?: AmbientEffectId | null;
       faceEffect?: FaceEffectId | null;
       audioReactive?: boolean;
+      colorFilterId?: FilterPresetId | null;
     }
   ) {
     const replacedAssetId =
@@ -1960,7 +1965,9 @@ export function ThreePaneEditor({
             options?.camera3D,
             options?.ambientEffect,
             options?.faceEffect,
-            options?.audioReactive
+            options?.audioReactive,
+            options?.chromaKeyColor,
+            options?.colorFilterId
           )
         : applyAddImageSequenceClip(
             selections,
@@ -1973,7 +1980,9 @@ export function ThreePaneEditor({
             options?.camera3D,
             options?.ambientEffect,
             options?.faceEffect,
-            options?.audioReactive
+            options?.audioReactive,
+            options?.chromaKeyColor,
+            options?.colorFilterId
           );
     pushChange(label, state);
     setIsCutawayDialogOpen(false);
@@ -2836,7 +2845,6 @@ export function ThreePaneEditor({
           onAddImageSequenceClip={handleAddImageSequenceClip}
           onAddVideoSequenceClip={handleAddToSequence}
           onCloseCutawayDialog={handleCloseCutawayDialog}
-          onDeleteCutaway={handleDeleteCutaway}
           onOpenTextSlideDialog={handleOpenTextSlideDialog}
           isTextSlideDialogOpen={isTextSlideDialogOpen}
           editingTextSlide={editingTextSlide}

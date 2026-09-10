@@ -202,7 +202,12 @@ function CutawaySegmentButton({
           </span>
         )}
         {segment.kind !== "text" && segment.backgroundRemoval?.enabled && (
-          segment.backgroundRemoval.matteAssetId ? (
+          // Chroma key has no job to wait on -- matteAssetId stays
+          // permanently null (see chromaKey.ts's own module comment), so
+          // without this guard the progress badge would show forever on a
+          // cutaway that's already fully, correctly keyed. Same guard
+          // VideoOverlayTrack.tsx uses for its own equivalent badge.
+          segment.backgroundRemoval.mode === "chromaKey" || segment.backgroundRemoval.matteAssetId ? (
             <span
               className="pointer-events-none shrink-0 truncate rounded-full bg-black/30 px-1 pr-1"
               title="Background removed"

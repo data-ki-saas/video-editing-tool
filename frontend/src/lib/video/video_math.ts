@@ -654,17 +654,23 @@ export const MIN_VIDEO_OVERLAY_DURATION_SECONDS = 0.2;
  * one way or the other). Neither field is ever meaningful for "chromaKey"
  * mode -- see that mode's own doc below.
  *
- * `mode` distinguishes two removal STRATEGIES, currently only meaningful for
- * a VideoOverlayClip (SequenceEntry's video/image kinds only ever use "ai"):
+ * `mode` distinguishes two removal STRATEGIES, meaningful on a
+ * VideoOverlayClip AND both SequenceEntry (Cutaway) video/image kinds alike:
  * absent/"ai" is the original fal.ai/VEED (or rembg, for a photo) AI matting
  * job -- requested right away, `matteAssetId`/`progress` populated once it
- * resolves. "chromaKey" is a solid-color (green/blue screen) cutout, keyed
- * out entirely client-side (lib/video/chromaKey.ts) -- for BOTH live preview
- * (chromaKeyFramesToAlphaMasks, against pre-extracted preview frames) AND
- * Edge Render's actual output (applyChromaKeyAlpha, against real seeked
- * export frames in lib/localRender/exportTimeline.ts) -- by design, never
- * requests a fal.ai job at all, at add-time OR render-time, so
- * `matteAssetId`/`progress` stay permanently absent/null for this mode. */
+ * resolves. "chromaKey" is a solid-color backdrop cutout (a real green/blue
+ * screen, a plain white wall, or any other solid color picked via
+ * CutawayDialog's eyedropper), keyed out entirely client-side
+ * (lib/video/chromaKey.ts) -- for BOTH live preview
+ * (chromaKeyFramesToAlphaMasks/chromaKeyImageToBitmap, against
+ * pre-extracted preview frames) AND Edge Render's actual output
+ * (applyChromaKeyAlpha, against real seeked export frames in
+ * lib/localRender/exportTimeline.ts) -- by design, never requests a fal.ai
+ * job at all, at add-time OR render-time, so `matteAssetId`/`progress` stay
+ * permanently absent/null for this mode. Not supported by
+ * compileCreatomateTimeline.ts's Creatomate render path (same as the
+ * VideoOverlayClip case it was first built for) -- Edge Render is the
+ * priority path, so that's an accepted gap, not a bug. */
 export type BackgroundRemovalMode = "ai" | "chromaKey";
 export type BackgroundRemovalState = {
   enabled: boolean;

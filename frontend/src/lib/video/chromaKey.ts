@@ -1,22 +1,26 @@
 /**
- * Instant, client-side chroma-key cutout for a solid-color (green/blue
- * screen) video overlay -- the chroma-key counterpart to
+ * Instant, client-side chroma-key cutout for a solid-color backdrop --
+ * originally a literal green/blue screen, now any single solid color a
+ * creator's footage was actually shot against (a white wall/backdrop, a
+ * colored wall picked via CutawayDialog's eyedropper -- see
+ * CHROMA_KEY_PRESETS' own comment). Used by BOTH a VideoOverlayClip and a
+ * SequenceEntry (Cutaway) video/image clip -- the chroma-key counterpart to
  * backgroundSegmentation.ts's segmentClipFramesApproximate, same per-frame
  * ImageBitmap-in/alpha-mask-out shape (via that file's own
  * alphaMaskFromValues) so CanvasPlayer's compositing code doesn't need to
  * know which algorithm produced a given frame's mask.
  *
- * Used for BOTH live preview (chromaKeyFramesToAlphaMasks below, against
- * CanvasPlayer's pre-extracted preview frames) AND the actual Edge Render
- * output (applyChromaKeyAlpha below, against exportTimeline.ts's real seeked
- * frames via lib/video/video.ts's drawImageFlippedChromaKeyed) -- unlike
- * "ai" mode's real fal.ai/VEED matting job, chroma key never talks to any
- * backend at all, by design: Edge Render is the free/local render path and
- * must not depend on a paid third-party API to produce its output. A plain
- * color-distance threshold has none of a real AI matting model's edge/spill
- * handling, so this is deliberately lower quality than "ai" mode -- that's
- * the tradeoff for a real green/blue screen never needing a network round
- * trip either to preview or to render.
+ * Used for BOTH live preview (chromaKeyFramesToAlphaMasks/chromaKeyImageToBitmap
+ * below, against CanvasPlayer's pre-extracted preview frames) AND the actual
+ * Edge Render output (applyChromaKeyAlpha below, against exportTimeline.ts's
+ * real seeked frames via lib/video/video.ts's drawImageFlippedChromaKeyed) --
+ * unlike "ai" mode's real fal.ai/VEED matting job, chroma key never talks to
+ * any backend at all, by design: Edge Render is the free/local render path
+ * and must not depend on a paid third-party API to produce its output. A
+ * plain color-distance threshold has none of a real AI matting model's
+ * edge/spill handling, so this is deliberately lower quality than "ai" mode
+ * -- that's the tradeoff for a real solid-color backdrop never needing a
+ * network round trip either to preview or to render.
  */
 import { alphaMaskFromValues } from "./backgroundSegmentation";
 
@@ -25,13 +29,20 @@ export interface ChromaKeyPreset {
   hex: string;
 }
 
-// Two presets, not a free-form color picker -- a casual creator picks
-// "green" or "blue" (the two screens they'd actually own), matching this
-// app's driving-vision preference for simple controls over exposing every
-// knob (no custom-color input, no tolerance slider).
+// Three quick presets, not a full color picker for the common case -- a
+// casual creator most often owns a green/blue screen OR shot against a
+// plain white wall/backdrop/lightbox (a product photo, a portrait against a
+// blank wall), matching this app's driving-vision preference for simple
+// controls over exposing every knob. A photo shot against some OTHER solid
+// color (a colored wall, a tinted backdrop) is why "Pick from photo" exists
+// alongside these -- see CutawayDialog.tsx's eyedropper, which samples the
+// actual background pixel the creator taps rather than asking them to name
+// or type its color. Still no tolerance slider -- KEY_DISTANCE_LOW/HIGH
+// below stay fixed either way.
 export const CHROMA_KEY_PRESETS: ChromaKeyPreset[] = [
   { label: "Green screen", hex: "#00b140" },
   { label: "Blue screen", hex: "#0047ab" },
+  { label: "White backdrop", hex: "#ffffff" },
 ];
 export const DEFAULT_CHROMA_KEY_COLOR = CHROMA_KEY_PRESETS[0].hex;
 
@@ -46,6 +57,14 @@ export function hexToRgb(hex: string): { r: number; g: number; b: number } {
       : normalized;
   const value = parseInt(expanded, 16);
   return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
+}
+
+// The inverse of hexToRgb -- used by CutawayDialog's/VideoOverlayPickerDialog's
+// eyedropper to turn a sampled photo pixel back into the hex string
+// chromaKeyColor is persisted as.
+export function rgbToHex(r: number, g: number, b: number): string {
+  const toHex = (channel: number) => channel.toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
 // How far a pixel's color must be from the key color, as a fraction of the
@@ -104,4 +123,25 @@ export async function chromaKeyFramesToAlphaMasks(frames: ImageBitmap[], keyColo
     masks.push(await createImageBitmap(imageData));
   }
   return masks;
+}
+
+/** The Ken Burns (still-photo) counterpart to chromaKeyFramesToAlphaMasks --
+ * one image in, one RGBA cutout out (original colors preserved, alpha keyed
+ * from `keyColorHex`), the same shape backgroundSegmentation.ts's
+ * segmentImageApproximate returns for its AI-approximate cutout. Used by
+ * CutawayDialog's own live preview and CanvasPlayer's image-clip loader when
+ * a cutaway's backgroundRemoval.mode is "chromaKey" -- unlike AI mode, there
+ * is no separate matte asset to wait on, so this always returns the final
+ * result immediately, live, at add-time or render-time alike. */
+export async function chromaKeyImageToBitmap(image: HTMLImageElement | ImageBitmap, keyColorHex: string): Promise<ImageBitmap> {
+  const width = image instanceof HTMLImageElement ? image.naturalWidth : image.width;
+  const height = image instanceof HTMLImageElement ? image.naturalHeight : image.height;
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return createImageBitmap(image);
+
+  ctx.drawImage(image, 0, 0, width, height);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  applyChromaKeyAlpha(imageData, hexToRgb(keyColorHex));
+  return createImageBitmap(imageData);
 }

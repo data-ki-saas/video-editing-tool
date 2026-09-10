@@ -279,7 +279,6 @@ export function ActionArea({
   onAddImageSequenceClip,
   onAddVideoSequenceClip,
   onCloseCutawayDialog,
-  onDeleteCutaway,
   onOpenTextSlideDialog,
   isTextSlideDialogOpen,
   editingTextSlide,
@@ -444,9 +443,8 @@ export function ActionArea({
   // `preselectedAssetId` prop.
   cutawayDialogPreselectedAssetId: string | null;
   onAddImageSequenceClip: (assetId: string, durationSeconds: number, templateIds: string[], cropRect: CropRect) => void;
-  onAddVideoSequenceClip: (asset: Asset, options?: { removeBackground?: boolean }) => void;
+  onAddVideoSequenceClip: (asset: Asset, options?: { removeBackground?: boolean; chromaKeyColor?: string; colorFilterId?: FilterPresetId | null }) => void;
   onCloseCutawayDialog: () => void;
-  onDeleteCutaway: (segment: CutawaySegment) => void;
   onOpenTextSlideDialog: () => void;
   isTextSlideDialogOpen: boolean;
   // Non-null when TextSlideDialog was reopened from the Cutaways rail to
@@ -761,6 +759,7 @@ export function ActionArea({
                   ambientEffect: editingCutaway.ambientEffect,
                   faceEffect: editingCutaway.faceEffect,
                   audioReactive: editingCutaway.audioReactive,
+                  colorFilterId: editingCutaway.colorFilterId,
                 }
               : null
           }
@@ -771,7 +770,6 @@ export function ActionArea({
             if (asset) onAddVideoSequenceClip(asset, options);
           }}
           onClose={onCloseCutawayDialog}
-          onDelete={editingCutaway ? () => onDeleteCutaway(editingCutaway) : undefined}
         />
       )}
 

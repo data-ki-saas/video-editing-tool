@@ -77,7 +77,7 @@ import { detectFaceGeometry, type FaceGeometry } from "@/lib/video/faceLandmarks
 import { computeAudioEnvelope, sampleMusicClipsEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { segmentClipFramesApproximate, lumaFramesToAlphaMasks, segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
-import { chromaKeyFramesToAlphaMasks, DEFAULT_CHROMA_KEY_COLOR } from "@/lib/video/chromaKey";
+import { chromaKeyFramesToAlphaMasks, chromaKeyImageToBitmap, DEFAULT_CHROMA_KEY_COLOR } from "@/lib/video/chromaKey";
 import { drawBrandWatermark } from "@/lib/video/brandWatermark";
 import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
 import {
@@ -2023,7 +2023,17 @@ export const CanvasPlayer = forwardRef<
             // same two-stage staging as the video path, just producing a
             // full RGBA image instead of a bare alpha mask.
             let image: HTMLImageElement | ImageBitmap;
-            if (clip.backgroundRemoval?.enabled) {
+            if (clip.backgroundRemoval?.mode === "chromaKey") {
+              // No matte to wait on -- keyed out live against the original
+              // photo, same as chromaKeyFramesToAlphaMasks' video-overlay
+              // counterpart (see chromaKey.ts's own module comment).
+              try {
+                image = await chromaKeyImageToBitmap(await loadImage(clip.url), clip.backgroundRemoval.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR);
+              } catch (err) {
+                console.error("chroma-key cutout failed for clip=%s", clip.id, err);
+                image = await loadImage(clip.url);
+              }
+            } else if (clip.backgroundRemoval?.enabled) {
               const matteUrl = clip.backgroundRemoval.matteAssetId ? assetUrlById[clip.backgroundRemoval.matteAssetId] : undefined;
               try {
                 image = matteUrl ? await loadImage(matteUrl) : await segmentImageApproximate(await loadImage(clip.url));
@@ -2107,7 +2117,13 @@ export const CanvasPlayer = forwardRef<
           // else plays" spirit this file's module comment already states
           // for the clip-load loop as a whole.
           let mattes: ImageBitmap[] | null = null;
-          if (clip.kind === "video" && clip.backgroundRemoval?.enabled) {
+          if (clip.kind === "video" && clip.backgroundRemoval?.mode === "chromaKey") {
+            try {
+              mattes = await chromaKeyFramesToAlphaMasks(images, clip.backgroundRemoval.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR);
+            } catch (err) {
+              console.error("chroma-key mask extraction failed for clip=%s", clip.id, err);
+            }
+          } else if (clip.kind === "video" && clip.backgroundRemoval?.enabled) {
             const matteUrl = clip.backgroundRemoval.matteAssetId ? assetUrlById[clip.backgroundRemoval.matteAssetId] : undefined;
             try {
               mattes = matteUrl

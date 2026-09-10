@@ -41,6 +41,20 @@
  * same move+aspect-locked-resize interaction the main clip-rectangle editor
  * on FrameStrip already uses) -- that positioned rect, in fractions of the
  * photo itself, is what's actually persisted and animated from.
+ *
+ * Below the panels, three stacked rows (not one crowded wrapping line):
+ * Background removal (RemovalModePicker -- "Keep"/a solid-color backdrop
+ * keyed out live via lib/video/chromaKey.ts, including an eyedropper that
+ * samples a pixel straight off the photo above/AI removal), then Look &
+ * motion (Filter, "Make it 3D", Ambience, Face effect, Pulse with music --
+ * every purely-cosmetic effect, all previewed live on Panel 3's own
+ * animated canvas the instant they're picked), then Cancel/Add. Filter used
+ * to be reachable only AFTERWARD via the Cutaways rail's right-click
+ * "Filter…" (still there, unchanged, for a clip already placed) -- it's
+ * folded in here too so it's visible and previewed at add-time like
+ * everything else, not a second disconnected step. "Remove Cutaway" isn't
+ * one of these rows -- that's the rail's own right-click action
+ * (CutawayTrack.tsx), no need for a second copy of it in here.
  */
 import { useEffect, useRef, useState } from "react";
 import type { Asset } from "@/lib/api";
@@ -50,8 +64,10 @@ import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { IMAGE_TEMPLATE_AXES, IMAGE_TEMPLATE_OPTIONS, buildKenBurnsEffect, type ImageTemplateId } from "@/lib/video/imageTemplates";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
+import { CHROMA_KEY_PRESETS, DEFAULT_CHROMA_KEY_COLOR, chromaKeyImageToBitmap, rgbToHex } from "@/lib/video/chromaKey";
 import { AMBIENT_EFFECT_OPTIONS, ambientEffectSeed, drawAmbientEffect, type AmbientEffectId } from "@/lib/video/ambientEffects";
 import { FACE_EFFECT_OPTIONS, detectFaceGeometry, type FaceEffectId, type FaceGeometry } from "@/lib/video/faceLandmarks";
+import { FILTER_PRESET_OPTIONS, getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { CropRectOverlay } from "./CropRectOverlay";
 import {
   DEFAULT_IMAGE_CLIP_DURATION_SECONDS,
@@ -102,6 +118,148 @@ function ZoomIcon({ zoomIn, className }: { zoomIn: boolean; className?: string }
   );
 }
 
+/** "Pick from photo" eyedropper button icon -- a plain pipette glyph, no
+ * per-app custom drawing needed since this is a single fixed icon (unlike
+ * TemplateIcon below, which switches on which motion it represents). */
+function EyedropperIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M19.5 4.5a2.121 2.121 0 0 0-3-3l-2 2 3 3 2-2Z" />
+      <path d="M13.5 6.5 5 15v3h3l8.5-8.5" />
+      <path d="M3 21l2-5" />
+    </svg>
+  );
+}
+
+/** Shared by both the Video and Image panels' "Remove background" row --
+ * None/Background color/AI removal, mirroring VideoOverlayPickerDialog's own
+ * RemovalMode picker so the choice reads the same everywhere it appears.
+ * `onPickFromPhoto` is only passed by the Image panel (the Video panel's
+ * asset grid has no single large photo to sample a pixel from), so the
+ * eyedropper button only renders there. */
+function RemovalModePicker({
+  mode,
+  onModeChange,
+  chromaKeyColor,
+  onChromaKeyColorChange,
+  onPickFromPhoto,
+}: {
+  mode: "none" | "chromaKey" | "ai";
+  onModeChange: (mode: "none" | "chromaKey" | "ai") => void;
+  chromaKeyColor: string;
+  onChromaKeyColorChange: (hex: string) => void;
+  onPickFromPhoto?: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs text-muted">Background:</span>
+      <div className="flex gap-1 rounded-md border border-border p-0.5">
+        {([
+          { value: "none" as const, label: "Keep" },
+          { value: "chromaKey" as const, label: "Solid color" },
+          { value: "ai" as const, label: "AI removal" },
+        ]).map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onModeChange(option.value)}
+            className={
+              "rounded-sm px-2 py-1 text-xs font-medium " +
+              (mode === option.value ? "bg-accent text-accent-foreground" : "text-muted hover:text-foreground")
+            }
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {mode === "chromaKey" && (
+        <div className="flex items-center gap-1.5">
+          {CHROMA_KEY_PRESETS.map((preset) => (
+            <button
+              key={preset.hex}
+              type="button"
+              title={preset.label}
+              onClick={() => onChromaKeyColorChange(preset.hex)}
+              style={{ backgroundColor: preset.hex }}
+              className={
+                "h-5 w-5 rounded-full border-2 " +
+                (chromaKeyColor === preset.hex ? "border-accent" : "border-transparent")
+              }
+            />
+          ))}
+          {onPickFromPhoto && (
+            <button
+              type="button"
+              title="Pick from photo"
+              onClick={onPickFromPhoto}
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-border text-foreground hover:bg-background"
+            >
+              <EyedropperIcon className="h-3 w-3" />
+            </button>
+          )}
+          <span
+            title={`Current color: ${chromaKeyColor}`}
+            style={{ backgroundColor: chromaKeyColor }}
+            className="h-5 w-5 rounded-full border border-border"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A compact, always-visible row of filter swatches -- folds
+ * FilterPresetDialog's own gallery (opened separately, after a clip's
+ * already placed, via the rail's right-click "Filter…") directly into the
+ * add/edit flow instead, so a filter is visible and previewed on THIS
+ * dialog's own live Ken Burns preview canvas the moment it's picked, same
+ * "everything visible in one place" reasoning as this dialog's other
+ * effect pickers. Each swatch renders this clip's own thumbnail with that
+ * filter's real CSS applied -- the same live-preview approximation
+ * CanvasPlayer/exportTimeline use, not just a color chip, so a swatch
+ * actually shows what it does. `previewImageSrc` is optional (the Video
+ * panel has a small per-asset thumbnail too, unlike the Image panel's own
+ * larger live canvas) -- a swatch with none just renders as a plain
+ * colored circle, same graceful "no preview yet" fallback FilterPresetDialog
+ * itself uses. */
+function FilterSwatchPicker({
+  value,
+  onChange,
+  previewImageSrc,
+}: {
+  value: FilterPresetId | null;
+  onChange: (id: FilterPresetId | null) => void;
+  previewImageSrc?: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-xs text-muted">Filter:</span>
+      <div className="flex items-center gap-1 overflow-x-auto">
+        {FILTER_PRESET_OPTIONS.map((option) => {
+          const isSelected = (value ?? "none") === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              title={option.name}
+              onClick={() => onChange(option.id === "none" ? null : option.id)}
+              className={
+                "h-6 w-6 shrink-0 overflow-hidden rounded-full border-2 bg-neutral-800 " +
+                (isSelected ? "border-accent" : "border-transparent")
+              }
+            >
+              {previewImageSrc && (
+                // eslint-disable-next-line @next/next/no-img-element -- a blob:/data: thumbnail URL, not a Next-optimizable static asset
+                <img src={previewImageSrc} alt="" className="h-full w-full object-cover" style={{ filter: option.cssFilter }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function TemplateIcon({ id, className }: { id: ImageTemplateId; className?: string }) {
   switch (id) {
     case "zoom-in":
@@ -128,7 +286,6 @@ export function CutawayDialog({
   onAddImage,
   onAddVideo,
   onClose,
-  onDelete,
 }: {
   assets: Asset[];
   // AssetGallery's own extracted per-video representative still frame --
@@ -150,10 +307,11 @@ export function CutawayDialog({
     templateIds: string[];
     durationSeconds: number;
     cropRect: CropRect | null;
-    // AI background removal (see this feature's own plan doc) -- pre-checks
-    // the "Remove background" toggle when reopening a cutaway that already
-    // has it on, so Save doesn't silently drop it.
-    backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null } | null;
+    // Background removal (see this feature's own plan doc) -- pre-selects
+    // the removal mode (and, for chroma key, the sampled/preset color) when
+    // reopening a cutaway that already has one set, so Save doesn't
+    // silently drop it.
+    backgroundRemoval?: { enabled: boolean; matteAssetId?: string | null; mode?: "ai" | "chromaKey"; chromaKeyColor?: string } | null;
     // "Make it 3D" (lib/video/camera3D.ts) -- pre-checks the toggle when
     // reopening a cutaway that already has it on, same staging as
     // backgroundRemoval above.
@@ -170,6 +328,11 @@ export function CutawayDialog({
     // toggle when reopening a cutaway that already has it on, same staging
     // as camera3D above.
     audioReactive?: boolean;
+    // Color filter (lib/video/filterPresets.ts) -- pre-selects the swatch
+    // when reopening a cutaway that already has one set (whether authored
+    // here or via the rail's own right-click "Filter…"), same staging as
+    // camera3D above.
+    colorFilterId?: FilterPresetId | null;
   } | null;
   /** Non-null when opened via AssetGallery's right-click "Cutaway" on a
    * specific IMAGE asset -- an ADD, not an edit, just pre-selects that
@@ -182,25 +345,43 @@ export function CutawayDialog({
     cropRect: CropRect,
     options?: {
       removeBackground?: boolean;
+      chromaKeyColor?: string;
       camera3D?: boolean;
       ambientEffect?: AmbientEffectId | null;
       faceEffect?: FaceEffectId | null;
       audioReactive?: boolean;
+      colorFilterId?: FilterPresetId | null;
     }
   ) => void;
-  onAddVideo: (assetId: string, options?: { removeBackground?: boolean }) => void;
+  onAddVideo: (assetId: string, options?: { removeBackground?: boolean; chromaKeyColor?: string; colorFilterId?: FilterPresetId | null }) => void;
   onClose: () => void;
-  // Only ever passed (and only ever shown) in edit mode -- there's no
-  // existing cutaway to remove yet while adding a fresh one.
-  onDelete?: () => void;
 }) {
   // Edit mode is image-only (see the `editing` prop's own comment) -- the
   // kind switch below only ever renders, and only ever matters, in add mode.
   const [kind, setKind] = useState<"video" | "image">("image");
   // Shared between the Video and Image panels -- only one is ever visible
-  // at a time (the kind switch above), so one toggle covers both, same
-  // "Remove background" checkbox either way.
-  const [removeBackground, setRemoveBackground] = useState(Boolean(editing?.backgroundRemoval?.enabled));
+  // at a time (the kind switch above), so one picker covers both, same as
+  // the old single "Remove background" checkbox it replaced. Mirrors
+  // VideoOverlayPickerDialog's own "none"/"chromaKey"/"ai" RemovalMode.
+  const [removalMode, setRemovalMode] = useState<"none" | "chromaKey" | "ai">(
+    editing?.backgroundRemoval?.mode === "chromaKey" ? "chromaKey" : editing?.backgroundRemoval?.enabled ? "ai" : "none"
+  );
+  // Only meaningful when removalMode === "chromaKey" -- a hex color, either
+  // one of CHROMA_KEY_PRESETS or sampled directly off the photo via the
+  // "Pick from photo" eyedropper below (image panel only; the video panel
+  // has no large-enough preview surface to sample from, presets only).
+  const [chromaKeyColor, setChromaKeyColor] = useState(editing?.backgroundRemoval?.chromaKeyColor ?? DEFAULT_CHROMA_KEY_COLOR);
+  // True while the next click on the displayed photo should sample its
+  // pixel color instead of dragging the clip rectangle -- see
+  // handlePickColorClick below.
+  const [isPickingColor, setIsPickingColor] = useState(false);
+  // Color filter (filterPresets.ts) -- same shared-across-panels reasoning
+  // as removalMode above (also settable afterward via the rail's own
+  // right-click "Filter…", which still opens FilterPresetDialog unchanged
+  // for a clip already placed -- this is just the same choice made visible
+  // and live-previewed at add-time too, on the Image panel's own preview
+  // canvas below).
+  const [colorFilterId, setColorFilterId] = useState<FilterPresetId | null>(editing?.colorFilterId ?? null);
   // "Make it 3D" (camera3D.ts) -- image-only, same shared-across-panels
   // reasoning doesn't apply here (video kind has nothing to attach a Ken
   // Burns dolly to), so this is only ever read/shown in the image panel.
@@ -318,16 +499,16 @@ export function CutawayDialog({
   // "Make it 3D" foreground/background parallax (see camera3D.ts's own
   // SUBJECT_DEPTH_FRACTION comment) -- an automatic MediaPipe subject cutout
   // for this preview's own drawImage3D call below, recomputed whenever the
-  // photo or the toggle itself changes. Unlike the "Remove background"
-  // checkbox (never actually applied to this dialog's own preview canvas,
-  // same simplification as audioReactive above), this only reads `camera3D`
-  // -- there's no equivalent "flat cutout over a new backdrop" treatment to
-  // preserve here to conflict with. Also needed (independent of camera3D)
-  // whenever the "halo" faceEffect is picked -- its own occlusion trick
-  // (camera3D.ts's HALO_DEPTH_FRACTION) depends on this same cutout.
+  // photo or the toggle itself changes. Also needed (independent of
+  // camera3D) whenever the "halo" faceEffect is picked -- its own occlusion
+  // trick (camera3D.ts's HALO_DEPTH_FRACTION) depends on this same cutout.
+  // Skipped in chromaKey mode -- mirrors CanvasPlayer.tsx's identical
+  // backgroundRemoval-enabled scoping (that combination keeps its own flat
+  // cutout-over-backdrop treatment instead of a real parallax, see this
+  // file's chromaKeyedImage effect below).
   const [subjectCutout, setSubjectCutout] = useState<ImageBitmap | null>(null);
   useEffect(() => {
-    if (!loadedImage || !(camera3D || faceEffect === "halo")) {
+    if (!loadedImage || removalMode === "chromaKey" || !(camera3D || faceEffect === "halo")) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change, same pattern as this file's other re-sync effects
       setSubjectCutout(null);
       return;
@@ -343,17 +524,18 @@ export function CutawayDialog({
     return () => {
       cancelled = true;
     };
-  }, [loadedImage, camera3D, faceEffect]);
+  }, [loadedImage, camera3D, faceEffect, removalMode]);
 
   // Face detection (faceLandmarks.ts) for the "Torus above head"/"Halo
   // behind head" pick -- one-shot per photo, same "recomputed whenever the
   // photo or the toggle itself changes" shape as the subject cutout above.
   // Stays null (silently, no console error) when no face is found -- the
   // draw loop below then just skips the faceEffect branch, same "fails
-  // toward looks normal" fallback faceLandmarks.ts itself documents.
+  // toward looks normal" fallback faceLandmarks.ts itself documents. Same
+  // chromaKey-mode scoping as subjectCutout above.
   const [faceGeometry, setFaceGeometry] = useState<FaceGeometry | null>(null);
   useEffect(() => {
-    if (!loadedImage || !faceEffect) {
+    if (!loadedImage || !faceEffect || removalMode === "chromaKey") {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change, same pattern as this file's other re-sync effects
       setFaceGeometry(null);
       return;
@@ -369,7 +551,68 @@ export function CutawayDialog({
     return () => {
       cancelled = true;
     };
-  }, [loadedImage, faceEffect]);
+  }, [loadedImage, faceEffect, removalMode]);
+
+  // Live chroma-key preview -- unlike AI mode (never actually applied to
+  // this dialog's own preview canvas; there's a real matting job to wait on
+  // so it isn't worth simulating here), chroma key has nothing to wait on
+  // at all, so the draw loop below can show the REAL keyed-out result the
+  // instant a preset or the eyedropper picks a color, same instant feedback
+  // CanvasPlayer's live preview gives once this cutaway is actually added.
+  const [chromaKeyedImage, setChromaKeyedImage] = useState<ImageBitmap | null>(null);
+  useEffect(() => {
+    if (!loadedImage || removalMode !== "chromaKey") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change, same pattern as this file's other re-sync effects
+      setChromaKeyedImage(null);
+      return;
+    }
+    let cancelled = false;
+    chromaKeyImageToBitmap(loadedImage, chromaKeyColor)
+      .then((bitmap) => {
+        if (!cancelled) setChromaKeyedImage(bitmap);
+      })
+      .catch((err) => {
+        console.error("chroma-key preview failed", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadedImage, removalMode, chromaKeyColor]);
+
+  // Backs the "Pick from photo" eyedropper -- redrawn once per photo (not
+  // per pick) so a click just re-reads a pixel from an already-drawn
+  // canvas rather than re-decoding the image every time.
+  const pickCanvasRef = useRef<OffscreenCanvas | null>(null);
+  useEffect(() => {
+    if (!loadedImage) {
+      pickCanvasRef.current = null;
+      return;
+    }
+    const canvas = new OffscreenCanvas(loadedImage.naturalWidth, loadedImage.naturalHeight);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx?.drawImage(loadedImage, 0, 0);
+    pickCanvasRef.current = canvas;
+  }, [loadedImage]);
+
+  // The photo container (img + CropRectOverlay) is exactly the photo's own
+  // aspect ratio (see its own `style={{ aspectRatio: ... }}` below), so
+  // object-cover fills it with no letterboxing/cropping to account for --
+  // a click's fraction across the CONTAINER is the same fraction across the
+  // photo's own natural pixels.
+  function handlePickColorClick(e: React.MouseEvent<HTMLDivElement>) {
+    const canvas = pickCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const fx = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+    const fy = clamp((e.clientY - rect.top) / rect.height, 0, 1);
+    const px = Math.min(canvas.width - 1, Math.floor(fx * canvas.width));
+    const py = Math.min(canvas.height - 1, Math.floor(fy * canvas.height));
+    const [r, g, b] = ctx.getImageData(px, py, 1, 1).data;
+    setChromaKeyColor(rgbToHex(r, g, b));
+    setIsPickingColor(false);
+  }
 
   // Loops the chosen template(s)' combined motion over the loaded image,
   // redrawing every frame -- reuses computeEffectiveCropRect/
@@ -396,13 +639,25 @@ export function CutawayDialog({
 
       // Non-null: `canvas`/`ctx`/`loadedImage` were all checked just above --
       // TypeScript doesn't carry that narrowing into this nested closure.
+      // `crop` is authored against the ORIGINAL photo's own natural
+      // dimensions regardless of which source actually gets drawn below --
+      // chromaKeyedImage (when present) shares those exact pixel dimensions
+      // by construction (see chromaKeyImageToBitmap), so sx/sy/sw/sh stay
+      // correct either way.
       const img = loadedImage!;
+      const drawSource: HTMLImageElement | ImageBitmap = chromaKeyedImage ?? img;
       const sx = crop.x * img.naturalWidth;
       const sy = crop.y * img.naturalHeight;
       const sw = crop.width * img.naturalWidth;
       const sh = crop.height * img.naturalHeight;
       const dest = computeContainRect(canvas!.width, canvas!.height, crop.width / crop.height);
       ctx!.clearRect(0, 0, canvas!.width, canvas!.height);
+      // Color filter (filterPresets.ts) -- set once before either branch
+      // below, same "set before the camera3D/plain-draw fork" placement
+      // exportTimeline.ts's own per-clip ctx.filter uses, so a filter
+      // combines with either path exactly like the real committed clip
+      // will (CanvasPlayer.tsx/exportTimeline.ts).
+      ctx!.filter = getFilterPresetOption(colorFilterId).cssFilter;
       // "Make it 3D" -- same computeCamera3DPoseForZoomEffect this photo's
       // real committed cutaway will use (CanvasPlayer.tsx/exportTimeline.ts),
       // so this popup's own preview can't drift from the real effect either,
@@ -414,13 +669,13 @@ export function CutawayDialog({
       if (camera3D || faceEffect) {
         const pose = camera3D ? computeCamera3DPoseForZoomEffect(zoomEffect, templateIds, elapsed) : NEUTRAL_POSE;
         getCamera3DRenderer().drawImage3D(
-          ctx!, img, pose, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height, false, false,
+          ctx!, drawSource, pose, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height, false, false,
           ambientEffect ? { effectId: ambientEffect, elapsedSeconds: elapsed, seed: ambientEffectSeed(selectedAssetId ?? "") } : null,
           subjectCutout,
           faceEffect && faceGeometry ? { effectId: faceEffect, geometry: faceGeometry, elapsedSeconds: elapsed } : null
         );
       } else {
-        ctx!.drawImage(img, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height);
+        ctx!.drawImage(drawSource, sx, sy, sw, sh, dest.x, dest.y, dest.width, dest.height);
         // Skipped when camera3D above already rendered this effect inside
         // its own 3D scene (real parallax) -- see that branch's own comment.
         drawAmbientEffect(ctx!, ambientEffect, dest.x, dest.y, dest.width, dest.height, elapsed, ambientEffectSeed(selectedAssetId ?? ""));
@@ -430,7 +685,7 @@ export function CutawayDialog({
     }
     rafId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafId);
-  }, [loadedImage, templateIds, durationSeconds, photoCropRect, camera3D, ambientEffect, faceEffect, faceGeometry, selectedAssetId, subjectCutout]);
+  }, [loadedImage, templateIds, durationSeconds, photoCropRect, camera3D, ambientEffect, faceEffect, faceGeometry, selectedAssetId, subjectCutout, chromaKeyedImage, colorFilterId]);
 
   // Toggles one template id, one pick per axis (zoom / horizontal pan /
   // vertical pan) -- picking a second id from the SAME axis as an existing
@@ -570,24 +825,36 @@ export function CutawayDialog({
         </div>
 
         {kind === "video" && (
-          <div className="flex items-center gap-2">
-            {/* AI background removal (see this feature's own plan doc) --
-                one direct toggle, no separate dialog/menu, matching this
-                app's driving-vision preference for simple controls over a
-                casual creator faking a green-screen effect. Processing
-                happens after "Add cutaway" (ThreePaneEditor.handleAddToSequence
-                kicks off the actual matting job and polls it), not here --
-                this checkbox only records the creator's intent. */}
-            <label className="flex items-center gap-1.5 text-xs text-muted">
-              <input
-                type="checkbox"
-                checked={removeBackground}
-                onChange={(e) => setRemoveBackground(e.target.checked)}
-                className="h-3.5 w-3.5"
+          <div className="flex shrink-0 flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              {/* Background removal -- one picker, no separate dialog/menu,
+                  matching this app's driving-vision preference for simple
+                  controls. "Solid color" keys itself out instantly, entirely
+                  client-side, no matter what solid backdrop the footage was
+                  shot against (see chromaKey.ts). "AI removal" processing
+                  happens after "Add cutaway" (ThreePaneEditor.
+                  handleAddToSequence kicks off the actual matting job and
+                  polls it), not here -- this picker only records the
+                  creator's intent. No eyedropper here (unlike the Image
+                  panel) -- this grid's thumbnails are too small to sample a
+                  pixel from reliably. */}
+              <RemovalModePicker
+                mode={removalMode}
+                onModeChange={setRemovalMode}
+                chromaKeyColor={chromaKeyColor}
+                onChromaKeyColorChange={setChromaKeyColor}
               />
-              Remove background
-            </label>
-            <div className="ml-auto flex gap-2">
+              {/* Filter -- same picker as the Image panel's own (see its
+                  own comment), previewed against this asset's own captured
+                  thumbnail since there's no live animated canvas here to
+                  show it on instead. */}
+              <FilterSwatchPicker
+                value={colorFilterId}
+                onChange={setColorFilterId}
+                previewImageSrc={selectedVideoAssetId ? videoThumbnailUrlByAssetId[selectedVideoAssetId] : undefined}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={onClose}
@@ -598,7 +865,14 @@ export function CutawayDialog({
               <button
                 type="button"
                 disabled={!selectedVideoAssetId}
-                onClick={() => selectedVideoAssetId && onAddVideo(selectedVideoAssetId, { removeBackground })}
+                onClick={() =>
+                  selectedVideoAssetId &&
+                  onAddVideo(selectedVideoAssetId, {
+                    removeBackground: removalMode === "ai",
+                    chromaKeyColor: removalMode === "chromaKey" ? chromaKeyColor : undefined,
+                    colorFilterId,
+                  })
+                }
                 className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"
               >
                 Add cutaway
@@ -649,7 +923,9 @@ export function CutawayDialog({
         <div className="flex min-h-0 flex-1 flex-col gap-2">
           <div className="flex min-h-0 flex-1 gap-2">
             <div className="flex min-h-0 flex-1 flex-col gap-1">
-              <p className="text-[11px] text-muted">Position the clip rectangle</p>
+              <p className="text-[11px] text-muted">
+                {isPickingColor ? "Click the photo's background color" : "Position the clip rectangle"}
+              </p>
               <div className="relative min-h-0 flex-1 overflow-hidden rounded-md bg-black">
                 {selectedAsset ? (
                   <div
@@ -662,6 +938,19 @@ export function CutawayDialog({
                     )}
                     {photoCropRect && (
                       <CropRectOverlay cropRect={photoCropRect} onChange={setPhotoCropRect} onCommit={setPhotoCropRect} />
+                    )}
+                    {isPickingColor && (
+                      // Sits on top of CropRectOverlay (later in DOM order),
+                      // covering the whole photo at its own exact aspect
+                      // ratio -- see handlePickColorClick's own comment for
+                      // why a click's fraction across THIS div maps directly
+                      // to a fraction of the photo's natural pixels, no
+                      // object-cover crop/letterbox math needed.
+                      <div
+                        onClick={handlePickColorClick}
+                        className="absolute inset-0 cursor-crosshair"
+                        title="Click to sample this pixel's color"
+                      />
                     )}
                   </div>
                 ) : (
@@ -727,94 +1016,112 @@ export function CutawayDialog({
             <span className="w-10 shrink-0 text-right text-xs text-muted">{durationSeconds.toFixed(1)}s</span>
           </div>
 
-          <div className="mt-1 flex items-center gap-2">
-            {editing && onDelete && (
-              <button type="button" onClick={onDelete} className="text-xs text-red-600 hover:underline">
-                Remove Cutaway
-              </button>
-            )}
-            {/* AI background removal, same toggle as the Video panel's own
-                (see its own comment) -- for a photo this runs a synchronous
-                image-matting job (backend/src/matting/service.py's
-                image-kind path) rather than VEED's async video job, but the
-                creator-facing control is identical either way. */}
-            <label className="flex items-center gap-1.5 text-xs text-muted">
-              <input
-                type="checkbox"
-                checked={removeBackground}
-                onChange={(e) => setRemoveBackground(e.target.checked)}
-                className="h-3.5 w-3.5"
+          <div className="mt-1 flex flex-col gap-2">
+            {/* Background removal, same picker as the Video panel's own
+                (see its own comment) -- "AI removal" for a photo runs a
+                synchronous image-matting job (backend/src/matting/
+                service.py's image-kind path) rather than VEED's async video
+                job, but the creator-facing control is identical either way.
+                Unlike the Video panel, this one gets the eyedropper -- the
+                photo is right there in Panel 3 above to sample a pixel
+                from. Its own row -- it can grow wide (swatches + eyedropper
+                + current-color chip), so it no longer has to jostle for
+                space against the effect toggles below. */}
+            <RemovalModePicker
+              mode={removalMode}
+              onModeChange={setRemovalMode}
+              chromaKeyColor={chromaKeyColor}
+              onChromaKeyColorChange={setChromaKeyColor}
+              onPickFromPhoto={() => setIsPickingColor(true)}
+            />
+
+            {/* Look & motion -- every effect that's purely cosmetic on top
+                of the motion/crop already authored above, grouped into one
+                wrapping row now that Filter lives here too instead of only
+                ever being reachable afterward via the rail's right-click
+                "Filter…". */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              {/* Color filter (filterPresets.ts) -- previewed live on
+                  Panel 3's own animated canvas above the instant a swatch
+                  is picked. */}
+              <FilterSwatchPicker
+                value={colorFilterId}
+                onChange={setColorFilterId}
+                previewImageSrc={selectedAsset ? imageThumbnailSrcById[selectedAsset.id] : undefined}
               />
-              Remove background
-            </label>
-            {/* "Make it 3D" (camera3D.ts) -- real dolly + tilt + roll camera
-                motion layered on top of whichever motion(s) are picked
-                above, rather than a separate effect with its own controls
-                (see this app's driving-vision preference for smart
-                defaults over exposed knobs). */}
-            <label className="flex items-center gap-1.5 text-xs text-muted">
-              <input
-                type="checkbox"
-                checked={camera3D}
-                onChange={(e) => setCamera3D(e.target.checked)}
-                className="h-3.5 w-3.5"
-              />
-              Make it 3D
-            </label>
-            {/* Ambient overlay effect (ambientEffects.ts) -- a subtle
-                looping overlay composited on top of the motion above,
-                independent of "Make it 3D" (works with either). No per-
-                effect tuning, same "no exposed knobs" reasoning as
-                camera3D. */}
-            <label className="flex items-center gap-1.5 text-xs text-muted">
-              Ambience
-              <select
-                value={ambientEffect ?? ""}
-                onChange={(e) => setAmbientEffect((e.target.value || null) as AmbientEffectId | null)}
-                className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
-              >
-                <option value="">None</option>
-                {AMBIENT_EFFECT_OPTIONS.map((option) => (
-                  <option key={option.id} value={option.id} title={option.description}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {/* Face-locked glow (faceLandmarks.ts + camera3D.ts) -- a
-                mutually-exclusive pick, like Ambience above, independent of
-                "Make it 3D"/Ambience (all combine freely). A no-op when no
-                face is detected in the photo. */}
-            <label className="flex items-center gap-1.5 text-xs text-muted">
-              Face effect
-              <select
-                value={faceEffect ?? ""}
-                onChange={(e) => setFaceEffect((e.target.value || null) as FaceEffectId | null)}
-                className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
-              >
-                <option value="">None</option>
-                {FACE_EFFECT_OPTIONS.map((option) => (
-                  <option key={option.id} value={option.id} title={option.description}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {/* "Pulse with music" (audioReactive.ts) -- subtly scales this
-                cutaway to the project's background-music amplitude,
-                independent of "Make it 3D"/Ambience above (all three
-                combine freely). A no-op when no background track is
-                selected. */}
-            <label className="flex items-center gap-1.5 text-xs text-muted">
-              <input
-                type="checkbox"
-                checked={audioReactive}
-                onChange={(e) => setAudioReactive(e.target.checked)}
-                className="h-3.5 w-3.5"
-              />
-              Pulse with music
-            </label>
-            <div className="ml-auto flex gap-2">
+              {/* "Make it 3D" (camera3D.ts) -- real dolly + tilt + roll
+                  camera motion layered on top of whichever motion(s) are
+                  picked above, rather than a separate effect with its own
+                  controls (see this app's driving-vision preference for
+                  smart defaults over exposed knobs). */}
+              <label className="flex items-center gap-1.5 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  checked={camera3D}
+                  onChange={(e) => setCamera3D(e.target.checked)}
+                  className="h-3.5 w-3.5"
+                />
+                Make it 3D
+              </label>
+              {/* Ambient overlay effect (ambientEffects.ts) -- a subtle
+                  looping overlay composited on top of the motion above,
+                  independent of "Make it 3D" (works with either). No per-
+                  effect tuning, same "no exposed knobs" reasoning as
+                  camera3D. */}
+              <label className="flex items-center gap-1.5 text-xs text-muted">
+                Ambience
+                <select
+                  value={ambientEffect ?? ""}
+                  onChange={(e) => setAmbientEffect((e.target.value || null) as AmbientEffectId | null)}
+                  className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+                >
+                  <option value="">None</option>
+                  {AMBIENT_EFFECT_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id} title={option.description}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {/* Face-locked glow (faceLandmarks.ts + camera3D.ts) -- a
+                  mutually-exclusive pick, like Ambience above, independent
+                  of "Make it 3D"/Ambience (all combine freely). A no-op
+                  when no face is detected in the photo. */}
+              <label className="flex items-center gap-1.5 text-xs text-muted">
+                Face effect
+                <select
+                  value={faceEffect ?? ""}
+                  onChange={(e) => setFaceEffect((e.target.value || null) as FaceEffectId | null)}
+                  className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+                >
+                  <option value="">None</option>
+                  {FACE_EFFECT_OPTIONS.map((option) => (
+                    <option key={option.id} value={option.id} title={option.description}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {/* "Pulse with music" (audioReactive.ts) -- subtly scales this
+                  cutaway to the project's background-music amplitude,
+                  independent of "Make it 3D"/Ambience above (all three
+                  combine freely). A no-op when no background track is
+                  selected. */}
+              <label className="flex items-center gap-1.5 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  checked={audioReactive}
+                  onChange={(e) => setAudioReactive(e.target.checked)}
+                  className="h-3.5 w-3.5"
+                />
+                Pulse with music
+              </label>
+            </div>
+
+            {/* Removing an already-placed cutaway is the rail's own
+                right-click "Remove Cutaway" (CutawayTrack.tsx) -- no second
+                copy of that action needed here. */}
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={onClose}
@@ -829,11 +1136,13 @@ export function CutawayDialog({
                   selectedAsset &&
                   photoCropRect &&
                   onAddImage(selectedAsset.id, durationSeconds, templateIds, photoCropRect, {
-                    removeBackground,
+                    removeBackground: removalMode === "ai",
+                    chromaKeyColor: removalMode === "chromaKey" ? chromaKeyColor : undefined,
                     camera3D,
                     ambientEffect,
                     faceEffect,
                     audioReactive,
+                    colorFilterId,
                   })
                 }
                 className="rounded-md bg-accent py-1.5 px-3 text-sm font-medium text-accent-foreground disabled:opacity-50"

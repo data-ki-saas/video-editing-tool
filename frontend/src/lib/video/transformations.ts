@@ -622,17 +622,34 @@ export function applyDeleteImageOverlay(
 export function applyAddSequenceClip(
   selections: EditSelectionsSnapshot,
   assetId: string,
-  removeBackground?: boolean
+  removeBackground?: boolean,
+  // Set (instead of `removeBackground`) for a solid-color backdrop -- see
+  // video_math.ts's BackgroundRemovalState.mode doc comment and
+  // applyAddVideoOverlay's identical param. Mutually exclusive with
+  // `removeBackground` in practice; chroma key wins if both are set.
+  chromaKeyColor?: string,
+  // Set from CutawayDialog's own filter picker (see filterPresets.ts) --
+  // authored at add-time now instead of only ever afterward via the rail's
+  // right-click "Filter…" (FilterPresetDialog), which still works
+  // unchanged for a clip already placed.
+  colorFilterId?: FilterPresetId | null
 ): TransformationResult {
   const newEntry: SequenceEntry = {
     id: crypto.randomUUID(),
     kind: "video",
     assetId,
+    colorFilterId,
     // matteAssetId starts null -- the caller (ThreePaneEditor's
     // handleAddToSequence) kicks off the actual matting job right after
     // this and patches it in later via applySetBackgroundRemoval once the
-    // async job completes, same "waiting" staging as avatar generation.
-    ...(removeBackground ? { backgroundRemoval: { enabled: true, matteAssetId: null } } : {}),
+    // async job completes, same "waiting" staging as avatar generation. For
+    // chroma key, NO job is ever requested -- matteAssetId stays permanently
+    // null, keyed out entirely client-side instead (see chromaKey.ts).
+    ...(chromaKeyColor
+      ? { backgroundRemoval: { enabled: true, matteAssetId: null, mode: "chromaKey" as const, chromaKeyColor } }
+      : removeBackground
+        ? { backgroundRemoval: { enabled: true, matteAssetId: null, mode: "ai" as const } }
+        : {}),
   };
   return {
     label: "Added clip to sequence",
@@ -697,7 +714,14 @@ export function applyAddImageSequenceClip(
   camera3D?: boolean,
   ambientEffect?: AmbientEffectId | null,
   faceEffect?: FaceEffectId | null,
-  audioReactive?: boolean
+  audioReactive?: boolean,
+  // Set (instead of `removeBackground`) for a solid-color backdrop -- see
+  // video_math.ts's BackgroundRemovalState.mode doc comment and
+  // applyAddVideoOverlay's identical param.
+  chromaKeyColor?: string,
+  // Set from CutawayDialog's own filter picker -- see
+  // applyAddSequenceClip's identical param.
+  colorFilterId?: FilterPresetId | null
 ): TransformationResult {
   const newEntry: SequenceEntry = {
     id: crypto.randomUUID(),
@@ -706,13 +730,19 @@ export function applyAddImageSequenceClip(
     durationSeconds,
     templateIds,
     cropRect,
+    colorFilterId,
     // matteAssetId starts null -- same "instant add, patch in the real
     // result once the job completes" staging as applyAddSequenceClip's own
     // video-kind backgroundRemoval, except a photo's own matting job
     // (backend/src/matting/service.py's image-kind path) is synchronous,
     // so the caller (ThreePaneEditor) may patch this in almost immediately
-    // rather than after a real poll loop.
-    ...(removeBackground ? { backgroundRemoval: { enabled: true, matteAssetId: null } } : {}),
+    // rather than after a real poll loop. For chroma key, no job is ever
+    // requested -- see applyAddSequenceClip's identical reasoning.
+    ...(chromaKeyColor
+      ? { backgroundRemoval: { enabled: true, matteAssetId: null, mode: "chromaKey" as const, chromaKeyColor } }
+      : removeBackground
+        ? { backgroundRemoval: { enabled: true, matteAssetId: null, mode: "ai" as const } }
+        : {}),
     camera3D,
     ambientEffect,
     faceEffect,
@@ -835,7 +865,18 @@ export function applyEditImageSequenceClip(
   camera3D?: boolean,
   ambientEffect?: AmbientEffectId | null,
   faceEffect?: FaceEffectId | null,
-  audioReactive?: boolean
+  audioReactive?: boolean,
+  // Set (instead of `removeBackground`) for a solid-color backdrop -- see
+  // video_math.ts's BackgroundRemovalState.mode doc comment and
+  // applyAddVideoOverlay's identical param.
+  chromaKeyColor?: string,
+  // Set from CutawayDialog's own filter picker -- see
+  // applyAddSequenceClip's identical param. Unlike `entry.colorFilterId`
+  // below (the OLD value, only read as a fallback further down), this is
+  // always authoritative when this function is called from the dialog's
+  // own "Save changes" -- the filter picker's state always reflects
+  // whatever's currently selected, on or off.
+  colorFilterId?: FilterPresetId | null
 ): TransformationResult {
   const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
   const entry = selections.sequenceClips[entryIndex];
@@ -860,12 +901,23 @@ export function applyEditImageSequenceClip(
     durationSeconds: clampedDuration,
     templateIds,
     cropRect,
-    colorFilterId: entry.colorFilterId,
-    // Preserves an already-completed matteAssetId when the toggle is left
-    // on unchanged (re-editing crop/duration/templates shouldn't re-run a
-    // paid matting job) -- only starts fresh (null, patched in by the
-    // caller) when the toggle is newly turned on this save.
-    backgroundRemoval: removeBackground ? { enabled: true, matteAssetId: entry.backgroundRemoval?.matteAssetId ?? null } : null,
+    // Falls back to the entry's OLD value when this param is omitted
+    // (undefined) -- keeps any caller that doesn't pass one (there are
+    // none left after CutawayDialog started sending its own filter picker
+    // state) from silently wiping out a filter set via the rail's
+    // right-click "Filter…" instead.
+    colorFilterId: colorFilterId !== undefined ? colorFilterId : entry.colorFilterId,
+    // Preserves an already-completed matteAssetId when AI mode is left on
+    // unchanged (re-editing crop/duration/templates shouldn't re-run a paid
+    // matting job) -- only starts fresh (null, patched in by the caller)
+    // when the toggle is newly turned on this save. Chroma key never had a
+    // matteAssetId to preserve (see applyAddImageSequenceClip's own
+    // reasoning), so it's always null there.
+    backgroundRemoval: chromaKeyColor
+      ? { enabled: true, matteAssetId: null, mode: "chromaKey" as const, chromaKeyColor }
+      : removeBackground
+        ? { enabled: true, matteAssetId: entry.backgroundRemoval?.matteAssetId ?? null, mode: "ai" as const }
+        : null,
     camera3D,
     ambientEffect,
     faceEffect,
