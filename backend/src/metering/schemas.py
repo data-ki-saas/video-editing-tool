@@ -38,3 +38,25 @@ class CapWarning(BaseModel):
 class CapWarningsResponse(BaseModel):
     days: int
     warnings: list[CapWarning]
+
+
+class ProviderTopUpCreate(BaseModel):
+    amount_cents: float
+    note: str | None = None
+
+
+class ProviderTopUp(BaseModel):
+    id: str
+    provider: str
+    amount_cents: float
+    note: str | None
+    created_at: str
+
+
+class ProviderRunwayResponse(BaseModel):
+    provider: str
+    topped_up_cents: float
+    spent_cents: float
+    remaining_cents: float
+    job_count: int
+    topups: list[ProviderTopUp]

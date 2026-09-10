@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useIsAdmin } from "@/lib/useIsAdmin";
+import { addProviderTopUp, getProviderRunway, type ProviderRunway } from "@/lib/api";
 
 // Static reference page -- no DB table, no CRUD. Pricing/plan details for
 // third-party integrations change on their own schedule, not ours, so this
@@ -31,6 +32,12 @@ type Integration = {
   // whole integration.
   envVars: EnvVar[];
   log: LogEntry[];
+  // Set only for a pay-as-you-go provider with no balance/billing API of
+  // its own to poll (fal.ai so far) -- renders a live ProviderRunwayCard
+  // below the static info, backed by admin-logged top-ups (see
+  // provider_topups' own migration comment) against this app's own
+  // usage_ledger spend, rather than anything fetched from the provider.
+  usageProviderKey?: string;
 };
 
 const INTEGRATIONS: Integration[] = [
@@ -92,6 +99,7 @@ const INTEGRATIONS: Integration[] = [
       { name: "BACKEND_PUBLIC_URL", scope: "backend", required: true },
       { name: "MATTING_DAILY_CAP", scope: "backend", required: false },
     ],
+    usageProviderKey: "fal",
     log: [
       {
         date: "2026-08-31",
@@ -176,6 +184,102 @@ const INTEGRATIONS: Integration[] = [
   },
 ];
 
+function formatCents(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
+/** Live usage/runway widget for a pay-as-you-go provider with no
+ * balance-check API of its own (fal.ai first) -- shows this app's own
+ * tracked spend (usage_ledger) against manually-logged top-ups
+ * (provider_topups), plus a small form to log a new one right after
+ * actually adding funds on the provider's own dashboard. See
+ * metering/service.py's get_provider_runway for how the numbers are
+ * derived. */
+function ProviderRunwayCard({ provider }: { provider: string }) {
+  const [runway, setRunway] = useState<ProviderRunway | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  function refresh() {
+    getProviderRunway(provider)
+      .then(setRunway)
+      .catch((err) => setError(err instanceof Error ? err.message : "Couldn't load usage"));
+  }
+
+  useEffect(refresh, [provider]);
+
+  async function handleLogTopUp(e: React.FormEvent) {
+    e.preventDefault();
+    const dollars = Number(amount);
+    if (!Number.isFinite(dollars) || dollars <= 0) return;
+    setSubmitting(true);
+    try {
+      await addProviderTopUp(provider, Math.round(dollars * 100), note.trim() || undefined);
+      setAmount("");
+      setNote("");
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't log the top-up");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (error) return <p className="mt-3 border-t border-border pt-2 text-xs text-red-400">{error}</p>;
+  if (!runway) return <p className="mt-3 border-t border-border pt-2 text-xs text-muted">Loading usage…</p>;
+
+  return (
+    <div className="mt-3 flex flex-col gap-2 border-t border-border pt-2">
+      <div className="text-xs">
+        <span className="font-medium">{formatCents(runway.remainingCents)} remaining</span>
+        <span className="text-muted">
+          {" "}
+          of {formatCents(runway.toppedUpCents)} topped up · {formatCents(runway.spentCents)} spent across {runway.jobCount} job
+          {runway.jobCount === 1 ? "" : "s"}
+        </span>
+      </div>
+      <form onSubmit={handleLogTopUp} className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-muted">Log a top-up:</span>
+        <input
+          type="number"
+          min="0.01"
+          step="0.01"
+          placeholder="USD"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          className="w-20 rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+        />
+        <input
+          type="text"
+          placeholder="Note (optional)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="w-40 rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground"
+        />
+        <button
+          type="submit"
+          disabled={submitting || !amount}
+          className="rounded-md border border-border px-2 py-1 text-xs text-foreground hover:bg-background disabled:opacity-50"
+        >
+          {submitting ? "Saving…" : "Add"}
+        </button>
+      </form>
+      {runway.topups.length > 0 && (
+        <ul className="flex flex-col gap-0.5">
+          {runway.topups.slice(0, 5).map((t) => (
+            <li key={t.id} className="text-xs text-muted">
+              {t.createdAt.slice(0, 10)} — {formatCents(t.amountCents)}
+              {t.note ? ` (${t.note})` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function AdminIntegrationsPage() {
   const router = useRouter();
   const isAdmin = useIsAdmin();
@@ -250,6 +354,7 @@ export default function AdminIntegrationsPage() {
                 ))}
               </ul>
             )}
+            {integration.usageProviderKey && <ProviderRunwayCard provider={integration.usageProviderKey} />}
           </div>
         ))}
       </div>

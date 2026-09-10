@@ -593,6 +593,66 @@ export async function getCapWarnings(days: number): Promise<CapWarningsResult> {
   };
 }
 
+export interface ProviderTopUp {
+  id: string;
+  provider: string;
+  amountCents: number;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface ProviderRunway {
+  provider: string;
+  toppedUpCents: number;
+  spentCents: number;
+  remainingCents: number;
+  jobCount: number;
+  topups: ProviderTopUp[];
+}
+
+function mapProviderTopUp(t: { id: string; provider: string; amount_cents: number; note: string | null; created_at: string }): ProviderTopUp {
+  return { id: t.id, provider: t.provider, amountCents: t.amount_cents, note: t.note, createdAt: t.created_at };
+}
+
+/** GET /api/metering/providers/{provider}/runway -- manually-logged top-ups
+ * minus this app's own tracked usage_ledger spend for that provider, since
+ * fal.ai (the first consumer of this, provider="fal") exposes no
+ * balance/billing API to poll -- see the admin integrations page's fal.ai
+ * card. Gated by the same metering_admin_view feature as getAdminUsageSummary. */
+export async function getProviderRunway(provider: string): Promise<ProviderRunway> {
+  const response = await apiFetch(`${API_BASE_URL}/api/metering/providers/${encodeURIComponent(provider)}/runway`, {
+    headers: await authHeader(),
+  });
+  const body = await handleResponse<{
+    provider: string;
+    topped_up_cents: number;
+    spent_cents: number;
+    remaining_cents: number;
+    job_count: number;
+    topups: { id: string; provider: string; amount_cents: number; note: string | null; created_at: string }[];
+  }>(response);
+  return {
+    provider: body.provider,
+    toppedUpCents: body.topped_up_cents,
+    spentCents: body.spent_cents,
+    remainingCents: body.remaining_cents,
+    jobCount: body.job_count,
+    topups: body.topups.map(mapProviderTopUp),
+  };
+}
+
+/** POST /api/metering/providers/{provider}/topups -- an admin manually
+ * recording that they added funds on the provider's own dashboard. */
+export async function addProviderTopUp(provider: string, amountCents: number, note?: string): Promise<ProviderTopUp> {
+  const response = await apiFetch(`${API_BASE_URL}/api/metering/providers/${encodeURIComponent(provider)}/topups`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ amount_cents: amountCents, note: note || null }),
+  });
+  const body = await handleResponse<{ id: string; provider: string; amount_cents: number; note: string | null; created_at: string }>(response);
+  return mapProviderTopUp(body);
+}
+
 export async function deleteProject(projectId: string) {
   const response = await apiFetch(`${API_BASE_URL}/api/projects/${encodeURIComponent(projectId)}`, {
     method: "DELETE",

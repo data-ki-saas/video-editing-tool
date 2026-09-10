@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 _TABLE = "usage_ledger"
 _CAP_WARNINGS_TABLE = "cap_warnings"
+_TOPUPS_TABLE = "provider_topups"
 
 
 def record_event(
@@ -67,6 +68,31 @@ def fetch_recent_events(days: int) -> list[dict]:
     return result.data or []
 
 
+def sum_succeeded_cost_cents(providers: list[str]) -> tuple[float, int]:
+    """All-time spend + job count for a set of usage_ledger `provider`
+    values (e.g. ["fal_rembg", "fal_veed"] for the one fal.ai account both
+    bill through) -- used by get_provider_runway, not fetch_recent_events's
+    own days-windowed totals, since runway needs the account's real
+    lifetime spend, not just a recent slice. Same fail-open-to-zero
+    convention as fetch_recent_events; same 5000-row cap for POC-scale
+    volume."""
+    try:
+        result = (
+            get_supabase_client()
+            .table(_TABLE)
+            .select("cost_estimate_cents")
+            .in_("provider", providers)
+            .eq("status", "succeeded")
+            .limit(5000)
+            .execute()
+        )
+    except Exception:
+        logger.exception("failed to sum usage ledger cost for providers=%s", providers)
+        return 0.0, 0
+    rows = result.data or []
+    return sum(float(row.get("cost_estimate_cents") or 0) for row in rows), len(rows)
+
+
 def record_cap_warning(*, user_id: str, feature: str, cap_value: int, count_at_trigger: int) -> None:
     """Best-effort, same convention as usage_ledger's record_event above --
     a failure to log this warning shouldn't fail the 429 that already
@@ -101,5 +127,39 @@ def fetch_recent_cap_warnings(days: int) -> list[dict]:
         )
     except Exception:
         logger.exception("failed to fetch cap warnings for last %s days", days)
+        return []
+    return result.data or []
+
+
+def create_topup(*, provider: str, amount_cents: float, note: str | None, created_by: str | None) -> dict:
+    """Not best-effort like record_event/record_cap_warning above -- this
+    IS the admin's actual action (not a side-log next to one that already
+    succeeded), so a write failure should raise and surface to them rather
+    than silently pretend the top-up was saved."""
+    result = (
+        get_supabase_client()
+        .table(_TOPUPS_TABLE)
+        .insert({"provider": provider, "amount_cents": amount_cents, "note": note, "created_by": created_by})
+        .execute()
+    )
+    return result.data[0]
+
+
+def fetch_topups(provider: str) -> list[dict]:
+    """Fail-open (empty list) on a read error, same convention as
+    fetch_recent_events above -- the integrations page's runway card
+    shouldn't 500 over a read hiccup."""
+    try:
+        result = (
+            get_supabase_client()
+            .table(_TOPUPS_TABLE)
+            .select("id, provider, amount_cents, note, created_at")
+            .eq("provider", provider)
+            .order("created_at", desc=True)
+            .limit(200)
+            .execute()
+        )
+    except Exception:
+        logger.exception("failed to fetch provider topups for provider=%s", provider)
         return []
     return result.data or []

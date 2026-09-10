@@ -2,10 +2,26 @@ import logging
 from collections import defaultdict
 
 from src.metering import repository
-from src.metering.schemas import AdminUsageSummaryResponse, CapWarning, CapWarningsResponse, DailyCost, TopUser, UsageTotal
+from src.metering.schemas import (
+    AdminUsageSummaryResponse,
+    CapWarning,
+    CapWarningsResponse,
+    DailyCost,
+    ProviderRunwayResponse,
+    ProviderTopUp,
+    TopUser,
+    UsageTotal,
+)
 from src.permissions import repository as permissions_repository
 
 logger = logging.getLogger(__name__)
+
+# Which usage_ledger `provider` values roll up into each admin-facing
+# "account" runway card -- fal.ai bills both the VEED (video) and rembg
+# (photo) matting jobs through the ONE account/API key (see admin/
+# integrations page's own note), so both share the one "fal" top-up ledger
+# even though usage_ledger itself keeps them as two distinct provider values.
+_RUNWAY_PROVIDER_LEDGER_KEYS = {"fal": ["fal_rembg", "fal_veed"]}
 
 
 def get_admin_summary(days: int = 30) -> AdminUsageSummaryResponse:
@@ -74,3 +90,31 @@ def list_cap_warnings(days: int = 7) -> CapWarningsResponse:
             )
         )
     return CapWarningsResponse(days=days, warnings=warnings)
+
+
+def record_provider_topup(*, provider: str, amount_cents: float, note: str | None, created_by: str) -> ProviderTopUp:
+    row = repository.create_topup(provider=provider, amount_cents=amount_cents, note=note, created_by=created_by)
+    return ProviderTopUp(id=row["id"], provider=row["provider"], amount_cents=row["amount_cents"], note=row.get("note"), created_at=row["created_at"])
+
+
+def get_provider_runway(provider: str) -> ProviderRunwayResponse:
+    """Manually-topped-up balance minus this app's own tracked spend for
+    that provider -- see provider_topups' own migration comment for why
+    this is hand-logged rather than pulled from the provider's own API
+    (fal.ai exposes no balance endpoint we're aware of)."""
+    ledger_providers = _RUNWAY_PROVIDER_LEDGER_KEYS.get(provider, [provider])
+    spent_cents, job_count = repository.sum_succeeded_cost_cents(ledger_providers)
+    topup_rows = repository.fetch_topups(provider)
+    topped_up_cents = sum(float(row.get("amount_cents") or 0) for row in topup_rows)
+    topups = [
+        ProviderTopUp(id=row["id"], provider=row["provider"], amount_cents=row["amount_cents"], note=row.get("note"), created_at=row["created_at"])
+        for row in topup_rows
+    ]
+    return ProviderRunwayResponse(
+        provider=provider,
+        topped_up_cents=topped_up_cents,
+        spent_cents=spent_cents,
+        remaining_cents=topped_up_cents - spent_cents,
+        job_count=job_count,
+        topups=topups,
+    )
