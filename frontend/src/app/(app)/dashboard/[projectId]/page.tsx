@@ -19,14 +19,6 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
 
   const [project, setProject] = useState<Project | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Bumped by the error screen's "Retry" button to force the load effect
-  // below to re-run even though projectId hasn't changed -- the shared
-  // Supabase fetch wrapper already retries a transient network failure once
-  // on its own (see lib/supabase/client.ts), but a longer outage or a
-  // Supabase project waking up from a free-tier pause can outlast that, and
-  // shouldn't strand the user on a dead-end error page with no way back in
-  // short of a full reload.
-  const [retryToken, setRetryToken] = useState(0);
   // isReady stays false until the first client-side device check has
   // actually run (matchMedia can't be read during SSR/first paint) -- see
   // useIsMobile's own comment. Gated on below alongside `project` so this
@@ -55,7 +47,7 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
         }
         setError(err instanceof Error ? err.message : "Failed to load this reel");
       });
-  }, [projectId, router, retryToken]);
+  }, [projectId, router]);
 
   if (error) {
     return (
@@ -63,7 +55,15 @@ export default function ReelEditorPage({ params }: { params: Promise<{ projectId
         <p>Couldn&apos;t load this reel: {error}</p>
         <button
           type="button"
-          onClick={() => setRetryToken((n) => n + 1)}
+          // A full reload, not a re-run of the load effect above -- a stuck
+          // load is usually a stale HTTP/3 (QUIC) connection to Supabase's
+          // edge (e.g. after the laptop slept, or a VPN/Wi-Fi network
+          // change) that the browser keeps reusing and failing on for as
+          // long as this tab's network context lives. Re-running the same
+          // fetch in-page hits that same broken connection again; only a
+          // real navigation makes Chrome establish a fresh one -- confirmed
+          // by a plain page refresh succeeding where in-page retry didn't.
+          onClick={() => window.location.reload()}
           className="rounded-md border border-red-600 px-3 py-1.5 text-red-600 hover:bg-red-50"
         >
           Retry

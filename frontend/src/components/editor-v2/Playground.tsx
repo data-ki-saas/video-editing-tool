@@ -304,7 +304,7 @@ export function Playground({
   ) => void;
   onToggleImageSplitScreenOrientation: (overlayIndex: number) => void;
   onToggleImageSplitScreenSides: (overlayIndex: number) => void;
-  onOpenImageOverlayFraming: (overlayIndex: number) => void;
+  onOpenImageOverlayFraming: (overlayIndex: number, clickedTimeSeconds: number) => void;
   onOpenImageOverlayFilter: (overlayIndex: number) => void;
   onDeleteImageOverlay: (overlayIndex: number) => void;
   textOverlays: TextOverlay[];
@@ -347,7 +347,7 @@ export function Playground({
   ) => void;
   onToggleSplitScreenOrientation: (overlayIndex: number) => void;
   onToggleSplitScreenSides: (overlayIndex: number) => void;
-  onOpenVideoOverlayFraming: (overlayIndex: number) => void;
+  onOpenVideoOverlayFraming: (overlayIndex: number, clickedTimeSeconds: number) => void;
   onOpenVideoOverlayFilter: (overlayIndex: number) => void;
   onDeleteVideoOverlay: (overlayIndex: number) => void;
   onChangeOverlayAudioBalance: (overlayIndex: number, balance: number) => void;

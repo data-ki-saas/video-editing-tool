@@ -461,10 +461,19 @@ export function ThreePaneEditor({
   // (null means closed, not "add new" -- there's always an existing
   // overlay to fine-tune, unlike the text dialog's add-vs-edit duality).
   const [framingDialogOverlayIndex, setFramingDialogOverlayIndex] = useState<number | null>(null);
+  // Where on VideoOverlayTrack's segment the click/tap that opened the
+  // dialog landed, in sequence-timeline seconds -- an overlay can stretch
+  // across several base cutaways, so the dialog's own background frame
+  // (framingDialogOverlayBaseFrameUrl below) uses THIS time rather than the
+  // main playhead's (currentTimeSeconds), which may be sitting anywhere
+  // else on the timeline when the dialog is opened.
+  const [framingDialogBaseTimeSeconds, setFramingDialogBaseTimeSeconds] = useState(0);
   // ImageOverlayFramingDialog's own equivalent -- a separate index since an
   // image overlay and a video overlay are independent arrays/rails (see
   // video_math.ts's ImageOverlayClip doc comment).
   const [imageFramingDialogOverlayIndex, setImageFramingDialogOverlayIndex] = useState<number | null>(null);
+  // Same as framingDialogBaseTimeSeconds above, for ImageOverlayFramingDialog.
+  const [imageFramingDialogBaseTimeSeconds, setImageFramingDialogBaseTimeSeconds] = useState(0);
   // "Video Overlay"/"Image Overlay" tabs' own small asset-picker dialogs --
   // see VideoOverlayPickerDialog.tsx/ImageOverlayPickerDialog.tsx. Picking a
   // tile adds that asset instantly (same as AssetGallery's right-click
@@ -659,6 +668,20 @@ export function ThreePaneEditor({
     transcriptCaption: rawSelections.transcriptCaption ?? null,
     musicClips: rawSelections.musicClips ?? [],
   };
+
+  // Mirrors `selections` for the handful of long-running async callbacks
+  // below (the three requestAndPoll*BackgroundRemoval functions) that
+  // capture `selections` in a closure when a matting job is REQUESTED but
+  // only build their pushChange patch once it's COMPLETED, possibly minutes
+  // later. Reading `selections` itself there would silently spread that
+  // stale closure's entire snapshot back over live state (reverting every
+  // edit made anywhere in the timeline while the job was in flight --
+  // deleted cutaways reappearing, replaced overlays reverting, etc.) once
+  // pushChange replaces the current history entry with it. Reading
+  // selectionsRef.current instead means the patch always lands on top of
+  // whatever's actually current at completion time.
+  const selectionsRef = useRef(selections);
+  selectionsRef.current = selections;
 
   // Ctrl/Cmd+Z to undo, Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z to redo (both redo
   // conventions are common enough -- Windows apps mostly use Ctrl+Y, Mac
@@ -1461,7 +1484,10 @@ export function ThreePaneEditor({
       // synthetic merge) since the matting endpoints only return the matte's
       // id/URL, not the full Asset shape uploadAsset's response carries.
       await refreshAssets();
-      const { label, state } = applySetBackgroundRemoval(selections, entryId, {
+      // selectionsRef.current, not `selections` -- see that ref's own
+      // comment: this job can take minutes, and `selections` here is
+      // whatever it was back when the job was REQUESTED.
+      const { label, state } = applySetBackgroundRemoval(selectionsRef.current, entryId, {
         enabled: true,
         matteAssetId: result.matteAssetId,
       });
@@ -1592,7 +1618,8 @@ export function ThreePaneEditor({
       return next;
     });
     if (result.status !== "completed") return;
-    const { label, state } = applySetVideoOverlayBackgroundRemoval(selections, overlayIndex, {
+    // selectionsRef.current, not `selections` -- see that ref's own comment.
+    const { label, state } = applySetVideoOverlayBackgroundRemoval(selectionsRef.current, overlayIndex, {
       enabled: true,
       matteAssetId: result.matteAssetId,
       mode: "ai",
@@ -1617,7 +1644,8 @@ export function ThreePaneEditor({
       return next;
     });
     if (result.status !== "completed") return;
-    const { label, state } = applySetImageOverlayBackgroundRemoval(selections, overlayIndex, {
+    // selectionsRef.current, not `selections` -- see that ref's own comment.
+    const { label, state } = applySetImageOverlayBackgroundRemoval(selectionsRef.current, overlayIndex, {
       enabled: true,
       matteAssetId: result.matteAssetId,
       mode: "ai",
@@ -1742,10 +1770,13 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
-  // VideoOverlayTrack's crosshair button -- opens VideoOverlayFramingDialog
-  // for that overlay.
-  function handleOpenVideoOverlayFraming(overlayIndex: number) {
+  // VideoOverlayTrack's crosshair button (or a plain click on its segment)
+  // -- opens VideoOverlayFramingDialog for that overlay, seeded with the
+  // clicked point's own time (see framingDialogBaseTimeSeconds's own
+  // comment).
+  function handleOpenVideoOverlayFraming(overlayIndex: number, clickedTimeSeconds: number) {
     setFramingDialogOverlayIndex(overlayIndex);
+    setFramingDialogBaseTimeSeconds(clickedTimeSeconds);
   }
 
   function handleCloseVideoOverlayFramingDialog() {
@@ -1850,10 +1881,12 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
-  // ImageOverlayTrack's crosshair button -- opens ImageOverlayFramingDialog
-  // for that overlay, mirror of handleOpenVideoOverlayFraming above.
-  function handleOpenImageOverlayFraming(overlayIndex: number) {
+  // ImageOverlayTrack's crosshair button (or a plain click on its segment)
+  // -- opens ImageOverlayFramingDialog for that overlay, mirror of
+  // handleOpenVideoOverlayFraming above.
+  function handleOpenImageOverlayFraming(overlayIndex: number, clickedTimeSeconds: number) {
     setImageFramingDialogOverlayIndex(overlayIndex);
+    setImageFramingDialogBaseTimeSeconds(clickedTimeSeconds);
   }
 
   function handleCloseImageOverlayFramingDialog() {
@@ -2785,8 +2818,30 @@ export function ThreePaneEditor({
       videoThumbnailUrlByAssetId[framingDialogOverlay.assetId] ??
       null)
     : null;
+  // The dialog's BACKGROUND frame (what's actually running on the base
+  // sequence behind this overlay) -- resolved at framingDialogBaseTimeSeconds
+  // (the point on the segment that was clicked to open the dialog), not
+  // previewFrameUrl's generic "wherever the main playhead currently is"
+  // frame. An overlay can stretch across more than one base cutaway, so
+  // there's no single frame that's always correct here; letting the click
+  // pick the point of interest is what CutawayTrack's own click-to-edit
+  // already gives every OTHER dialog for free (a cutaway can't span two of
+  // itself), and is the only option that generalizes properly here.
+  const framingDialogOverlayBaseFrameUrl = framingDialogOverlay
+    ? (() => {
+        const index = findClosestTimestampIndex(thumbnailTimestampsSeconds, framingDialogBaseTimeSeconds);
+        return index >= 0 ? thumbnails[index] : null;
+      })()
+    : null;
   const imageFramingDialogOverlay =
     imageFramingDialogOverlayIndex !== null ? displayedOverlayImages[imageFramingDialogOverlayIndex] ?? null : null;
+  // Same as framingDialogOverlayBaseFrameUrl above, for ImageOverlayFramingDialog.
+  const imageFramingDialogOverlayBaseFrameUrl = imageFramingDialogOverlay
+    ? (() => {
+        const index = findClosestTimestampIndex(thumbnailTimestampsSeconds, imageFramingDialogBaseTimeSeconds);
+        return index >= 0 ? thumbnails[index] : null;
+      })()
+    : null;
   const sourceStartDialogOverlay =
     sourceStartDialogOverlayIndex !== null ? displayedVideoOverlays[sourceStartDialogOverlayIndex] ?? null : null;
   const sourceStartDialogAsset = sourceStartDialogOverlay ? assets.find((a) => a.id === sourceStartDialogOverlay.assetId) ?? null : null;
@@ -2842,10 +2897,12 @@ export function ThreePaneEditor({
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
           framingDialogOverlay={framingDialogOverlay}
           framingDialogOverlayFrameUrl={framingDialogOverlayFrameUrl}
+          framingDialogOverlayBaseFrameUrl={framingDialogOverlayBaseFrameUrl}
           onSaveVideoOverlayFraming={handleSaveVideoOverlayFraming}
           onCloseVideoOverlayFramingDialog={handleCloseVideoOverlayFramingDialog}
           onDeleteFramingDialogOverlay={handleDeleteFramingDialogOverlay}
           imageFramingDialogOverlay={imageFramingDialogOverlay}
+          imageFramingDialogOverlayBaseFrameUrl={imageFramingDialogOverlayBaseFrameUrl}
           onSaveImageOverlayFraming={handleSaveImageOverlayFraming}
           onCloseImageOverlayFramingDialog={handleCloseImageOverlayFramingDialog}
           onDeleteImageFramingDialogOverlay={handleDeleteImageFramingDialogOverlay}

@@ -175,6 +175,20 @@ export function FlipCameraIcon(props: IconProps) {
   );
 }
 
+/** Two overlapping circles -- CameraCapturePage's "try another back lens"
+ * button (mobile only, shown when this session has confirmed a phone
+ * exposes more than one back-facing camera device -- see
+ * backLensDeviceIds' own comment there). Distinct from FlipCameraIcon
+ * (front/back switch), same outline stroke style. */
+export function SwitchLensIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="9" cy="12" r="5" />
+      <circle cx="15" cy="12" r="5" />
+    </svg>
+  );
+}
+
 /** Counter-clockwise refresh arrow -- CameraCapturePage's "Reset" button
  * (discard what's recorded so far and start over), same outline stroke
  * style as ExpandIcon/CollapseIcon. */

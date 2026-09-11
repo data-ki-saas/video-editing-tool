@@ -31,6 +31,12 @@ import { MattingProgressBadge } from "./MattingProgressBadge";
 
 const SNAP_THRESHOLD_PX = 8;
 
+// Pixel movement, from the initial pointerdown, before a press-and-move on
+// the segment body counts as a drag rather than a click -- below this, a
+// plain click opens the framing dialog instead (same click-vs-drag split as
+// CutawayTrack.tsx's own DRAG_THRESHOLD_PX).
+const DRAG_THRESHOLD_PX = 4;
+
 const LAYOUT_COLOR_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
   "full-screen": "border-sky-700 bg-sky-500",
   "picture-in-picture": "border-fuchsia-700 bg-fuchsia-500",
@@ -73,12 +79,29 @@ function ImageOverlaySegment({
   onChangeLayout: (layoutType: VideoOverlayLayout["type"], splitScreenOrientation?: "horizontal" | "vertical") => void;
   onToggleOrientation: () => void;
   onToggleSides: () => void;
-  onOpenFraming: () => void;
+  // Takes the time (seconds, within this overlay's own window) the framing
+  // dialog should show as its background -- see resolveClickedTimeSeconds
+  // below for where that comes from.
+  onOpenFraming: (clickedTimeSeconds: number) => void;
   onOpenFilter: () => void;
   onDelete: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
+
+  // Where a click landed, as a time within THIS overlay's own
+  // [startTimeSeconds, endTimeSeconds) window -- an overlay can stretch
+  // across several base cutaways, so which one is actually behind it varies
+  // along its length. Clamped to the overlay's own window so a click that
+  // lands right on its edge (or the track rect not being measurable yet)
+  // never resolves outside it.
+  function resolveClickedTimeSeconds(clientX: number): number {
+    const track = rootRef.current?.parentElement;
+    if (!track || videoDurationSeconds <= 0) return overlay.startTimeSeconds;
+    const trackRect = track.getBoundingClientRect();
+    const raw = ((clientX - trackRect.left) / trackRect.width) * videoDurationSeconds;
+    return Math.min(Math.max(raw, overlay.startTimeSeconds), overlay.endTimeSeconds);
+  }
 
   function startEdgeDrag(e: React.PointerEvent, edge: "start" | "end") {
     e.preventDefault();
@@ -129,6 +152,7 @@ function ImageOverlaySegment({
     const minStart = prevBoundSeconds;
     const maxStart = Math.min(nextBoundSeconds, videoDurationSeconds) - durationSeconds;
     const snapThresholdSeconds = (SNAP_THRESHOLD_PX / trackRect.width) * videoDurationSeconds;
+    let dragged = false;
 
     function computeNext(clientX: number): number {
       const dxSeconds = ((clientX - startX) / trackRect.width) * videoDurationSeconds;
@@ -137,12 +161,18 @@ function ImageOverlaySegment({
       return Math.min(Math.max(snapped, minStart), Math.max(maxStart, minStart));
     }
     function handleMove(ev: PointerEvent) {
+      if (!dragged && Math.abs(ev.clientX - startX) >= DRAG_THRESHOLD_PX) dragged = true;
       onChangePosition(computeNext(ev.clientX));
     }
     function handleUp(ev: PointerEvent) {
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
-      onCommitPosition(computeNext(ev.clientX));
+      // A press that never moved past the threshold is a click, not a drag
+      // -- opens the framing dialog (same "click anywhere on the segment"
+      // affordance CutawayTrack already has for its own image segments) at
+      // the clicked point, instead of committing a no-op position change.
+      if (dragged) onCommitPosition(computeNext(ev.clientX));
+      else onOpenFraming(resolveClickedTimeSeconds(ev.clientX));
     }
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", handleUp);
@@ -206,7 +236,7 @@ function ImageOverlaySegment({
       <button
         type="button"
         onPointerDown={(e) => e.stopPropagation()}
-        onClick={onOpenFraming}
+        onClick={(e) => onOpenFraming(resolveClickedTimeSeconds(e.clientX))}
         title="Adjust framing -- recenter or flip this overlay's own photo"
         className="pointer-events-auto z-10 shrink-0 rounded-sm bg-black/25 p-0.5 text-white hover:bg-black/50"
       >
@@ -312,7 +342,9 @@ export function ImageOverlayTrack({
   onChangeLayout: (overlayIndex: number, layoutType: VideoOverlayLayout["type"], splitScreenOrientation?: "horizontal" | "vertical") => void;
   onToggleOrientation: (overlayIndex: number) => void;
   onToggleSides: (overlayIndex: number) => void;
-  onOpenFraming: (overlayIndex: number) => void;
+  // See ImageOverlaySegment's own onOpenFraming doc comment above -- the
+  // clicked time passes through unchanged all the way to ThreePaneEditor.
+  onOpenFraming: (overlayIndex: number, clickedTimeSeconds: number) => void;
   onOpenFilter: (overlayIndex: number) => void;
   onDelete: (overlayIndex: number) => void;
 }) {
@@ -341,7 +373,7 @@ export function ImageOverlayTrack({
         onChangeLayout(index, layoutType, splitScreenOrientation),
       onToggleOrientation: () => onToggleOrientation(index),
       onToggleSides: () => onToggleSides(index),
-      onOpenFraming: () => onOpenFraming(index),
+      onOpenFraming: (clickedTimeSeconds: number) => onOpenFraming(index, clickedTimeSeconds),
       onOpenFilter: () => onOpenFilter(index),
       onDelete: () => onDelete(index),
     };

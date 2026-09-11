@@ -627,7 +627,7 @@ export function FrameStrip({
   ) => void;
   onToggleImageSplitScreenOrientation: (overlayIndex: number) => void;
   onToggleImageSplitScreenSides: (overlayIndex: number) => void;
-  onOpenImageOverlayFraming: (overlayIndex: number) => void;
+  onOpenImageOverlayFraming: (overlayIndex: number, clickedTimeSeconds: number) => void;
   // This overlay's own right-click "Filter" -- opens FilterPresetDialog
   // scoped to just this overlay (see applySelectImageOverlayFilterPreset).
   onOpenImageOverlayFilter: (overlayIndex: number) => void;
@@ -670,7 +670,7 @@ export function FrameStrip({
   ) => void;
   onToggleSplitScreenOrientation: (overlayIndex: number) => void;
   onToggleSplitScreenSides: (overlayIndex: number) => void;
-  onOpenVideoOverlayFraming: (overlayIndex: number) => void;
+  onOpenVideoOverlayFraming: (overlayIndex: number, clickedTimeSeconds: number) => void;
   // Same as onOpenImageOverlayFilter, for a video overlay (see
   // applySelectVideoOverlayFilterPreset).
   onOpenVideoOverlayFilter: (overlayIndex: number) => void;

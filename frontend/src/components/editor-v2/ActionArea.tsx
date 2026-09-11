@@ -214,10 +214,12 @@ export function ActionArea({
   videoThumbnailUrlByAssetId,
   framingDialogOverlay,
   framingDialogOverlayFrameUrl,
+  framingDialogOverlayBaseFrameUrl,
   onSaveVideoOverlayFraming,
   onCloseVideoOverlayFramingDialog,
   onDeleteFramingDialogOverlay,
   imageFramingDialogOverlay,
+  imageFramingDialogOverlayBaseFrameUrl,
   onSaveImageOverlayFraming,
   onCloseImageOverlayFramingDialog,
   onDeleteImageFramingDialogOverlay,
@@ -348,14 +350,21 @@ export function ActionArea({
   // it alone holds videoOverlayStartThumbnailByKey; null while no dialog
   // is open.
   framingDialogOverlayFrameUrl: string | null;
+  // The BASE (background) frame -- the sequence's own footage this overlay
+  // sits on top of, resolved at the point on its segment that was actually
+  // clicked to open the dialog (see ThreePaneEditor's
+  // framingDialogBaseTimeSeconds), not just wherever the main playhead
+  // happens to be sitting.
+  framingDialogOverlayBaseFrameUrl: string | null;
   onSaveVideoOverlayFraming: (
     framing: OverlayFraming,
     options?: { baseFraming?: OverlayFraming; ratio?: number; audioBalance?: number; rect?: CropRect }
   ) => void;
   onCloseVideoOverlayFramingDialog: () => void;
   onDeleteFramingDialogOverlay: () => void;
-  // ImageOverlayFramingDialog's own equivalent of the four props above.
+  // ImageOverlayFramingDialog's own equivalent of the props above.
   imageFramingDialogOverlay: ImageOverlayClip | null;
+  imageFramingDialogOverlayBaseFrameUrl: string | null;
   onSaveImageOverlayFraming: (framing: OverlayFraming, options?: { baseFraming?: OverlayFraming; ratio?: number; rect?: CropRect }) => void;
   onCloseImageOverlayFramingDialog: () => void;
   onDeleteImageFramingDialogOverlay: () => void;
@@ -901,7 +910,7 @@ export function ActionArea({
       {framingDialogOverlay && (
         <VideoOverlayFramingDialog
           overlay={framingDialogOverlay}
-          baseFrameUrl={previewFrameUrl ?? ""}
+          baseFrameUrl={framingDialogOverlayBaseFrameUrl ?? ""}
           overlayFrameUrl={framingDialogOverlayFrameUrl ?? ""}
           outputAspectRatio={playAreaRatio}
           onSave={onSaveVideoOverlayFraming}
@@ -913,7 +922,7 @@ export function ActionArea({
       {imageFramingDialogOverlay && (
         <ImageOverlayFramingDialog
           overlay={imageFramingDialogOverlay}
-          baseFrameUrl={previewFrameUrl ?? ""}
+          baseFrameUrl={imageFramingDialogOverlayBaseFrameUrl ?? ""}
           overlayFrameUrl={assetUrlById[imageFramingDialogOverlay.assetId] ?? ""}
           outputAspectRatio={playAreaRatio}
           onSave={onSaveImageOverlayFraming}

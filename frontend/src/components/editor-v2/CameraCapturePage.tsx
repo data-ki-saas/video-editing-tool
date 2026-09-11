@@ -53,7 +53,7 @@ import { Camera3DRenderer, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { computeCoverFitSourceRect } from "@/lib/video/video_math";
 import { pickMediaRecorderMimeType, toMp4Asset } from "@/lib/media/cameraRecording";
 import { useIsMobile } from "@/lib/useIsMobile";
-import { FlipCameraIcon, PlayIcon, PauseIcon, ResetIcon, TeleprompterIcon, EyeIcon, EyeOffIcon } from "./icons/PlayerIcons";
+import { FlipCameraIcon, SwitchLensIcon, PlayIcon, PauseIcon, ResetIcon, TeleprompterIcon, EyeIcon, EyeOffIcon } from "./icons/PlayerIcons";
 
 const MAX_RECORDING_SECONDS = 180;
 // Smart-default teleprompter scroll pace -- no manual speed knob (see this
@@ -102,6 +102,12 @@ const CAPTURE_ASPECT_RATIO = 9 / 16;
 // shown once ever, same "reel-creator-" prefixed localStorage convention as
 // this app's saved theme (see app/layout.tsx).
 const FRAMING_TIP_DISMISSED_KEY = "reel-creator-camera-framing-tip-seen";
+// Remembers which back-lens deviceId the user last picked via the lens-
+// switch button (see backLensDeviceIds' own comment) so a phone with
+// multiple rear cameras doesn't reset to the default lens -- often not the
+// widest one -- every time this page reopens. Same "reel-creator-" prefixed
+// localStorage convention as the framing tip above.
+const BACK_LENS_DEVICE_ID_KEY = "reel-creator-camera-back-lens-device-id";
 // Persists the typed teleprompter script itself across a page refresh/tab
 // close -- same "reel-creator-" prefixed localStorage convention as the
 // framing tip above. Without this, a script the user had already typed in
@@ -148,6 +154,39 @@ function describeCameraError(err: unknown): string {
   if (name === "NotAllowedError") return "Camera access was denied. Allow camera (and microphone) access in your browser's site settings, then try again.";
   if (name === "NotFoundError" || name === "OverconstrainedError") return "No camera was found on this device.";
   return "Couldn't access the camera. Check your browser's permission settings and try again.";
+}
+
+// Probes every OTHER videoinput device (skipping `excludeDeviceId`, already
+// known-good) to find additional back-facing lenses on phones that expose
+// their main/ultra-wide/tele cameras as SEPARATE devices rather than one
+// logical camera with a `zoom` range -- see backLensDeviceIds' own comment
+// for why the existing zoom-capability-min reset can't reach those. Probes
+// sequentially, not in parallel: opening two streams from the same camera
+// subsystem at once can throw on some phones, and awaiting each one before
+// starting the next keeps at most one extra stream open at a time. A device
+// that errors out (busy/unavailable) or whose settings don't confirm
+// facingMode "environment" is silently skipped -- under-detecting is far
+// safer here than mistakenly offering the FRONT camera as a "back lens".
+async function probeOtherBackLensDeviceIds(excludeDeviceId: string | undefined): Promise<string[]> {
+  let devices: MediaDeviceInfo[];
+  try {
+    devices = await navigator.mediaDevices.enumerateDevices();
+  } catch {
+    return [];
+  }
+  const candidates = devices.filter((d) => d.kind === "videoinput" && d.deviceId && d.deviceId !== excludeDeviceId);
+  const found: string[] = [];
+  for (const device of candidates) {
+    try {
+      const probeStream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: device.deviceId } } });
+      const [track] = probeStream.getVideoTracks();
+      if (track?.getSettings().facingMode === "environment") found.push(device.deviceId);
+      probeStream.getTracks().forEach((t) => t.stop());
+    } catch {
+      // Ignored -- see this function's own doc comment.
+    }
+  }
+  return found;
 }
 
 function stopMediaRecorder(recorder: MediaRecorder): Promise<void> {
@@ -317,6 +356,22 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
 
   const [facingMode, setFacingMode] = useState<"user" | "environment">("environment");
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
+  // Which back-facing deviceIds this session has confirmed exist (see
+  // probeOtherBackLensDeviceIds above) -- there's no standard web API to ask
+  // a lens its actual field of view, so once more than one is found the
+  // lens-switch button below just lets the user tap through them looking
+  // for wider coverage themselves (reported as "back camera still zoomed in
+  // a lot" even after the aspectRatio/resizeMode negotiation hints below).
+  // Populated once per page lifetime (see hasProbedBackLensesRef), not
+  // per facingMode flip -- the list doesn't change once discovered.
+  const [backLensDeviceIds, setBackLensDeviceIds] = useState<string[]>([]);
+  // Non-null only once the user has actively picked a specific back lens
+  // (a manual cycle tap, or a remembered BACK_LENS_DEVICE_ID_KEY preference
+  // restored on mount) -- left null the rest of the time so the very first
+  // acquisition below still goes through the plain facingMode path rather
+  // than needlessly re-deriving today's default lens by deviceId.
+  const [selectedBackLensDeviceId, setSelectedBackLensDeviceId] = useState<string | null>(null);
+  const hasProbedBackLensesRef = useRef(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   // Bumped by the "Try again" button to force the camera-acquisition effect
   // below to re-run even when facingMode hasn't changed (setting it to its
@@ -464,10 +519,16 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
     setCameraError(null);
 
     async function acquireCameraStream(): Promise<MediaStream> {
-      const baseVideoConstraints: MediaTrackConstraints = {
-        facingMode,
-        frameRate: { ideal: TARGET_FPS, max: TARGET_FPS },
-      };
+      // Once the user has actively picked a specific back lens (see
+      // selectedBackLensDeviceId's own comment), address it directly by
+      // deviceId instead of facingMode -- facingMode alone always re-lands
+      // on whichever lens the browser/OS treats as its own default
+      // "environment" camera, which is exactly the one the lens-switch
+      // button exists to get away from.
+      const baseVideoConstraints: MediaTrackConstraints =
+        facingMode === "environment" && selectedBackLensDeviceId
+          ? { deviceId: { exact: selectedBackLensDeviceId }, frameRate: { ideal: TARGET_FPS, max: TARGET_FPS } }
+          : { facingMode, frameRate: { ideal: TARGET_FPS, max: TARGET_FPS } };
       try {
         return await navigator.mediaDevices.getUserMedia({
           audio: true,
@@ -563,6 +624,37 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
           // Device labels/enumeration can fail before permission is fully
           // settled on some browsers -- just keep the flip button hidden.
         }
+        // One-time (per page lifetime, not per flip -- see
+        // hasProbedBackLensesRef) discovery of any OTHER back-facing lenses
+        // this phone exposes as separate devices -- see backLensDeviceIds'
+        // own comment for why. Only worth trying on the mobile back camera,
+        // where the "zoomed in a lot" complaint this exists for actually
+        // comes from.
+        if (isMobile && facingMode === "environment" && !hasProbedBackLensesRef.current) {
+          hasProbedBackLensesRef.current = true;
+          const currentDeviceId = videoTrack?.getSettings().deviceId;
+          probeOtherBackLensDeviceIds(currentDeviceId).then((otherDeviceIds) => {
+            if (cancelled) return;
+            const allDeviceIds = currentDeviceId ? [currentDeviceId, ...otherDeviceIds] : otherDeviceIds;
+            setBackLensDeviceIds(allDeviceIds);
+            if (allDeviceIds.length < 2) return;
+            // Restore a lens the user picked in an earlier session (see
+            // BACK_LENS_DEVICE_ID_KEY's own comment) -- only if it's
+            // actually one of the lenses just confirmed to exist AND
+            // differs from the one already streaming, so this never
+            // triggers a needless re-acquisition of the same device.
+            let savedDeviceId: string | null = null;
+            try {
+              savedDeviceId = localStorage.getItem(BACK_LENS_DEVICE_ID_KEY);
+            } catch {
+              // Ignored -- best-effort read, same as the framing-tip
+              // preference above.
+            }
+            if (savedDeviceId && savedDeviceId !== currentDeviceId && allDeviceIds.includes(savedDeviceId)) {
+              setSelectedBackLensDeviceId(savedDeviceId);
+            }
+          });
+        }
       })
       .catch((err) => {
         if (!cancelled) setCameraError(describeCameraError(err));
@@ -573,7 +665,7 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     };
-  }, [facingMode, retryToken, isMobileCheckReady]);
+  }, [facingMode, retryToken, isMobileCheckReady, selectedBackLensDeviceId, isMobile]);
 
   // The compositing loop -- redraws the live camera frame onto the visible
   // canvas every rAF tick, with the current filter/ambience/face effect
@@ -838,6 +930,25 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
 
   function handleFlipCamera() {
     setFacingMode((prev) => (prev === "user" ? "environment" : "user"));
+  }
+
+  // Cycles to the next confirmed back-facing lens (see backLensDeviceIds'
+  // own comment) -- reads the actually-active deviceId off the live stream
+  // rather than off selectedBackLensDeviceId, since that state starts null
+  // until the user's first tap here. Persists the pick so it's remembered
+  // next time this page opens on this device.
+  function cycleBackLens() {
+    if (backLensDeviceIds.length < 2) return;
+    const activeDeviceId = streamRef.current?.getVideoTracks()[0]?.getSettings().deviceId;
+    const currentIndex = activeDeviceId ? backLensDeviceIds.indexOf(activeDeviceId) : -1;
+    const nextDeviceId = backLensDeviceIds[(currentIndex + 1) % backLensDeviceIds.length];
+    setSelectedBackLensDeviceId(nextDeviceId);
+    try {
+      localStorage.setItem(BACK_LENS_DEVICE_ID_KEY, nextDeviceId);
+    } catch {
+      // Ignored -- best-effort persistence only, same as the framing-tip
+      // preference above.
+    }
   }
 
   // The actual MediaRecorder setup -- pulled out of handleStartOrResume so
@@ -1256,6 +1367,17 @@ export function CameraCapturePage({ projectId }: { projectId: string | null }) {
           >
             <TeleprompterIcon className="h-5 w-5" />
           </button>
+          {isMobile && facingMode === "environment" && backLensDeviceIds.length > 1 && recorderState === "idle" && countdownValue === null && (
+            <button
+              type="button"
+              onClick={cycleBackLens}
+              aria-label="Try another back camera lens"
+              title="Try another lens for a wider view"
+              className="rounded-full bg-black/40 p-2 backdrop-blur-sm"
+            >
+              <SwitchLensIcon className="h-5 w-5" />
+            </button>
+          )}
           {hasMultipleCameras && recorderState === "idle" && countdownValue === null && (
             <button type="button" onClick={handleFlipCamera} aria-label="Flip camera" className="rounded-full bg-black/40 p-2 backdrop-blur-sm">
               <FlipCameraIcon className="h-5 w-5" />
