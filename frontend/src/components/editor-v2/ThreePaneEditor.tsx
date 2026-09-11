@@ -344,15 +344,17 @@ export function ThreePaneEditor({
   // before render (see effectiveSequenceEntries/displayedVideoOverlays
   // below) -- deliberately NOT part of `selections`/pushChange, since it's
   // re-derived every poll tick and has no business in undo history. Keyed by
-  // entryId (stable across the sequence) for cutaways, by array index for
-  // video overlays -- same "not stale-safe against edits made during the
-  // wait" accepted risk requestAndPollVideoOverlayBackgroundRemoval's own
-  // comment already carries for that index.
+  // entryId for cutaways, by the overlay's own stable `id` for video/image
+  // overlays (VideoOverlayClip.id/ImageOverlayClip.id) -- NOT array index,
+  // since this job can run for up to ~2 minutes and an index would silently
+  // misattribute progress (and, worse, the eventual matte result) to
+  // whichever overlay later shifted into that same slot if others are
+  // deleted/reordered while it's in flight.
   const [cutawayMattingProgress, setCutawayMattingProgress] = useState<Record<string, number>>({});
-  const [videoOverlayMattingProgress, setVideoOverlayMattingProgress] = useState<Record<number, number>>({});
+  const [videoOverlayMattingProgress, setVideoOverlayMattingProgress] = useState<Record<string, number>>({});
   // Image-overlay equivalent of videoOverlayMattingProgress above, keyed by
-  // position in `overlayImages` the same way.
-  const [imageOverlayMattingProgress, setImageOverlayMattingProgress] = useState<Record<number, number>>({});
+  // id the same way.
+  const [imageOverlayMattingProgress, setImageOverlayMattingProgress] = useState<Record<string, number>>({});
   // FeedbackArea's own chatty activity ticker -- see that file's own module
   // comment for why this exists (fal.ai's background-removal integration
   // gives no real interim progress, so this is the "proof it's still
@@ -600,10 +602,18 @@ export function ThreePaneEditor({
   const videoOverlays: VideoOverlayClip[] = useMemo(
     () =>
       (rawSelections.videoOverlays ?? []).map((overlay) => {
+        // Backfills a stable id for a project saved before VideoOverlayClip
+        // carried one -- see that field's own doc comment. Settles after
+        // the next edit (whatever apply* function runs next builds its
+        // patch off THIS healed array, so the generated id gets baked into
+        // history and every later render just passes it through via the
+        // spread below instead of generating a fresh one).
+        const id = overlay.id ?? crypto.randomUUID();
         const framing = { ...DEFAULT_OVERLAY_FRAMING, ...overlay.framing };
-        if (overlay.layout.type !== "split-screen") return { ...overlay, framing };
+        if (overlay.layout.type !== "split-screen") return { ...overlay, id, framing };
         return {
           ...overlay,
+          id,
           framing,
           layout: {
             ...overlay.layout,
@@ -628,9 +638,13 @@ export function ThreePaneEditor({
   const overlayImages: ImageOverlayClip[] = useMemo(
     () =>
       (rawSelections.overlayImages ?? []).map((overlay): ImageOverlayClip => {
+        // Same id backfill as videoOverlays' own useMemo above -- see that
+        // one's comment.
+        const id = overlay.id ?? crypto.randomUUID();
         const legacy = overlay as unknown as { rect?: CropRect; layout?: VideoOverlayLayout };
         if (!legacy.layout && legacy.rect) {
           return {
+            id,
             assetId: overlay.assetId,
             startTimeSeconds: overlay.startTimeSeconds,
             endTimeSeconds: overlay.endTimeSeconds,
@@ -639,9 +653,10 @@ export function ThreePaneEditor({
           };
         }
         const framing = { ...DEFAULT_OVERLAY_FRAMING, ...overlay.framing };
-        if (overlay.layout.type !== "split-screen") return { ...overlay, framing };
+        if (overlay.layout.type !== "split-screen") return { ...overlay, id, framing };
         return {
           ...overlay,
+          id,
           framing,
           layout: {
             ...overlay.layout,
@@ -1542,9 +1557,9 @@ export function ThreePaneEditor({
     // output (lib/localRender/exportTimeline.ts) -- see chromaKey.ts's own
     // module comment.
     if (options?.removeBackground && !options?.chromaKeyColor) {
-      const newOverlayIndex = state.videoOverlays.length - 1;
-      if (state.videoOverlays[newOverlayIndex]?.assetId === asset.id) {
-        void requestAndPollVideoOverlayBackgroundRemoval(asset.id, newOverlayIndex);
+      const newOverlay = state.videoOverlays[state.videoOverlays.length - 1];
+      if (newOverlay?.assetId === asset.id) {
+        void requestAndPollVideoOverlayBackgroundRemoval(asset.id, newOverlay.id);
       }
     }
   }
@@ -1602,24 +1617,25 @@ export function ThreePaneEditor({
   // Video-overlay equivalent of requestAndPollBackgroundRemoval above --
   // same request/poll/refreshAssets/patch-in-matteAssetId flow (now via the
   // shared requestAndPollMatte), landing via applySetVideoOverlayBackgroundRemoval
-  // (indexed into videoOverlays, not sequenceClips) instead. Same "not
-  // stale-safe against edits made during the wait" accepted risk as that
-  // function's own comment. AI mode only -- chroma key never calls this at
-  // add-time (see handleAddVideoOverlay above).
-  async function requestAndPollVideoOverlayBackgroundRemoval(sourceAssetId: string, overlayIndex: number) {
+  // (indexed into videoOverlays by id, not sequenceClips) instead. Targeted
+  // by the overlay's own stable `id`, not its array index at request time --
+  // see VideoOverlayClip.id's own doc comment for why. AI mode only --
+  // chroma key never calls this at add-time (see handleAddVideoOverlay
+  // above).
+  async function requestAndPollVideoOverlayBackgroundRemoval(sourceAssetId: string, overlayId: string) {
     const assetName = assets.find((asset) => asset.id === sourceAssetId)?.filename ?? "this video overlay";
     const result = await requestAndPollMatte(sourceAssetId, assetName, (fraction) =>
-      setVideoOverlayMattingProgress((prev) => ({ ...prev, [overlayIndex]: fraction }))
+      setVideoOverlayMattingProgress((prev) => ({ ...prev, [overlayId]: fraction }))
     );
     setVideoOverlayMattingProgress((prev) => {
-      if (!(overlayIndex in prev)) return prev;
+      if (!(overlayId in prev)) return prev;
       const next = { ...prev };
-      delete next[overlayIndex];
+      delete next[overlayId];
       return next;
     });
     if (result.status !== "completed") return;
     // selectionsRef.current, not `selections` -- see that ref's own comment.
-    const { label, state } = applySetVideoOverlayBackgroundRemoval(selectionsRef.current, overlayIndex, {
+    const { label, state } = applySetVideoOverlayBackgroundRemoval(selectionsRef.current, overlayId, {
       enabled: true,
       matteAssetId: result.matteAssetId,
       mode: "ai",
@@ -1628,24 +1644,24 @@ export function ThreePaneEditor({
   }
 
   // Image-overlay equivalent of requestAndPollVideoOverlayBackgroundRemoval
-  // above, indexed into `overlayImages` instead -- used from
+  // above, indexed into `overlayImages` by id instead -- used from
   // ImageOverlayFramingDialog's own Background-removal row (the first place
   // this is settable for an image overlay at all, add-time or otherwise;
   // see ImageOverlayClip.backgroundRemoval's own doc comment).
-  async function requestAndPollImageOverlayBackgroundRemoval(sourceAssetId: string, overlayIndex: number) {
+  async function requestAndPollImageOverlayBackgroundRemoval(sourceAssetId: string, overlayId: string) {
     const assetName = assets.find((asset) => asset.id === sourceAssetId)?.filename ?? "this image overlay";
     const result = await requestAndPollMatte(sourceAssetId, assetName, (fraction) =>
-      setImageOverlayMattingProgress((prev) => ({ ...prev, [overlayIndex]: fraction }))
+      setImageOverlayMattingProgress((prev) => ({ ...prev, [overlayId]: fraction }))
     );
     setImageOverlayMattingProgress((prev) => {
-      if (!(overlayIndex in prev)) return prev;
+      if (!(overlayId in prev)) return prev;
       const next = { ...prev };
-      delete next[overlayIndex];
+      delete next[overlayId];
       return next;
     });
     if (result.status !== "completed") return;
     // selectionsRef.current, not `selections` -- see that ref's own comment.
-    const { label, state } = applySetImageOverlayBackgroundRemoval(selectionsRef.current, overlayIndex, {
+    const { label, state } = applySetImageOverlayBackgroundRemoval(selectionsRef.current, overlayId, {
       enabled: true,
       matteAssetId: result.matteAssetId,
       mode: "ai",
@@ -1824,7 +1840,7 @@ export function ThreePaneEditor({
     if (options?.removeBackground && !options?.chromaKeyColor) {
       const updatedOverlay = state.videoOverlays[overlayIndex];
       if (updatedOverlay?.backgroundRemoval?.enabled && !updatedOverlay.backgroundRemoval.matteAssetId) {
-        void requestAndPollVideoOverlayBackgroundRemoval(updatedOverlay.assetId, overlayIndex);
+        void requestAndPollVideoOverlayBackgroundRemoval(updatedOverlay.assetId, updatedOverlay.id);
       }
     }
   }
@@ -1925,7 +1941,7 @@ export function ThreePaneEditor({
     if (options?.removeBackground && !options?.chromaKeyColor) {
       const updatedOverlay = state.overlayImages[overlayIndex];
       if (updatedOverlay?.backgroundRemoval?.enabled && !updatedOverlay.backgroundRemoval.matteAssetId) {
-        void requestAndPollImageOverlayBackgroundRemoval(updatedOverlay.assetId, overlayIndex);
+        void requestAndPollImageOverlayBackgroundRemoval(updatedOverlay.assetId, updatedOverlay.id);
       }
     }
   }
@@ -2624,7 +2640,7 @@ export function ThreePaneEditor({
     } else if (liveOverlayRectEdit?.index === index && overlay.layout.type === "picture-in-picture") {
       next = { ...next, layout: { ...overlay.layout, rect: liveOverlayRectEdit.rect } };
     }
-    const progress = imageOverlayMattingProgress[index];
+    const progress = imageOverlayMattingProgress[overlay.id];
     if (progress !== undefined && next.backgroundRemoval?.enabled && !next.backgroundRemoval.matteAssetId) {
       next = { ...next, backgroundRemoval: { ...next.backgroundRemoval, progress } };
     }
@@ -2665,7 +2681,7 @@ export function ThreePaneEditor({
     } else if (liveOverlayAudioBalanceEdit?.index === index) {
       next = { ...next, audioBalance: liveOverlayAudioBalanceEdit.balance };
     }
-    const progress = videoOverlayMattingProgress[index];
+    const progress = videoOverlayMattingProgress[overlay.id];
     if (progress !== undefined && next.backgroundRemoval?.enabled && !next.backgroundRemoval.matteAssetId) {
       next = { ...next, backgroundRemoval: { ...next.backgroundRemoval, progress } };
     }

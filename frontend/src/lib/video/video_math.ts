@@ -683,6 +683,14 @@ export type BackgroundRemovalState = {
 };
 
 export interface VideoOverlayClip {
+  // Stable identity, independent of this overlay's position in the array --
+  // ThreePaneEditor's requestAndPollVideoOverlayBackgroundRemoval targets a
+  // long-running (up to ~2min) matting job at this id rather than an array
+  // index, so a delete/reorder of OTHER overlays while that job is in
+  // flight can't land its result on the wrong (shifted) overlay once it
+  // completes. Backfilled for any project saved before this field existed
+  // -- see ThreePaneEditor's own videoOverlays useMemo.
+  id: string;
   assetId: string;
   startTimeSeconds: number;
   endTimeSeconds: number;
@@ -761,6 +769,8 @@ export interface VideoOverlayClip {
  * load time (a picture-in-picture layout wrapping its old `rect`).
  */
 export interface ImageOverlayClip {
+  // Same stable-identity purpose as VideoOverlayClip.id above.
+  id: string;
   assetId: string;
   startTimeSeconds: number;
   endTimeSeconds: number;

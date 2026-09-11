@@ -446,6 +446,7 @@ export function applyAddImageOverlay(
   );
   if (endTimeSeconds <= startTimeSeconds) return { label: "Added image overlay", state: selections };
   const newOverlay: ImageOverlayClip = {
+    id: crypto.randomUUID(),
     assetId,
     startTimeSeconds,
     endTimeSeconds,
@@ -1662,6 +1663,7 @@ export function applyAddVideoOverlay(
   if (endTimeSeconds <= startTimeSeconds) return { label: "Added overlay", state: selections };
 
   const newOverlay: VideoOverlayClip = {
+    id: crypto.randomUUID(),
     assetId,
     startTimeSeconds,
     endTimeSeconds,
@@ -1690,17 +1692,20 @@ export function applyAddVideoOverlay(
 
 /** Patches one placed video overlay's backgroundRemoval field in place --
  * the video-overlay equivalent of applySetBackgroundRemoval above, indexed
- * by position in `videoOverlays` (overlays carry no stable id, same
- * convention as applyChangeVideoOverlayLayout/applyToggleSplitScreenSides
- * etc.) rather than by entry id. Used by ThreePaneEditor's request/poll flow
- * to silently write in the real matteAssetId once VEED's job completes --
- * no new undo step for that (same reasoning as applySetBackgroundRemoval's
- * own callers). */
+ * by `id` (like that function's own entryId) rather than array position.
+ * Used by ThreePaneEditor's request/poll flow to silently write in the real
+ * matteAssetId once VEED's job completes -- no new undo step for that (same
+ * reasoning as applySetBackgroundRemoval's own callers). Deliberately id-,
+ * not index-based: that job can run for up to ~2 minutes, plenty of time
+ * for OTHER overlays to be deleted/reordered while it's in flight, which
+ * would silently misdirect an index-based patch onto whichever overlay
+ * later shifted into that same slot. */
 export function applySetVideoOverlayBackgroundRemoval(
   selections: EditSelectionsSnapshot,
-  overlayIndex: number,
+  overlayId: string,
   backgroundRemoval: BackgroundRemovalState | null
 ): TransformationResult {
+  const overlayIndex = selections.videoOverlays.findIndex((overlay) => overlay.id === overlayId);
   const overlay = selections.videoOverlays[overlayIndex];
   const label = backgroundRemoval?.enabled ? "Remove background" : "Restore background";
   if (!overlay) return { label, state: selections };
@@ -1710,14 +1715,15 @@ export function applySetVideoOverlayBackgroundRemoval(
 }
 
 /** Image-overlay equivalent of applySetVideoOverlayBackgroundRemoval above,
- * indexed into `overlayImages` instead -- used by ThreePaneEditor's own
- * image-overlay request/poll flow to silently write in the real
+ * indexed into `overlayImages` by `id` instead -- used by ThreePaneEditor's
+ * own image-overlay request/poll flow to silently write in the real
  * matteAssetId once the matting job completes. */
 export function applySetImageOverlayBackgroundRemoval(
   selections: EditSelectionsSnapshot,
-  overlayIndex: number,
+  overlayId: string,
   backgroundRemoval: BackgroundRemovalState | null
 ): TransformationResult {
+  const overlayIndex = selections.overlayImages.findIndex((overlay) => overlay.id === overlayId);
   const overlay = selections.overlayImages[overlayIndex];
   const label = backgroundRemoval?.enabled ? "Remove background" : "Restore background";
   if (!overlay) return { label, state: selections };

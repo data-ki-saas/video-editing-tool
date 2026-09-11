@@ -134,10 +134,15 @@ export function MobileEditor({
   const videoOverlays: VideoOverlayClip[] = useMemo(
     () =>
       (rawSelections.videoOverlays ?? []).map((overlay) => {
+        // Same id backfill as ThreePaneEditor's own videoOverlays useMemo --
+        // see VideoOverlayClip.id's doc comment. This editor never authors
+        // an overlay itself, but the type still requires the field.
+        const id = overlay.id ?? crypto.randomUUID();
         const framing = { ...DEFAULT_OVERLAY_FRAMING, ...overlay.framing };
-        if (overlay.layout.type !== "split-screen") return { ...overlay, framing };
+        if (overlay.layout.type !== "split-screen") return { ...overlay, id, framing };
         return {
           ...overlay,
+          id,
           framing,
           layout: {
             ...overlay.layout,
@@ -151,9 +156,12 @@ export function MobileEditor({
   const overlayImages: ImageOverlayClip[] = useMemo(
     () =>
       (rawSelections.overlayImages ?? []).map((overlay): ImageOverlayClip => {
+        // Same id backfill as videoOverlays' own useMemo just above.
+        const id = overlay.id ?? crypto.randomUUID();
         const legacy = overlay as unknown as { rect?: CropRect; layout?: VideoOverlayLayout };
         if (!legacy.layout && legacy.rect) {
           return {
+            id,
             assetId: overlay.assetId,
             startTimeSeconds: overlay.startTimeSeconds,
             endTimeSeconds: overlay.endTimeSeconds,
@@ -162,9 +170,10 @@ export function MobileEditor({
           };
         }
         const framing = { ...DEFAULT_OVERLAY_FRAMING, ...overlay.framing };
-        if (overlay.layout.type !== "split-screen") return { ...overlay, framing };
+        if (overlay.layout.type !== "split-screen") return { ...overlay, id, framing };
         return {
           ...overlay,
+          id,
           framing,
           layout: {
             ...overlay.layout,
