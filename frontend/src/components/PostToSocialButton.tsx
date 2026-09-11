@@ -7,26 +7,37 @@ import { usePermissions } from "@/lib/usePermissions";
 import { UploadIcon } from "@/components/icons/UIIcons";
 
 type PostState = "idle" | "posting" | "completed" | "failed";
+type SocialProvider = "youtube" | "meta" | "instagram";
+
+const PLATFORM_NAME: Record<SocialProvider, string> = {
+  youtube: "YouTube",
+  meta: "Facebook",
+  instagram: "Instagram",
+};
 
 /**
- * One-click "Post to YouTube" for an already-saved library video -- shared
- * by LocalRenderPopup.tsx (right after "Save to library" succeeds) and the
- * library page's own per-card action row, so neither duplicates the
- * publish/poll logic. No title/description dialog on purpose: the reel's
- * own saved name is the title, matching this app's "smart defaults over
- * exposing every knob" bias (see root CLAUDE.md's driving vision) -- a
- * picker can follow later if that turns out to matter.
+ * One-click "Post to <platform>" for an already-saved library video --
+ * shared by LocalRenderPopup.tsx (right after "Save to library" succeeds)
+ * and the library page's own per-card action row, so neither duplicates the
+ * publish/poll logic. Generalized from the YouTube-only PostToYoutubeButton
+ * when Facebook/Instagram posting was added -- same component, keyed off
+ * `provider` instead of a hardcoded platform. No title/description dialog
+ * on purpose: the reel's own saved name is the title, matching this app's
+ * "smart defaults over exposing every knob" bias (see root CLAUDE.md's
+ * driving vision) -- a picker can follow later if that turns out to matter.
  *
  * `variant="button"` renders a full-width labeled button (next to Download/
  * Save to library in LocalRenderPopup); `variant="icon"` renders a round
  * icon-only button matching the library page's existing Download/Share/
  * Delete action row.
  */
-export function PostToYoutubeButton({
+export function PostToSocialButton({
+  provider,
   libraryVideoId,
   title,
   variant = "button",
 }: {
+  provider: SocialProvider;
   libraryVideoId: string;
   title: string;
   variant?: "button" | "icon";
@@ -36,12 +47,13 @@ export function PostToYoutubeButton({
   const [state, setState] = useState<PostState>("idle");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const platformName = PLATFORM_NAME[provider];
 
   useEffect(() => {
     getSocialAccounts()
-      .then((accounts) => setIsConnected(accounts.some((a) => a.provider === "youtube")))
+      .then((accounts) => setIsConnected(accounts.some((a) => a.provider === provider)))
       .catch(() => setIsConnected(false));
-  }, []);
+  }, [provider]);
 
   async function handleClick() {
     if (state === "posting") return;
@@ -52,14 +64,14 @@ export function PostToYoutubeButton({
     setState("posting");
     setError(null);
     try {
-      const post = await publishSocialPost("youtube", libraryVideoId, title, "");
+      const post = await publishSocialPost(provider, libraryVideoId, title, "");
       const finished = await pollSocialPost(post.id);
       if (finished.status === "completed" && finished.providerUrl) {
         setVideoUrl(finished.providerUrl);
         setState("completed");
       } else if (finished.status === "failed") {
         setState("failed");
-        setError(finished.error ?? "Failed to post to YouTube");
+        setError(finished.error ?? `Failed to post to ${platformName}`);
       } else {
         // Still "processing" past the poll budget -- not a failure, just
         // slow (a big reel's resumable upload can take a while); let the
@@ -69,7 +81,7 @@ export function PostToYoutubeButton({
       }
     } catch (err) {
       setState("failed");
-      setError(err instanceof Error ? err.message : "Failed to post to YouTube");
+      setError(err instanceof Error ? err.message : `Failed to post to ${platformName}`);
     }
   }
 
@@ -80,17 +92,22 @@ export function PostToYoutubeButton({
   if (!hasFeature("social_posting")) return null;
 
   if (!isConnected) {
-    return variant === "icon" ? null : (
+    // Instagram is never connected on its own (see settings/page.tsx) -- it
+    // rides along with a Facebook connect, so there's nothing useful to
+    // link to here for it; just render nothing until it's connected.
+    if (variant === "icon" || provider === "instagram") return null;
+    const connectLabel = provider === "meta" ? "Connect Facebook to post reels" : `Connect ${platformName} to post reels`;
+    return (
       <a
         href="/settings"
         className="flex-1 rounded-md border border-dashed border-border py-1.5 text-center text-sm text-muted hover:bg-background"
       >
-        Connect YouTube to post reels
+        {connectLabel}
       </a>
     );
   }
 
-  const label = state === "posting" ? "Posting…" : state === "completed" ? "Posted -- view" : "Post to YouTube";
+  const label = state === "posting" ? "Posting…" : state === "completed" ? "Posted -- view" : `Post to ${platformName}`;
 
   if (variant === "icon") {
     return (

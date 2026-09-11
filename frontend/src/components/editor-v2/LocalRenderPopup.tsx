@@ -18,7 +18,7 @@
  */
 import { useRef, useState } from "react";
 import { saveToLibrary } from "@/lib/api";
-import { PostToYoutubeButton } from "@/components/PostToYoutubeButton";
+import { PostToSocialButton } from "@/components/PostToSocialButton";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -159,10 +159,14 @@ export function LocalRenderPopup({
               >
                 {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved to library ✓" : "Save to library"}
               </button>
-              {saveState === "saved" && savedVideoId && (
-                <PostToYoutubeButton libraryVideoId={savedVideoId} title={projectName} />
-              )}
             </div>
+            {saveState === "saved" && savedVideoId && (
+              <div className="flex gap-2">
+                <PostToSocialButton provider="youtube" libraryVideoId={savedVideoId} title={projectName} />
+                <PostToSocialButton provider="meta" libraryVideoId={savedVideoId} title={projectName} />
+                <PostToSocialButton provider="instagram" libraryVideoId={savedVideoId} title={projectName} />
+              </div>
+            )}
             {saveState === "error" && saveError && <p className="text-xs text-red-600">{saveError}</p>}
           </div>
         )}

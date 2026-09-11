@@ -1,6 +1,7 @@
 # Meta App Review — submission draft
 
-Status: **written draft only, not yet submitted**. Prepared alongside the
+Status: **draft + connect/publish code both exist now; not yet submitted,
+and not yet exercised against a real Meta app.** Prepared alongside the
 YouTube posting feature (see `backend/src/social/`) so the review clock
 can start as soon as the prerequisites below are in place — Meta's review
 turnaround (days-to-weeks, sometimes bounced back for revisions) is the
@@ -107,21 +108,31 @@ Facebook Page" click uploads that specific, already-saved reel.
 
 ## What's still needed before this can actually be submitted
 
-No Facebook/Instagram integration code exists yet (only YouTube, per the
-approved plan this document was drafted alongside). Submitting to Meta
-requires either:
+The connect + publish flow described in "App overview" above is now built:
+`MetaProvider` (`backend/src/social/providers/meta_provider.py`, mirroring
+`YouTubeProvider`'s shape), registered in `client.py` under the `meta`/
+`instagram` provider keys, a "Connect Facebook" button in Settings, and
+"Post to Facebook"/"Post to Instagram" next to the existing "Post to
+YouTube" one (`PostToSocialButton.tsx`). It has **not** been exercised
+against a real Meta app, Page, or Instagram Business account — none were
+available while wiring it up (same caveat `youtube_provider.py`'s own file
+comment carries for its own resumable upload, before it had a real Google
+account to test against).
 
-1. Building the minimal connect + publish flow described in "App overview"
-   above (a `MetaProvider` mirroring `YouTubeProvider`'s shape, a Facebook
-   Login button in Settings, a "Post to Facebook"/"Post to Instagram"
-   button next to the existing "Post to YouTube" one), then recording the
-   demo script against it; **or**
-2. Demonstrating the permission via Meta's own Graph API Explorer against a
-   real test Page/IG account, without this app's UI at all — acceptable to
-   Meta for some review cycles, but produces a less convincing "this is
-   what our actual users will experience" narrative than option 1.
+What's left, all external to this repo's code:
 
-Either way, this document (use-case narrative, data handling summary,
-prerequisites) is ready to paste into the App Review form once one of the
-above exists — treat that as the next concrete step when this feature is
-picked back up.
+1. Create the Meta app (Meta for Developers), add the Facebook Login
+   product, and set `META_APP_ID`/`META_APP_SECRET` per `DEPLOY.md`'s new
+   rows for this feature.
+2. Complete the prerequisites checklist below (Business Verification, a
+   real test Page + linked Instagram Business account, the Valid OAuth
+   Redirect URI).
+3. Connect a real account through the app's own Settings page and post a
+   real reel to both Facebook and Instagram — this is the first real test
+   of the code above, not just of the review submission.
+4. Record the demo screencast per the script above against that real
+   connection.
+5. Paste this document's content into Meta's App Review form and submit.
+
+This document (use-case narrative, data handling summary, prerequisites)
+is ready to paste into the App Review form as soon as steps 1-4 are done.

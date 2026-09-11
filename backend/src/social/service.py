@@ -11,6 +11,7 @@ from src.core.config import settings
 from src.library import repository as library_repository
 from src.social import repository as social_repository
 from src.social.client import get_social_provider
+from src.social.providers.meta_provider import MetaProvider
 from src.social.schemas import (
     ConnectUrlResponse,
     PublishResponse,
@@ -71,9 +72,9 @@ async def handle_callback(provider: str, code: str | None, state: str | None, er
     (Google, not our frontend, is what's redirecting here)."""
     frontend_settings_url = f"{settings.frontend_public_url.rstrip('/')}/settings"
     if error:
-        return f"{frontend_settings_url}?social_error={error}"
+        return f"{frontend_settings_url}?social_error={error}&provider={provider}"
     if not code or not state:
-        return f"{frontend_settings_url}?social_error=missing_code"
+        return f"{frontend_settings_url}?social_error=missing_code&provider={provider}"
 
     # Still raises HTTPException -- a forged/expired state isn't a normal
     # "user declined consent" case and shouldn't be swallowed the same way.
@@ -85,7 +86,7 @@ async def handle_callback(provider: str, code: str | None, state: str | None, er
         account_info = await provider_client.get_account_info(tokens.access_token)
     except Exception:
         logger.exception("social connect failed for provider=%s user=%s", provider, user_id)
-        return f"{frontend_settings_url}?social_error=connect_failed"
+        return f"{frontend_settings_url}?social_error=connect_failed&provider={provider}"
 
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=tokens.expires_in_seconds)
     social_repository.upsert_account(
@@ -97,6 +98,30 @@ async def handle_callback(provider: str, code: str | None, state: str | None, er
         account_id=account_info.account_id,
         account_name=account_info.account_name,
     )
+
+    # A single "Connect Facebook" click grants access to both the Page and
+    # its linked Instagram Business account at once (there's no separate
+    # Instagram login) -- so connecting `meta` also transparently connects
+    # `instagram` here, reusing the same Page token, rather than making the
+    # user go through a second OAuth consent for it. See META_APP_REVIEW.md's
+    # demo script and MetaProvider.get_linked_instagram_account's docstring.
+    if provider == "meta" and isinstance(provider_client, MetaProvider):
+        try:
+            ig_account = await provider_client.get_linked_instagram_account(tokens.access_token)
+        except Exception:
+            logger.exception("instagram auto-connect failed for user=%s", user_id)
+            ig_account = None
+        if ig_account is not None:
+            social_repository.upsert_account(
+                user_id=user_id,
+                provider="instagram",
+                access_token=tokens.access_token,
+                refresh_token=tokens.refresh_token,
+                token_expires_at=expires_at.isoformat(),
+                account_id=ig_account.account_id,
+                account_name=ig_account.account_name,
+            )
+
     return f"{frontend_settings_url}?social=connected&provider={provider}"
 
 

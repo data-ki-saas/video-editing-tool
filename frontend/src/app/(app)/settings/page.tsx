@@ -9,11 +9,29 @@ import { COLOR_THEMES, THEME_MODES } from "@/lib/theme";
 import { resetPermissionsCache, usePermissions } from "@/lib/usePermissions";
 import { disconnectSocialAccount, getSocialAccounts, getSocialConnectUrl, type SocialAccount } from "@/lib/api";
 
-const SOCIAL_ERROR_MESSAGES: Record<string, string> = {
-  access_denied: "YouTube connection was cancelled.",
-  missing_code: "YouTube didn't return the expected response -- try again.",
-  connect_failed: "Couldn't connect your YouTube account -- try again.",
+type SocialProviderKey = "youtube" | "meta" | "instagram";
+
+const PLATFORM_NAME: Record<SocialProviderKey, string> = {
+  youtube: "YouTube",
+  meta: "Facebook",
+  instagram: "Instagram",
 };
+
+// `instagram` never appears here -- it's never the platform a connect
+// attempt is made against (see PROVIDERS below), only ever created as a
+// side effect of connecting `meta`.
+const CONNECTABLE_PROVIDERS: { key: "youtube" | "meta"; label: string }[] = [
+  { key: "youtube", label: "YouTube" },
+  { key: "meta", label: "Facebook" },
+];
+
+function socialErrorMessage(code: string, providerKey: string | null): string {
+  const platform = (providerKey && PLATFORM_NAME[providerKey as SocialProviderKey]) || "that account";
+  if (code === "access_denied") return `${platform} connection was cancelled.`;
+  if (code === "missing_code") return `${platform} didn't return the expected response -- try again.`;
+  if (code === "connect_failed") return `Couldn't connect your ${platform} account -- try again.`;
+  return "Couldn't connect that account -- try again.";
+}
 
 function SettingsPageContent() {
   const router = useRouter();
@@ -23,8 +41,8 @@ function SettingsPageContent() {
   const { mode, colorTheme, setMode, setColorTheme } = useTheme();
   const { loading: isLoadingRole, roleLabel, badgeColor, has: hasFeature } = usePermissions();
   const [socialAccounts, setSocialAccounts] = useState<SocialAccount[] | null>(null);
-  const [isConnectingYoutube, setIsConnectingYoutube] = useState(false);
-  const [isDisconnectingYoutube, setIsDisconnectingYoutube] = useState(false);
+  const [connectingProvider, setConnectingProvider] = useState<SocialProviderKey | null>(null);
+  const [disconnectingProvider, setDisconnectingProvider] = useState<SocialProviderKey | null>(null);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
 
   // Read once, lazily, off the URL this page was loaded with (right after
@@ -34,11 +52,13 @@ function SettingsPageContent() {
   // immediately vanish once the query-param cleanup effect below fires.
   const [socialError] = useState<string | null>(() => {
     const code = searchParams.get("social_error");
-    return code ? (SOCIAL_ERROR_MESSAGES[code] ?? "Couldn't connect that account -- try again.") : null;
+    return code ? socialErrorMessage(code, searchParams.get("provider")) : null;
   });
-  const [socialNotice] = useState<string | null>(() =>
-    searchParams.get("social") === "connected" ? "YouTube connected." : null
-  );
+  const [socialNotice] = useState<string | null>(() => {
+    const provider = searchParams.get("provider") as SocialProviderKey | null;
+    if (searchParams.get("social") !== "connected") return null;
+    return `${(provider && PLATFORM_NAME[provider]) || "Account"} connected.`;
+  });
 
   useEffect(() => {
     if (searchParams.get("social_error") || searchParams.get("social")) {
@@ -57,29 +77,31 @@ function SettingsPageContent() {
       .catch(() => setSocialAccounts([]));
   }, []);
 
-  async function handleConnectYoutube() {
-    setIsConnectingYoutube(true);
+  async function handleConnect(provider: "youtube" | "meta") {
+    setConnectingProvider(provider);
     try {
-      window.location.href = await getSocialConnectUrl("youtube");
+      window.location.href = await getSocialConnectUrl(provider);
     } catch (err) {
-      setDisconnectError(err instanceof Error ? err.message : "Couldn't start connecting YouTube");
-      setIsConnectingYoutube(false);
+      setDisconnectError(err instanceof Error ? err.message : `Couldn't start connecting ${PLATFORM_NAME[provider]}`);
+      setConnectingProvider(null);
     }
   }
 
-  async function handleDisconnectYoutube() {
-    setIsDisconnectingYoutube(true);
+  async function handleDisconnect(provider: SocialProviderKey) {
+    setDisconnectingProvider(provider);
     try {
-      await disconnectSocialAccount("youtube");
-      setSocialAccounts((prev) => prev?.filter((a) => a.provider !== "youtube") ?? prev);
+      await disconnectSocialAccount(provider);
+      setSocialAccounts((prev) => prev?.filter((a) => a.provider !== provider) ?? prev);
     } catch (err) {
-      setDisconnectError(err instanceof Error ? err.message : "Couldn't disconnect YouTube");
+      setDisconnectError(err instanceof Error ? err.message : `Couldn't disconnect ${PLATFORM_NAME[provider]}`);
     } finally {
-      setIsDisconnectingYoutube(false);
+      setDisconnectingProvider(null);
     }
   }
 
-  const youtubeAccount = socialAccounts?.find((a) => a.provider === "youtube") ?? null;
+  function accountFor(provider: SocialProviderKey) {
+    return socialAccounts?.find((a) => a.provider === provider) ?? null;
+  }
 
   async function handleSignOut() {
     setSigningOut(true);
@@ -131,35 +153,66 @@ function SettingsPageContent() {
           {socialNotice && <p className="text-sm text-accent">{socialNotice}</p>}
           {(socialError || disconnectError) && <p className="text-sm text-red-600">{socialError ?? disconnectError}</p>}
 
-          <div className="flex items-center justify-between rounded-md border border-border p-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">YouTube</p>
-              {youtubeAccount ? (
-                <p className="text-sm text-muted">Connected as {youtubeAccount.accountName}</p>
-              ) : (
-                <p className="text-sm text-muted">Not connected</p>
-              )}
-            </div>
-            {youtubeAccount ? (
-              <button
-                type="button"
-                onClick={handleDisconnectYoutube}
-                disabled={isDisconnectingYoutube}
-                className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-surface disabled:opacity-50"
-              >
-                {isDisconnectingYoutube ? "Disconnecting…" : "Disconnect"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleConnectYoutube}
-                disabled={isConnectingYoutube || socialAccounts === null}
-                className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-50"
-              >
-                {isConnectingYoutube ? "Connecting…" : "Connect YouTube"}
-              </button>
-            )}
-          </div>
+          {CONNECTABLE_PROVIDERS.map(({ key, label }) => {
+            const account = accountFor(key);
+            return (
+              <div key={key} className="flex items-center justify-between rounded-md border border-border p-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">{label}</p>
+                  <p className="text-sm text-muted">{account ? `Connected as ${account.accountName}` : "Not connected"}</p>
+                </div>
+                {account ? (
+                  <button
+                    type="button"
+                    onClick={() => handleDisconnect(key)}
+                    disabled={disconnectingProvider === key}
+                    className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-surface disabled:opacity-50"
+                  >
+                    {disconnectingProvider === key ? "Disconnecting…" : "Disconnect"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleConnect(key)}
+                    disabled={connectingProvider === key || socialAccounts === null}
+                    className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-foreground hover:opacity-90 disabled:opacity-50"
+                  >
+                    {connectingProvider === key ? "Connecting…" : `Connect ${label}`}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Instagram is never connected directly -- a Facebook connect
+              that has a linked Instagram Business account picks it up
+              automatically (see backend/src/social/service.py's
+              handle_callback), so this is status + disconnect only. */}
+          {(() => {
+            const instagramAccount = accountFor("instagram");
+            return (
+              <div className="flex items-center justify-between rounded-md border border-border p-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Instagram</p>
+                  <p className="text-sm text-muted">
+                    {instagramAccount
+                      ? `Connected as ${instagramAccount.accountName}`
+                      : "Not connected -- connects automatically when you connect Facebook"}
+                  </p>
+                </div>
+                {instagramAccount && (
+                  <button
+                    type="button"
+                    onClick={() => handleDisconnect("instagram")}
+                    disabled={disconnectingProvider === "instagram"}
+                    className="rounded-md border border-border px-3 py-1.5 text-sm font-medium hover:bg-surface disabled:opacity-50"
+                  >
+                    {disconnectingProvider === "instagram" ? "Disconnecting…" : "Disconnect"}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
         </section>
       )}
 

@@ -13,7 +13,7 @@ import {
 import { BookmarkIcon, DownloadIcon, ShareIcon, SpeakerFullIcon, SpeakerMutedIcon, TrashIcon } from "@/components/icons/UIIcons";
 import { CollapseIcon, ExpandIcon } from "@/components/editor-v2/icons/PlayerIcons";
 import { InlineEditableText } from "@/components/InlineEditableText";
-import { PostToYoutubeButton } from "@/components/PostToYoutubeButton";
+import { PostToSocialButton } from "@/components/PostToSocialButton";
 
 const DESCRIPTION_MAX_LENGTH = 120;
 
@@ -201,7 +201,9 @@ function LibraryCard({
           >
             <TrashIcon className="h-4 w-4" />
           </button>
-          <PostToYoutubeButton libraryVideoId={video.id} title={video.projectName} variant="icon" />
+          <PostToSocialButton provider="youtube" libraryVideoId={video.id} title={video.projectName} variant="icon" />
+          <PostToSocialButton provider="meta" libraryVideoId={video.id} title={video.projectName} variant="icon" />
+          <PostToSocialButton provider="instagram" libraryVideoId={video.id} title={video.projectName} variant="icon" />
         </div>
         <button
           type="button"

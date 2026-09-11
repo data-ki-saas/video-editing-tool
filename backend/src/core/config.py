@@ -175,6 +175,15 @@ class Settings(BaseSettings):
     # this one needs youtube.upload plus a stored refresh token.
     google_oauth_client_id: str = ""
     google_oauth_client_secret: str = ""
+    # Meta (Facebook Login) app used for posting to a connected Facebook
+    # Page and/or its linked Instagram Business account (src/social/
+    # providers/meta_provider.py) -- see META_APP_REVIEW.md for the
+    # permissions requested and why. One app serves both the "meta" and
+    # "instagram" provider keys; only "meta" ever initiates the OAuth
+    # flow (see client.py), so only one Valid OAuth Redirect URI needs
+    # registering with Meta.
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
     # Signs/verifies the OAuth "state" param round-tripped through Google's
     # consent screen (CSRF protection, and carries which user started the
     # connect flow, since the callback has no session/bearer token to read
