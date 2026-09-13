@@ -60,7 +60,6 @@ import {
   type ZoomEffect,
   type RenderSegment,
   type MusicClip,
-  type TranscriptCaption,
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
 import { getTextTemplateFontFraction, getStrokeWidthFontSizeFraction } from "@/lib/video/textTemplates";
@@ -71,7 +70,6 @@ import {
   FONT_SIZE_FRACTION as BRAND_FONT_SIZE_FRACTION,
   FADE_IN_SECONDS as BRAND_FADE_IN_SECONDS,
 } from "@/lib/video/brandWatermark";
-import { getTranscriptCaptionConfig } from "@/lib/video/transcriptCaptionTemplates";
 import { getCreatomateFilterProperties, type FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import {
@@ -1208,9 +1206,10 @@ function buildMusicAudioElements(
  * getTextTemplateFontFraction against overlay.templateId). Karaoke mode's
  * companion Text is driven by Creatomate's own transcriptSource/
  * transcriptEffect/transcriptSplit against THIS Audio element's own id --
- * mirrors buildTranscriptCaptionElements' shape closely, but against a
- * narration's own generated audio (known, exact word timings from the
- * synthesis itself) rather than ASR transcription of the base video.
+ * against a narration's own generated audio (known, exact word timings from
+ * the synthesis itself), never ASR transcription (auto-generated transcript
+ * captions were removed from this compiler entirely -- see this repo's own
+ * project notes on that feature).
  * `displayMode === "none"` (audio-only narration) skips the companion Text
  * entirely -- and, since there's nothing to caption, never allocates the
  * second (caption) track that mode would have used. */
@@ -1288,46 +1287,6 @@ function buildTtsOverlayElements(
     }
   }
   return elements;
-}
-
-/** Auto-generated (transcript) captions -- one Text element per VIDEO
- * RenderSegment, each transcribing that segment's own Video element
- * (transcriptSource takes exactly one video element's id, and the
- * sequence is already split into per-clip/per-trim Video elements -- see
- * video_math.ts's TranscriptCaption doc comment for why this is fine: a
- * caption naturally resets at a hard cut anyway). Image segments are
- * skipped entirely -- a still photo has no spoken audio to transcribe.
- * `videoSegmentPairs` pairs each VIDEO segment with the exact Video
- * element buildMediaSegments produced for it (not a plain index into
- * `segments`, since that array can also contain Image elements once image
- * clips exist). Root-level placement, same output-frame-relative rect
- * convention as image/text overlays. */
-function buildTranscriptCaptionElements(
-  transcriptCaption: TranscriptCaption | null,
-  videoSegmentPairs: { segment: RenderSegment; element: Video }[],
-  track: number
-): Text[] {
-  if (!transcriptCaption) return [];
-  const config = getTranscriptCaptionConfig(transcriptCaption.templateId);
-
-  return videoSegmentPairs.map(({ segment, element }) => {
-    const sourceVideoId = element.properties.id as string;
-    return new Text({
-      id: nextId("transcript"),
-      track,
-      time: segment.outputStartSeconds,
-      duration: segment.durationSeconds,
-      transcriptSource: sourceVideoId,
-      transcriptEffect: config.transcriptEffect,
-      transcriptSplit: config.transcriptSplit,
-      ...(config.transcriptColor ? { transcriptColor: config.transcriptColor } : {}),
-      textWrap: true,
-      fillColor: "#ffffff",
-      xAnchor: "0%",
-      yAnchor: "0%",
-      ...rectProperties(transcriptCaption.rect),
-    });
-  });
 }
 
 /** Automatic "Made by myreels.in" attribution, burned into every cloud
@@ -1441,7 +1400,7 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const referenceClip = sequenceClips[0];
   const referenceAspectRatio =
     referenceClip?.width && referenceClip?.height ? referenceClip.width / referenceClip.height : null;
-  const { wrapperChildren, foregroundBySegment } = buildMediaSegments(
+  const { wrapperChildren } = buildMediaSegments(
     segments,
     selections.cropRect,
     selections.zoomEffects,
@@ -1454,9 +1413,6 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     outputWidth,
     outputHeight
   );
-  const videoSegmentPairs = segments
-    .map((segment, index) => ({ segment, element: foregroundBySegment[index] }))
-    .filter((pair): pair is { segment: RenderSegment; element: Video } => pair.segment.kind === "video");
   const flipWrapper = buildFlipWrapper(
     wrapperChildren,
     selections.flipHorizontalToggles,
@@ -1517,7 +1473,6 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
   const overlayElements = buildOverlayImageElements(clampedOverlayImages, segments, nextTrack, appMeta);
   const textElements = buildTextElements(clampedTextOverlays, segments, nextTrack);
   const ttsOverlayElements = buildTtsOverlayElements(clampedTtsOverlays, segments, nextTrack, appMeta);
-  const transcriptCaptionElements = buildTranscriptCaptionElements(selections.transcriptCaption, videoSegmentPairs, nextTrack());
   const musicAudioElements = buildMusicAudioElements(musicClips, nextTrack(), appMeta, toVolumePercent(backgroundVolume));
   // Always the LAST element added and the HIGHEST track number -- must
   // render on top of every other overlay/caption no matter which of
@@ -1534,7 +1489,6 @@ export function compileCreatomateTimeline(input: CompileTimelineInput): Timeline
     ...overlayElements.map((el) => el.toMap() as TemplateElement),
     ...textElements.map((el) => el.toMap() as TemplateElement),
     ...ttsOverlayElements.map((el) => el.toMap() as TemplateElement),
-    ...transcriptCaptionElements.map((el) => el.toMap() as TemplateElement),
     ...musicAudioElements.map((el) => el.toMap() as TemplateElement),
     brandWatermarkElement.toMap() as TemplateElement,
   ];

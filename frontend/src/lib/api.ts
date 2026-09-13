@@ -1,6 +1,5 @@
 import { getLastProjectId } from "@/lib/lastProject";
 import { createClient } from "@/lib/supabase/client";
-import type { CompileTimelineInput } from "@/lib/timeline/compileCreatomateTimeline";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -640,36 +639,6 @@ export async function clearThumbnail(projectId: string) {
     headers: await authHeader(),
   });
   await throwIfNotOk(response);
-}
-
-export interface RenderTriggerResult {
-  renderId: string;
-  status: string;
-  warning?: string;
-}
-
-/** Calls this Next.js app's own /api/render route (not the FastAPI
- * backend) -- same-origin, so no CORS/API_BASE_URL involved. That route
- * authenticates via the browser's Supabase cookie session directly, then
- * compiles `compileInput` into real Creatomate JSON itself (see
- * lib/timeline/compileCreatomateTimeline.ts's own comment on why that
- * can't happen here in the browser). */
-export async function triggerRender(projectId: string, compileInput: CompileTimelineInput) {
-  const response = await fetch("/api/render", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ projectId, compileInput }),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    // The route forwards backend/src/permissions/router.py's /assert body
-    // verbatim on a permission denial (see api/render/route.ts's own
-    // comment) -- `body.detail` is that shape; every other error this route
-    // returns is its own native `{error}` shape.
-    if (isFeatureNotAllowedDetail(body.detail)) throw new FeatureLockedError(body.detail);
-    throw new Error(body.error ?? `Request failed (HTTP ${response.status})`);
-  }
-  return body as RenderTriggerResult;
 }
 
 // --- Roles & permissions (backend/src/permissions/*) ---------------------

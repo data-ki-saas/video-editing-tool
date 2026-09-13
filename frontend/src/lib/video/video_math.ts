@@ -1081,25 +1081,6 @@ export interface TextOverlay {
 // there's any TextOverlay object yet to read a rect from.
 export const DEFAULT_TEXT_OVERLAY_RECT: CropRect = { x: 0.1, y: 0.7, width: 0.8, height: 0.2 };
 
-/**
- * Auto-generated, speech-driven captions -- Creatomate's own transcription
- * (see lib/video/transcriptCaptionTemplates.ts and
- * lib/timeline/compileCreatomateTimeline.ts), as opposed to TextOverlay's
- * manually-typed captions. One config for the whole video, not a
- * time-ranged list: there's no text to author a range around, it's simply
- * enabled or not, with one style and one position. Never rendered in the
- * live Canvas2D preview -- transcription only happens server-side, during
- * an actual render (see CanvasPlayer.tsx's own comment on why it
- * deliberately shows nothing for this).
- */
-export interface TranscriptCaption {
-  templateId: string;
-  rect: CropRect;
-}
-
-// Same bottom-third caption-safe default as text overlays.
-export const DEFAULT_TRANSCRIPT_CAPTION_RECT: CropRect = { x: 0.1, y: 0.7, width: 0.8, height: 0.2 };
-
 /** Every text overlay visible at `timeSeconds` -- same multiple-at-once,
  * half-open-interval semantics as findActiveOverlays above. */
 export function findActiveTextOverlays(overlays: TextOverlay[], timeSeconds: number): TextOverlay[] {
@@ -1125,7 +1106,7 @@ export interface TtsWordTiming {
  * captioned block (same template system as TextOverlay), word-by-word
  * "karaoke" highlighting driven by wordTimings (exact per-word timestamps
  * from the synthesis itself, not ASR -- this is why karaoke mode CAN be
- * live-previewed accurately, unlike TranscriptCaption), or no text at all
+ * live-previewed accurately), or no text at all
  * ("none" -- the narration plays as audio only, nothing drawn on screen;
  * `rect`/`templateId` are simply unused in this mode, kept set rather than
  * made optional so every TtsOverlay still has one consistent shape).
@@ -1170,9 +1151,8 @@ export function findActiveTtsOverlays(overlays: TtsOverlay[], timeSeconds: numbe
  * "speaking" at `timeSeconds` -- word_timings are milliseconds relative to
  * the narration's OWN start, so this converts timeSeconds (the sequence's
  * own clock, same one findActiveTtsOverlays uses) down to that same
- * relative-ms scale first. Unlike TranscriptCaption (ASR, ~second-level
- * accuracy, deliberately never live-previewed -- see its own doc comment
- * above), these timings come straight from the synthesis engine, so a live
+ * relative-ms scale first. Unlike ASR-based transcription (~second-level
+ * accuracy at best), these timings come straight from the synthesis engine, so a live
  * per-word highlight is trustworthy, not just an approximation -- both
  * CanvasPlayer.tsx's live preview and exportTimeline.ts's offline render
  * call this so the two never disagree on which word is highlighted when. */
@@ -1191,7 +1171,13 @@ export function findActiveWordIndex(overlay: TtsOverlay, timeSeconds: number): n
  * one does.
  */
 export interface AvatarAction {
-  action: AvatarActionId;
+  // `AvatarActionId | (string & {})` rather than the bare union -- an open
+  // string enum idiom that keeps IDE autocomplete suggesting the six known
+  // baseline ids while still accepting any OTHER string with no type error,
+  // because a richer Topology can declare extra action ids beyond that
+  // baseline (see topology.ts's own `AvatarTopology.actions` doc comment --
+  // e.g. library.ts's "biped-simple" also defines "talkEmphasize").
+  action: AvatarActionId | (string & {});
   startMs: number;
   endMs: number;
   params?: Record<string, number>;
@@ -1219,7 +1205,12 @@ export interface AvatarOverlayClip {
   startTimeSeconds: number;
   endTimeSeconds: number;
   rect: CropRect;
-  defaultAction: AvatarActionId;
+  // Same "open string enum" widening as AvatarAction.action above, same
+  // reason: a Topology's `actions` map is keyed by an open string index on
+  // top of the six baseline AvatarActionId values (topology.ts), so a stored
+  // clip needs to be able to name any of those extras too, not just the
+  // guaranteed baseline six.
+  defaultAction: AvatarActionId | (string & {});
   // Populated by a later phase's LLM director (script -> timed action
   // sequence) -- NOT read by the render loop yet: today the render loop uses
   // `defaultAction` above for the clip's entire time range regardless of what

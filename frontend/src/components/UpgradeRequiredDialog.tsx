@@ -5,9 +5,9 @@ import type { FeatureLockedError } from "@/lib/api";
 
 /**
  * Shown when a gated action 403s with a FeatureLockedError (see
- * backend/src/permissions/service.py's feature_denied_detail) -- same small
- * backdrop+card chrome as RenderComingSoonPopup.tsx, no new dependency.
- * Server-side enforcement (require_feature / the render route's
+ * backend/src/permissions/service.py's feature_denied_detail) -- a small
+ * backdrop+card popup, no new dependency. Server-side enforcement
+ * (require_feature / the render route's
  * /api/permissions/assert call) is what actually blocks the action; this is
  * just the explanation shown after that block happens.
  */

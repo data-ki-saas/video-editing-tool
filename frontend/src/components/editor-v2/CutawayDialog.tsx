@@ -9,7 +9,7 @@
  * Video/Image segmented switch at the top picks which; Video collapses down
  * to just an asset grid + one click (nothing to animate/crop/duration-tune),
  * Image keeps the original three STACKED horizontal panels (not the
- * left/right split TranscriptCaptionDialog/TextOverlayDialog use): pick the
+ * left/right split TextOverlayDialog uses): pick the
  * photo, pick the motion(s), position the clip rectangle + tune the
  * preview/duration, Add.
  *
@@ -450,7 +450,7 @@ export function CutawayDialog({
   // the only fetch of the photo this dialog ever makes.
   useEffect(() => {
     if (!selectedAsset) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change, same pattern as TranscriptCaptionDialog's own re-sync effect
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting on a prop-driven dependency change
       setLoadedImage(null);
       return;
     }

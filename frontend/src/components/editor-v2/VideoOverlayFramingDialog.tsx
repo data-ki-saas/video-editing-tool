@@ -30,8 +30,8 @@
  * source that crop keeps).
  *
  * Keeps its own local draft state and only commits on "Save" -- same
- * pattern as TextOverlayDialog/TranscriptCaptionDialog, not a live/commit
- * split against the outer edit history. The Picture-in-Picture box's own
+ * pattern as TextOverlayDialog, not a live/commit split against the outer
+ * edit history. The Picture-in-Picture box's own
  * rect (`pipRect` state) follows the same draft-until-Save convention --
  * FrameStrip's OverlayRectOverlay drag on the timeline tile commits the
  * SAME field (VideoOverlayLayout.rect, via applyVideoOverlayRectChange)

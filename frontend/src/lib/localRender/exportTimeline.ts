@@ -48,7 +48,7 @@ import { loadVideoElement, seekVideoTo, drawImageFlipped, drawImageFlippedMasked
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
 import { getCompiledAvatar, type CompiledAvatar } from "@/lib/video/avatar/compile";
-import { computeAvatarPose, computeMouthShapeId } from "@/lib/video/avatar/actions";
+import { computeAvatarPose, computeMouthShapeId, computeMouthShapeIdForWord } from "@/lib/video/avatar/actions";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { detectFaceGeometry, type FaceGeometry } from "@/lib/video/faceLandmarks";
@@ -90,6 +90,7 @@ import {
   type TtsOverlay,
   type VideoOverlayClip,
   type ImageOverlayClip,
+  type AvatarOverlayClip,
 } from "@/lib/video/video_math";
 import { getTextTemplateRenderer, drawKaraokeCaption } from "@/lib/video/textTemplates";
 import { drawTextSlide, type TextSlideEntry } from "@/lib/video/textSlideRenderer";
@@ -107,6 +108,78 @@ const OUTPUT_FPS = 30;
 const AUDIO_SAMPLE_RATE = 48000;
 const AUDIO_CHANNELS = 2;
 const KEY_FRAME_INTERVAL_SECONDS = 3;
+
+/** Clamps `value` into [0,1] -- used below to guard a word-progress fraction
+ * against floating-point edge cases right at a word's own start/end
+ * boundary (see computeMouthShapeIdForWord's own doc comment in actions.ts). */
+function clamp01(value: number): number {
+  return Math.min(Math.max(value, 0), 1);
+}
+
+/**
+ * Which action + mouth shape an avatar clip should render at THIS instant --
+ * driven automatically by whichever TTS narration overlaps the SAME moment,
+ * if any, rather than a field a creator has to set: place a narration
+ * overlay and an avatar overlay near each other on the timeline and this
+ * falls out on its own, same "smart default, no extra configuration" spirit
+ * as every other avatar/camera3D/ambientEffect toggle in this app.
+ *
+ * - No narration active at `sequenceTimeSeconds` at all: unchanged Phase 1/2
+ *   behavior -- the clip's own `defaultAction`, mouth shape from
+ *   computeMouthShapeId's generic fixed-rate flap.
+ * - A narration is active and a word is actively being spoken right now
+ *   (findActiveWordIndex >= 0): "talk", mouth shape from
+ *   computeMouthShapeIdForWord against THAT WORD's own progress (derived
+ *   from its TtsWordTiming.startMs/endMs, not the whole overlay's span).
+ * - A narration is active but between words (a pause): "idle" -- the
+ *   character stops flapping at nothing rather than continuing to
+ *   talk-animate through a silent gap.
+ *
+ * `sequenceTimeSeconds` MUST be the sequence's own clock -- the same one
+ * findActiveTtsOverlays/findActiveWordIndex already use elsewhere in this
+ * file for karaoke captions -- never `localElapsed` (relative to the avatar
+ * clip's own start), which is used here only as computeMouthShapeId's own
+ * fallback-path argument (mirroring computeAvatarPose's unchanged
+ * elapsedSeconds argument at the call site below). Mixing the two clocks up
+ * would desync the avatar's mouth from the narration by however far into
+ * the timeline the avatar clip itself starts. At most one narration is
+ * ordinarily active at once; if more than one somehow overlaps, candidates[0]
+ * is a deterministic (never random) pick, same convention as every other
+ * "pick one of possibly-several actives" lookup in this app.
+ *
+ * Mirrors CanvasPlayer.tsx's own resolveAvatarTalkState exactly (same
+ * branches, same derivation order) -- the one deliberate difference between
+ * the two files is this parameter's name at each call site (elapsedSeconds
+ * there vs. sourceTimeSeconds here), matching how the rest of this file's
+ * avatar-overlay loop already mirrors CanvasPlayer.tsx's.
+ */
+function resolveAvatarTalkState(
+  clip: AvatarOverlayClip,
+  ttsOverlays: TtsOverlay[],
+  sequenceTimeSeconds: number,
+  localElapsed: number
+): { actionId: string; mouthShapeId: string } {
+  const candidates = findActiveTtsOverlays(ttsOverlays, sequenceTimeSeconds);
+  const narration = candidates.length > 0 ? candidates[0] : null;
+  if (!narration) {
+    return { actionId: clip.defaultAction, mouthShapeId: computeMouthShapeId(clip.defaultAction, localElapsed) };
+  }
+  const wordIndex = findActiveWordIndex(narration, sequenceTimeSeconds);
+  if (wordIndex < 0) {
+    return { actionId: "idle", mouthShapeId: computeMouthShapeId("idle", localElapsed) };
+  }
+  const word = narration.wordTimings[wordIndex];
+  const relativeMs = (sequenceTimeSeconds - narration.startTimeSeconds) * 1000;
+  const progress01 = clamp01((relativeMs - word.startMs) / Math.max(1, word.endMs - word.startMs));
+  // Prefer the creator's OWN talk-family pick (e.g. library.ts's
+  // "talkEmphasize" gesture) over a hardcoded plain "talk" -- narration
+  // driving the mouth shouldn't downgrade a deliberately-chosen talking
+  // variant back to the generic one. Only actually falls back to "talk"
+  // when defaultAction isn't a talking pose at all (e.g. "walk"/"sleep"),
+  // same convention as computeMouthShapeId's own id-prefix check.
+  const actionId = clip.defaultAction.startsWith("talk") ? clip.defaultAction : "talk";
+  return { actionId, mouthShapeId: computeMouthShapeIdForWord(word.word, progress01) };
+}
 
 export interface LocalRenderInput {
   selections: EditSelectionsSnapshot;
@@ -1753,10 +1826,15 @@ export async function exportVideoLocally(
         const localElapsed = sourceTimeSeconds - clip.startTimeSeconds;
         // Phase 1: no actionTimeline evaluation yet -- see CanvasPlayer.tsx's
         // identical comment on this same simplification.
-        const actionId = clip.defaultAction;
+        //
+        // Talk action + mouth shape ARE, however, already driven
+        // automatically by whichever TTS narration overlaps this same
+        // instant (see resolveAvatarTalkState's own doc comment above) --
+        // falls back to defaultAction/computeMouthShapeId's generic flap
+        // whenever none does.
+        const { actionId, mouthShapeId } = resolveAvatarTalkState(clip, selections.ttsOverlays, sourceTimeSeconds, localElapsed);
         const seed = ambientEffectSeed(clip.id);
         const pose = computeAvatarPose(compiled.topology, actionId, localElapsed, seed);
-        const mouthShapeId = computeMouthShapeId(actionId, localElapsed);
         const destX = clip.rect.x * canvas.width;
         const destY = clip.rect.y * canvas.height;
         const destWidth = clip.rect.width * canvas.width;

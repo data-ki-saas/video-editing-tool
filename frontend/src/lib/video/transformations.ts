@@ -28,7 +28,6 @@ import {
   mergeTrimRanges,
   isExclusiveLayout,
   DEFAULT_TEXT_OVERLAY_RECT,
-  DEFAULT_TRANSCRIPT_CAPTION_RECT,
   DEFAULT_AVATAR_OVERLAY_RECT,
   DEFAULT_OVERLAY_FRAMING,
   DEFAULT_SPLIT_SCREEN_RATIO,
@@ -1580,7 +1579,7 @@ const DEFAULT_AVATAR_OVERLAY_DURATION_SECONDS = DEFAULT_OVERLAY_DURATION_SECONDS
 export function applyAddAvatarOverlay(
   selections: EditSelectionsSnapshot,
   avatarId: string,
-  defaultAction: AvatarActionId,
+  defaultAction: AvatarActionId | (string & {}),
   currentTimeSeconds: number,
   videoDurationSeconds: number,
   rect: CropRect = DEFAULT_AVATAR_OVERLAY_RECT
@@ -1613,7 +1612,7 @@ export function applyEditAvatarOverlay(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   avatarId: string,
-  defaultAction: AvatarActionId,
+  defaultAction: AvatarActionId | (string & {}),
   rect?: CropRect
 ): TransformationResult {
   const overlay = selections.avatarOverlays[overlayIndex];
@@ -1662,43 +1661,6 @@ export function applyDeleteAvatarOverlay(selections: EditSelectionsSnapshot, ove
     label: "Removed avatar",
     state: { ...selections, avatarOverlays: selections.avatarOverlays.filter((_, index) => index !== overlayIndex) },
   };
-}
-
-/** Turns on auto-generated (transcript) captions, from
- * TranscriptCaptionDialog's "Enable" -- see video_math.ts's
- * TranscriptCaption for why this is one config for the whole video rather
- * than a time-ranged list like textOverlays. */
-export function applyEnableTranscriptCaption(
-  selections: EditSelectionsSnapshot,
-  templateId: string,
-  rect: CropRect = DEFAULT_TRANSCRIPT_CAPTION_RECT
-): TransformationResult {
-  return {
-    label: "Enabled auto-captions",
-    state: { ...selections, transcriptCaption: { templateId, rect } },
-  };
-}
-
-/** Changes an already-enabled transcript caption's style/position, from
- * TranscriptCaptionDialog's "Update". No-op if it's been disabled since
- * the dialog opened. */
-export function applyUpdateTranscriptCaption(
-  selections: EditSelectionsSnapshot,
-  templateId: string,
-  rect: CropRect
-): TransformationResult {
-  if (!selections.transcriptCaption) return { label: "Updated auto-captions", state: selections };
-  return {
-    label: "Updated auto-captions",
-    state: { ...selections, transcriptCaption: { templateId, rect } },
-  };
-}
-
-/** Turns auto-captions off outright -- from TranscriptCaptionDialog's
- * "Disable". */
-export function applyDisableTranscriptCaption(selections: EditSelectionsSnapshot): TransformationResult {
-  if (!selections.transcriptCaption) return { label: "Disabled auto-captions", state: selections };
-  return { label: "Disabled auto-captions", state: { ...selections, transcriptCaption: null } };
 }
 
 // Default window for a freshly-placed video overlay -- same "modest,
@@ -1944,8 +1906,8 @@ export function applyVideoOverlayPositionChange(
  * overlay" context menu entry. */
 /** Saves everything VideoOverlayFramingDialog lets you fine-tune -- one
  * commit on "Save", not a live/commit split, since the dialog keeps its
- * own local draft state while open (same pattern as TextOverlayDialog/
- * TranscriptCaptionDialog) rather than touching history on every drag.
+ * own local draft state while open (same pattern as TextOverlayDialog)
+ * rather than touching history on every drag.
  * `baseFraming`/`ratio` are only meaningful (and only ever passed) for a
  * Split-Screen overlay, whose popup shows both halves plus their divider;
  * `rect` is only meaningful (and only ever passed) for a Picture-in-Picture

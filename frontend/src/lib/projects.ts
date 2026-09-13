@@ -7,7 +7,6 @@ import type {
   MusicClip,
   SequenceEntry,
   TextOverlay,
-  TranscriptCaption,
   TrimRange,
   TtsOverlay,
   VideoOverlayClip,
@@ -110,12 +109,6 @@ export interface EditSelectionsSnapshot {
   // (unlike the sequence itself): placing one never changes the total
   // output length.
   videoOverlays: VideoOverlayClip[];
-  // Auto-generated, speech-driven captions (Creatomate's own transcription
-  // -- see lib/video/transcriptCaptionTemplates.ts), as opposed to
-  // textOverlays' manually-typed ones. One config for the whole video, not
-  // a time-ranged list -- null when disabled. History-tracked since it
-  // changes what's on screen, same tier as textOverlays.
-  transcriptCaption: TranscriptCaption | null;
   // Background-music clips, each with its own authored startTimeSeconds/
   // endTimeSeconds/sourceStartSeconds (drag to move, drag an edge to trim --
   // see video_math.ts's MusicClip and BackgroundTrackStrip.tsx). Unlike
@@ -142,7 +135,6 @@ export const DEFAULT_EDIT_SELECTIONS: EditSelectionsSnapshot = {
   avatarOverlays: [],
   sequenceClips: [],
   videoOverlays: [],
-  transcriptCaption: null,
   musicClips: [],
 };
 
@@ -256,9 +248,12 @@ export interface Project {
   // render_error: set once render_status = 'failed' -- a human-readable
   // reason from either Creatomate itself or the render-transfer worker (see
   // app/api/webhooks/creatomate/route.ts and worker/src/server.js).
-  // render_started_at: when the current render attempt began; used
-  // client-side (see lib/useRenderStatus.ts) to warn if a render has been
-  // non-terminal for far longer than normal.
+  // render_started_at: when the current render attempt began -- these
+  // render_* fields are still written by the (dormant, untouched) cloud
+  // render pipeline (api/render/route.ts, the webhook, worker/), but no
+  // editor-v2 UI reads them anymore now that cloud rendering has no
+  // trigger in this editor -- see this repo's own render-backend-decision
+  // notes.
   render_error: string | null;
   render_started_at: string | null;
   // Cover/thumbnail picker (see components/editor-v2/CoverPicker.tsx) --

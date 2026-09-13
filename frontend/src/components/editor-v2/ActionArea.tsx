@@ -36,7 +36,6 @@ import { TextOverlayDialog } from "./TextOverlayDialog";
 import { TtsOverlayDialog } from "./TtsOverlayDialog";
 import { AvatarFramingDialog } from "./AvatarFramingDialog";
 import { getAvatarLibraryEntry } from "@/lib/video/avatar/library";
-import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
 import { CutawayDialog } from "./CutawayDialog";
 import { TextSlideDialog } from "./TextSlideDialog";
 import type { CutawaySegment } from "./CutawayTrack";
@@ -56,7 +55,6 @@ import { OverlaySourceStartDialog } from "./OverlaySourceStartDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
-import { TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS } from "@/lib/video/transcriptCaptionTemplates";
 import { computeFlipSegments, ttsOverlayEndTimeSeconds, formatTimeRange, describeOverlayLayout } from "@/lib/video/video_math";
 import type { Asset } from "@/lib/api";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
@@ -68,14 +66,12 @@ import type {
   OverlayFraming,
   SequenceEntry,
   TextOverlay,
-  TranscriptCaption,
   TrimRange,
   TtsOverlay,
   VideoOverlayClip,
   ZoomEffect,
 } from "@/lib/video/video_math";
 import type { TextTemplateId } from "@/lib/video/textTemplates";
-import type { TranscriptCaptionTemplateId } from "@/lib/video/transcriptCaptionTemplates";
 import type { AvatarActionId } from "@/lib/video/avatar/topology";
 import type { RefObject } from "react";
 
@@ -143,12 +139,6 @@ function ActiveTransformationsList({
   }
   if (selections.sequenceClips.length > 1) {
     rows.push(`Sequence: ${selections.sequenceClips.length} clips`);
-  }
-  if (selections.transcriptCaption) {
-    const option = TRANSCRIPT_CAPTION_TEMPLATE_OPTIONS.find(
-      (candidate) => candidate.id === selections.transcriptCaption?.templateId
-    );
-    rows.push(`Auto-captions: ${option?.name ?? selections.transcriptCaption.templateId}`);
   }
 
   if (rows.length === 0 && selections.ttsOverlays.length === 0) {
@@ -280,12 +270,6 @@ export function ActionArea({
   onSaveAvatarOverlay,
   onCloseAvatarDialog,
   onDeleteAvatarOverlay,
-  onOpenTranscriptDialog,
-  isTranscriptDialogOpen,
-  transcriptCaption,
-  onSaveTranscriptCaption,
-  onDisableTranscriptCaption,
-  onCloseTranscriptDialog,
   onOpenCutawayDialog,
   isCutawayDialogOpen,
   editingCutaway,
@@ -448,18 +432,12 @@ export function ActionArea({
   onOpenAvatarDialog: () => void;
   isAvatarDialogOpen: boolean;
   editingAvatarOverlay: AvatarOverlayClip | null;
-  onSaveAvatarOverlay: (avatarId: string, defaultAction: AvatarActionId, rect: CropRect) => void;
+  onSaveAvatarOverlay: (avatarId: string, defaultAction: AvatarActionId | (string & {}), rect: CropRect) => void;
   onCloseAvatarDialog: () => void;
   // AvatarOverlayTrack's own "Remove avatar" -- see onDeleteTextOverlay's
   // comment for why this is index-aware (keeps editingAvatarOverlay pointed
   // at the same overlay through a deletion earlier in the array).
   onDeleteAvatarOverlay: (overlayIndex: number) => void;
-  onOpenTranscriptDialog: () => void;
-  isTranscriptDialogOpen: boolean;
-  transcriptCaption: TranscriptCaption | null;
-  onSaveTranscriptCaption: (templateId: TranscriptCaptionTemplateId, rect: CropRect) => void;
-  onDisableTranscriptCaption: () => void;
-  onCloseTranscriptDialog: () => void;
   onOpenCutawayDialog: () => void;
   isCutawayDialogOpen: boolean;
   // Non-null when CutawayDialog was reopened from the Cutaways rail to edit
@@ -507,8 +485,8 @@ export function ActionArea({
   // onDeleteVideoOverlay above.
   onDeleteImageOverlay: (overlayIndex: number) => void;
   // The actual current frame (closest thumbnail to the playhead) and its
-  // aspect ratio, for TextOverlayDialog/TranscriptCaptionDialog's live
-  // preview -- see TextOverlayDialog's own comment on why positioning
+  // aspect ratio, for TextOverlayDialog's live preview -- see that dialog's
+  // own comment on why positioning
   // happens against the real frame now.
   previewFrameUrl: string | null;
   frameAspectRatio: number | null;
@@ -536,18 +514,13 @@ export function ActionArea({
   assetUrlById: Record<string, string>;
   onFrameDimensions: (dimensions: { width: number; height: number }) => void;
   // Forwarded straight through to CanvasPlayer's own renderControls prop --
-  // Render/Edge Render now live in its preview toolbar, not the top bar.
+  // Edge Render lives in its preview toolbar, not the top bar.
   renderControls?: {
-    canRender: boolean;
-    isRendering: boolean;
-    renderStatus: string | null;
-    onRenderClick: () => void;
     canLocalRender: boolean;
     isLocalRendering: boolean;
     isLocalRenderSupported: boolean;
     localRenderUnsupportedReason: string | null;
     onLocalRenderClick: () => void;
-    transcriptCaption: TranscriptCaption | null;
   };
   // Lets ThreePaneEditor's Playground scrub this player and track a
   // playhead against it -- see CanvasPlayer.tsx's seekTo/onTimeUpdate.
@@ -643,8 +616,6 @@ export function ActionArea({
           ttsOverlayCount={ttsOverlays.length}
           onOpenAvatarDialog={onOpenAvatarDialog}
           avatarOverlayCount={avatarOverlays.length}
-          onOpenTranscriptDialog={onOpenTranscriptDialog}
-          autoCaptionEnabled={transcriptCaption !== null}
           onOpenCoverPicker={onOpenCoverPicker}
           coverThumbnailUrl={coverThumbnailUrl}
         />
@@ -789,17 +760,6 @@ export function ActionArea({
                 }
               : undefined
           }
-        />
-      )}
-
-      {isTranscriptDialogOpen && (
-        <TranscriptCaptionDialog
-          transcriptCaption={transcriptCaption}
-          previewFrameUrl={previewFrameUrl}
-          frameAspectRatio={frameAspectRatio}
-          onSave={onSaveTranscriptCaption}
-          onDisable={onDisableTranscriptCaption}
-          onClose={onCloseTranscriptDialog}
         />
       )}
 

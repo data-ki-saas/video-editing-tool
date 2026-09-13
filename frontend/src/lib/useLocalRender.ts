@@ -1,11 +1,10 @@
 "use client";
 
 /**
- * Local counterpart to useRenderStatus.ts -- shaped similarly on purpose
- * (isRendering/resultUrl/resultError mirror isRendering/renderUrl/
- * renderError) so FeedbackArea's two render buttons read as siblings, but
- * there's no polling here: exportVideoLocally runs entirely in this tab and
- * resolves with the finished Blob directly, so there's no render_status
+ * isRendering/resultUrl/resultError are named to read naturally alongside
+ * this app's other render-status shapes, but there's no polling here:
+ * exportVideoLocally runs entirely in this tab and resolves with the
+ * finished Blob directly, so there's no render_status
  * column, no webhook, and nothing to poll.
  */
 import { useEffect, useState } from "react";

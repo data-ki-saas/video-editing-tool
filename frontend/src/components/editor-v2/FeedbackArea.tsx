@@ -27,8 +27,6 @@
  */
 import { useEffect, useRef } from "react";
 
-const TERMINAL_RENDER_STATUSES = new Set(["completed", "failed"]);
-
 export interface ActivityLogEntry {
   id: number;
   text: string;
@@ -40,11 +38,6 @@ export function FeedbackArea({
   saveError,
   isAnalyzing,
   isUploading,
-  isRendering,
-  renderStatus,
-  renderUrl,
-  renderError,
-  isRenderStuck,
   activityLog,
 }: {
   assetsError: string | null;
@@ -52,11 +45,6 @@ export function FeedbackArea({
   saveError: string | null;
   isAnalyzing: boolean;
   isUploading: boolean;
-  isRendering: boolean;
-  renderStatus: string | null;
-  renderUrl: string | null;
-  renderError: string | null;
-  isRenderStuck: boolean;
   // Chatty background-activity feed -- see this file's own module comment.
   // Oldest-first; ThreePaneEditor caps its own length, this component just
   // renders whatever it's handed.
@@ -66,27 +54,6 @@ export function FeedbackArea({
     if (assetsError) return <span className="text-red-600">Couldn&apos;t load your videos: {assetsError}</span>;
     if (analysisError) return <span className="text-red-600">Couldn&apos;t analyze this video: {analysisError}</span>;
     if (saveError) return <span className="text-red-600">Couldn&apos;t save your changes: {saveError}</span>;
-    if (isRendering) return <span className="text-muted">Starting render…</span>;
-    if (renderStatus === "failed") {
-      return <span className="text-red-600">Render failed{renderError ? `: ${renderError}` : ""}</span>;
-    }
-    if (renderStatus === "completed" && renderUrl) {
-      return (
-        <span className="text-foreground">
-          Render ready —{" "}
-          <a href={renderUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">
-            watch or download
-          </a>
-        </span>
-      );
-    }
-    if (renderStatus && !TERMINAL_RENDER_STATUSES.has(renderStatus)) {
-      return (
-        <span className="text-muted">
-          Rendering… {isRenderStuck && "this is taking longer than usual"}
-        </span>
-      );
-    }
     if (isUploading) return <span className="text-muted">Uploading…</span>;
     if (isAnalyzing) return <span className="text-muted">Analyzing video for the timeline preview…</span>;
     return <span className="text-muted">No issues to report.</span>;

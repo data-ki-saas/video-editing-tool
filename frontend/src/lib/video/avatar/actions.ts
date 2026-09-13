@@ -197,11 +197,63 @@ const MOUTH_FLAP_INTERVAL_SECONDS = 0.18;
 
 /**
  * Which mouth shape ("open"/"closed") should be drawn right now. Only
- * "talk" ever animates the mouth in this phase -- flapping at a fixed
- * cadence -- every other action holds it "closed" throughout.
+ * "talk" (and any talk-family action -- see the id-prefix note below) ever
+ * animates the mouth in this phase -- flapping at a fixed cadence -- every
+ * other action holds it "closed" throughout.
+ *
+ * Matches by PREFIX ("talk"...) rather than an exact "talk" check, by
+ * convention: a topology can declare extra actions beyond the baseline six
+ * (see topology.ts's own doc comment) that are still fundamentally "the
+ * character is talking, plus something else" -- e.g. library.ts's
+ * "talkEmphasize" gesture -- and those should keep animating the mouth too,
+ * not go silent just because their id isn't the literal string "talk". Any
+ * new talk-variant action MUST start its id with "talk" for this to pick
+ * it up automatically; that's the whole point of the naming convention.
  */
 export function computeMouthShapeId(actionId: string, elapsedSeconds: number): string {
-  if (actionId !== "talk") return "closed";
+  if (!actionId.startsWith("talk")) return "closed";
   const cycleIndex = Math.floor(Math.max(0, elapsedSeconds) / MOUTH_FLAP_INTERVAL_SECONDS);
   return cycleIndex % 2 === 0 ? "open" : "closed";
+}
+
+/** How many discrete open/closed flaps `computeMouthShapeIdForWord` below
+ * divides a word into -- one per vowel, matched case-insensitively against
+ * [aeiou] (diphthongs/silent letters aren't modeled, just a plain count).
+ * A vowel-less token (a stray "hmm", or a number/punctuation-only entry the
+ * TTS word list can legitimately contain) still counts as 1, never 0 --
+ * dividing a word's duration into zero segments would be a divide-by-zero,
+ * and a real spoken word should show at least one open/closed flap rather
+ * than sitting frozen for its whole span. */
+function countVowelSegments(word: string): number {
+  const matches = word.match(/[aeiou]/gi);
+  return matches ? matches.length : 1;
+}
+
+/**
+ * Word-level counterpart to computeMouthShapeId above, used instead of it
+ * whenever a real TTS narration overlaps the avatar clip's current instant
+ * (see CanvasPlayer.tsx/exportTimeline.ts's own avatar-overlay loop) --
+ * `progress01` is 0..1 through THIS ONE WORD's own span (derived by the
+ * caller from that word's TtsWordTiming.startMs/endMs, not from the whole
+ * TtsOverlay), and this divides that span into `countVowelSegments(word)`
+ * equal segments, alternating "open"/"closed" by segment parity (segment 0
+ * = open, 1 = closed, 2 = open, ...) -- a longer or vowel-heavier word
+ * therefore flaps more times across its own duration than a short one,
+ * which is the whole point of sizing the flap count off the word itself
+ * rather than reusing computeMouthShapeId's fixed MOUTH_FLAP_INTERVAL_SECONDS
+ * cadence for every word regardless of length.
+ *
+ * Still every bit as much an approximation as computeMouthShapeId above --
+ * this is vowel-count-driven timing, not real phoneme/viseme alignment (the
+ * synthesis call this app uses returns word-level timing, not per-phoneme
+ * mouth shapes), just a finer-grained placeholder that at least tracks how
+ * MUCH a given word is likely to move the mouth. `progress01` is clamped
+ * defensively to [0,1] in case a caller's own boundary math lands a hair
+ * outside it from floating-point rounding right at a word's start/end.
+ */
+export function computeMouthShapeIdForWord(word: string, progress01: number): string {
+  const clampedProgress01 = Math.min(Math.max(progress01, 0), 1);
+  const vowelSegments = countVowelSegments(word);
+  const segmentIndex = Math.min(Math.floor(clampedProgress01 * vowelSegments), vowelSegments - 1);
+  return segmentIndex % 2 === 0 ? "open" : "closed";
 }

@@ -39,9 +39,8 @@ export const IMAGE_TEMPLATE_OPTIONS: ImageTemplateOption[] = [
 
 const DEFAULT_IMAGE_TEMPLATE_ID: ImageTemplateId = IMAGE_TEMPLATE_OPTIONS[0].id;
 
-/** Defensive lookup, same pattern as transcriptCaptionTemplates.ts's
- * getTranscriptCaptionConfig -- falls back to the first template rather
- * than throwing if a stale/unknown id is ever persisted. */
+/** Defensive lookup -- falls back to the first template rather than
+ * throwing if a stale/unknown id is ever persisted. */
 export function getImageTemplateOption(templateId: string): ImageTemplateOption {
   return IMAGE_TEMPLATE_OPTIONS.find((option) => option.id === templateId) ?? IMAGE_TEMPLATE_OPTIONS[0];
 }

@@ -116,9 +116,6 @@ import {
   applyAvatarOverlayRangeChange,
   applyAvatarOverlayPositionChange,
   applyDeleteAvatarOverlay,
-  applyEnableTranscriptCaption,
-  applyUpdateTranscriptCaption,
-  applyDisableTranscriptCaption,
   applyAddVideoOverlay,
   applyChangeVideoOverlayLayout,
   applyToggleSplitScreenOrientation,
@@ -163,7 +160,6 @@ import {
 } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
 import { useAutosaveTimeline } from "@/lib/useAutosaveTimeline";
-import { useRenderStatus } from "@/lib/useRenderStatus";
 import { useLocalRender } from "@/lib/useLocalRender";
 import { gatherLocalSequenceClips, gatherLocalMusicClips } from "@/lib/localRender/gatherLocalRenderClips";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
@@ -174,7 +170,6 @@ import type { VideoOverlayThumbnailFrames } from "./FrameStrip";
 import type { CutawaySegment } from "./CutawayTrack";
 import { FeedbackArea, type ActivityLogEntry } from "./FeedbackArea";
 import type { CanvasPlayerHandle } from "./CanvasPlayer";
-import { RenderComingSoonPopup } from "./RenderComingSoonPopup";
 import { LocalRenderPopup } from "./LocalRenderPopup";
 import { CoverPicker } from "./CoverPicker";
 
@@ -194,14 +189,6 @@ export function ThreePaneEditor({
   initialProject: Project;
 }) {
   const router = useRouter();
-  const {
-    isRendering,
-    renderStatus,
-    renderUrl,
-    renderError,
-    isStuck: isRenderStuck,
-    applyProjectStatus,
-  } = useRenderStatus(projectId);
 
   const {
     isSupported: isLocalRenderSupported,
@@ -214,11 +201,6 @@ export function ThreePaneEditor({
     resultWarnings: localRenderWarnings,
     startLocalRender,
   } = useLocalRender();
-
-  useEffect(() => {
-    applyProjectStatus(initialProject);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial-mount seed only; applyProjectStatus is a fresh closure from the hook every render
-  }, []);
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [assetsLoaded, setAssetsLoaded] = useState(false);
@@ -433,10 +415,6 @@ export function ThreePaneEditor({
   const [isAvatarDialogOpen, setIsAvatarDialogOpen] = useState(false);
   const [editingAvatarOverlayIndex, setEditingAvatarOverlayIndex] = useState<number | null>(null);
 
-  // TranscriptCaptionDialog's open state -- no edit-target index needed,
-  // there's only ever one transcript caption config (see
-  // video_math.ts's TranscriptCaption).
-  const [isTranscriptDialogOpen, setIsTranscriptDialogOpen] = useState(false);
   const [isCutawayDialogOpen, setIsCutawayDialogOpen] = useState(false);
   // Non-null while CutawayDialog is open in EDIT mode (image cutaways only
   // -- a video cutaway has nothing to edit in place), reopened by clicking
@@ -520,11 +498,6 @@ export function ThreePaneEditor({
   // above rather than the old assetId-keyed AssetMarkersDialog state.
   const [sourceStartDialogOverlayIndex, setSourceStartDialogOverlayIndex] = useState<number | null>(null);
 
-  // The cloud (Creatomate) render is temporarily disabled -- see
-  // handleRenderClick below, which shows this instead of actually starting
-  // a render.
-  const [isRenderComingSoonOpen, setIsRenderComingSoonOpen] = useState(false);
-
   // Opened by handleLocalRenderClick right before the export starts, and
   // stays open through completion/failure -- LocalRenderPopup itself
   // decides what to show (loader vs. finished player vs. error) from the
@@ -535,8 +508,8 @@ export function ThreePaneEditor({
 
   // Cover/thumbnail picker (see CoverPicker.tsx) -- seeded from the row this
   // reel was loaded with, then kept in sync locally as the user saves/clears
-  // a cover, same as isRenderComingSoonOpen etc. above rather than a
-  // dedicated hook (unlike render status, there's no async polling here --
+  // a cover, same as isCutawayDialogOpen etc. above rather than a
+  // dedicated hook (unlike a render, there's no async polling here --
   // every CoverPicker action is a single request/response).
   const [isCoverPickerOpen, setIsCoverPickerOpen] = useState(false);
   const [coverThumbnailUrl, setCoverThumbnailUrl] = useState<string | null>(initialProject.thumbnail_url);
@@ -704,7 +677,6 @@ export function ThreePaneEditor({
     avatarOverlays: rawSelections.avatarOverlays ?? [],
     sequenceClips,
     videoOverlays,
-    transcriptCaption: rawSelections.transcriptCaption ?? null,
     musicClips: rawSelections.musicClips ?? [],
   };
 
@@ -2362,30 +2334,6 @@ export function ThreePaneEditor({
     setEditingTextOverlayIndex(null);
   }
 
-  function handleOpenTranscriptDialog() {
-    setIsTranscriptDialogOpen(true);
-  }
-
-  function handleCloseTranscriptDialog() {
-    setIsTranscriptDialogOpen(false);
-  }
-
-  // TranscriptCaptionDialog's Enable/Update -- dispatches based on whether
-  // auto-captions are already on, same pattern as handleSaveTextOverlay.
-  function handleSaveTranscriptCaption(templateId: string, rect: CropRect) {
-    const { label, state } = selections.transcriptCaption
-      ? applyUpdateTranscriptCaption(selections, templateId, rect)
-      : applyEnableTranscriptCaption(selections, templateId, rect);
-    pushChange(label, state);
-    setIsTranscriptDialogOpen(false);
-  }
-
-  function handleDisableTranscriptCaption() {
-    const { label, state } = applyDisableTranscriptCaption(selections);
-    pushChange(label, state);
-    setIsTranscriptDialogOpen(false);
-  }
-
   function handleChangeTextOverlayRect(overlayIndex: number, next: CropRect) {
     setLiveTextOverlayRectEdit({ index: overlayIndex, rect: next });
   }
@@ -2546,7 +2494,7 @@ export function ThreePaneEditor({
   // AvatarFramingDialog's Add/Save -- dispatches to add-new or edit-existing
   // depending on whether it was opened via handleOpenAvatarDialog or
   // handleRequestEditAvatarOverlay, same shape as handleSaveTextOverlay.
-  function handleSaveAvatarOverlay(avatarId: string, defaultAction: AvatarActionId, rect: CropRect) {
+  function handleSaveAvatarOverlay(avatarId: string, defaultAction: AvatarActionId | (string & {}), rect: CropRect) {
     const { label, state } =
       editingAvatarOverlayIndex !== null
         ? applyEditAvatarOverlay(selections, editingAvatarOverlayIndex, avatarId, defaultAction, rect)
@@ -2827,21 +2775,13 @@ export function ThreePaneEditor({
     return clip;
   });
 
-  // The green Render button in FeedbackArea -- cloud (Creatomate) rendering
-  // is temporarily disabled, so this just surfaces a "coming soon" popup
-  // instead of gathering clip durations and calling startRender(). The free/
-  // local render button (handleLocalRenderClick) is the only one that
-  // actually renders for now.
-  function handleRenderClick() {
-    setIsRenderComingSoonOpen(true);
-  }
-
-  // The lighter-green free Render button in FeedbackArea -- renders entirely
-  // in this tab (lib/localRender/exportTimeline.ts), no server/Creatomate
-  // involved. Mirrors handleRenderClick's own "gather real durations fresh,
-  // then compute output dimensions" shape, but via the local-only gatherer
-  // (gatherLocalRenderClips.ts) since the local exporter needs each clip's
-  // actual URL, not just its duration.
+  // The free Edge Render button in CanvasPlayer's preview toolbar -- renders
+  // entirely in this tab (lib/localRender/exportTimeline.ts), no server/
+  // Creatomate involved (cloud rendering has been removed from this editor;
+  // see the render-backend-decision notes). Gathers each clip's real
+  // duration/dimensions fresh via the local-only gatherer
+  // (gatherLocalRenderClips.ts), which needs each clip's actual URL, not
+  // just its duration.
   async function handleLocalRenderClick() {
     if (effectiveSequenceEntries.length === 0 || isLocalRendering) return;
 
@@ -2959,16 +2899,11 @@ export function ThreePaneEditor({
     : Infinity;
 
   const renderControls = {
-    canRender: effectiveSequenceEntries.length > 0,
-    isRendering,
-    renderStatus,
-    onRenderClick: handleRenderClick,
     canLocalRender: effectiveSequenceEntries.length > 0,
     isLocalRendering,
     isLocalRenderSupported,
     localRenderUnsupportedReason,
     onLocalRenderClick: handleLocalRenderClick,
-    transcriptCaption: selections.transcriptCaption,
   };
 
   return (
@@ -3066,12 +3001,6 @@ export function ThreePaneEditor({
           onSaveAvatarOverlay={handleSaveAvatarOverlay}
           onCloseAvatarDialog={handleCloseAvatarDialog}
           onDeleteAvatarOverlay={handleDeleteAvatarOverlay}
-          onOpenTranscriptDialog={handleOpenTranscriptDialog}
-          isTranscriptDialogOpen={isTranscriptDialogOpen}
-          transcriptCaption={selections.transcriptCaption}
-          onSaveTranscriptCaption={handleSaveTranscriptCaption}
-          onDisableTranscriptCaption={handleDisableTranscriptCaption}
-          onCloseTranscriptDialog={handleCloseTranscriptDialog}
           onOpenCutawayDialog={handleOpenCutawayDialog}
           isCutawayDialogOpen={isCutawayDialogOpen}
           editingCutaway={editingCutaway}
@@ -3257,16 +3186,10 @@ export function ThreePaneEditor({
           saveError={saveError}
           isAnalyzing={isAnalyzing}
           isUploading={isUploading}
-          isRendering={isRendering}
-          renderStatus={renderStatus}
-          renderUrl={renderUrl}
-          renderError={renderError}
-          isRenderStuck={isRenderStuck}
           activityLog={activityLog}
         />
       </section>
 
-      {isRenderComingSoonOpen && <RenderComingSoonPopup onClose={() => setIsRenderComingSoonOpen(false)} />}
       {isCoverPickerOpen && (
         <CoverPicker
           projectId={projectId}

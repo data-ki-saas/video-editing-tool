@@ -183,6 +183,52 @@ const SLEEP: ActionCurveSpec = {
   ],
 };
 
+// Peak arm-raise rotation for TALK_EMPHASIZE's pointing gesture below, in
+// radians, ADDITIVE on top of armR's own DEFAULT_LOCAL_POSE rotation (0 --
+// the arm hangs straight down at rest, see that pose's own doc comment).
+// renderer.ts's forward-kinematics pass feeds this straight into
+// DOMMatrix.rotate, which (per canvas 2D convention) is CLOCKWISE for
+// positive degrees -- so a positive delta here sweeps the hanging arm up
+// through its own front/center side (toward the torso, where the camera
+// effectively "is" for this flat 2D rig) rather than out and around behind
+// the body. ~126 degrees lands the hand raised well past horizontal, angled
+// in toward center -- short of a full 180 ("straight overhead salute",
+// which reads as reaching/waving rather than pointing).
+const ARM_POINT_ROTATION_RADIANS = 2.2;
+
+// A non-baseline EXTRA action (see topology.ts's own doc comment on
+// AvatarTopology.actions' open string index) -- "talk", but with a periodic
+// presenter-style point-at-camera gesture layered on the right arm, for a
+// creator who wants their avatar to emphasize a beat rather than just idly
+// chatter. Actions don't compose or inherit (a spec is its own complete
+// keyframe list, see this file's own module comment), so TALK's own
+// torso/head bob is copied here verbatim -- same amplitudes, same bones --
+// rather than referenced, specifically so this reads as "the same character
+// as talk, plus a gesture" instead of a differently-tuned one.
+const TALK_EMPHASIZE: ActionCurveSpec = {
+  // Matches TALK's own period exactly (not just "a period in the same
+  // range") -- this action IS talk's cadence with a gesture added, not a
+  // second, differently-timed rhythm; it also happens to land well inside a
+  // natural single-emphasis-beat range (1.6-2s) for the arm gesture itself.
+  periodSeconds: 1.8,
+  keyframes: [
+    ...breathingBobKeyframes(TORSO, 1.5),
+    ...breathingBobKeyframes(HEAD, 1),
+    // One emphasis beat per loop on armR only -- legs/root/armL get no
+    // keyframes at all here (same as TALK), i.e. stay fully at rest, since
+    // this is a standing gesture, not a walk. Rest through ~37% of the
+    // period, ease up into the raised/pointing pose by ~58%, hold briefly,
+    // ease back down to rest by ~88%, then rest for the remainder (the loop
+    // wraps from this last keyframe straight back to t=0's rest delta, see
+    // ActionCurveSpec's own doc comment in topology.ts).
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.37, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.58, boneIndex: ARM_R, delta: { rotation: ARM_POINT_ROTATION_RADIANS } },
+    { t: 0.68, boneIndex: ARM_R, delta: { rotation: ARM_POINT_ROTATION_RADIANS } },
+    { t: 0.88, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
 const LOOK_AROUND: ActionCurveSpec = {
   // Unused by this action's own special-cased evaluator (see actions.ts's
   // computeSeededPose) -- kept nonzero only to satisfy ActionCurveSpec's
@@ -204,6 +250,11 @@ const ACTIONS: AvatarTopology["actions"] = {
   sit: SIT,
   sleep: SLEEP,
   lookAround: LOOK_AROUND,
+  // The first non-baseline extra (see topology.ts's own doc comment on
+  // AvatarTopology.actions) -- deliberately id-prefixed "talk" (see
+  // TALK_EMPHASIZE's own comment) so a future actionId.startsWith("talk")
+  // check elsewhere can treat it as a talking variant.
+  talkEmphasize: TALK_EMPHASIZE,
 };
 
 const BIPED_SIMPLE_TOPOLOGY: AvatarTopology = {

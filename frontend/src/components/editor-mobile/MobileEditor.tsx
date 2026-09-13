@@ -15,10 +15,12 @@
  * zoom dragging, video/image overlay framing, freeform text/caption
  * placement, markers, click-to-place trim, per-overlay volume mixing --
  * all confirmed poor touch fits, deliberately left to desktop). Cloud
- * (Creatomate) rendering is disabled app-wide right now (see
- * ThreePaneEditor's own handleRenderClick) -- this editor's Render button
- * shows the identical "coming soon" stub, so it starts working automatically,
- * with no mobile-specific follow-up, once that ships.
+ * (Creatomate) rendering has been removed from this editor entirely (see
+ * this repo's own render-backend-decision notes) -- the header's Render
+ * button triggers the same free/local Edge Render pipeline
+ * (lib/localRender/exportTimeline.ts, via useLocalRender/handleLocalRenderClick
+ * below) ThreePaneEditor's own preview toolbar uses, just from this file's
+ * own simpler header instead of a per-preview control row.
  *
  * Unlike ThreePaneEditor, this component does NOT run the full per-second
  * thumbnail-strip extraction pipeline (extractThumbnails) -- that exists to
@@ -40,6 +42,7 @@ import {
   DEFAULT_BACKGROUND_VOLUME,
   DEFAULT_OVERLAY_FRAMING,
   DEFAULT_SPLIT_SCREEN_RATIO,
+  computeOutputDimensions,
   type CropRect,
   type ImageOverlayClip,
   type MusicClip,
@@ -58,15 +61,14 @@ import {
   applySelectCutawayFilterPreset,
   applySelectClipTransition,
   applyAddTtsOverlay,
-  applyEnableTranscriptCaption,
-  applyUpdateTranscriptCaption,
-  applyDisableTranscriptCaption,
 } from "@/lib/video/transformations";
 import type { FilterPresetId } from "@/lib/video/filterPresets";
 import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import { DEFAULT_EDIT_SELECTIONS, type Timeline, type EditSelectionsSnapshot, type Project } from "@/lib/projects";
 import { useEditHistory } from "@/lib/useEditHistory";
 import { useAutosaveTimeline } from "@/lib/useAutosaveTimeline";
+import { useLocalRender } from "@/lib/useLocalRender";
+import { gatherLocalSequenceClips, gatherLocalMusicClips } from "@/lib/localRender/gatherLocalRenderClips";
 import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { CLIP_RECT_OPTIONS } from "@/components/editor-v2/ClipRectIcon";
 import { CanvasPlayer, type CanvasPlayerHandle } from "@/components/editor-v2/CanvasPlayer";
@@ -74,9 +76,9 @@ import { ClipRectangleDialog } from "@/components/editor-v2/ClipRectangleDialog"
 import { FilterPresetDialog } from "@/components/editor-v2/FilterPresetDialog";
 import { CutTransitionDialog } from "@/components/editor-v2/CutTransitionDialog";
 import { TtsOverlayDialog } from "@/components/editor-v2/TtsOverlayDialog";
-import { TranscriptCaptionDialog } from "@/components/editor-v2/TranscriptCaptionDialog";
 import { CoverPicker } from "@/components/editor-v2/CoverPicker";
-import { RenderComingSoonPopup } from "@/components/editor-v2/RenderComingSoonPopup";
+import { LocalRenderPopup } from "@/components/editor-v2/LocalRenderPopup";
+import { LocalRenderIcon } from "@/components/editor-v2/icons/PlayerIcons";
 import { MenuIcon } from "@/components/icons/UIIcons";
 import { MobileAssetStrip } from "./MobileAssetStrip";
 import { MobileClipEditor } from "./MobileClipEditor";
@@ -108,6 +110,22 @@ export function MobileEditor({
   const [frameDimensions, setFrameDimensions] = useState<{ width: number; height: number } | null>(null);
   const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
   const [isReelMenuOpen, setIsReelMenuOpen] = useState(false);
+
+  // Edge Render (free, local export) -- same hook desktop's ThreePaneEditor
+  // uses, just triggered from this file's own header button (handleLocalRenderClick
+  // below) instead of a preview-toolbar button, since this editor has no
+  // CanvasPlayer-hosted renderControls of its own.
+  const {
+    isSupported: isLocalRenderSupported,
+    unsupportedReason: localRenderUnsupportedReason,
+    isRendering: isLocalRendering,
+    progress: localRenderProgress,
+    resultUrl: localRenderUrl,
+    resultMimeType: localRenderMimeType,
+    resultError: localRenderError,
+    resultWarnings: localRenderWarnings,
+    startLocalRender,
+  } = useLocalRender();
 
   const {
     state: rawSelections,
@@ -201,7 +219,6 @@ export function MobileEditor({
     avatarOverlays: rawSelections.avatarOverlays ?? [],
     sequenceClips,
     videoOverlays,
-    transcriptCaption: rawSelections.transcriptCaption ?? null,
     // This editor has no music-clip drag/resize UI (see ThreePaneEditor's
     // BackgroundTrackStrip for that) -- round-tripped unchanged so a reel
     // edited here doesn't silently drop music authored in the desktop
@@ -369,10 +386,12 @@ export function MobileEditor({
   >(null);
   const [isClipRectDialogOpen, setIsClipRectDialogOpen] = useState(false);
   const [isTtsDialogOpen, setIsTtsDialogOpen] = useState(false);
-  const [isTranscriptDialogOpen, setIsTranscriptDialogOpen] = useState(false);
   const [isCoverPickerOpen, setIsCoverPickerOpen] = useState(false);
   const [coverThumbnailUrl, setCoverThumbnailUrl] = useState<string | null>(initialProject.thumbnail_url);
-  const [isRenderComingSoonOpen, setIsRenderComingSoonOpen] = useState(false);
+  // Opened by handleLocalRenderClick right before the export starts, and
+  // stays open through completion/failure -- same LocalRenderPopup desktop
+  // uses, see its own doc comment.
+  const [isLocalRenderPopupOpen, setIsLocalRenderPopupOpen] = useState(false);
 
   function handleUploaded(asset: Asset) {
     setAssets((prev) => [asset, ...prev]);
@@ -487,18 +506,59 @@ export function MobileEditor({
     setIsTtsDialogOpen(false);
   }
 
-  function handleSaveTranscriptCaption(templateId: string, rect: CropRect) {
-    const { label, state } = selections.transcriptCaption
-      ? applyUpdateTranscriptCaption(selections, templateId, rect)
-      : applyEnableTranscriptCaption(selections, templateId, rect);
-    pushChange(label, state);
-    setIsTranscriptDialogOpen(false);
-  }
+  // The header's Render button -- Edge Render (free, local export), the
+  // only render path this app has now (cloud/Creatomate rendering has been
+  // removed here too). Mirrors ThreePaneEditor's own handleLocalRenderClick
+  // almost exactly, just against this editor's own simpler state (no
+  // matting-progress splice, no separate `effectiveSequenceEntries` --
+  // `sequenceClips` here is already the plain resolved list).
+  async function handleLocalRenderClick() {
+    if (sequenceClips.length === 0 || isLocalRendering) return;
 
-  function handleDisableTranscriptCaption() {
-    const { label, state } = applyDisableTranscriptCaption(selections);
-    pushChange(label, state);
-    setIsTranscriptDialogOpen(false);
+    // A live preview competes with the export for the same decode/audio
+    // resources (and would otherwise keep playing, unseen, behind the
+    // render popup) -- stop it before anything else starts, same as
+    // desktop's own handleLocalRenderClick.
+    canvasPlayerRef.current?.pause();
+
+    setIsLocalRenderPopupOpen(true);
+
+    // Re-fetches the asset list right before rendering rather than reusing
+    // this component's own (possibly long-since-fetched) `assets`/
+    // `assetUrlById` -- presigned URLs expire and a slow export can easily
+    // outlast one otherwise. See ThreePaneEditor's own handleLocalRenderClick
+    // for the fuller writeup of why this refetch exists.
+    const freshAssets = await listAssets(projectId);
+    const freshAssetUrlById = Object.fromEntries(freshAssets.map((asset) => [asset.id, asset.url]));
+    // Same "drop an entry whose asset no longer resolves, but always keep a
+    // text-only slide" filter as ThreePaneEditor's own resolvedSequenceEntries.
+    const freshSequenceClips = sequenceClips
+      .filter((entry) => (entry.kind === "text" && !entry.assetId) || Boolean(freshAssetUrlById[entry.assetId]))
+      .map((entry) => ({ ...entry, url: freshAssetUrlById[entry.assetId] }));
+
+    const gatheredSequenceClips = await gatherLocalSequenceClips(freshSequenceClips);
+    const gatheredMusicClips = gatherLocalMusicClips(selections.musicClips, freshAssetUrlById);
+
+    const { width, height } = computeOutputDimensions(clipRectAspectRatio);
+
+    await startLocalRender({
+      selections,
+      sequenceClips: gatheredSequenceClips,
+      musicClips: gatheredMusicClips,
+      assetUrlById: freshAssetUrlById,
+      refreshAssetUrl: async (assetId: string) => {
+        try {
+          const latest = await listAssets(projectId);
+          return latest.find((asset) => asset.id === assetId)?.url;
+        } catch {
+          return undefined;
+        }
+      },
+      mainAudioVolume,
+      backgroundVolume,
+      outputWidth: width,
+      outputHeight: height,
+    });
   }
 
   const transitionIndex = transitionDialogEntry ? sequenceClips.findIndex((entry) => entry.id === transitionDialogEntry.id) : -1;
@@ -528,9 +588,18 @@ export function MobileEditor({
           </button>
           <button
             type="button"
-            onClick={() => setIsRenderComingSoonOpen(true)}
-            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground"
+            onClick={handleLocalRenderClick}
+            disabled={sequenceClips.length === 0 || isLocalRendering || !isLocalRenderSupported}
+            title={
+              sequenceClips.length === 0
+                ? "Add a video before rendering"
+                : !isLocalRenderSupported
+                  ? (localRenderUnsupportedReason ?? "Needs a Chromium browser (Chrome or Microsoft Edge)")
+                  : "Render (in your browser, no cost)"
+            }
+            className="flex shrink-0 items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
+            <LocalRenderIcon className="h-4 w-4" />
             Render
           </button>
         </div>
@@ -598,13 +667,6 @@ export function MobileEditor({
           className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground"
         >
           Voiceover
-        </button>
-        <button
-          type="button"
-          onClick={() => setIsTranscriptDialogOpen(true)}
-          className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-foreground"
-        >
-          {selections.transcriptCaption ? "Captions: on" : "Captions"}
         </button>
       </div>
 
@@ -739,17 +801,6 @@ export function MobileEditor({
         />
       )}
 
-      {isTranscriptDialogOpen && (
-        <TranscriptCaptionDialog
-          transcriptCaption={selections.transcriptCaption}
-          previewFrameUrl={generalPreviewFrameUrl}
-          frameAspectRatio={frameAspectRatio}
-          onSave={handleSaveTranscriptCaption}
-          onDisable={handleDisableTranscriptCaption}
-          onClose={() => setIsTranscriptDialogOpen(false)}
-        />
-      )}
-
       {isCoverPickerOpen && (
         <CoverPicker
           projectId={projectId}
@@ -762,7 +813,19 @@ export function MobileEditor({
         />
       )}
 
-      {isRenderComingSoonOpen && <RenderComingSoonPopup onClose={() => setIsRenderComingSoonOpen(false)} />}
+      {isLocalRenderPopupOpen && (
+        <LocalRenderPopup
+          projectId={projectId}
+          projectName={initialProject.name}
+          isRendering={isLocalRendering}
+          progress={localRenderProgress}
+          resultUrl={localRenderUrl}
+          resultMimeType={localRenderMimeType}
+          resultError={localRenderError}
+          resultWarnings={localRenderWarnings}
+          onClose={() => setIsLocalRenderPopupOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -10,11 +10,9 @@
  * something's selected this tab also grows a small preview swatch of it at
  * the bottom. The other tabs pin their own at-a-glance state to the same
  * bottom spot: Cutaway/Video Overlay/Image Overlay/Text show a count badge
- * once they have at least one item (CountBadge), Auto-Caption shows a
- * filled On/Off pill instead since it's a single whole-video setting, not a
- * count (AutoCaptionStatus).
+ * once they have at least one item (CountBadge).
  *
- * Grouped into three clusters, left to right, each with its own micro
+ * Grouped into two clusters, left to right, each with its own micro
  * uppercase label (same convention AssetGallery.tsx's own section headers
  * use) so the tab bar reads as organized roles rather than one flat row.
  * Each cluster owns exactly one fixed hue (also tinting its own GroupLabel,
@@ -35,10 +33,6 @@
  *    family now (previously each had its own unrelated hue -- amber/sky/
  *    violet -- which read as unrelated colors rather than one "overlays"
  *    group); shade alone now distinguishes them within the cluster.
- *  - CAPTIONS (emerald): Auto-Caption -- its own cluster since it's a
- *    different kind of thing (server-side transcription, not a user-placed
- *    clip/overlay). Only one member, so it just gets the group's own
- *    mid-range shade.
  *
  * Thumbnail (moved here from the top bar -- it's an editing decision about
  * this reel's own content, not a global nav/render action) sits in BASE
@@ -75,19 +69,6 @@ function TextGlyphIcon({ className }: { className?: string }) {
   );
 }
 
-// Universal "closed captions" glyph -- distinguishes the auto-caption
-// trigger from the plain "Text" one at a glance.
-function ClosedCaptionIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <rect x="2.5" y="5.5" width="19" height="13" rx="2" />
-      <text x="12" y="14.5" textAnchor="middle" fontSize="7" fontWeight="700" stroke="none" fill="currentColor">
-        CC
-      </text>
-    </svg>
-  );
-}
-
 // A photo frame with a small motion trail on its corner -- distinguishes
 // the "insert a cutaway" trigger from a plain picture glyph, and from
 // PhotoOverlayIcon below (a static corner box, not a trail) -- "this one
@@ -105,9 +86,9 @@ function ImageMotionIcon({ className }: { className?: string }) {
 }
 
 // A card with two text lines inside -- "Text Slide" 's identity, distinct
-// from ClosedCaptionIcon's "CC" glyph (auto-caption) and TextGlyphIcon's
-// bare "T" (a manually-typed caption over existing footage): this one is
-// its own full-frame slide, not an overlay on top of anything.
+// from TextGlyphIcon's bare "T" (a manually-typed caption over existing
+// footage): this one is its own full-frame slide, not an overlay on top of
+// anything.
 function TextSlideIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className={className}>
@@ -183,22 +164,6 @@ function CountBadge({ count }: { count: number }) {
   );
 }
 
-// Auto-Caption has no "count" that means anything (it's one config for the
-// whole video, on or off) -- a filled on/white-text pill reads clearly
-// against any of the app's light/dark/color themes, unlike plain colored
-// text sitting directly on the page background.
-function AutoCaptionStatus({ enabled }: { enabled: boolean }) {
-  return (
-    <span
-      className={`mt-auto rounded-full px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white ${
-        enabled ? "bg-green-600" : "bg-red-600"
-      }`}
-    >
-      {enabled ? "On" : "Off"}
-    </span>
-  );
-}
-
 // A tab's own group micro-label, shared across every group below -- same
 // tiny uppercase convention AssetGallery.tsx's own section headers use.
 // `colorClassName` ties the label to its group's own fixed hue (see this
@@ -228,8 +193,6 @@ export function UserActions({
   ttsOverlayCount,
   onOpenAvatarDialog,
   avatarOverlayCount,
-  onOpenTranscriptDialog,
-  autoCaptionEnabled,
   onOpenCoverPicker,
   coverThumbnailUrl,
 }: {
@@ -249,8 +212,6 @@ export function UserActions({
   ttsOverlayCount: number;
   onOpenAvatarDialog: () => void;
   avatarOverlayCount: number;
-  onOpenTranscriptDialog: () => void;
-  autoCaptionEnabled: boolean;
   onOpenCoverPicker: () => void;
   coverThumbnailUrl: string | null;
 }) {
@@ -379,23 +340,6 @@ export function UserActions({
             Avatar
           </span>
           <CountBadge count={avatarOverlayCount} />
-        </button>
-      </div>
-
-      {/* CAPTIONS -- emerald family (single member, so its own mid shade) */}
-      <div className="relative flex h-full gap-3">
-        <GroupLabel colorClassName="text-emerald-600">Captions</GroupLabel>
-        <button
-          type="button"
-          onClick={onOpenTranscriptDialog}
-          title="Auto-captions"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-emerald-600 hover:bg-background"
-        >
-          <ClosedCaptionIcon className="h-4 w-4" />
-          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-            Auto-Caption
-          </span>
-          <AutoCaptionStatus enabled={autoCaptionEnabled} />
         </button>
       </div>
     </div>

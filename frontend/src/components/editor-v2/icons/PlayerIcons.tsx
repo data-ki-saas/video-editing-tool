@@ -47,30 +47,8 @@ export function LoopIcon(props: IconProps) {
   );
 }
 
-/** Simple clapperboard glyph for the Render action -- outline, matching
- * LoopIcon's stroke style. */
-export function RenderIcon(props: IconProps) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      {...props}
-    >
-      <path d="M3 8.5V19a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8.5H3Z" />
-      <path d="m3 8.5 1.5-4.5h3L6 8.5" />
-      <path d="m9.5 8.5 1.5-4.5h3l-1.5 4.5" />
-      <path d="M16 8.5 17.5 4H20a1 1 0 0 1 1 1v3.5" />
-    </svg>
-  );
-}
-
 /** Simple monitor glyph for the free/local render action -- "renders on
- * this device," visually distinct from RenderIcon's clapperboard (which
- * reads as the cloud/studio render), same outline stroke style. */
+ * this device," same outline stroke style as every other icon here. */
 export function LocalRenderIcon(props: IconProps) {
   return (
     <svg
@@ -134,7 +112,7 @@ export function CollapseIcon(props: IconProps) {
 /** A camera body with a shutter dot -- opens the camera Record page
  * (CameraCapturePage.tsx), badged right after CoverIcon's thumbnail button
  * in TopMenuBar since both live in that same "this reel's own media"
- * button group. Outline, matching CoverIcon/RenderIcon's stroke style. */
+ * button group. Outline, matching CoverIcon/LocalRenderIcon's stroke style. */
 export function RecordIcon(props: IconProps) {
   return (
     <svg
@@ -210,7 +188,7 @@ export function ResetIcon(props: IconProps) {
 }
 
 /** Simple picture/image glyph for the cover/thumbnail picker action --
- * outline, matching LocalRenderIcon/RenderIcon's stroke style. */
+ * outline, matching LocalRenderIcon's stroke style. */
 export function CoverIcon(props: IconProps) {
   return (
     <svg

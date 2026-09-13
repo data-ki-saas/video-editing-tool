@@ -26,33 +26,74 @@
  * Right half: a character gallery (AVATAR_LIBRARY, avatar/library.ts) --
  * built as a real grid rather than a single hardcoded card, so a later
  * phase's larger library (user-generated avatars) drops in with no
- * structural change here -- and a 6-button action grid (AvatarActionId's
- * baseline set, human-readable labels). No free-typed content field at all
- * (unlike TextOverlayDialog's textarea): everything this overlay carries is
- * a pick from a fixed set, per this feature's own spec.
+ * structural change here -- and an action grid derived from the CURRENTLY
+ * SELECTED avatar's own resolved topology (human-readable labels, see
+ * AVATAR_ACTION_LABELS below), not a fixed six-button layout: a Topology
+ * may declare extra actions beyond the six-id baseline (topology.ts's own
+ * `AvatarTopology.actions` doc comment), and this picker needs to offer
+ * whichever set the picked character's own rig actually has. No free-typed
+ * content field at all (unlike TextOverlayDialog's textarea): everything
+ * this overlay carries is a pick from a fixed set, per this feature's own
+ * spec.
  */
 import { useEffect, useRef, useState } from "react";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
 import { getCompiledAvatar, type CompiledAvatar } from "@/lib/video/avatar/compile";
 import { computeAvatarPose, computeMouthShapeId } from "@/lib/video/avatar/actions";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
-import { AVATAR_LIBRARY } from "@/lib/video/avatar/library";
+import { AVATAR_LIBRARY, getAvatarLibraryEntry } from "@/lib/video/avatar/library";
 import type { AvatarActionId } from "@/lib/video/avatar/topology";
 import { ambientEffectSeed } from "@/lib/video/ambientEffects";
 import { DEFAULT_AVATAR_OVERLAY_RECT, type AvatarOverlayClip, type CropRect } from "@/lib/video/video_math";
 
-// The baseline action set (topology.ts's AvatarActionId) with the
-// human-readable labels this picker shows -- every seed/library Topology is
-// expected to define all six (see library.ts's own doc comment), so this
-// list doesn't need to be derived per-avatar.
-const AVATAR_ACTION_OPTIONS: { id: AvatarActionId; label: string }[] = [
-  { id: "idle", label: "Idle" },
-  { id: "talk", label: "Talking" },
-  { id: "walk", label: "Walking" },
-  { id: "sit", label: "Sitting" },
-  { id: "sleep", label: "Sleeping" },
-  { id: "lookAround", label: "Looking around" },
-];
+// Human-readable labels for the six baseline actions (topology.ts's
+// AvatarActionId) plus this feature's own first non-baseline extra
+// ("talkEmphasize" -- see library.ts's own doc comment on "biped-simple"'s
+// action map). A Topology may declare further extras beyond even this map,
+// which is exactly why this is a plain lookup with a humanizing fallback
+// (see humanizeActionId/actionLabel below) rather than a closed set this
+// component would need another patch to extend.
+const AVATAR_ACTION_LABELS: Record<string, string> = {
+  idle: "Idle",
+  talk: "Talking",
+  walk: "Walking",
+  sit: "Sitting",
+  sleep: "Sleeping",
+  lookAround: "Looking around",
+  talkEmphasize: "Talking + Pointing",
+};
+
+// Defensive fallback ONLY -- used if getAvatarLibraryEntry can't resolve the
+// currently-picked avatarId at all (see actionIdsForAvatar below). Every
+// real seed Topology defines all six baseline actions (library.ts's own doc
+// comment), so this path isn't expected to matter in practice.
+const BASELINE_ACTION_IDS: AvatarActionId[] = ["idle", "talk", "walk", "sit", "sleep", "lookAround"];
+
+// "someNewAction" -> "Some New Action" -- last-resort label for any action
+// id AVATAR_ACTION_LABELS doesn't know about yet, so a future Topology's
+// extra action (topology.ts's own "actions" doc comment) shows up looking
+// reasonable in this picker without another round of UI changes here.
+function humanizeActionId(actionId: string): string {
+  const spaced = actionId.replace(/([a-z0-9])([A-Z])/g, "$1 $2").trim();
+  if (spaced === "") return actionId;
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+function actionLabel(actionId: string): string {
+  return AVATAR_ACTION_LABELS[actionId] ?? humanizeActionId(actionId);
+}
+
+// The actual pickable action ids for whichever avatar is CURRENTLY
+// selected -- derived from that avatar's own resolved topology (Object.keys
+// of its `actions` map, which preserves the insertion order library.ts
+// authored it in: baseline six first, extras after) rather than a fixed
+// array, so a richer topology's extra actions show up here with no further
+// change to this component. Falls back to the baseline six only if the
+// lookup itself fails (see BASELINE_ACTION_IDS's own comment).
+function actionIdsForAvatar(avatarId: string): string[] {
+  const actionIds = Object.keys(getAvatarLibraryEntry(avatarId)?.topology.actions ?? {});
+  return actionIds.length > 0 ? actionIds : BASELINE_ACTION_IDS;
+}
 
 // A plain person silhouette -- this gallery's default "unknown character"
 // glyph, shown for every AVATAR_LIBRARY card regardless of its own skin
@@ -86,7 +127,7 @@ function AvatarGlyphIcon({ className }: { className?: string }) {
  * getCompiledAvatar is itself promise-cached (compile.ts), so flipping back
  * to an already-picked avatarId resolves instantly with no re-decode.
  */
-function AvatarPreviewCanvas({ avatarId, action, className }: { avatarId: string; action: AvatarActionId; className?: string }) {
+function AvatarPreviewCanvas({ avatarId, action, className }: { avatarId: string; action: string; className?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const compiledRef = useRef<CompiledAvatar | null>(null);
   const seedRef = useRef(0);
@@ -179,7 +220,7 @@ export function AvatarFramingDialog({
   editingOverlay: AvatarOverlayClip | null;
   previewFrameUrl: string | null;
   frameAspectRatio: number | null;
-  onSave: (avatarId: string, defaultAction: AvatarActionId, rect: CropRect) => void;
+  onSave: (avatarId: string, defaultAction: AvatarActionId | (string & {}), rect: CropRect) => void;
   onClose: () => void;
   // Only ever passed (and only ever rendered, see the button row below) when
   // editingOverlay is non-null -- a not-yet-added avatar has nothing to
@@ -188,7 +229,12 @@ export function AvatarFramingDialog({
   onDelete?: () => void;
 }) {
   const [avatarId, setAvatarId] = useState(editingOverlay?.avatarId ?? AVATAR_LIBRARY[0]?.design.designId ?? "");
-  const [defaultAction, setDefaultAction] = useState<AvatarActionId>(editingOverlay?.defaultAction ?? "idle");
+  // Widened to plain `string` (rather than AvatarActionId) because the
+  // picker below is driven off whatever action ids the SELECTED avatar's own
+  // topology actually declares, which can include extras beyond the six
+  // baseline ids (see AVATAR_ACTION_LABELS's own comment above) -- matches
+  // AvatarOverlayClip.defaultAction's own widened type (video_math.ts).
+  const [defaultAction, setDefaultAction] = useState<string>(editingOverlay?.defaultAction ?? "idle");
   const [rect, setRect] = useState<CropRect>(editingOverlay?.rect ?? DEFAULT_AVATAR_OVERLAY_RECT);
 
   // Re-syncs if a different overlay is opened for editing (or the dialog is
@@ -200,6 +246,23 @@ export function AvatarFramingDialog({
     setDefaultAction(editingOverlay?.defaultAction ?? "idle");
     setRect(editingOverlay?.rect ?? DEFAULT_AVATAR_OVERLAY_RECT);
   }, [editingOverlay]);
+
+  // The action ids pickable for whichever avatar is picked RIGHT NOW --
+  // recomputed every render off avatarId (a plain Object.keys lookup, cheap
+  // enough that memoizing it would just be ceremony).
+  const actionOptions = actionIdsForAvatar(avatarId);
+
+  // If the picked action isn't even IN that list -- e.g. the user just
+  // switched to a different avatar card whose topology doesn't define
+  // whatever action was picked for the previous one -- fall back to "idle"
+  // (or this avatar's own first action, on the even-more-defensive chance
+  // "idle" itself isn't in its list) rather than leaving a stale selection
+  // that doesn't correspond to anything this avatar can actually do.
+  useEffect(() => {
+    if (actionOptions.includes(defaultAction)) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDefaultAction(actionOptions.includes("idle") ? "idle" : (actionOptions[0] ?? "idle"));
+  }, [actionOptions, defaultAction]);
 
   // Only ever false if AVATAR_LIBRARY were somehow empty -- not a real
   // condition today (library.ts always seeds at least one entry), kept as
@@ -279,19 +342,19 @@ export function AvatarFramingDialog({
 
             <h3 className="mb-1.5 text-xs font-medium text-foreground">Action</h3>
             <div className="mb-3 grid grid-cols-2 gap-1.5">
-              {AVATAR_ACTION_OPTIONS.map((option) => (
+              {actionOptions.map((actionId) => (
                 <button
-                  key={option.id}
+                  key={actionId}
                   type="button"
-                  onClick={() => setDefaultAction(option.id)}
+                  onClick={() => setDefaultAction(actionId)}
                   className={
                     "rounded-md border py-1.5 text-xs font-medium " +
-                    (defaultAction === option.id
+                    (defaultAction === actionId
                       ? "border-accent bg-accent text-accent-foreground"
                       : "border-border text-foreground hover:bg-background")
                   }
                 >
-                  {option.label}
+                  {actionLabel(actionId)}
                 </button>
               ))}
             </div>
