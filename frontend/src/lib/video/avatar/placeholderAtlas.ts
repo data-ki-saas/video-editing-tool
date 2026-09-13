@@ -159,8 +159,13 @@ function drawMouthOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: 
  * reproduces the original palette exactly, since DEFAULT_PALETTE carries no
  * hairColor. The returned `partRects` are identical across every call
  * (packing is fixed layout math, not palette-dependent) -- only `dataUrl`
- * differs. */
-export function buildPlaceholderAtlas(paletteOverrides: Partial<PlaceholderAtlasPalette> = {}): { dataUrl: string; partRects: Record<string, AtlasRect> } {
+ * differs. `resolvedPalette` (the merged palette actually drawn with) lets a
+ * caller (library.ts's buildSeedSkin) build accurate `AvatarSkinColorSlot`
+ * `defaultColor`s without re-deriving/duplicating DEFAULT_PALETTE's own
+ * values a second time. */
+export function buildPlaceholderAtlas(
+  paletteOverrides: Partial<PlaceholderAtlasPalette> = {}
+): { dataUrl: string; partRects: Record<string, AtlasRect>; resolvedPalette: PlaceholderAtlasPalette } {
   const palette: PlaceholderAtlasPalette = { ...DEFAULT_PALETTE, ...paletteOverrides };
   const partRects: Record<string, AtlasRect> = {
     head: HEAD_RECT,
@@ -195,7 +200,7 @@ export function buildPlaceholderAtlas(paletteOverrides: Partial<PlaceholderAtlas
   // "document is not defined" on the server; nothing server-side ever
   // actually decodes or draws this dataUrl.
   if (typeof document === "undefined") {
-    return { dataUrl: "", partRects };
+    return { dataUrl: "", partRects, resolvedPalette: palette };
   }
 
   const canvas = document.createElement("canvas");
@@ -213,5 +218,5 @@ export function buildPlaceholderAtlas(paletteOverrides: Partial<PlaceholderAtlas
   drawRoundedRect(ctx, LEG_L_RECT.sx + 4, LEG_L_RECT.sy + 4, LEG_L_RECT.sWidth - 8, LEG_L_RECT.sHeight - 8, 17, palette.pantsColor);
   drawRoundedRect(ctx, LEG_R_RECT.sx + 4, LEG_R_RECT.sy + 4, LEG_R_RECT.sWidth - 8, LEG_R_RECT.sHeight - 8, 17, palette.pantsColor);
 
-  return { dataUrl: canvas.toDataURL("image/png"), partRects };
+  return { dataUrl: canvas.toDataURL("image/png"), partRects, resolvedPalette: palette };
 }

@@ -106,18 +106,56 @@ export interface AvatarAnchor {
 }
 
 /**
+ * One bone's contribution to an expression param at that param's value ==
+ * `spec.max` (or, symmetrically, `spec.min` on the negative side -- see
+ * ExpressionParamSpec's own doc comment for how the two directions share this
+ * single delta). Same additive-x/y/rotation, multiplicative-scale rule as
+ * ActionKeyframe's own delta (topology.ts's own convention) -- NOT a
+ * separate rule invented for expressions.
+ */
+export interface ExpressionBoneDelta {
+  boneIndex: number;
+  delta: Partial<BoneTransform>;
+}
+
+/**
+ * One color slot's contribution to an expression param -- unlike
+ * ExpressionBoneDelta above, color needs a DIFFERENT target at each end of
+ * the range rather than one delta mirrored by sign (there's no natural
+ * "negative color"), so this names both ends explicitly. actions.ts/
+ * compile.ts blend the slot's current color toward whichever end the bias is
+ * closer to, in proportion to how far it's pushed toward that end.
+ */
+export interface ExpressionColorDelta {
+  slotId: string;
+  towardColorAtMax: string;
+  towardColorAtMin: string;
+}
+
+/**
+ * One named, bounded "mood" slider (Phase 7 -- conversational Design edits):
+ * `min`/`max`/`default` bound whatever value a Design's own `expressionBias`
+ * (design.ts) may hold for this paramId, and `boneDeltas`/`colorDeltas`
+ * describe what moving the slider actually DOES. A param may declare either,
+ * both, or neither (a param with only `colorDeltas` moves no bone at all,
+ * e.g. a pure "mood color" slider). Compiled/applied by compile.ts
+ * (colorDeltas, resolved once at compile time into a recolored atlas) and
+ * actions.ts (boneDeltas, resolved every frame alongside the active action's
+ * own pose, same as any other additive bone delta).
+ */
+export interface ExpressionParamSpec {
+  min: number;
+  max: number;
+  default: number;
+  boneDeltas?: ExpressionBoneDelta[];
+  colorDeltas?: ExpressionColorDelta[];
+}
+
+/**
  * The shared skeleton + action library one or more Skins bind to. This is
  * the ONE layer of the three (Topology/Skin/Design) that owns bone-driven
- * animation logic -- action curves, and (not yet consumed, see below)
- * scalable bone groupings and attachment anchors.
- *
- * NOTE deliberately absent: `expressionParams`. A later phase adds
- * expression sliders (a bone-delta spec keyed by a param id, driven by a
- * creator-facing slider or an LLM-picked mood); this phase has no consumer
- * for that concept yet, so it's left out entirely rather than stubbed in
- * unused -- adding it later is a additive schema change (a new optional
- * field), not a breaking one, so there's no forward-compatibility cost to
- * waiting.
+ * animation logic -- action curves, scalable bone groupings, attachment
+ * anchors, and (Phase 7) expression params.
  */
 export interface AvatarTopology {
   schemaVersion: 1;
@@ -176,4 +214,13 @@ export interface AvatarTopology {
   // "wave", "dance", "point", ...) -- hence the open string index alongside
   // the specific union, rather than a closed Record<AvatarActionId, ...>.
   actions: Partial<Record<AvatarActionId, ActionCurveSpec>> & Record<string, ActionCurveSpec>;
+
+  // Phase 7: a handful of named, bounded "mood" sliders a Design's own
+  // `expressionBias` (design.ts) holds current values for -- e.g.
+  // "browAngle"/"energy"/"colorMood" on biped-simple (see library.ts). Optional
+  // and possibly entirely absent (a topology need not offer any expression
+  // params at all); every consumer (actions.ts, compile.ts, this feature's
+  // edit-ops validator) already treats a missing/empty map as "no expression
+  // capability for this avatar" rather than erroring.
+  expressionParams?: Record<string, ExpressionParamSpec>;
 }

@@ -15,6 +15,7 @@ import type { AmbientEffectId } from "./ambientEffects";
 import type { FaceEffectId } from "./faceLandmarks";
 import type { TextSlideTransitionId } from "./textSlideTransitions";
 import type { AvatarActionId } from "./avatar/topology";
+import type { AvatarDesignOverrides } from "./avatar/design";
 
 /**
  * Timestamps (seconds) to sample a clip of the given duration at a fixed
@@ -1221,6 +1222,17 @@ export interface AvatarOverlayClip {
   // `defaultAction` remains the fallback for any instant outside every
   // beat's own range (no actionTimeline at all, or a gap in one).
   actionTimeline?: AvatarAction[];
+  // Phase 7 (conversational Design edits) -- this clip's OWN customization of
+  // whichever avatarId it resolves against (a bone-scale/color-slot/
+  // accessory/expression-bias override), layered on top of that shared
+  // library/generated Design at compile time (avatar/design.ts's
+  // mergeDesignOverrides, called from avatar/compile.ts's
+  // getCompiledAvatarForClip) rather than ever forking the underlying Design.
+  // Two clips can use the same avatarId with completely different
+  // designOverrides (or none) -- each is its own independent customization,
+  // same "small override record on shared content" idea Design itself
+  // already applies one level up over Skin.
+  designOverrides?: AvatarDesignOverrides;
 }
 
 // Bottom-right, bust-framed -- clear of the center content a reel's main

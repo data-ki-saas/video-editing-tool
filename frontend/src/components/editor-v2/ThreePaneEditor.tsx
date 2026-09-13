@@ -77,6 +77,7 @@ import {
   type ZoomEffect,
 } from "@/lib/video/video_math";
 import type { AvatarActionId } from "@/lib/video/avatar/topology";
+import type { AvatarDesignOverrides } from "@/lib/video/avatar/design";
 import {
   applySelectClipRect,
   applyCropRectCommit,
@@ -2496,11 +2497,16 @@ export function ThreePaneEditor({
   // AvatarFramingDialog's Add/Save -- dispatches to add-new or edit-existing
   // depending on whether it was opened via handleOpenAvatarDialog or
   // handleRequestEditAvatarOverlay, same shape as handleSaveTextOverlay.
-  function handleSaveAvatarOverlay(avatarId: string, defaultAction: AvatarActionId | (string & {}), rect: CropRect) {
+  function handleSaveAvatarOverlay(
+    avatarId: string,
+    defaultAction: AvatarActionId | (string & {}),
+    rect: CropRect,
+    designOverrides?: AvatarDesignOverrides
+  ) {
     const { label, state } =
       editingAvatarOverlayIndex !== null
-        ? applyEditAvatarOverlay(selections, editingAvatarOverlayIndex, avatarId, defaultAction, rect)
-        : applyAddAvatarOverlay(selections, avatarId, defaultAction, currentTimeSeconds, videoDurationSeconds, rect);
+        ? applyEditAvatarOverlay(selections, editingAvatarOverlayIndex, avatarId, defaultAction, rect, designOverrides)
+        : applyAddAvatarOverlay(selections, avatarId, defaultAction, currentTimeSeconds, videoDurationSeconds, rect, designOverrides);
     pushChange(label, state);
     setIsAvatarDialogOpen(false);
     setEditingAvatarOverlayIndex(null);

@@ -73,7 +73,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { extractPreviewFrames, getVideoDuration, drawImageFlipped, drawImageFlippedMasked } from "@/lib/video/video";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
-import { getCompiledAvatar, type CompiledAvatar } from "@/lib/video/avatar/compile";
+import { avatarCompileCacheKey, getCompiledAvatarForClip, type CompiledAvatar } from "@/lib/video/avatar/compile";
 import { computeAvatarPose, computeMouthShapeId, computeMouthShapeIdForWord } from "@/lib/video/avatar/actions";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { detectFaceGeometry, type FaceGeometry } from "@/lib/video/faceLandmarks";
@@ -636,14 +636,18 @@ export const CanvasPlayer = forwardRef<
   // known, accepted scope limitation, not a bug.
   const overlayFaceGeometriesRef = useRef<Record<string, FaceGeometry | null>>({});
   // One compiled avatar (lib/video/avatar/compile.ts's CompiledAvatar) per
-  // distinct avatarId currently in use, keyed by avatarId (not per-clip --
-  // two avatar overlay clips reusing the same avatarId share one compiled
-  // entry, same sharing convention as overlayImagesRef/videoOverlayFramesByAssetIdRef
-  // above). getCompiledAvatar itself is async (it decodes the skin atlas
+  // distinct (avatarId, designOverrides) pairing currently in use, keyed by
+  // avatarCompileCacheKey (compile.ts) -- two avatar overlay clips reusing
+  // the same avatarId with NO per-clip customization (Phase 7's
+  // AvatarOverlayClip.designOverrides) still share one compiled entry, same
+  // sharing convention as overlayImagesRef/videoOverlayFramesByAssetIdRef
+  // above; a clip that HAS been customized gets its own separate entry
+  // instead (avatarCompileCacheKey folds designOverrides into the key).
+  // getCompiledAvatarForClip itself is async (it decodes the skin atlas
   // image, see compile.ts's own doc comment) and this file's draw loop is
   // synchronous, so compilation happens in its own effect below and this
   // ref is just where the resolved value lands -- drawFrameAt below simply
-  // skips drawing an avatar overlay whose avatarId hasn't resolved into
+  // skips drawing an avatar overlay whose cache key hasn't resolved into
   // this ref yet, same tolerance as a still-loading overlay image.
   const avatarCompiledByIdRef = useRef<Record<string, CompiledAvatar>>({});
   // Extracted preview frames for every video overlay's own source asset,
@@ -1625,7 +1629,7 @@ export const CanvasPlayer = forwardRef<
     // still-loading asset rather than block/throw" tolerance as a video
     // overlay's own not-yet-extracted frames above.
     for (const clip of findActiveAvatarOverlays(avatarOverlays, elapsedSeconds)) {
-      const compiled = avatarCompiledByIdRef.current[clip.avatarId];
+      const compiled = avatarCompiledByIdRef.current[avatarCompileCacheKey(clip.avatarId, clip.designOverrides)];
       if (!compiled) continue;
       const localElapsed = elapsedSeconds - clip.startTimeSeconds;
       // Phase 4: a director-authored actionTimeline beat covering this
@@ -1635,7 +1639,7 @@ export const CanvasPlayer = forwardRef<
       // own doc comment above for the full precedence.
       const { actionId, mouthShapeId } = resolveAvatarTalkState(clip, ttsOverlays, elapsedSeconds, localElapsed);
       const seed = ambientEffectSeed(clip.id);
-      const pose = computeAvatarPose(compiled.topology, actionId, localElapsed, seed);
+      const pose = computeAvatarPose(compiled.topology, actionId, localElapsed, seed, compiled.design.expressionBias);
       const destX = clip.rect.x * canvas.width;
       const destY = clip.rect.y * canvas.height;
       const destWidth = clip.rect.width * canvas.width;
@@ -2506,25 +2510,32 @@ export const CanvasPlayer = forwardRef<
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
   }, [overlayImages, assetUrlById, isReady, isPlaying]);
 
-  // Compiles each currently-referenced avatar once (cached in
-  // avatarCompiledByIdRef by avatarId, see that ref's own doc comment) and
-  // redraws the current frame once any of them finish -- same "load once,
-  // cache, redraw if paused" shape as the overlay-image loading effect just
-  // above, just keyed on avatarId instead of assetId and calling
-  // getCompiledAvatar (already itself promise-cached, see compile.ts) instead
-  // of this file's own loadImage. Only the distinct, not-yet-cached
-  // avatarIds are (re)compiled -- reusing an already-compiled avatar across
-  // renders/clips never re-decodes its atlas image.
+  // Compiles each currently-referenced (avatarId, designOverrides) pairing
+  // once (cached in avatarCompiledByIdRef by avatarCompileCacheKey, see that
+  // ref's own doc comment) and redraws the current frame once any of them
+  // finish -- same "load once, cache, redraw if paused" shape as the
+  // overlay-image loading effect just above, just keyed on that cache key
+  // instead of assetId and calling getCompiledAvatarForClip (already itself
+  // promise-cached, see compile.ts) instead of this file's own loadImage.
+  // Only the distinct, not-yet-cached keys are (re)compiled -- reusing an
+  // already-compiled avatar across renders/clips never re-decodes its atlas
+  // image, and two clips sharing the same avatarId+designOverrides (Phase 7)
+  // still share one compile too.
   useEffect(() => {
     let cancelled = false;
-    const distinctAvatarIds = Array.from(new Set(avatarOverlays.map((overlay) => overlay.avatarId)));
-    const toCompile = distinctAvatarIds.filter((avatarId) => !(avatarId in avatarCompiledByIdRef.current));
+    const distinctClips = new Map(
+      avatarOverlays.map((overlay) => [
+        avatarCompileCacheKey(overlay.avatarId, overlay.designOverrides),
+        { avatarId: overlay.avatarId, designOverrides: overlay.designOverrides },
+      ])
+    );
+    const toCompile = Array.from(distinctClips.entries()).filter(([key]) => !(key in avatarCompiledByIdRef.current));
     if (toCompile.length === 0) return;
 
     Promise.all(
-      toCompile.map((avatarId) =>
-        getCompiledAvatar(avatarId)
-          .then((compiled) => ({ avatarId, compiled }))
+      toCompile.map(([key, { avatarId, designOverrides }]) =>
+        getCompiledAvatarForClip(avatarId, designOverrides)
+          .then((compiled) => ({ key, compiled }))
           .catch((err) => {
             console.error("Avatar compile failed for avatarId=%s", avatarId, err);
             return null;
@@ -2535,7 +2546,7 @@ export const CanvasPlayer = forwardRef<
       let didCompileAny = false;
       for (const entry of compiledEntries) {
         if (!entry) continue;
-        avatarCompiledByIdRef.current[entry.avatarId] = entry.compiled;
+        avatarCompiledByIdRef.current[entry.key] = entry.compiled;
         didCompileAny = true;
       }
       if (didCompileAny && isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);

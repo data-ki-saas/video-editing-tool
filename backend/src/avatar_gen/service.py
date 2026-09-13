@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from src.avatar_gen import repository
-from src.avatar_gen.atlas_builder import build_atlas_png
+from src.avatar_gen.atlas_builder import _PANTS_COLOR, _SHIRT_COLOR, build_atlas_png
 from src.avatar_gen.photo_analysis import analyze_photo
 from src.avatar_gen.schemas import GeneratedAvatarDetail, GeneratedAvatarSummary
 from src.core.auth import CurrentUser, bypasses_daily_caps
@@ -44,6 +44,18 @@ _PARTS = [
     {"partId": "mouth", "boneIndex": 2, "pivotX": 25, "pivotY": 40, "zOrder": 6},
 ]
 _MOUTH_SHAPES = [{"shapeId": "closed", "partId": "mouth"}, {"shapeId": "open", "partId": "mouth"}]
+
+# Phase 7 -- mirrors frontend/src/lib/video/avatar/library.ts's own
+# colorSlotsForPalette exactly: shirt/pants are each a single flat fill with
+# nothing else sharing their rect (unlike the head, which also bakes in
+# hair/eyes), which is what makes them safely recolorable via compile.ts's
+# whole-rect source-atop tint. defaultColor MUST match _SHIRT_COLOR/
+# _PANTS_COLOR above -- those are the literal colors build_atlas_png actually
+# painted into this generated atlas.
+_COLOR_SLOTS = [
+    {"slotId": "shirtColor", "targetPartIds": ["torso"], "defaultColor": _SHIRT_COLOR},
+    {"slotId": "pantsColor", "targetPartIds": ["legL", "legR"], "defaultColor": _PANTS_COLOR, "respondsToExpressionParams": ["colorMood"]},
+]
 
 _ALLOWED_PHOTO_TYPES = {"image/jpeg", "image/png"}
 
@@ -117,6 +129,7 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
         "atlas": {"imageRef": "", "partRects": part_rects},
         "parts": _PARTS,
         "mouthShapes": _MOUTH_SHAPES,
+        "colorSlots": _COLOR_SLOTS,
     }
     design = {
         "schemaVersion": 1,

@@ -34,22 +34,30 @@
  * whichever set the picked character's own rig actually has. No free-typed
  * content field at all (unlike TextOverlayDialog's textarea): everything
  * this overlay carries is a pick from a fixed set, per this feature's own
- * spec.
+ * spec -- EXCEPT the Phase 7 "Customize with AI" prompt below the left-pane
+ * preview, this dialog's one free-text input, which edits pendingOverrides
+ * (avatar/edits.ts's applyAvatarEditOps) rather than avatarId/defaultAction/
+ * rect themselves.
  */
 import { useEffect, useRef, useState } from "react";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
 import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
-import { getCompiledAvatar, type CompiledAvatar } from "@/lib/video/avatar/compile";
+import { getCompiledAvatar, getCompiledAvatarForClip, type CompiledAvatar } from "@/lib/video/avatar/compile";
 import { computeAvatarPose, computeMouthShapeId } from "@/lib/video/avatar/actions";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { AVATAR_LIBRARY, BIPED_SIMPLE_TOPOLOGY, getAvatarLibraryEntry } from "@/lib/video/avatar/library";
 import {
   deleteGeneratedAvatar,
+  fetchGeneratedAvatarEntry,
   generateAvatarFromPhoto,
   listMyGeneratedAvatars,
   type GeneratedAvatarSummary,
 } from "@/lib/video/avatar/generatedLibrary";
-import type { AvatarActionId } from "@/lib/video/avatar/topology";
+import type { AvatarActionId, AvatarTopology } from "@/lib/video/avatar/topology";
+import type { AvatarSkin } from "@/lib/video/avatar/skin";
+import { hasAnyDesignOverride, type AvatarDesignOverrides } from "@/lib/video/avatar/design";
+import { applyAvatarEditOps } from "@/lib/video/avatar/edits";
+import { ACCESSORY_CATALOG } from "@/lib/video/avatar/accessories";
 import { ambientEffectSeed } from "@/lib/video/ambientEffects";
 import {
   DEFAULT_AVATAR_OVERLAY_RECT,
@@ -59,7 +67,7 @@ import {
   type CropRect,
   type TtsOverlay,
 } from "@/lib/video/video_math";
-import { directAvatarActions, FeatureLockedError } from "@/lib/api";
+import { directAvatarActions, editAvatarDesign, FeatureLockedError } from "@/lib/api";
 import { usePermissions } from "@/lib/usePermissions";
 
 // A Phase-6 generated avatarId always has this prefix (see
@@ -178,17 +186,32 @@ function AvatarThumbnailCanvas({ avatarId, className }: { avatarId: string; clas
  * getCompiledAvatar is itself promise-cached (compile.ts), so flipping back
  * to an already-picked avatarId resolves instantly with no re-decode.
  */
-function AvatarPreviewCanvas({ avatarId, action, className }: { avatarId: string; action: string; className?: string }) {
+function AvatarPreviewCanvas({
+  avatarId,
+  action,
+  designOverrides,
+  className,
+}: {
+  avatarId: string;
+  action: string;
+  // Phase 7 -- this dialog's own in-progress "Edit with AI" customization
+  // (pendingOverrides), previewed live via getCompiledAvatarForClip instead
+  // of the plain id-only getCompiledAvatar every OTHER caller of this
+  // component (gallery thumbnails) still uses. Omitted entirely for those
+  // callers, which behave exactly as before this phase.
+  designOverrides?: AvatarDesignOverrides;
+  className?: string;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const compiledRef = useRef<CompiledAvatar | null>(null);
   const seedRef = useRef(0);
 
-  // (Re)compiles whenever the picked avatarId changes. `cancelled` guards
-  // against a stale resolution landing after the user has since picked a
-  // DIFFERENT avatar (or this dialog has since closed/unmounted) --
-  // compiledRef is simply never written in that case, so the loop below
-  // keeps drawing whatever it already had (or nothing, if this is the
-  // first pick) instead of a wrong, late-arriving character.
+  // (Re)compiles whenever the picked avatarId OR its pending overrides
+  // change. `cancelled` guards against a stale resolution landing after the
+  // user has since picked a DIFFERENT avatar (or this dialog has since
+  // closed/unmounted) -- compiledRef is simply never written in that case,
+  // so the loop below keeps drawing whatever it already had (or nothing, if
+  // this is the first pick) instead of a wrong, late-arriving character.
   useEffect(() => {
     let cancelled = false;
     compiledRef.current = null;
@@ -202,7 +225,7 @@ function AvatarPreviewCanvas({ avatarId, action, className }: { avatarId: string
     // reproduced pixel-for-pixel between the two.
     seedRef.current = ambientEffectSeed(avatarId);
     if (!avatarId) return;
-    getCompiledAvatar(avatarId)
+    getCompiledAvatarForClip(avatarId, designOverrides)
       .then((compiled) => {
         if (!cancelled) compiledRef.current = compiled;
       })
@@ -212,7 +235,7 @@ function AvatarPreviewCanvas({ avatarId, action, className }: { avatarId: string
     return () => {
       cancelled = true;
     };
-  }, [avatarId]);
+  }, [avatarId, designOverrides]);
 
   // Crisp resolution matched to the canvas's own rendered CSS size -- same
   // convention as TextOverlayCanvas.tsx (this dialog's rect can be resized,
@@ -246,7 +269,7 @@ function AvatarPreviewCanvas({ avatarId, action, className }: { avatarId: string
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         const compiled = compiledRef.current;
         if (compiled) {
-          const pose = computeAvatarPose(compiled.topology, action, elapsedSeconds, seedRef.current);
+          const pose = computeAvatarPose(compiled.topology, action, elapsedSeconds, seedRef.current, compiled.design.expressionBias);
           const mouthShapeId = computeMouthShapeId(action, elapsedSeconds);
           drawAvatar(ctx, compiled, pose, { x: 0, y: 0, width: canvas.width, height: canvas.height }, mouthShapeId);
         }
@@ -276,7 +299,12 @@ export function AvatarFramingDialog({
   // Needed only for "Direct with AI" below (findOverlappingTtsOverlay) --
   // every other prop here is unrelated to narration.
   ttsOverlays: TtsOverlay[];
-  onSave: (avatarId: string, defaultAction: AvatarActionId | (string & {}), rect: CropRect) => void;
+  // `designOverrides` (Phase 7) is only ever passed when this dialog's own
+  // "Edit with AI" panel actually produced at least one real override --
+  // omitted (not an empty `{}`) otherwise, so a never-customized avatar's
+  // clip stays exactly as lean as before this phase (see design.ts's
+  // hasAnyDesignOverride).
+  onSave: (avatarId: string, defaultAction: AvatarActionId | (string & {}), rect: CropRect, designOverrides?: AvatarDesignOverrides) => void;
   onClose: () => void;
   // Only ever passed (and only ever rendered, see the button row below) when
   // editingOverlay is non-null -- a not-yet-added avatar has nothing to
@@ -299,6 +327,11 @@ export function AvatarFramingDialog({
   // AvatarOverlayClip.defaultAction's own widened type (video_math.ts).
   const [defaultAction, setDefaultAction] = useState<string>(editingOverlay?.defaultAction ?? "idle");
   const [rect, setRect] = useState<CropRect>(editingOverlay?.rect ?? DEFAULT_AVATAR_OVERLAY_RECT);
+  // Phase 7 -- this clip's own bone-scale/color-slot/accessory/expression-bias
+  // customization, edited in place via "Edit with AI" and previewed live
+  // (AvatarPreviewCanvas below) before ever being committed to the clip on
+  // Save. Starts from whatever the overlay being edited already carries.
+  const [pendingOverrides, setPendingOverrides] = useState<AvatarDesignOverrides>(editingOverlay?.designOverrides ?? {});
 
   // Re-syncs if a different overlay is opened for editing (or the dialog is
   // reopened fresh for "Add") while already mounted -- same convention as
@@ -308,7 +341,21 @@ export function AvatarFramingDialog({
     setAvatarId(editingOverlay?.avatarId ?? AVATAR_LIBRARY[0]?.design.designId ?? "");
     setDefaultAction(editingOverlay?.defaultAction ?? "idle");
     setRect(editingOverlay?.rect ?? DEFAULT_AVATAR_OVERLAY_RECT);
+    setPendingOverrides(editingOverlay?.designOverrides ?? {});
   }, [editingOverlay]);
+
+  // Switching to a DIFFERENT character mid-dialog clears any pending
+  // customization -- a bone-scale/color-slot override tuned for one skin has
+  // no guaranteed meaning against another's (different boneGroups/colorSlots
+  // ids), and silently carrying it across would be confusing even where it
+  // happens to still resolve (compile.ts just ignores an override whose
+  // id isn't present on the new skin/topology, but that's a safety net, not
+  // a feature). Every direct `setAvatarId` call below except the re-sync
+  // effect above goes through this instead of calling setAvatarId directly.
+  function selectAvatar(id: string) {
+    setAvatarId(id);
+    setPendingOverrides({});
+  }
 
   // This creator's own photo-generated avatars (Phase 6,
   // backend/src/avatar_gen/) -- loaded once per dialog open and rendered as
@@ -346,7 +393,7 @@ export function AvatarFramingDialog({
         { id: entry.design.designId, name: entry.design.meta.name, thumbnailUrl: null, createdAt: new Date().toISOString() },
         ...prev,
       ]);
-      setAvatarId(entry.design.designId);
+      selectAvatar(entry.design.designId);
     } catch (err) {
       if (err instanceof FeatureLockedError) setLockedError(err);
       else setGenerateError(err instanceof Error ? err.message : "Couldn't generate an avatar from that photo");
@@ -360,11 +407,42 @@ export function AvatarFramingDialog({
     try {
       await deleteGeneratedAvatar(id);
       setMyAvatars((prev) => prev.filter((a) => a.id !== id));
-      if (avatarId === id) setAvatarId(AVATAR_LIBRARY[0]?.design.designId ?? "");
+      if (avatarId === id) selectAvatar(AVATAR_LIBRARY[0]?.design.designId ?? "");
     } catch (err) {
       console.error("Failed to delete generated avatar", err);
     }
   }
+
+  // Phase 7 -- the raw topology/skin (NOT the compiled form) for whichever
+  // avatar is picked RIGHT NOW: "Edit with AI" needs the actual
+  // boneGroups/colorSlots/anchors/expressionParams ids to (a) tell the
+  // backend what this specific avatar can and can't be edited on, and (b)
+  // re-validate/clamp whatever ops it returns (edits.ts's
+  // applyAvatarEditOps). A seed avatar resolves synchronously
+  // (getAvatarLibraryEntry); a Phase-6 generated one needs one fetch --
+  // `cancelled` guards the same "a different avatar was picked before this
+  // resolved" race every other async effect in this file already guards.
+  const [resolvedEntry, setResolvedEntry] = useState<{ topology: AvatarTopology; skin: AvatarSkin } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setResolvedEntry(null);
+    const seedEntry = getAvatarLibraryEntry(avatarId);
+    if (seedEntry) {
+      setResolvedEntry({ topology: seedEntry.topology, skin: seedEntry.skin });
+      return;
+    }
+    if (!avatarId) return;
+    fetchGeneratedAvatarEntry(avatarId)
+      .then((entry) => {
+        if (!cancelled && entry) setResolvedEntry({ topology: entry.topology, skin: entry.skin });
+      })
+      .catch((err) => console.error("Failed to resolve avatar topology/skin for avatarId=%s", avatarId, err));
+    return () => {
+      cancelled = true;
+    };
+  }, [avatarId]);
 
   // The action ids pickable for whichever avatar is picked RIGHT NOW --
   // recomputed every render off avatarId (a plain Object.keys lookup, cheap
@@ -390,7 +468,7 @@ export function AvatarFramingDialog({
 
   function handleSave() {
     if (!canSave) return;
-    onSave(avatarId, defaultAction, rect);
+    onSave(avatarId, defaultAction, rect, hasAnyDesignOverride(pendingOverrides) ? pendingOverrides : undefined);
   }
 
   // "Direct with AI" (Phase 4) -- the narration this clip's own committed
@@ -421,6 +499,51 @@ export function AvatarFramingDialog({
       setIsDirecting(false);
     }
   }
+
+  // Phase 7 -- "Edit with AI": a free-text prompt ("make it fatter", "add
+  // sunglasses", "make him look more evil") turns into a batch of primitive
+  // ops (backend/src/avatar/service.py's edit_avatar_design), applied onto
+  // pendingOverrides via edits.ts's applyAvatarEditOps (which re-validates
+  // every op against this SPECIFIC avatar's own resolvedEntry) and previewed
+  // instantly by the left pane's AvatarPreviewCanvas -- nothing is persisted
+  // onto the actual overlay clip until Save.
+  const [editPrompt, setEditPrompt] = useState("");
+  const [isEditingDesign, setIsEditingDesign] = useState(false);
+  const [editDesignError, setEditDesignError] = useState<string | null>(null);
+  const canEditDesign = isLoadingPermissions || hasFeature("avatar_edit");
+
+  async function handleApplyEdit() {
+    const prompt = editPrompt.trim();
+    if (!prompt || !resolvedEntry || isEditingDesign) return;
+    setIsEditingDesign(true);
+    setEditDesignError(null);
+    try {
+      const { topology, skin } = resolvedEntry;
+      const ops = await editAvatarDesign(prompt, {
+        boneGroupIds: Object.keys(topology.boneGroups),
+        colorSlotIds: (skin.colorSlots ?? []).map((slot) => slot.slotId),
+        // Only the accessories that can actually attach to THIS topology's
+        // own anchors -- same "read this avatar's real capability, don't
+        // offer a global catalog" principle actionIdsForAvatar/actionOptions
+        // above already apply to actions.
+        accessories: ACCESSORY_CATALOG.filter((entry) => topology.anchors.some((anchor) => anchor.anchorId === entry.anchorId)).map(
+          (entry) => ({ accessoryAssetId: entry.accessoryAssetId, anchorId: entry.anchorId, name: entry.name })
+        ),
+        expressionParams: Object.fromEntries(
+          Object.entries(topology.expressionParams ?? {}).map(([paramId, spec]) => [paramId, { min: spec.min, max: spec.max }])
+        ),
+      });
+      setPendingOverrides((prev) => applyAvatarEditOps(prev, ops, topology, skin));
+      setEditPrompt("");
+    } catch (err) {
+      if (err instanceof FeatureLockedError) setLockedError(err);
+      else setEditDesignError(err instanceof Error ? err.message : "Couldn't apply that edit -- try again");
+    } finally {
+      setIsEditingDesign(false);
+    }
+  }
+
+  const canResetDesignOverrides = hasAnyDesignOverride(pendingOverrides);
 
   return (
     <div
@@ -462,10 +585,59 @@ export function AvatarFramingDialog({
                 onCommit={setRect}
                 borderColorClassName="border-teal-400"
                 handleColorClassName="bg-teal-400"
-                renderInner={<AvatarPreviewCanvas avatarId={avatarId} action={defaultAction} className="h-full w-full" />}
+                renderInner={
+                  <AvatarPreviewCanvas avatarId={avatarId} action={defaultAction} designOverrides={pendingOverrides} className="h-full w-full" />
+                }
               />
             </div>
             <p className="text-[11px] text-muted">Drag to position, drag the corner to resize.</p>
+
+            {/* Phase 7 -- "Edit with AI": a free-text customization prompt,
+                applied onto pendingOverrides (previewed instantly above)
+                rather than a form full of sliders/color pickers, per this
+                product's own bias toward simple direct-manipulation/
+                conversational controls over exposing every knob. */}
+            <div className="mt-2 flex flex-col gap-1">
+              <label htmlFor="avatar-edit-prompt" className="text-xs font-medium text-foreground">
+                Customize with AI
+              </label>
+              <div className="flex gap-1.5">
+                <input
+                  id="avatar-edit-prompt"
+                  type="text"
+                  value={editPrompt}
+                  onChange={(e) => setEditPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleApplyEdit();
+                    }
+                  }}
+                  placeholder="e.g. make it fatter, add sunglasses, more evil"
+                  disabled={!resolvedEntry || isEditingDesign}
+                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  onClick={handleApplyEdit}
+                  disabled={!resolvedEntry || !editPrompt.trim() || isEditingDesign}
+                  className="flex items-center gap-1.5 whitespace-nowrap rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                >
+                  {isEditingDesign ? "Applying…" : "Apply"}
+                  {!canEditDesign && <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase">Pro</span>}
+                </button>
+              </div>
+              {editDesignError && <p className="text-[11px] text-red-600">{editDesignError}</p>}
+              {canResetDesignOverrides && (
+                <button
+                  type="button"
+                  onClick={() => setPendingOverrides({})}
+                  className="self-start text-[11px] text-muted hover:text-foreground hover:underline"
+                >
+                  Reset customization
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Right half: character gallery + action grid. */}
@@ -476,7 +648,7 @@ export function AvatarFramingDialog({
                 <button
                   key={entry.design.designId}
                   type="button"
-                  onClick={() => setAvatarId(entry.design.designId)}
+                  onClick={() => selectAvatar(entry.design.designId)}
                   className={
                     "flex flex-col gap-1 rounded-md border-2 p-1.5 text-xs " +
                     (avatarId === entry.design.designId ? "border-accent bg-accent/10" : "border-border hover:bg-background")
@@ -497,7 +669,7 @@ export function AvatarFramingDialog({
                 <button
                   key={summary.id}
                   type="button"
-                  onClick={() => setAvatarId(summary.id)}
+                  onClick={() => selectAvatar(summary.id)}
                   className={
                     "flex flex-col gap-1 rounded-md border-2 p-1.5 text-xs " +
                     (avatarId === summary.id ? "border-accent bg-accent/10" : "border-border hover:bg-background")

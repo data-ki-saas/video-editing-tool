@@ -74,6 +74,7 @@ import type {
 } from "@/lib/video/video_math";
 import type { TextTemplateId } from "@/lib/video/textTemplates";
 import type { AvatarActionId } from "@/lib/video/avatar/topology";
+import type { AvatarDesignOverrides } from "@/lib/video/avatar/design";
 import type { RefObject } from "react";
 
 function ActiveTransformationsList({
@@ -434,7 +435,12 @@ export function ActionArea({
   onOpenAvatarDialog: () => void;
   isAvatarDialogOpen: boolean;
   editingAvatarOverlay: AvatarOverlayClip | null;
-  onSaveAvatarOverlay: (avatarId: string, defaultAction: AvatarActionId | (string & {}), rect: CropRect) => void;
+  onSaveAvatarOverlay: (
+    avatarId: string,
+    defaultAction: AvatarActionId | (string & {}),
+    rect: CropRect,
+    designOverrides?: AvatarDesignOverrides
+  ) => void;
   onCloseAvatarDialog: () => void;
   // AvatarOverlayTrack's own "Remove avatar" -- see onDeleteTextOverlay's
   // comment for why this is index-aware (keeps editingAvatarOverlay pointed

@@ -10,8 +10,8 @@
  * hand-drawn or photo-generated art) means adding another AvatarLibraryEntry
  * here, never touching the engine.
  */
-import type { ActionCurveSpec, AvatarAnchor, AvatarTopology, BoneTransform } from "./topology";
-import type { AvatarSkin, AvatarSkinPart, AvatarSkinMouthShape } from "./skin";
+import type { ActionCurveSpec, AvatarAnchor, AvatarTopology, BoneTransform, ExpressionParamSpec } from "./topology";
+import type { AvatarSkin, AvatarSkinColorSlot, AvatarSkinPart, AvatarSkinMouthShape } from "./skin";
 import type { AvatarDesign } from "./design";
 import { buildPlaceholderAtlas, type PlaceholderAtlasPalette } from "./placeholderAtlas";
 
@@ -243,6 +243,52 @@ const LOOK_AROUND: ActionCurveSpec = {
   keyframes: [{ t: 0, boneIndex: HEAD, delta: {} }],
 };
 
+// Phase 7 -- "biped-simple"'s three expression sliders. Every Design riding
+// this topology gets these for free (a Design's own `expressionBias`,
+// design.ts, holds current values; a slider absent from that record sits at
+// its own `default` below). Bipolar ranges throughout ([-1, 1]) so ONE
+// numeric bias, scaled straight onto each bone delta (actions.ts's
+// applyExpressionBoneDeltas) or blended between two named colors
+// (compile.ts's computeEffectiveSlotColors), covers both directions of the
+// mood it represents without needing a separate "how much of the opposite"
+// field.
+const EXPRESSION_PARAMS: Record<string, ExpressionParamSpec> = {
+  // Stern/serious (positive) vs. wide-eyed/surprised (negative) -- a small
+  // head-tilt read entirely off HEAD's own rotation, same bone TALK/SLEEP's
+  // own curves already animate, just as a static bias rather than a loop.
+  browAngle: {
+    min: -1,
+    max: 1,
+    default: 0,
+    boneDeltas: [{ boneIndex: HEAD, delta: { rotation: 0.22 } }],
+  },
+  // Energetic/upright (positive) vs. tired/slumped (negative) -- torso+head
+  // both lift or droop together, plus a subtle torso "puff" on the
+  // energetic side (scaleY>1) that becomes a subtle slouch on the tired side
+  // (scaleY<1).
+  energy: {
+    min: -1,
+    max: 1,
+    default: 0,
+    boneDeltas: [
+      { boneIndex: TORSO, delta: { y: -4, scaleY: 1.04 } },
+      { boneIndex: HEAD, delta: { y: -3 } },
+    ],
+  },
+  // A pure mood-color slider with no bone motion of its own -- pushes
+  // "pantsColor" (see colorSlotsForPalette below) toward a cool near-black
+  // at the "serious/evil" end, or a warm earthy brown at the
+  // "friendly/approachable" end. Only affects a skin that actually declares
+  // a "pantsColor" slot with `respondsToExpressionParams` including this id
+  // (every seed skin below does).
+  colorMood: {
+    min: -1,
+    max: 1,
+    default: 0,
+    colorDeltas: [{ slotId: "pantsColor", towardColorAtMax: "#14161f", towardColorAtMin: "#8a5a2b" }],
+  },
+};
+
 const ACTIONS: AvatarTopology["actions"] = {
   idle: IDLE,
   talk: TALK,
@@ -273,6 +319,7 @@ export const BIPED_SIMPLE_TOPOLOGY: AvatarTopology = {
   boneGroups: BONE_GROUPS,
   anchors: ANCHORS,
   actions: ACTIONS,
+  expressionParams: EXPRESSION_PARAMS,
 };
 
 const MOUTH_SHAPES: AvatarSkinMouthShape[] = [
@@ -317,6 +364,28 @@ const PLACEHOLDER_SKIN_PARTS: AvatarSkinPart[] = [
   { partId: "mouth", boneIndex: HEAD, pivotX: 25, pivotY: 40, zOrder: 6 },
 ];
 
+/** Phase 7's two recolorable slots -- shirt (targets "torso" alone) and
+ * pants (targets both legs) -- built from whichever palette a given seed
+ * skin actually resolved to (buildPlaceholderAtlas's own `resolvedPalette`),
+ * so `defaultColor` always matches what's really baked into that skin's
+ * atlas pixels. Deliberately NOT a "skinTone"/"hairColor" slot: the head
+ * part's atlas rect bakes skin tone, hair cap, AND eyes into one rect (see
+ * placeholderAtlas.ts's drawHead), so a whole-rect recolor (compile.ts's
+ * source-atop tint) would flatten all three to one color -- shirt/pants are
+ * each a single flat fill with nothing else sharing their rect, which is
+ * what actually makes them safely recolorable this way. */
+function colorSlotsForPalette(palette: PlaceholderAtlasPalette): AvatarSkinColorSlot[] {
+  return [
+    { slotId: "shirtColor", targetPartIds: ["torso"], defaultColor: palette.shirtColor },
+    {
+      slotId: "pantsColor",
+      targetPartIds: ["legL", "legR"],
+      defaultColor: palette.pantsColor,
+      respondsToExpressionParams: ["colorMood"],
+    },
+  ];
+}
+
 /** Builds one seed Skin bound to `biped-simple` -- every seed character
  * shares the exact same rig alignment (PLACEHOLDER_SKIN_PARTS/MOUTH_SHAPES
  * above are structural, not per-character), so growing the library (Phase 5)
@@ -331,6 +400,7 @@ function buildSeedSkin(skinId: string, palette: Partial<PlaceholderAtlasPalette>
     atlas: { imageRef: atlas.dataUrl, partRects: atlas.partRects },
     parts: PLACEHOLDER_SKIN_PARTS,
     mouthShapes: MOUTH_SHAPES,
+    colorSlots: colorSlotsForPalette(atlas.resolvedPalette),
   };
 }
 

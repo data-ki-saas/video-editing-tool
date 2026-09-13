@@ -157,6 +157,44 @@ function computeSeededPose(topology: CompiledTopology, spec: ActionCurveSpec, el
 }
 
 /**
+ * Phase 7 -- layers a Design's `expressionBias` (design.ts) on top of an
+ * already-action-posed frame, one bone at a time: for every paramId the
+ * Design has a bias value for, each of that param's own `boneDeltas`
+ * (topology.ts's ExpressionBoneDelta) is scaled by the bias value itself
+ * (not normalized against min/max -- a bipolar [-1, 1] range, which is what
+ * every seed param uses, e.g. library.ts's biped-simple, already means
+ * "scale by the value" IS "scale by how far toward that end the slider
+ * sits") and added on top of whatever the active action already put there.
+ * Same additive-x/y/rotation, multiplicative-scale combination rule as
+ * applyDelta above -- an expression bias is just one more delta layered onto
+ * the pose, not a different kind of transform. Mutates nothing -- always
+ * returns a fresh per-bone array (`pose` itself, and every bone object in
+ * it, are left untouched), since callers reuse `pose` in the return value of
+ * computeAvatarPose regardless of whether any bias was actually active. */
+function applyExpressionBoneDeltas(topology: CompiledTopology, pose: BoneTransform[], expressionBias: Record<string, number> | undefined): BoneTransform[] {
+  if (!expressionBias || !topology.expressionParams) return pose;
+
+  const next = pose.map((bone) => ({ ...bone }));
+  for (const [paramId, spec] of Object.entries(topology.expressionParams)) {
+    const bias = expressionBias[paramId];
+    if (!bias || !spec.boneDeltas) continue;
+    for (const boneDelta of spec.boneDeltas) {
+      const bone = next[boneDelta.boneIndex];
+      if (!bone) continue;
+      const delta = boneDelta.delta;
+      next[boneDelta.boneIndex] = {
+        x: bone.x + (delta.x ?? 0) * bias,
+        y: bone.y + (delta.y ?? 0) * bias,
+        rotation: bone.rotation + (delta.rotation ?? 0) * bias,
+        scaleX: bone.scaleX * (1 + ((delta.scaleX ?? 1) - 1) * bias),
+        scaleY: bone.scaleY * (1 + ((delta.scaleY ?? 1) - 1) * bias),
+      };
+    }
+  }
+  return next;
+}
+
+/**
  * The full, index-ordered local pose (length `topology.boneCount`) for every
  * bone at `elapsedSeconds` under `actionId`. Falls back to the plain rest
  * pose, unmodified, for any `actionId` the topology has no curve for --
@@ -167,24 +205,39 @@ function computeSeededPose(topology: CompiledTopology, spec: ActionCurveSpec, el
  * `seed` only matters for a `usesSeed` action (lookAround) -- every other
  * action's curve is a fixed loop over `elapsedSeconds` alone, so passing a
  * different seed changes nothing about them.
+ *
+ * `expressionBias` (Phase 7, optional -- omitted call sites behave exactly
+ * as before this phase) is a Design's own current expression-slider values
+ * (design.ts's `expressionBias`, typically `compiled.design.expressionBias`
+ * off a CompiledAvatar, which already carries any per-clip override merged
+ * in) -- applied via applyExpressionBoneDeltas above, on top of whatever
+ * pose the active action already produced.
  */
-export function computeAvatarPose(topology: CompiledTopology, actionId: string, elapsedSeconds: number, seed: number): BoneTransform[] {
+export function computeAvatarPose(
+  topology: CompiledTopology,
+  actionId: string,
+  elapsedSeconds: number,
+  seed: number,
+  expressionBias?: Record<string, number>
+): BoneTransform[] {
   const spec = topology.actions[actionId];
   if (!spec) {
-    return topology.defaultLocalPose.map((pose) => ({ ...pose }));
+    const restPose = topology.defaultLocalPose.map((pose) => ({ ...pose }));
+    return applyExpressionBoneDeltas(topology, restPose, expressionBias);
   }
 
   if (spec.usesSeed) {
-    return computeSeededPose(topology, spec, elapsedSeconds, seed);
+    return applyExpressionBoneDeltas(topology, computeSeededPose(topology, spec, elapsedSeconds, seed), expressionBias);
   }
 
   const phase =
     spec.periodSeconds > 0 ? (((elapsedSeconds % spec.periodSeconds) + spec.periodSeconds) % spec.periodSeconds) / spec.periodSeconds : 0;
 
-  return topology.defaultLocalPose.map((defaultPose, boneIndex) => {
+  const pose = topology.defaultLocalPose.map((defaultPose, boneIndex) => {
     const keyframesForBone = spec.keyframes.filter((keyframe) => keyframe.boneIndex === boneIndex);
     return applyDelta(defaultPose, deltaAtPhase(keyframesForBone, phase));
   });
+  return applyExpressionBoneDeltas(topology, pose, expressionBias);
 }
 
 // How often "talk"'s mouth flaps between open/closed -- a generic,

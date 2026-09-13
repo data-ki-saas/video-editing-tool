@@ -41,6 +41,8 @@ import type { BoneTransform } from "./topology";
  *     rect offset by its own pivot -- substituting the active mouth shape's
  *     rect/pivot in place of the mouth slot's own, when this part IS that
  *     slot.
+ *  4. Draw every Phase 7 accessory (compiled.accessories) on top of every
+ *     part, riding its own anchor bone's already-built world matrix.
  */
 export function drawAvatar(
   ctx: CanvasRenderingContext2D,
@@ -51,7 +53,7 @@ export function drawAvatar(
 ): void {
   if (destRect.width <= 0 || destRect.height <= 0) return;
 
-  const { topology, skin } = compiled;
+  const { topology, skin, accessories } = compiled;
 
   const scale = destRect.height / topology.rigHeight;
   const scaledRigWidth = topology.rigWidth * scale;
@@ -113,6 +115,24 @@ export function drawAvatar(
       atlasRect.sWidth,
       atlasRect.sHeight
     );
+    ctx.restore();
+  }
+
+  // Phase 7 -- accessories always draw AFTER every skin part (a hat sits on
+  // top of the head, sunglasses on top of the face), in `accessories`' own
+  // declaration order (no z-sorting of their own, unlike skin parts -- see
+  // CompiledAvatar.accessories' own doc comment). Each rides its own bone's
+  // ALREADY-BUILT world matrix (same one its anchor's owning part used above)
+  // translated by its own resolved anchor offset -- so an accessory
+  // naturally inherits that bone's current rotation/scale (a hat tilts with
+  // a tilted head) rather than needing its own forward-kinematics pass.
+  for (const accessory of accessories) {
+    const boneMatrix = worldMatrices[accessory.boneIndex];
+    if (!boneMatrix) continue;
+    const anchorMatrix = boneMatrix.translate(accessory.offsetX, accessory.offsetY);
+    ctx.save();
+    ctx.transform(anchorMatrix.a, anchorMatrix.b, anchorMatrix.c, anchorMatrix.d, anchorMatrix.e, anchorMatrix.f);
+    ctx.drawImage(accessory.image, -accessory.pivotX, -accessory.pivotY, accessory.width, accessory.height);
     ctx.restore();
   }
 

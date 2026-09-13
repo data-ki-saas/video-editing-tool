@@ -54,6 +54,7 @@ import type { AmbientEffectId } from "./ambientEffects";
 import type { FaceEffectId } from "./faceLandmarks";
 import type { TextSlideTransitionId } from "./textSlideTransitions";
 import type { AvatarActionId } from "./avatar/topology";
+import type { AvatarDesignOverrides } from "./avatar/design";
 
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
@@ -1583,7 +1584,12 @@ export function applyAddAvatarOverlay(
   defaultAction: AvatarActionId | (string & {}),
   currentTimeSeconds: number,
   videoDurationSeconds: number,
-  rect: CropRect = DEFAULT_AVATAR_OVERLAY_RECT
+  rect: CropRect = DEFAULT_AVATAR_OVERLAY_RECT,
+  // Phase 7 -- whatever "Edit with AI"/manual customization the creator made
+  // to this character BEFORE ever hitting "Add" (AvatarFramingDialog's own
+  // pendingOverrides). Optional/empty for the overwhelmingly common
+  // never-edited case.
+  designOverrides?: AvatarDesignOverrides
 ): TransformationResult {
   const startTimeSeconds = currentTimeSeconds;
   const endTimeSeconds = Math.min(
@@ -1597,6 +1603,7 @@ export function applyAddAvatarOverlay(
     endTimeSeconds,
     rect,
     defaultAction,
+    designOverrides,
   };
   return {
     label: "Added avatar",
@@ -1604,22 +1611,38 @@ export function applyAddAvatarOverlay(
   };
 }
 
-/** Changes an existing avatar overlay's picked character/action/rect --
- * from AvatarFramingDialog's "Save", reopened via AvatarOverlayTrack's
- * "Edit avatar." Its time range is untouched (that's AvatarOverlayTrack's
- * own drag handles' job, same split as applyEditTextOverlay), and its own
- * id/actionTimeline survive unchanged. */
+/** Changes an existing avatar overlay's picked character/action/rect/Phase-7
+ * customization -- from AvatarFramingDialog's "Save", reopened via
+ * AvatarOverlayTrack's "Edit avatar." Its time range is untouched (that's
+ * AvatarOverlayTrack's own drag handles' job, same split as
+ * applyEditTextOverlay), and its own id/actionTimeline survive unchanged.
+ * `rect` keeps the "undefined means don't touch this field" convention (some
+ * other callers of this function may not want to touch it), but
+ * `designOverrides` does NOT -- AvatarFramingDialog is this field's only
+ * writer and always passes its own current, real pendingOverrides state
+ * (possibly `undefined`, meaning "no overrides left, including one that
+ * used to be here" -- e.g. the creator hit "Reset customization"), so this
+ * ALWAYS replaces whatever the overlay previously carried rather than
+ * leaving a stale override in place when the dialog's own intent was to
+ * clear it. */
 export function applyEditAvatarOverlay(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   avatarId: string,
   defaultAction: AvatarActionId | (string & {}),
-  rect?: CropRect
+  rect?: CropRect,
+  designOverrides?: AvatarDesignOverrides
 ): TransformationResult {
   const overlay = selections.avatarOverlays[overlayIndex];
   if (!overlay) return { label: "Edited avatar", state: selections };
   const nextOverlays = [...selections.avatarOverlays];
-  nextOverlays[overlayIndex] = { ...overlay, avatarId, defaultAction, ...(rect ? { rect } : {}) };
+  nextOverlays[overlayIndex] = {
+    ...overlay,
+    avatarId,
+    defaultAction,
+    ...(rect ? { rect } : {}),
+    designOverrides,
+  };
   return { label: "Edited avatar", state: { ...selections, avatarOverlays: nextOverlays } };
 }
 

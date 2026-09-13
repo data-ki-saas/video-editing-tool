@@ -481,6 +481,104 @@ export async function deleteGeneratedAvatar(avatarId: string): Promise<void> {
   await throwIfNotOk(response);
 }
 
+/** Phase 7 (conversational Design edits) -- the SPECIFIC avatar's own
+ * resolved capability set (bone group ids, color slot ids, which
+ * accessories can attach to which of its anchors, and its expression params'
+ * own [min,max] ranges), read at request time off that avatar's topology/skin
+ * (AvatarFramingDialog), never a hardcoded global vocabulary -- same
+ * per-Topology-capability principle directAvatarActions' own `actionIds`
+ * already follows. */
+export interface AvatarEditAccessoryOption {
+  accessoryAssetId: string;
+  anchorId: string;
+  name: string;
+}
+
+export interface AvatarEditCapabilities {
+  boneGroupIds: string[];
+  colorSlotIds: string[];
+  accessories: AvatarEditAccessoryOption[];
+  expressionParams: Record<string, { min: number; max: number }>;
+}
+
+/** Shaped to match (structurally) lib/video/avatar/edits.ts's own
+ * `AvatarEditOp` union exactly, WITHOUT importing it -- same "api.ts stays
+ * domain-agnostic, keeps its own local copy of a small closed-vocabulary
+ * response shape" posture as AvatarActionBeat above (which mirrors
+ * video_math.ts's AvatarAction rather than importing it). Passing this
+ * array straight into applyAvatarEditOps typechecks via plain structural
+ * assignability. */
+export type AvatarEditOpResult =
+  | { op: "setBoneScale"; groupId: string; value: number }
+  | { op: "setColorSlot"; slotId: string; color: string }
+  | { op: "addAccessory"; anchorId: string; accessoryAssetId: string; colorOverride?: string }
+  | { op: "removeAccessory"; anchorId: string }
+  | { op: "setExpression"; paramId: string; value: number };
+
+interface AvatarEditOpWire {
+  op: string;
+  group_id?: string | null;
+  slot_id?: string | null;
+  anchor_id?: string | null;
+  accessory_asset_id?: string | null;
+  color?: string | null;
+  color_override?: string | null;
+  param_id?: string | null;
+  value?: number | null;
+}
+
+/** POST /api/avatar/edit (Phase 7) -- turns a free-text prompt ("make it
+ * fatter", "add sunglasses", "make him look more evil") into a batch of
+ * primitive edit ops, already validated/clamped server-side against
+ * `capabilities`. Still re-validated a second time by edits.ts's
+ * applyAvatarEditOps before ever touching a Design -- see that function's
+ * own doc comment for why. A wire entry this function can't itself make
+ * sense of (unknown `op`, a required field missing) is dropped here at the
+ * boundary; edits.ts's own deeper validation (against the actual
+ * topology/skin) would reject it anyway, so this is only a shape guard, not
+ * a duplicate of that validation. */
+export async function editAvatarDesign(prompt: string, capabilities: AvatarEditCapabilities): Promise<AvatarEditOpResult[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/edit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({
+      prompt,
+      bone_group_ids: capabilities.boneGroupIds,
+      color_slot_ids: capabilities.colorSlotIds,
+      accessories: capabilities.accessories.map((a) => ({
+        accessory_asset_id: a.accessoryAssetId,
+        anchor_id: a.anchorId,
+        name: a.name,
+      })),
+      expression_params: Object.fromEntries(
+        Object.entries(capabilities.expressionParams).map(([paramId, range]) => [paramId, [range.min, range.max]])
+      ),
+    }),
+  });
+  const body = await handleResponse<{ ops: AvatarEditOpWire[] }>(response);
+
+  const ops: AvatarEditOpResult[] = [];
+  for (const wire of body.ops) {
+    if (wire.op === "setBoneScale" && wire.group_id && typeof wire.value === "number") {
+      ops.push({ op: "setBoneScale", groupId: wire.group_id, value: wire.value });
+    } else if (wire.op === "setColorSlot" && wire.slot_id && wire.color) {
+      ops.push({ op: "setColorSlot", slotId: wire.slot_id, color: wire.color });
+    } else if (wire.op === "addAccessory" && wire.anchor_id && wire.accessory_asset_id) {
+      ops.push({
+        op: "addAccessory",
+        anchorId: wire.anchor_id,
+        accessoryAssetId: wire.accessory_asset_id,
+        ...(wire.color_override ? { colorOverride: wire.color_override } : {}),
+      });
+    } else if (wire.op === "removeAccessory" && wire.anchor_id) {
+      ops.push({ op: "removeAccessory", anchorId: wire.anchor_id });
+    } else if (wire.op === "setExpression" && wire.param_id && typeof wire.value === "number") {
+      ops.push({ op: "setExpression", paramId: wire.param_id, value: wire.value });
+    }
+  }
+  return ops;
+}
+
 export type BackgroundRemovalStatus = "waiting" | "completed" | "failed";
 
 export interface BackgroundRemoval {

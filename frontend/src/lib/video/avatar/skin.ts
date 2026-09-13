@@ -58,6 +58,29 @@ export interface AvatarSkinMouthShape {
 }
 
 /**
+ * One recolorable region of the atlas (Phase 7 -- conversational Design
+ * edits, e.g. "make the shirt red"). Deliberately scoped to parts whose
+ * ENTIRE drawn rect is a single flat fill color (a skin's shirt/pants, never
+ * a multi-color rect like the head, which also bakes in hair + eyes) --
+ * compile.ts's recolor step re-tints `targetPartIds`' whole atlas rects via a
+ * clipped `source-atop` fill, which would flatten a multi-color rect to one
+ * color if used there. `defaultColor` MUST equal whatever color this slot's
+ * parts were actually drawn with in the atlas image (placeholderAtlas.ts's
+ * resolved palette / avatar_gen's atlas_builder.py) -- it's both "what a
+ * Design with no override renders as" and compile.ts's own "does this Design
+ * actually need a recolor at all" cheap-skip check.
+ */
+export interface AvatarSkinColorSlot {
+  slotId: string;
+  targetPartIds: string[];
+  defaultColor: string;
+  // Which of the owning Topology's `expressionParams` (topology.ts) can also
+  // nudge this slot's color, beyond a Design's own explicit
+  // `colorSlotOverrides` -- see ExpressionColorDelta's own doc comment.
+  respondsToExpressionParams?: string[];
+}
+
+/**
  * The full visual definition bound to one Topology. `atlas.imageRef` is
  * either a real URL or a `data:` URL (this phase's placeholder generator
  * produces the latter, baked from an in-memory canvas -- see
@@ -80,4 +103,8 @@ export interface AvatarSkin {
   // comment for why that matters.
   parts: AvatarSkinPart[];
   mouthShapes: AvatarSkinMouthShape[];
+  // Phase 7: optional, possibly entirely absent -- a skin with no color
+  // slots simply can't be recolored via `AvatarDesign.colorSlotOverrides`
+  // (compile.ts's own recolor step is a no-op for it).
+  colorSlots?: AvatarSkinColorSlot[];
 }

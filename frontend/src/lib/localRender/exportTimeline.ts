@@ -47,7 +47,7 @@ import {
 import { loadVideoElement, seekVideoTo, drawImageFlipped, drawImageFlippedMasked, drawImageFlippedChromaKeyed } from "@/lib/video/video";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
-import { getCompiledAvatar, type CompiledAvatar } from "@/lib/video/avatar/compile";
+import { avatarCompileCacheKey, getCompiledAvatarForClip, type CompiledAvatar } from "@/lib/video/avatar/compile";
 import { computeAvatarPose, computeMouthShapeId, computeMouthShapeIdForWord } from "@/lib/video/avatar/actions";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
@@ -1082,24 +1082,31 @@ export async function exportVideoLocally(
 
     // Avatar overlays (lib/video/avatar/) -- unlike every asset loaded
     // above, this file has no `<video>`/`<img>` element to seek per frame:
-    // getCompiledAvatar resolves a library avatarId into a ready-to-draw
-    // CompiledAvatar ONCE (it's already promise-cached internally, see
-    // compile.ts's own doc comment), so every distinct avatarId used by
+    // getCompiledAvatarForClip resolves a library avatarId (plus, Phase 7,
+    // that clip's own designOverrides) into a ready-to-draw CompiledAvatar
+    // ONCE (it's already promise-cached internally, see compile.ts's own doc
+    // comment), so every distinct (avatarId, designOverrides) pairing used by
     // this reel's avatarOverlays is compiled up front, in parallel, before
     // the frame loop starts -- there is no per-frame async step left for
     // the draw loop below to wait on, mirroring CanvasPlayer.tsx's own
     // avatarCompiledByIdRef (populated by its own effect ahead of playback)
-    // but as a plain Map built once here rather than a React ref. A
-    // failed compile (e.g. an unknown avatarId) is skipped with a warning,
-    // same "one broken overlay shouldn't block the rest" policy as every
-    // other optional asset above -- that avatar simply never draws in this
-    // render rather than failing the whole export.
+    // but as a plain Map built once here rather than a React ref, keyed by
+    // avatarCompileCacheKey exactly like that ref is. A failed compile (e.g.
+    // an unknown avatarId) is skipped with a warning, same "one broken
+    // overlay shouldn't block the rest" policy as every other optional asset
+    // above -- that avatar simply never draws in this render rather than
+    // failing the whole export.
     const compiledAvatarsById = new Map<string, CompiledAvatar>();
-    const distinctAvatarIds = Array.from(new Set(selections.avatarOverlays.map((overlay) => overlay.avatarId)));
+    const distinctAvatarClips = new Map(
+      selections.avatarOverlays.map((overlay) => [
+        avatarCompileCacheKey(overlay.avatarId, overlay.designOverrides),
+        { avatarId: overlay.avatarId, designOverrides: overlay.designOverrides },
+      ])
+    );
     await Promise.all(
-      distinctAvatarIds.map(async (avatarId) => {
+      Array.from(distinctAvatarClips.entries()).map(async ([key, { avatarId, designOverrides }]) => {
         try {
-          compiledAvatarsById.set(avatarId, await getCompiledAvatar(avatarId));
+          compiledAvatarsById.set(key, await getCompiledAvatarForClip(avatarId, designOverrides));
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           const message = `An avatar overlay (avatarId ${avatarId}) couldn't be compiled for this render: ${reason}`;
@@ -1851,7 +1858,7 @@ export async function exportVideoLocally(
       // instead of a React ref, and driven by sourceTimeSeconds instead of
       // a live elapsedSeconds clock.
       for (const clip of findActiveAvatarOverlays(selections.avatarOverlays, sourceTimeSeconds)) {
-        const compiled = compiledAvatarsById.get(clip.avatarId);
+        const compiled = compiledAvatarsById.get(avatarCompileCacheKey(clip.avatarId, clip.designOverrides));
         if (!compiled) continue;
         const localElapsed = sourceTimeSeconds - clip.startTimeSeconds;
         // Phase 4: a director-authored actionTimeline beat covering this
@@ -1863,7 +1870,7 @@ export async function exportVideoLocally(
         // disagree on which action/mouth shape is active at a given instant.
         const { actionId, mouthShapeId } = resolveAvatarTalkState(clip, selections.ttsOverlays, sourceTimeSeconds, localElapsed);
         const seed = ambientEffectSeed(clip.id);
-        const pose = computeAvatarPose(compiled.topology, actionId, localElapsed, seed);
+        const pose = computeAvatarPose(compiled.topology, actionId, localElapsed, seed, compiled.design.expressionBias);
         const destX = clip.rect.x * canvas.width;
         const destY = clip.rect.y * canvas.height;
         const destWidth = clip.rect.width * canvas.width;
