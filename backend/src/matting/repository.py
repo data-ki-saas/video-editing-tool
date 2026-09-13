@@ -44,10 +44,9 @@ def create(*, id: str, source_asset_id: str, user_id: str) -> BackgroundRemovalR
 
 
 def get_by_id(id: str) -> BackgroundRemovalRecord | None:
-    """Unscoped lookup, only ever called from the webhook handler -- see
-    avatar/repository.py's get_generation_by_id for the identical reasoning
-    (the provider is authenticated via verify_webhook's signature/secret,
-    not a signed-in user, so there's no user_id to scope by yet here)."""
+    """Unscoped lookup, only ever called from the webhook handler -- the
+    provider is authenticated via verify_webhook's signature/secret, not a
+    signed-in user, so there's no user_id to scope by yet here."""
     result = get_supabase_client().table(_TABLE).select("*").eq("id", id).limit(1).execute()
     if not result.data:
         return None
@@ -75,9 +74,9 @@ def mark_failed(id: str, error: str) -> BackgroundRemovalRecord | None:
 
 
 def count_recent_matting_events(user_id: str) -> int | None:
-    """Same fail-OPEN-on-read-error reasoning as avatar/repository.py's
-    count_recent_avatar_events -- a usage_events hiccup shouldn't block the
-    feature entirely."""
+    """Same fail-OPEN-on-read-error reasoning as tts/repository.py's
+    count_recent_voiceover_events -- a usage_events hiccup shouldn't block
+    the feature entirely."""
     since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     try:
         result = (

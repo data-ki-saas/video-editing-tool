@@ -265,21 +265,10 @@ the next push that touches `supabase/migrations/`.
    | `META_APP_SECRET` | required for the Facebook/Instagram posting feature | Same **App settings > Basic** screen as above |
    | `SOCIAL_OAUTH_STATE_SECRET` | required for the YouTube/Meta posting features | Self-generated: `openssl rand -hex 32` — shared across every social provider's connect flow |
    | `FRONTEND_PUBLIC_URL` | required for the YouTube/Meta posting features | This app's own production frontend URL — same value as the frontend's own `SITE_URL` (step 6) — lets the OAuth callback redirect the browser back to `/settings` once a platform is connected |
-   | `BACKEND_PUBLIC_URL` | required for the avatar-video feature | this same backend's own Render URL, e.g. `https://<your-backend>.onrender.com` (no trailing slash) -- lets it hand HeyGen a callback URL pointing back at itself |
-   | `HEYGEN_API_KEY` | required for the avatar-video feature | [app.heygen.com](https://app.heygen.com) > **API** — pay-as-you-go, no free tier as of writing |
-   | `HEYGEN_DEFAULT_AVATAR_ID` | required for the avatar-video feature | the `avatar_id` of one avatar you create in HeyGen's dashboard — there's no in-app avatar picker yet, every generation uses this one |
-   | `HEYGEN_WEBHOOK_SECRET` | required for the avatar-video feature | any long random string you generate — appended as a query param on the callback URL HeyGen POSTs back to; see `avatar/providers/heygen_provider.py`'s own comment for why this (not HeyGen's signature header) is the real verification boundary here |
-   | `AVATAR_DAILY_CAP` | optional | `3` — keep this small; unlike TTS this has a real per-generation cost (~$0.02-0.07/sec of avatar video) |
+   | `BACKEND_PUBLIC_URL` | required for video background removal and the YouTube/Meta posting features | this same backend's own Render URL, e.g. `https://<your-backend>.onrender.com` (no trailing slash) -- lets it hand fal.ai/Google/Meta a callback/redirect URL pointing back at itself |
    | `FAL_API_KEY` | required for the background-removal feature (video AND photo cutaways) | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) — pay-per-use, calls both VEED's video background removal model and fal-ai/imageutils/rembg (photos) |
    | `FAL_WEBHOOK_SECRET` | required for VIDEO cutaway background removal only | any long random string you generate — appended as a query param on the callback URL handed to fal, and checked against fal's own signed-webhook headers when present; see `matting/providers/fal_veed_provider.py`'s own comment. A photo cutaway's own job is synchronous (no webhook), so this isn't needed for that path |
-   | `MATTING_DAILY_CAP` | optional | `20` — real cost is a few cents/clip, so this can stay generous relative to `AVATAR_DAILY_CAP` |
-
-   The avatar-video feature (a talking avatar delivering the AI-generated
-   narration, via HeyGen) is entirely optional — without the four `HEYGEN_*`/
-   `BACKEND_PUBLIC_URL` variables above, the wizard's voiceover step still
-   works, just without the "Deliver as a talking avatar video" checkbox
-   doing anything (`POST /api/avatar/generate` 500s with a clear "not
-   configured" message instead).
+   | `MATTING_DAILY_CAP` | optional | `20` — real cost is a few cents/clip |
 
    The background-removal feature (cutting a cutaway's subject out to
    composite over a new backdrop, via fal.ai/VEED for video, fal.ai/rembg
@@ -385,12 +374,6 @@ the next push that touches `supabase/migrations/`.
       "Recent Deliveries" or similar under your project/webhook settings)
 - [ ] `projects.render_status` reaches `completed` and `render_url` resolves
       to a playable video served from your Cloudflare custom domain
-- [ ] (if `HEYGEN_*`/`BACKEND_PUBLIC_URL` are set) In the wizard's Review
-      step, generate a voiceover, check "Deliver as a talking avatar video,"
-      and confirm the reel opens on a real avatar clip after "Generate My
-      Reel" — check `avatar_generations.status` reaches `completed` if it
-      doesn't (a `failed` row's `error` column has the reason)
-
 ---
 
 ## Common pitfalls

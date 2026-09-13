@@ -21,8 +21,7 @@ _IMAGE_CUTOUT_URL = "https://fal.run/fal-ai/imageutils/rembg"
 
 # NOT verified against a live delivery (no fal.ai account available while
 # wiring this up) -- confirm both of the following against a real request/
-# response before relying on this in production, same caveat this app's
-# HeyGenProvider.parse_webhook already carries for HeyGen:
+# response before relying on this in production:
 #  1. Whether the webhook URL is a query param on the queue submission
 #     (fal's general Webhooks doc: "pass a webhook_url when submitting to
 #     queue.fal.run") or a body field (this specific model's own doc example
@@ -52,11 +51,11 @@ class FalVeedProvider(MattingProvider):
         self._api_key = api_key
         # fal signs webhook deliveries (X-Fal-Webhook-Signature/-Timestamp/
         # -Request-Id headers, per docs.fal.ai/model-apis/model-endpoints/
-        # webhooks) -- unlike HeyGenProvider, this is real signature
-        # verification, not a shared-secret-in-the-URL fallback. Kept as a
-        # constructor arg (rather than reading settings directly) for the
-        # same reason HeyGenProvider does: keeps this class testable without
-        # importing src.core.config.
+        # webhooks) -- real signature verification, with a
+        # shared-secret-in-the-URL fallback (see verify_webhook below) in
+        # case a delivery doesn't carry those headers. Kept as a constructor
+        # arg (rather than reading settings directly) to keep this class
+        # testable without importing src.core.config.
         self._webhook_secret = webhook_secret
 
     async def create_matte(self, *, video_url: str, callback_url: str) -> MatteJobHandle:
@@ -128,8 +127,7 @@ class FalVeedProvider(MattingProvider):
         # NOT verified against a live delivery -- see this file's module
         # comment. Parsed defensively (multiple plausible shapes, never
         # raises on an unexpected one) so a drifted field name degrades to
-        # "unrecognized event" rather than a 500 fal would retry forever,
-        # same defensive-parsing precedent as HeyGenProvider.parse_webhook.
+        # "unrecognized event" rather than a 500 fal would retry forever.
         job_id = payload.get("request_id") or payload.get("gateway_request_id")
         status = str(payload.get("status") or "").upper()
         payload_data = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload

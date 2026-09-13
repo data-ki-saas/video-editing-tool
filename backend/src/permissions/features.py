@@ -16,7 +16,6 @@ class Feature:
 FEATURES: list[Feature] = [
     Feature("render_generate", "Cloud render", "Rendering & AI"),
     Feature("tts_synthesize", "AI voiceover", "Rendering & AI"),
-    Feature("avatar_generate", "AI avatar video", "Rendering & AI"),
     Feature("matting_generate", "AI background removal", "Rendering & AI"),
     Feature("social_posting", "Post reels to social media", "Rendering & AI"),
     Feature("assets_manage", "Upload & manage media", "Media"),

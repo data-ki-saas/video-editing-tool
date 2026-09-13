@@ -5,10 +5,6 @@ def render_cost_cents(duration_seconds: float) -> float:
     return duration_seconds * settings.creatomate_cost_cents_per_second
 
 
-def avatar_cost_cents(duration_seconds: float) -> float:
-    return duration_seconds * settings.heygen_cost_cents_per_second
-
-
 def matting_cost_cents(duration_seconds: float) -> float:
     return duration_seconds * settings.veed_cost_cents_per_second
 

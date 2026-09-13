@@ -148,7 +148,7 @@ export default function AdminUsagePage() {
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-medium">Cap warnings (last {CAP_WARNINGS_WINDOW_DAYS}d)</h2>
         <p className="text-xs text-muted">
-          Fires when a non-admin account hits a daily usage cap -- render/voiceover/avatar/background-removal --
+          Fires when a non-admin account hits a daily usage cap -- render/voiceover/background-removal --
           a possible cost-overrun signal. Admin accounts bypass these caps entirely and never appear here.
         </p>
         {capWarningsError && <p className="text-sm text-red-600">{capWarningsError}</p>}

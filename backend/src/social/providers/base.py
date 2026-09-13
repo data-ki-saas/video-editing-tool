@@ -18,15 +18,15 @@ class SocialAccountInfo:
 class SocialProvider(ABC):
     """One connected social platform: OAuth connect + publishing a video
     that already lives at a durable, publicly-fetchable URL (this app's own
-    R2-hosted library_videos.video_url). Mirrors avatar/providers/base.py's
-    AvatarProvider shape -- callers (social/service.py) never depend on a
-    specific vendor's SDK or token format.
+    R2-hosted library_videos.video_url). Same "callers never depend on a
+    specific vendor's SDK or token format" shape as MattingProvider/
+    LLMProvider/TTSProvider.
 
-    Unlike AvatarProvider (one active vendor at a time, switched via a
-    global settings.avatar_provider), a user can have several
-    SocialProviders connected simultaneously, so this is looked up by name
-    per-request rather than through a single settings switch -- see
-    social/client.py's get_social_provider.
+    Unlike those (one active vendor at a time, switched via a global
+    settings.X_provider), a user can have several SocialProviders connected
+    simultaneously, so this is looked up by name per-request rather than
+    through a single settings switch -- see social/client.py's
+    get_social_provider.
     """
 
     @abstractmethod

@@ -6,13 +6,11 @@ from src.metering import service as metering_service
 from src.usage import repository
 from src.usage.schemas import UsageSummaryItem, UsageSummaryResponse
 
-# (event_type, label, cap) -- the same three usage_events event_types
-# enforced today by api/render/route.ts (render), tts/service.py
-# (voiceover), and avatar/service.py (avatar_video).
+# (event_type, label, cap) -- the same usage_events event_types enforced
+# today by api/render/route.ts (render) and tts/service.py (voiceover).
 _FEATURES = [
     ("render", "Reels rendered", lambda: settings.render_daily_cap),
     ("voiceover", "Voiceovers generated", lambda: settings.tts_daily_cap),
-    ("avatar_video", "Avatar videos generated", lambda: settings.avatar_daily_cap),
 ]
 
 

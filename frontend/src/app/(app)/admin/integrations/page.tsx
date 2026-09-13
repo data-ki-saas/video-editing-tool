@@ -71,20 +71,6 @@ const INTEGRATIONS: Integration[] = [
     log: [],
   },
   {
-    name: "HeyGen",
-    purpose: "Talking-avatar video generation for the voiceover step's optional \"Deliver as a talking avatar video\" feature.",
-    pricingNote: "Pay-as-you-go, no free tier as of writing. Roughly $0.02-0.07/sec of avatar video -- keep AVATAR_DAILY_CAP small.",
-    docsUrl: "https://app.heygen.com",
-    envVars: [
-      { name: "HEYGEN_API_KEY", scope: "backend", required: true },
-      { name: "HEYGEN_DEFAULT_AVATAR_ID", scope: "backend", required: true },
-      { name: "HEYGEN_WEBHOOK_SECRET", scope: "backend", required: true },
-      { name: "BACKEND_PUBLIC_URL", scope: "backend", required: true },
-      { name: "AVATAR_DAILY_CAP", scope: "backend", required: false },
-    ],
-    log: [],
-  },
-  {
     name: "VEED + rembg (via fal.ai)",
     purpose:
       "AI background removal for cutaways/compositing -- the editor's \"Remove background\" toggle. VEED's video background-removal model (fast, no edge-refinement tier) handles a video cutaway; a completely different fal-hosted model, fal-ai/imageutils/rembg, handles a Ken Burns photo cutaway -- both billed through the same fal.ai account/API key (FAL_API_KEY), not two separate vendor relationships.",

@@ -11,7 +11,7 @@ _PROVIDERS = {"youtube", "meta", "instagram"}
 @lru_cache
 def get_social_provider(provider: str) -> SocialProvider:
     """Keyed by the route's own `provider` path param, unlike
-    avatar/matting's get_x_provider() (a single global settings switch) --
+    matting's get_matting_provider() (a single global settings switch) --
     a user can have several platforms connected at once here, so this is a
     small registry instead. Add tiktok etc. here later without changing any
     caller."""

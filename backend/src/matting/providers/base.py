@@ -5,9 +5,9 @@ from dataclasses import dataclass
 @dataclass
 class MatteJobHandle:
     # The provider's own id for the in-progress job -- used as this app's own
-    # background_removals.id too (see repository.py), same reasoning as
-    # AvatarVideoHandle.provider_video_id: a webhook delivery only ever
-    # carries the provider's id, so there's never a second id to map between.
+    # background_removals.id too (see repository.py): a webhook delivery
+    # only ever carries the provider's id, so there's never a second id to
+    # map between.
     provider_job_id: str
 
 
@@ -26,9 +26,9 @@ class MattingProvider(ABC):
       cutout directly -- no separate mask needed, since a still image's own
       transparency already IS the mask (see buildBackgroundRemovedImageSegment).
 
-    Mirrors avatar/providers/base.py's AvatarProvider shape -- callers
-    (matting/service.py) never depend on a specific vendor's SDK or webhook
-    payload shape.
+    Same "callers never depend on a specific vendor's SDK or webhook
+    payload shape" shape as LLMProvider/TTSProvider/SocialProvider --
+    matting/service.py never depends on fal.ai specifically.
     """
 
     @abstractmethod

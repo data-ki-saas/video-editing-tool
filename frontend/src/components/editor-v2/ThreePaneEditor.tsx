@@ -408,11 +408,6 @@ export function ThreePaneEditor({
   const [isTtsDialogOpen, setIsTtsDialogOpen] = useState(false);
   const [editingTtsOverlayIndex, setEditingTtsOverlayIndex] = useState<number | null>(null);
 
-  // TtsAvatarDialog's own open state -- no edit-target index, unlike TTS
-  // narration: it always generates a fresh avatar video and hands off to
-  // the Video Overlay mechanism, never edits an existing overlay in place.
-  const [isTtsAvatarDialogOpen, setIsTtsAvatarDialogOpen] = useState(false);
-
   // TranscriptCaptionDialog's open state -- no edit-target index needed,
   // there's only ever one transcript caption config (see
   // video_math.ts's TranscriptCaption).
@@ -1667,21 +1662,6 @@ export function ThreePaneEditor({
       mode: "ai",
     });
     pushChange(label, state);
-  }
-
-  // TtsAvatarDialog's own "Generate & add" -- the dialog already generated
-  // the avatar video and resolved it to a real project Asset (fetching a
-  // fresh listAssets() itself, since the backend just created this asset
-  // and this component's own `assets` state doesn't know about it yet).
-  // Adds it to local state (same as handleUploaded) and places it exactly
-  // like any other video overlay (handleAddVideoOverlay), since a talking-
-  // avatar clip needs nothing special beyond that -- Full-Screen/
-  // Picture-in-Picture/Split Screen, framing, deletion all already work on
-  // it unchanged.
-  function handleGeneratedTtsAvatar(asset: Asset) {
-    setAssets((prev) => (prev.some((existing) => existing.id === asset.id) ? prev : [asset, ...prev]));
-    setIsTtsAvatarDialogOpen(false);
-    void handleAddVideoOverlay(asset);
   }
 
   // VideoOverlayTrack's right-click "Switch to..." entries -- an instant
@@ -2967,10 +2947,6 @@ export function ThreePaneEditor({
           onCloseTtsDialog={handleCloseTtsDialog}
           onEditTtsOverlay={handleRequestEditTtsOverlay}
           onDeleteTtsOverlay={handleDeleteTtsOverlay}
-          onOpenTtsAvatarDialog={() => setIsTtsAvatarDialogOpen(true)}
-          isTtsAvatarDialogOpen={isTtsAvatarDialogOpen}
-          onGeneratedTtsAvatar={handleGeneratedTtsAvatar}
-          onCloseTtsAvatarDialog={() => setIsTtsAvatarDialogOpen(false)}
           onOpenTranscriptDialog={handleOpenTranscriptDialog}
           isTranscriptDialogOpen={isTranscriptDialogOpen}
           transcriptCaption={selections.transcriptCaption}

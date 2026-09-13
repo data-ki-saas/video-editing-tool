@@ -41,11 +41,10 @@ MAX_RECORDING_DURATION_SECONDS = 180
 
 def _probe_video_duration_seconds(body: bytes) -> float | None:
     """Authoritative server-side duration for an uploaded mp4, via mutagen
-    (pure-Python, no ffprobe/ffmpeg binary -- same technique already used by
-    avatar/service.py to probe a HeyGen video). Returns None (fail OPEN, not
-    closed) on a probe failure -- same convention as avatar/service.py's own
-    probe -- rather than blocking an upload mutagen simply can't parse; the
-    duration cap below only applies when a duration was actually measured."""
+    (pure-Python, no ffprobe/ffmpeg binary). Returns None (fail OPEN, not
+    closed) on a probe failure rather than blocking an upload mutagen simply
+    can't parse; the duration cap below only applies when a duration was
+    actually measured."""
     try:
         return MP4(io.BytesIO(body)).info.length
     except Exception:

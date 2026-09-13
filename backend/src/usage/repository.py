@@ -10,7 +10,7 @@ _TABLE = "usage_events"
 
 def count_recent_events(user_id: str, event_type: str) -> int | None:
     """Fail-OPEN on a read error (returns None), same convention as
-    avatar/repository.py's count_recent_avatar_events -- a usage_events
+    tts/repository.py's count_recent_voiceover_events -- a usage_events
     hiccup shouldn't block this summary from rendering the other rows.
     Generic across event_type here (unlike each feature's own private
     helper) since this is the one place that needs all three at once."""

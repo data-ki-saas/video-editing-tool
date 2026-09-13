@@ -26,8 +26,8 @@ export const MAX_POLL_SECONDS = (MAX_ATTEMPTS * POLL_INTERVAL_MS) / 1000;
 /** Polls GET /api/matting/status/{sourceAssetId} until it reaches a
  * terminal status or the attempt budget runs out. Returns the last-seen
  * state either way -- same "timeout looks like a slow waiting, not a hard
- * error" reasoning as avatarGeneration.ts's pollAvatarGeneration, which this
- * mirrors. Called after CutawayDialog's "Remove background" toggle fires
+ * error" reasoning as socialPost.ts's pollSocialPost, which this mirrors.
+ * Called after CutawayDialog's "Remove background" toggle fires
  * requestBackgroundRemoval.
  *
  * `onProgress`, if given, is called each time a wait begins: with an

@@ -19,8 +19,8 @@ _UPLOAD_INIT_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 _SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 
 # NOT verified against a live Google account (none available while wiring
-# this up) -- same caveat this app's HeyGenProvider/FalVeedProvider already
-# carry for their own webhook payloads. Before relying on this in
+# this up) -- same caveat this app's FalVeedProvider already carries for
+# its own webhook payloads. Before relying on this in
 # production, confirm against a real OAuth consent + upload: the resumable-
 # upload request/response shape here follows Google's published Data API v3
 # docs (https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol).

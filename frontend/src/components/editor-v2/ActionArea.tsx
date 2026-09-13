@@ -34,7 +34,6 @@ import { StockMediaDialog } from "./StockMediaDialog";
 import { UserActions } from "./UserActions";
 import { TextOverlayDialog } from "./TextOverlayDialog";
 import { TtsOverlayDialog } from "./TtsOverlayDialog";
-import { TtsAvatarDialog } from "./TtsAvatarDialog";
 import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
 import { CutawayDialog } from "./CutawayDialog";
 import { TextSlideDialog } from "./TextSlideDialog";
@@ -264,10 +263,6 @@ export function ActionArea({
   onCloseTtsDialog,
   onEditTtsOverlay,
   onDeleteTtsOverlay,
-  onOpenTtsAvatarDialog,
-  isTtsAvatarDialogOpen,
-  onGeneratedTtsAvatar,
-  onCloseTtsAvatarDialog,
   onOpenTranscriptDialog,
   isTranscriptDialogOpen,
   transcriptCaption,
@@ -432,10 +427,6 @@ export function ActionArea({
   onCloseTtsDialog: () => void;
   onEditTtsOverlay: (overlayIndex: number) => void;
   onDeleteTtsOverlay: (overlayIndex: number) => void;
-  onOpenTtsAvatarDialog: () => void;
-  isTtsAvatarDialogOpen: boolean;
-  onGeneratedTtsAvatar: (asset: Asset) => void;
-  onCloseTtsAvatarDialog: () => void;
   onOpenTranscriptDialog: () => void;
   isTranscriptDialogOpen: boolean;
   transcriptCaption: TranscriptCaption | null;
@@ -616,7 +607,6 @@ export function ActionArea({
           textOverlayCount={textOverlays.length}
           onOpenTtsDialog={onOpenTtsDialog}
           ttsOverlayCount={ttsOverlays.length}
-          onOpenTtsAvatarDialog={onOpenTtsAvatarDialog}
           onOpenTranscriptDialog={onOpenTranscriptDialog}
           autoCaptionEnabled={transcriptCaption !== null}
           onOpenCoverPicker={onOpenCoverPicker}
@@ -734,10 +724,6 @@ export function ActionArea({
           onSave={onSaveTtsOverlay}
           onClose={onCloseTtsDialog}
         />
-      )}
-
-      {isTtsAvatarDialogOpen && (
-        <TtsAvatarDialog projectId={projectId} onGenerated={onGeneratedTtsAvatar} onClose={onCloseTtsAvatarDialog} />
       )}
 
       {isTranscriptDialogOpen && (

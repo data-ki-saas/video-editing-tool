@@ -48,39 +48,18 @@ class Settings(BaseSettings):
     # 0029's widened check constraint).
     tickets_daily_cap: int = 10
 
-    # This server's own publicly reachable base URL -- needed only so
-    # avatar/service.py can hand HeyGen a callback_url pointing back at
-    # itself (POST /api/render never needed this, since Creatomate's
-    # webhook is handled by the Next.js frontend instead -- see
+    # This server's own publicly reachable base URL -- needed so
+    # matting/service.py and social/client.py can hand a provider/OAuth
+    # flow a callback/redirect URL pointing back at itself (POST
+    # /api/render never needed this, since Creatomate's webhook is handled
+    # by the Next.js frontend instead -- see
     # frontend/src/app/api/webhooks/creatomate/route.ts). No trailing slash.
     backend_public_url: str = ""
-
-    # Which AvatarProvider src.avatar.client.get_avatar_provider() returns.
-    # Only "heygen" exists today -- same switch-pattern precedent as
-    # llm_provider/tts_provider above, kept even with one implementation so
-    # a second provider doesn't require a rewrite.
-    avatar_provider: str = "heygen"
-    heygen_api_key: str = ""
-    # A single pre-created HeyGen avatar_id used for every generation until
-    # a real avatar-picker UI exists -- create one at heygen.com and paste
-    # its id here (see DEPLOY.md).
-    heygen_default_avatar_id: str = ""
-    # Our own shared secret, appended as a query param on the callback_url
-    # handed to HeyGen -- see HeyGenProvider's own comment on why this
-    # (rather than HeyGen's registered-endpoint HMAC signature) is the
-    # actual verification boundary for now. Generate a long random value,
-    # same handling as any other API secret.
-    heygen_webhook_secret: str = ""
-    # Real per-generation cost (~$0.02-0.07/sec of avatar video), unlike
-    # every other daily cap in this file -- deliberately small. Not
-    # billing/metering (see tts_daily_cap's own comment), just a hard
-    # ceiling on how much this feature can spend per user per day.
-    avatar_daily_cap: int = 3
 
     # Which MattingProvider src.matting.client.get_matting_provider()
     # returns. Only "fal_veed" exists today (VEED's fast/no-refine video
     # background removal, called via fal.ai's queue API) -- same
-    # switch-pattern precedent as avatar_provider above.
+    # switch-pattern precedent as llm_provider/tts_provider above.
     matting_provider: str = "fal_veed"
     fal_api_key: str = ""
     # Our own shared secret, appended as a query param on the callback_url
@@ -89,9 +68,8 @@ class Settings(BaseSettings):
     # why both checks exist.
     fal_webhook_secret: str = ""
     # Real cost is a few cents/clip ($0.008/sec at VEED's fast/no-refine
-    # tier) -- generous relative to avatar_daily_cap since a miss here is
-    # much cheaper, but still a hard ceiling per CLAUDE.md's
-    # abuse-rate-limiting scope, not billing.
+    # tier) -- still a hard ceiling per CLAUDE.md's abuse-rate-limiting
+    # scope, not billing.
     matting_daily_cap: int = 20
 
     # Estimated external costs backing usage_ledger.cost_estimate_cents (see
@@ -99,11 +77,7 @@ class Settings(BaseSettings):
     # live provider rates. Cross-reference frontend/src/app/admin/integrations
     # page.tsx's pricingNote text and keep both in sync by hand, same
     # precedent as render_daily_cap mirroring RENDER_DAILY_LIMIT above.
-    # heygen_cost_cents_per_second sits at the midpoint of that page's
-    # documented $0.02-0.07/sec range; the rest have no public per-unit rate
-    # yet and are rough placeholders pending real invoices.
     creatomate_cost_cents_per_second: float = 2.5
-    heygen_cost_cents_per_second: float = 5.0
     # VEED's fast/no-refine tier, per fal.ai's published per-30-frames rate
     # at 30fps ($0.008/30 frames = $0.008/sec) -- an actual published rate,
     # unlike most of this block's placeholders.
@@ -189,7 +163,7 @@ class Settings(BaseSettings):
     # connect flow, since the callback has no session/bearer token to read
     # one from -- Google redirects the browser there directly). Self-
     # generated, same precedent as CREATOMATE_WEBHOOK_SECRET/
-    # HEYGEN_WEBHOOK_SECRET: `openssl rand -hex 32`.
+    # FAL_WEBHOOK_SECRET: `openssl rand -hex 32`.
     social_oauth_state_secret: str = ""
     # This app's own frontend origin -- lets social/service.py's OAuth
     # callback redirect the browser back to /settings once a platform is

@@ -30,15 +30,11 @@
  *    CutawayTrack.tsx) and each overlay (ImageOverlayTrack.tsx/
  *    VideoOverlayTrack.tsx) gets its own, via that clip's own right-click
  *    "Filter".
- *  - OVERLAYS (amber): Video Overlay, Image Overlay, Text, TTS,
- *    TTS + Avatar -- what composites ON TOP of the base. All five share the
- *    same amber family now (previously each had its own unrelated hue --
- *    amber/sky/violet -- which read as five unrelated colors rather than
- *    one "overlays" group); shade alone now distinguishes them within the
- *    cluster. TTS + Avatar has no count badge of its own: it doesn't create
- *    its own overlay type, it generates a talking-avatar video and hands
- *    off to the SAME Video Overlay mechanism (that tab's own count already
- *    covers it).
+ *  - OVERLAYS (amber): Video Overlay, Image Overlay, Text, TTS -- what
+ *    composites ON TOP of the base. All four share the same amber family now
+ *    (previously each had its own unrelated hue -- amber/sky/violet --
+ *    which read as unrelated colors rather than one "overlays" group);
+ *    shade alone now distinguishes them within the cluster.
  *  - CAPTIONS (emerald): Auto-Caption -- its own cluster since it's a
  *    different kind of thing (server-side transcription, not a user-placed
  *    clip/overlay). Only one member, so it just gets the group's own
@@ -160,20 +156,6 @@ function TtsIcon({ className }: { className?: string }) {
   );
 }
 
-// A person (talking-avatar) glyph with the same small waveform accent as
-// TtsIcon -- "TTS + Avatar" 's identity, same violet family as plain TTS
-// (both are speech-driven) but visually distinct at a glance: a face, not
-// a speech bubble.
-function TtsAvatarIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <circle cx="12" cy="8" r="3.5" />
-      <path d="M5 20c0-3.6 3.1-6.5 7-6.5s7 2.9 7 6.5" />
-      <path d="M19.5 8.5v3M21.5 9.5v1" />
-    </svg>
-  );
-}
-
 // Small notification-style count badge, pinned to the bottom of a tab
 // trigger once it has at least one item -- the at-a-glance equivalent of
 // Clip's own preview swatch (also bottom-pinned via mt-auto) for the tabs
@@ -230,7 +212,6 @@ export function UserActions({
   textOverlayCount,
   onOpenTtsDialog,
   ttsOverlayCount,
-  onOpenTtsAvatarDialog,
   onOpenTranscriptDialog,
   autoCaptionEnabled,
   onOpenCoverPicker,
@@ -250,7 +231,6 @@ export function UserActions({
   textOverlayCount: number;
   onOpenTtsDialog: () => void;
   ttsOverlayCount: number;
-  onOpenTtsAvatarDialog: () => void;
   onOpenTranscriptDialog: () => void;
   autoCaptionEnabled: boolean;
   onOpenCoverPicker: () => void;
@@ -369,17 +349,6 @@ export function UserActions({
             TTS
           </span>
           <CountBadge count={ttsOverlayCount} />
-        </button>
-        <button
-          type="button"
-          onClick={onOpenTtsAvatarDialog}
-          title="TTS + Avatar -- generate a talking-avatar video reading a script, added as a Video Overlay"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-800 hover:bg-background"
-        >
-          <TtsAvatarIcon className="h-4 w-4" />
-          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-            TTS + Avatar
-          </span>
         </button>
       </div>
 

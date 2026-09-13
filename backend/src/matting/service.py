@@ -62,7 +62,7 @@ async def request(project_id: str, source_asset_id: str, user: CurrentUser) -> R
     # core/auth.py's bypasses_daily_caps.
     if not bypasses_daily_caps(user):
         # Fails OPEN on a usage_events read error, same precedent as
-        # avatar/service.py's own cap check -- but a miss here spends real
+        # tts/service.py's own cap check -- but a miss here spends real
         # money at the provider, so matting_daily_cap should stay
         # conservative. Shared across both video and image jobs -- one
         # budget, not two.
@@ -97,7 +97,7 @@ async def _request_video_matte(project_id: str, source_asset: AssetRecord, user:
         raise HTTPException(status_code=502, detail="Couldn't start background removal -- try again") from exc
 
     matting_repository.create(id=handle.provider_job_id, source_asset_id=source_asset.id, user_id=user.id)
-    # Best-effort, same as avatar/service.py's record_avatar_event -- a
+    # Best-effort, same as tts/service.py's record_voiceover_event -- a
     # failure here shouldn't fail a job that was already kicked off.
     matting_repository.record_matting_event(user.id)
 
@@ -189,7 +189,7 @@ async def handle_webhook(*, raw_body: bytes, headers: dict[str, str], query_secr
     if record is None:
         # A stale/replayed delivery, or one for a job this app never
         # recorded -- acknowledge rather than inviting a retry storm, same
-        # "no matching row" handling as the avatar/Creatomate webhooks.
+        # "no matching row" handling as the Creatomate webhook.
         logger.warning("matting webhook for unrecognized job id=%s", event.provider_job_id)
         return
 
@@ -220,8 +220,7 @@ async def handle_webhook(*, raw_body: bytes, headers: dict[str, str], query_secr
         # Marked failed (a terminal state) rather than left "waiting" -- fal
         # retries failed webhook DELIVERIES (non-2xx), not a delivery that
         # succeeded but whose handling errored afterward, so leaving this
-        # waiting would mean it never resolves. Same reasoning as
-        # avatar/service.py's own handle_webhook.
+        # waiting would mean it never resolves.
         logger.exception("failed to store finished matte for job=%s", record.id)
         matting_repository.mark_failed(record.id, "Failed to save the finished background-removal result")
         return

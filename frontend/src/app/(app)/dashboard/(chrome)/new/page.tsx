@@ -4,16 +4,12 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   type Asset,
-  type AvatarOption,
   deleteAsset,
-  generateAvatarVideo,
-  listAvatars,
   listTtsVoices,
   synthesizeTts,
   uploadAssetWithProgress,
   type TtsVoiceOption,
 } from "@/lib/api";
-import { pollAvatarGeneration } from "@/lib/avatarGeneration";
 import { downscaleImageIfNeeded } from "@/lib/image";
 import { getOrCreateNiche, listNiches, localeForNicheLanguage, NICHE_LANGUAGES, type MediaSlot, type NicheConfig } from "@/lib/niches";
 import { createProject, renameProject, saveTimeline, updateProjectAttributes, type Project } from "@/lib/projects";
@@ -154,48 +150,6 @@ export default function NewReelPage() {
   // cap (see backend/src/core/config.py's tts_daily_cap) and a wizard-driven
   // reel shouldn't spend it without the creator choosing to.
   const [narrationVoice, setNarrationVoice] = useState("");
-  // Delivers the narration as a lip-synced talking-avatar video (via
-  // HeyGen) instead of audio-only -- only meaningful once a voice is
-  // chosen, since the avatar lip-syncs to that generated audio rather than
-  // doing its own text-to-speech. Off by default: unlike TTS, this has a
-  // real per-generation cost (see backend/src/core/config.py's
-  // avatar_daily_cap), so it's an explicit second opt-in, not bundled into
-  // picking a voice.
-  const [useAvatarVideo, setUseAvatarVideo] = useState(false);
-  const [avatarOptions, setAvatarOptions] = useState<AvatarOption[]>([]);
-  const [loadingAvatars, setLoadingAvatars] = useState(false);
-  const [avatarsError, setAvatarsError] = useState<string | null>(null);
-  // Empty string defers to the server's configured default avatar (see
-  // backend's HEYGEN_DEFAULT_AVATAR_ID) -- set once the catalog loads and
-  // the user hasn't picked one yet, same "seed a default once data loads"
-  // pattern as TtsOverlayDialog's own voice <select>.
-  const [selectedAvatarId, setSelectedAvatarId] = useState("");
-
-  // Fetches the avatar catalog only once the checkbox is actually turned
-  // on -- unlike voices (always shown), this is a live third-party API call
-  // (see avatar/service.py) that most reels won't use, so it shouldn't fire
-  // on every visit to the Review step.
-  useEffect(() => {
-    if (!useAvatarVideo || avatarOptions.length > 0 || loadingAvatars) return;
-    let cancelled = false;
-    setLoadingAvatars(true);
-    listAvatars()
-      .then((res) => {
-        if (cancelled) return;
-        setAvatarOptions(res.avatars);
-        setSelectedAvatarId((prev) => prev || res.avatars[0]?.id || "");
-      })
-      .catch((err) => {
-        if (!cancelled) setAvatarsError(err instanceof Error ? err.message : "Failed to load avatars");
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingAvatars(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- avatarOptions/loadingAvatars are read only to skip a redundant fetch, not to re-trigger one
-  }, [useAvatarVideo]);
 
   // Review/generate
   const [generating, setGenerating] = useState(false);
@@ -425,32 +379,11 @@ export default function NewReelPage() {
         }
       }
 
-      let avatarClipAsset: { id: string; url: string } | null = null;
-      let avatarWarning: string | null = null;
-      if (narration && useAvatarVideo) {
-        setGeneratingStage("Generating avatar video… this can take up to a minute");
-        try {
-          const kicked = await generateAvatarVideo(project.id, narration.assetId, selectedAvatarId || undefined);
-          const finalState = await pollAvatarGeneration(kicked.id);
-          if (finalState.status === "completed" && finalState.url && finalState.assetId) {
-            avatarClipAsset = { id: finalState.assetId, url: finalState.url };
-          } else {
-            avatarWarning =
-              finalState.error ?? "The avatar video didn't finish in time -- used audio-only narration instead.";
-          }
-        } catch (err) {
-          // Non-fatal, same reasoning as the narration try/catch above --
-          // falls back to audio-only narration rather than blocking the reel.
-          avatarWarning = err instanceof Error ? err.message : "Failed to generate the avatar video";
-        }
-      }
-
       setGeneratingStage("Assembling your reel…");
       const selections = await autoAssembleFromWizard(orderedSlotAssets, {
         hookText,
         contactLine,
         ctaText,
-        avatarClipAsset,
         narration,
       });
 
@@ -460,7 +393,7 @@ export default function NewReelPage() {
         editHistoryIndex: 0,
       });
 
-      const warnings = [narrationWarning, avatarWarning].filter((w): w is string => Boolean(w));
+      const warnings = [narrationWarning].filter((w): w is string => Boolean(w));
       if (warnings.length > 0) {
         window.alert(`Your reel was created, but: ${warnings.join(" ")}`);
       }
@@ -917,64 +850,6 @@ export default function NewReelPage() {
               </select>
               {loadingNarrationVoices && <p className="mt-1 text-xs text-muted">Loading voices…</p>}
               {narrationVoicesError && <p className="mt-1 text-xs text-red-500">{narrationVoicesError}</p>}
-
-              {narrationVoice && (
-                <label className="mt-3 flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={useAvatarVideo}
-                    onChange={(e) => setUseAvatarVideo(e.target.checked)}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="text-foreground">Deliver as a talking avatar video</span>
-                    <span className="block text-xs text-muted">
-                      Opens the reel with a lip-synced avatar speaking the narration, instead of audio only. Takes up
-                      to a minute to generate; limited to a few per day.
-                    </span>
-                  </span>
-                </label>
-              )}
-
-              {useAvatarVideo && (
-                <div className="mt-3">
-                  {loadingAvatars && <p className="text-xs text-muted">Loading avatars…</p>}
-                  {avatarsError && <p className="text-xs text-red-500">{avatarsError}</p>}
-                  {avatarOptions.length > 0 && (
-                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-                      {avatarOptions.map((avatar) => (
-                        <label
-                          key={avatar.id}
-                          className={`flex cursor-pointer flex-col items-center gap-1 rounded-md border p-1.5 ${
-                            selectedAvatarId === avatar.id ? "border-accent bg-accent/5" : "border-border"
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="avatar"
-                            checked={selectedAvatarId === avatar.id}
-                            onChange={() => setSelectedAvatarId(avatar.id)}
-                            className="sr-only"
-                          />
-                          {avatar.previewImageUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- an external HeyGen-hosted thumbnail, not a Next-optimizable static asset
-                            <img
-                              src={avatar.previewImageUrl}
-                              alt={avatar.name}
-                              className="aspect-square w-full rounded object-cover"
-                            />
-                          ) : (
-                            <div className="flex aspect-square w-full items-center justify-center rounded bg-background text-xs text-muted">
-                              {avatar.name}
-                            </div>
-                          )}
-                          <span className="w-full truncate text-center text-xs text-foreground">{avatar.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )}
 

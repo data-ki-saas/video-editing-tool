@@ -56,21 +56,9 @@ export interface WizardOverlayInputs {
   /** Already interpolated -- shown only in the final few seconds, as an
    * end-screen call to action (e.g. a comment-keyword lead magnet). */
   ctaText?: string | null;
-  /** A talking-avatar video (HeyGen, lip-synced to the niche's narration
-   * script -- see dashboard/(chrome)/new/page.tsx's handleGenerate) that
-   * already has the narration baked into its own audio track. Prepended as
-   * the reel's own FIRST clip (an intro, like a realtor's own on-camera
-   * pitch before the listing tour) rather than an overlay -- reuses the
-   * exact same sequence-clip mechanism as a media-slot video, and every
-   * later clip's start time simply shifts by however long it runs. Takes
-   * priority over `narration` below when both are given, since playing
-   * both would double the narration audio. */
-  avatarClipAsset?: { id: string; url: string } | null;
-  /** Audio-only narration (no avatar video available/chosen, or avatar
-   * generation failed/timed out) -- a fully-synthesized TTS overlay
-   * (already generated via synthesizeTts + re-probed for its real
-   * duration). Placed at t=0 with whatever displayMode/rect it already
-   * carries. Ignored if `avatarClipAsset` is set. */
+  /** Audio-only narration -- a fully-synthesized TTS overlay (already
+   * generated via synthesizeTts + re-probed for its real duration). Placed
+   * at t=0 with whatever displayMode/rect it already carries. */
   narration?: TtsOverlay | null;
 }
 
@@ -91,15 +79,6 @@ export async function autoAssembleFromWizard(
   let selections: EditSelectionsSnapshot = DEFAULT_EDIT_SELECTIONS;
   let runningTimeSeconds = 0;
   let imageIndex = 0;
-
-  if (overlays.avatarClipAsset) {
-    selections = applyAddSequenceClip(selections, overlays.avatarClipAsset.id).state;
-    try {
-      runningTimeSeconds += await getVideoDuration(overlays.avatarClipAsset.url);
-    } catch {
-      runningTimeSeconds += DEFAULT_IMAGE_CLIP_DURATION_SECONDS;
-    }
-  }
 
   for (const { asset } of slotAssets) {
     if (asset.kind === "video") {
@@ -175,7 +154,7 @@ export async function autoAssembleFromWizard(
     });
   }
 
-  const ttsOverlays: TtsOverlay[] = !overlays.avatarClipAsset && overlays.narration ? [overlays.narration] : [];
+  const ttsOverlays: TtsOverlay[] = overlays.narration ? [overlays.narration] : [];
 
   return { ...selections, textOverlays, ttsOverlays };
 }

@@ -65,8 +65,8 @@ def get_admin_summary(days: int = 30) -> AdminUsageSummaryResponse:
 
 def record_cap_hit(*, user_id: str, feature: str, cap_value: int, count_at_trigger: int) -> None:
     """Called by every daily-cap enforcement site (tts/service.py,
-    avatar/service.py, matting/service.py, usage/service.py's
-    assert_render_cap) right before it raises 429 -- a WARNING-level log
+    matting/service.py, usage/service.py's assert_render_cap) right before
+    it raises 429 -- a WARNING-level log
     line (visible in Render's log viewer with no extra setup) plus a
     cap_warnings row an admin can see on /admin/usage without digging
     through logs."""
