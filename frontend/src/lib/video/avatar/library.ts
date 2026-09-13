@@ -257,7 +257,12 @@ const ACTIONS: AvatarTopology["actions"] = {
   talkEmphasize: TALK_EMPHASIZE,
 };
 
-const BIPED_SIMPLE_TOPOLOGY: AvatarTopology = {
+// Exported so avatar_gen's frontend client (generatedLibrary.ts) can bind a
+// Phase-6 photo-generated Skin to this exact same shared Topology -- every
+// generated skin rides "biped-simple" too (see
+// backend/src/avatar_gen/service.py's own _TOPOLOGY_ID), so there's no
+// separate topology to fetch or resolve for one.
+export const BIPED_SIMPLE_TOPOLOGY: AvatarTopology = {
   schemaVersion: 1,
   topologyId: "biped-simple",
   rigWidth: RIG_WIDTH,

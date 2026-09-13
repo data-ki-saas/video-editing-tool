@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from src.assets.router import router as assets_router
 from src.avatar.router import router as avatar_router
+from src.avatar_gen.router import router as avatar_generated_router
 from src.core.config import settings
 from src.library.router import router as library_router
 from src.matting.router import router as matting_router
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
 
     app.include_router(assets_router)
     app.include_router(avatar_router)
+    app.include_router(avatar_generated_router)
     app.include_router(library_router)
     app.include_router(matting_router)
     app.include_router(metering_router)

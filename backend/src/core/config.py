@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     # tier) -- still a hard ceiling per CLAUDE.md's abuse-rate-limiting
     # scope, not billing.
     matting_daily_cap: int = 20
+    # No external vendor cost at all (local mediapipe + Pillow, see
+    # avatar_gen/service.py) -- purely an abuse guard, not a budget guard, so
+    # this can afford to be more generous than matting_daily_cap above.
+    avatar_generate_daily_cap: int = 10
 
     # Estimated external costs backing usage_ledger.cost_estimate_cents (see
     # backend/src/metering/pricing.py) -- hand-maintained placeholders, not

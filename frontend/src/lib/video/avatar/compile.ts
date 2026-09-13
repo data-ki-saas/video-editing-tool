@@ -23,6 +23,7 @@ import type { ActionCurveSpec, AvatarTopology, BoneTransform } from "./topology"
 import type { AtlasRect, AvatarSkin } from "./skin";
 import type { AvatarDesign } from "./design";
 import { getAvatarLibraryEntry } from "./library";
+import { fetchGeneratedAvatarEntry } from "./generatedLibrary";
 
 /** One resolved, ready-to-draw part -- `zOrder` itself is dropped once it's
  * done its one job (deciding this entry's position in the already-sorted
@@ -183,15 +184,18 @@ export async function compileAvatar(topology: AvatarTopology, skin: AvatarSkin, 
 const compiledAvatarCache = new Map<string, Promise<CompiledAvatar>>();
 
 /** The ONLY function other modules should call to get a usable
- * CompiledAvatar -- resolves `avatarId` against library.ts's seed library,
- * compiles it once, and reuses that compiled result (and in-flight promise)
- * for every later call with the same id for the lifetime of this page load. */
+ * CompiledAvatar -- resolves `avatarId` against library.ts's seed library
+ * first (synchronous, in-memory), then falls back to fetching a Phase-6
+ * user-generated avatar (generatedLibrary.ts, backend/src/avatar_gen/) if
+ * that misses -- compiles it once either way, and reuses that compiled
+ * result (and in-flight promise) for every later call with the same id for
+ * the lifetime of this page load. */
 export function getCompiledAvatar(avatarId: string): Promise<CompiledAvatar> {
   const cached = compiledAvatarCache.get(avatarId);
   if (cached) return cached;
 
   const promise = (async () => {
-    const entry = getAvatarLibraryEntry(avatarId);
+    const entry = getAvatarLibraryEntry(avatarId) ?? (await fetchGeneratedAvatarEntry(avatarId));
     if (!entry) {
       throw new Error(`getCompiledAvatar: no avatar found in the library for id "${avatarId}"`);
     }

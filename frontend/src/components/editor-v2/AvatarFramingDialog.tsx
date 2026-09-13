@@ -42,7 +42,13 @@ import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
 import { getCompiledAvatar, type CompiledAvatar } from "@/lib/video/avatar/compile";
 import { computeAvatarPose, computeMouthShapeId } from "@/lib/video/avatar/actions";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
-import { AVATAR_LIBRARY, getAvatarLibraryEntry } from "@/lib/video/avatar/library";
+import { AVATAR_LIBRARY, BIPED_SIMPLE_TOPOLOGY, getAvatarLibraryEntry } from "@/lib/video/avatar/library";
+import {
+  deleteGeneratedAvatar,
+  generateAvatarFromPhoto,
+  listMyGeneratedAvatars,
+  type GeneratedAvatarSummary,
+} from "@/lib/video/avatar/generatedLibrary";
 import type { AvatarActionId } from "@/lib/video/avatar/topology";
 import { ambientEffectSeed } from "@/lib/video/ambientEffects";
 import {
@@ -55,6 +61,13 @@ import {
 } from "@/lib/video/video_math";
 import { directAvatarActions, FeatureLockedError } from "@/lib/api";
 import { usePermissions } from "@/lib/usePermissions";
+
+// A Phase-6 generated avatarId always has this prefix (see
+// backend/src/avatar_gen/service.py's own design_id construction) -- every
+// generated Skin binds to the exact same shared "biped-simple" topology
+// every seed character rides, so its action set is known statically without
+// an async fetch (see actionIdsForAvatar below).
+const GENERATED_AVATAR_ID_PREFIX = "gen-";
 
 // Human-readable labels for the six baseline actions (topology.ts's
 // AvatarActionId) plus this feature's own first non-baseline extra
@@ -101,7 +114,10 @@ function actionLabel(actionId: string): string {
 // change to this component. Falls back to the baseline six only if the
 // lookup itself fails (see BASELINE_ACTION_IDS's own comment).
 function actionIdsForAvatar(avatarId: string): string[] {
-  const actionIds = Object.keys(getAvatarLibraryEntry(avatarId)?.topology.actions ?? {});
+  const topology =
+    getAvatarLibraryEntry(avatarId)?.topology ??
+    (avatarId.startsWith(GENERATED_AVATAR_ID_PREFIX) ? BIPED_SIMPLE_TOPOLOGY : null);
+  const actionIds = Object.keys(topology?.actions ?? {});
   return actionIds.length > 0 ? actionIds : BASELINE_ACTION_IDS;
 }
 
@@ -294,6 +310,62 @@ export function AvatarFramingDialog({
     setRect(editingOverlay?.rect ?? DEFAULT_AVATAR_OVERLAY_RECT);
   }, [editingOverlay]);
 
+  // This creator's own photo-generated avatars (Phase 6,
+  // backend/src/avatar_gen/) -- loaded once per dialog open and rendered as
+  // extra gallery cards alongside AVATAR_LIBRARY's seed characters below.
+  // Kept as plain summaries (id/name/thumbnail), not full AvatarLibraryEntry
+  // triples: AvatarThumbnailCanvas/AvatarPreviewCanvas already resolve any
+  // avatarId (seed or generated) through the same getCompiledAvatar, so this
+  // dialog never needs the full Skin/Design payload itself.
+  const [myAvatars, setMyAvatars] = useState<GeneratedAvatarSummary[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    listMyGeneratedAvatars()
+      .then((avatars) => {
+        if (!cancelled) setMyAvatars(avatars);
+      })
+      .catch((err) => console.error("Failed to load your generated avatars", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handlePhotoPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow picking the same file again later
+    if (!file || isGenerating) return;
+    setIsGenerating(true);
+    setGenerateError(null);
+    try {
+      const entry = await generateAvatarFromPhoto(file);
+      setMyAvatars((prev) => [
+        { id: entry.design.designId, name: entry.design.meta.name, thumbnailUrl: null, createdAt: new Date().toISOString() },
+        ...prev,
+      ]);
+      setAvatarId(entry.design.designId);
+    } catch (err) {
+      if (err instanceof FeatureLockedError) setLockedError(err);
+      else setGenerateError(err instanceof Error ? err.message : "Couldn't generate an avatar from that photo");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function handleDeleteGenerated(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    try {
+      await deleteGeneratedAvatar(id);
+      setMyAvatars((prev) => prev.filter((a) => a.id !== id));
+      if (avatarId === id) setAvatarId(AVATAR_LIBRARY[0]?.design.designId ?? "");
+    } catch (err) {
+      console.error("Failed to delete generated avatar", err);
+    }
+  }
+
   // The action ids pickable for whichever avatar is picked RIGHT NOW --
   // recomputed every render off avatarId (a plain Object.keys lookup, cheap
   // enough that memoizing it would just be ceremony).
@@ -420,7 +492,62 @@ export function AvatarFramingDialog({
                   <span className="w-full truncate text-center text-foreground">{entry.design.meta.name}</span>
                 </button>
               ))}
+
+              {myAvatars.map((summary) => (
+                <button
+                  key={summary.id}
+                  type="button"
+                  onClick={() => setAvatarId(summary.id)}
+                  className={
+                    "flex flex-col gap-1 rounded-md border-2 p-1.5 text-xs " +
+                    (avatarId === summary.id ? "border-accent bg-accent/10" : "border-border hover:bg-background")
+                  }
+                >
+                  <div className="relative aspect-[9/16] w-full overflow-hidden rounded bg-black">
+                    <AvatarThumbnailCanvas avatarId={summary.id} className="absolute inset-0 h-full w-full" />
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => handleDeleteGenerated(summary.id, e)}
+                      aria-label="Delete this avatar"
+                      className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-[10px] text-white"
+                    >
+                      ✕
+                    </span>
+                  </div>
+                  <span className="w-full truncate text-center text-foreground">{summary.name}</span>
+                </button>
+              ))}
+
+              {/* "Sophisticated faces" (Phase 6) -- generate a new character
+                  from a photo, deterministic landmark -> template mapping run
+                  server-side (backend/src/avatar_gen/). One click opens the
+                  OS file picker directly (no separate naming step) per this
+                  product's own bias toward sensible defaults over exposing
+                  every knob -- the actual gate ("avatar_generate") is
+                  enforced server-side, same posture as "Direct with AI"'s
+                  own canDirect below (a locked account still gets to try;
+                  the resulting 403 surfaces as lockedError). */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isGenerating}
+                className="flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-border p-1.5 text-xs text-muted hover:bg-background disabled:opacity-50"
+              >
+                <div className="flex aspect-[9/16] w-full items-center justify-center rounded bg-background text-2xl">
+                  {isGenerating ? "…" : "+"}
+                </div>
+                <span>{isGenerating ? "Generating…" : "From a photo"}</span>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png"
+                className="hidden"
+                onChange={handlePhotoPicked}
+              />
             </div>
+            {generateError && <p className="-mt-2 mb-3 text-[11px] text-red-600">{generateError}</p>}
 
             <h3 className="mb-1.5 text-xs font-medium text-foreground">Action</h3>
             <div className="mb-3 grid grid-cols-2 gap-1.5">

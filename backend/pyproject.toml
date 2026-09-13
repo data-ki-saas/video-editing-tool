@@ -18,6 +18,9 @@ dependencies = [
     "edge-tts>=6.1",
     "mutagen>=1.47",
     "pyjwt[crypto]>=2.13",
+    "mediapipe>=0.10.14",
+    "pillow>=10.4",
+    "numpy>=1.26",
 ]
 
 [dependency-groups]

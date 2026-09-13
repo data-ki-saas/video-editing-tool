@@ -269,6 +269,19 @@ the next push that touches `supabase/migrations/`.
    | `FAL_API_KEY` | required for the background-removal feature (video AND photo cutaways) | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) — pay-per-use, calls both VEED's video background removal model and fal-ai/imageutils/rembg (photos) |
    | `FAL_WEBHOOK_SECRET` | required for VIDEO cutaway background removal only | any long random string you generate — appended as a query param on the callback URL handed to fal, and checked against fal's own signed-webhook headers when present; see `matting/providers/fal_veed_provider.py`'s own comment. A photo cutaway's own job is synchronous (no webhook), so this isn't needed for that path |
    | `MATTING_DAILY_CAP` | optional | `20` — real cost is a few cents/clip |
+   | `AVATAR_GENERATE_DAILY_CAP` | optional | `10` — no external vendor cost (local mediapipe + Pillow), so this is purely an abuse guard |
+
+   The "Generate from photo" avatar feature (backend/src/avatar_gen/) needs
+   no API key or extra config -- it's local CV (mediapipe) + image synthesis
+   (Pillow), same no-billing posture as everything else in this POC. On
+   first use it downloads MediaPipe's ~3.7MB `face_landmarker.task` model
+   bundle from `storage.googleapis.com` to a local temp-dir cache; this
+   needs the backend host to have outbound internet access (true for a
+   normal Render deploy) and adds a one-time delay to the first request
+   after each deploy/restart (the ephemeral filesystem doesn't persist the
+   cache across deploys). A download failure, or no face found in the
+   photo, degrades gracefully to a default palette rather than failing the
+   request (see `photo_analysis.py`'s own comment).
 
    The background-removal feature (cutting a cutaway's subject out to
    composite over a new backdrop, via fal.ai/VEED for video, fal.ai/rembg

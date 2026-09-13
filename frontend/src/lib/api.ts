@@ -394,6 +394,93 @@ export async function directAvatarActions(
   };
 }
 
+/** Phase 6 (photo -> generated avatar Skin, backend/src/avatar_gen/) --
+ * `skin`/`design` are passed through untyped at this boundary (same posture
+ * as directAvatarActions' own `params` above): the backend already emits
+ * them shaped exactly like frontend/src/lib/video/avatar/skin.ts's
+ * AvatarSkin / design.ts's AvatarDesign, and
+ * lib/video/avatar/generatedLibrary.ts (not this file) is where that gets
+ * narrowed back to those real types, right before compile.ts's own
+ * validation runs on it -- api.ts stays domain-agnostic about avatar
+ * internals, matching every other call in this file. */
+export interface GeneratedAvatarSummary {
+  id: string;
+  name: string;
+  thumbnailUrl: string | null;
+  createdAt: string;
+}
+
+export interface GeneratedAvatarDetail {
+  id: string;
+  name: string;
+  skin: unknown;
+  design: unknown;
+  createdAt: string;
+}
+
+interface GeneratedAvatarDetailWire {
+  id: string;
+  name: string;
+  skin: unknown;
+  design: unknown;
+  created_at: string;
+}
+
+function toGeneratedAvatarDetail(wire: GeneratedAvatarDetailWire): GeneratedAvatarDetail {
+  return { id: wire.id, name: wire.name, skin: wire.skin, design: wire.design, createdAt: wire.created_at };
+}
+
+/** POST /api/avatar/generated (multipart) -- runs the uploaded photo through
+ * the backend's face-analysis + parametric-template pipeline and returns a
+ * ready-to-compile AvatarSkin+Design pair bound to the same "biped-simple"
+ * topology every seed avatar rides. */
+export async function generateAvatarFromPhoto(file: File, name?: string): Promise<GeneratedAvatarDetail> {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (name?.trim()) formData.append("name", name.trim());
+
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/generated`, {
+    method: "POST",
+    headers: await authHeader(),
+    body: formData,
+  });
+  return toGeneratedAvatarDetail(await handleResponse<GeneratedAvatarDetailWire>(response));
+}
+
+export async function listGeneratedAvatars(): Promise<GeneratedAvatarSummary[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/generated`, { headers: await authHeader() });
+  const body = await handleResponse<{ id: string; name: string; thumbnail_url: string | null; created_at: string }[]>(
+    response
+  );
+  return body.map((entry) => ({
+    id: entry.id,
+    name: entry.name,
+    thumbnailUrl: entry.thumbnail_url,
+    createdAt: entry.created_at,
+  }));
+}
+
+/** Resolves one generated avatar by id -- returns null on a 404 (an id that
+ * no longer exists, e.g. deleted from another tab) rather than throwing, so
+ * compile.ts's getCompiledAvatar can turn "not found" into its own single
+ * thrown Error message instead of surfacing a raw fetch error. */
+export async function getGeneratedAvatar(avatarId: string): Promise<GeneratedAvatarDetail | null> {
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/generated/${encodeURIComponent(avatarId)}`, {
+    headers: await authHeader(),
+  });
+  if (response.status === 404) return null;
+  return toGeneratedAvatarDetail(await handleResponse<GeneratedAvatarDetailWire>(response));
+}
+
+export async function deleteGeneratedAvatar(avatarId: string): Promise<void> {
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/generated/${encodeURIComponent(avatarId)}`, {
+    method: "DELETE",
+    headers: await authHeader(),
+  });
+  if (response.status === 404) return;
+  await throwIfNotOk(response);
+}
+
 export type BackgroundRemovalStatus = "waiting" | "completed" | "failed";
 
 export interface BackgroundRemoval {
