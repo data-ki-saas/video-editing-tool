@@ -1,19 +1,19 @@
 /**
  * The Avatar animation engine's seed content: one hand-authored Topology
- * ("biped-simple"), one Skin bound to it ("placeholder-v1", built from
- * placeholderAtlas.ts's procedural art), and one trivial Design ("Sam")
- * wrapping that skin with no overrides. Everything downstream
- * (compile.ts/actions.ts/renderer.ts) is generic over ANY topology/skin/
- * design triple -- this file is the only place in this phase that actually
- * decides what a rig looks like and how big each bone group's motion is.
- * Growing the library later (a second hand-drawn skin, eventually a
- * photo-generated one) means adding another AvatarLibraryEntry here, never
- * touching the engine.
+ * ("biped-simple") and, riding it, three Skins built from
+ * placeholderAtlas.ts's procedural art (a base palette plus two recolors),
+ * each wrapped in one trivial Design ("Sam"/"Maya"/"Leo") with no overrides.
+ * Everything downstream (compile.ts/actions.ts/renderer.ts) is generic over
+ * ANY topology/skin/design triple -- this file is the only place that
+ * actually decides what a rig looks like and how big each bone group's
+ * motion is. Growing the library later (more recolors, eventually
+ * hand-drawn or photo-generated art) means adding another AvatarLibraryEntry
+ * here, never touching the engine.
  */
 import type { ActionCurveSpec, AvatarAnchor, AvatarTopology, BoneTransform } from "./topology";
-import type { AvatarSkin, AvatarSkinPart } from "./skin";
+import type { AvatarSkin, AvatarSkinPart, AvatarSkinMouthShape } from "./skin";
 import type { AvatarDesign } from "./design";
-import { buildPlaceholderAtlas } from "./placeholderAtlas";
+import { buildPlaceholderAtlas, type PlaceholderAtlasPalette } from "./placeholderAtlas";
 
 export interface AvatarLibraryEntry {
   design: AvatarDesign;
@@ -270,7 +270,10 @@ const BIPED_SIMPLE_TOPOLOGY: AvatarTopology = {
   actions: ACTIONS,
 };
 
-const placeholderAtlas = buildPlaceholderAtlas();
+const MOUTH_SHAPES: AvatarSkinMouthShape[] = [
+  { shapeId: "closed", partId: "mouth" },
+  { shapeId: "open", partId: "mouth" },
+];
 
 /**
  * Every part's pivot is chosen so the assembled figure reads correctly at
@@ -309,20 +312,40 @@ const PLACEHOLDER_SKIN_PARTS: AvatarSkinPart[] = [
   { partId: "mouth", boneIndex: HEAD, pivotX: 25, pivotY: 40, zOrder: 6 },
 ];
 
-const PLACEHOLDER_SKIN: AvatarSkin = {
-  schemaVersion: 1,
-  skinId: "placeholder-v1",
-  topologyId: BIPED_SIMPLE_TOPOLOGY.topologyId,
-  atlas: {
-    imageRef: placeholderAtlas.dataUrl,
-    partRects: placeholderAtlas.partRects,
-  },
-  parts: PLACEHOLDER_SKIN_PARTS,
-  mouthShapes: [
-    { shapeId: "closed", partId: "mouth" },
-    { shapeId: "open", partId: "mouth" },
-  ],
-};
+/** Builds one seed Skin bound to `biped-simple` -- every seed character
+ * shares the exact same rig alignment (PLACEHOLDER_SKIN_PARTS/MOUTH_SHAPES
+ * above are structural, not per-character), so growing the library (Phase 5)
+ * is just calling this again with a new `skinId` + palette, never touching
+ * parts/pivots/zOrder. */
+function buildSeedSkin(skinId: string, palette: Partial<PlaceholderAtlasPalette>): AvatarSkin {
+  const atlas = buildPlaceholderAtlas(palette);
+  return {
+    schemaVersion: 1,
+    skinId,
+    topologyId: BIPED_SIMPLE_TOPOLOGY.topologyId,
+    atlas: { imageRef: atlas.dataUrl, partRects: atlas.partRects },
+    parts: PLACEHOLDER_SKIN_PARTS,
+    mouthShapes: MOUTH_SHAPES,
+  };
+}
+
+const PLACEHOLDER_SKIN = buildSeedSkin("placeholder-v1", {});
+// Two recolors (plus a simple hair cap, see placeholderAtlas.ts's own doc
+// comment) of the exact same procedural rig -- proves the gallery/picker
+// added in this phase actually distinguishes between characters, without
+// waiting on real character art.
+const MAYA_SKIN = buildSeedSkin("placeholder-v2", {
+  skinTone: "#c98a5e",
+  shirtColor: "#9a3f6b",
+  pantsColor: "#22344a",
+  hairColor: "#241a14",
+});
+const LEO_SKIN = buildSeedSkin("placeholder-v3", {
+  skinTone: "#f0c9a0",
+  shirtColor: "#d9782d",
+  pantsColor: "#33363d",
+  hairColor: "#3a2a1c",
+});
 
 const SEED_FRIENDLY_DESIGN: AvatarDesign = {
   schemaVersion: 1,
@@ -330,11 +353,26 @@ const SEED_FRIENDLY_DESIGN: AvatarDesign = {
   skinId: PLACEHOLDER_SKIN.skinId,
   meta: { name: "Sam" },
 };
+const SEED_MAYA_DESIGN: AvatarDesign = {
+  schemaVersion: 1,
+  designId: "seed-maya-1",
+  skinId: MAYA_SKIN.skinId,
+  meta: { name: "Maya" },
+};
+const SEED_LEO_DESIGN: AvatarDesign = {
+  schemaVersion: 1,
+  designId: "seed-leo-1",
+  skinId: LEO_SKIN.skinId,
+  meta: { name: "Leo" },
+};
 
-/** The whole seed Avatar library -- just the one hand-authored entry for
- * this phase (see this file's own doc comment). */
+/** The whole seed Avatar library -- three hand-authored entries, all riding
+ * `biped-simple` (see this file's own doc comment on how growing the library
+ * mostly means adding entries here, not new topology/engine code). */
 export const AVATAR_LIBRARY: AvatarLibraryEntry[] = [
   { design: SEED_FRIENDLY_DESIGN, skin: PLACEHOLDER_SKIN, topology: BIPED_SIMPLE_TOPOLOGY },
+  { design: SEED_MAYA_DESIGN, skin: MAYA_SKIN, topology: BIPED_SIMPLE_TOPOLOGY },
+  { design: SEED_LEO_DESIGN, skin: LEO_SKIN, topology: BIPED_SIMPLE_TOPOLOGY },
 ];
 
 /** Looks up a library entry by its Design's own id -- the same id an

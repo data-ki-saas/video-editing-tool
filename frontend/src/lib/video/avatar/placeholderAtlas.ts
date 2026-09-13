@@ -2,10 +2,12 @@
  * Procedurally draws a placeholder cartoon biped into one packed atlas
  * canvas and returns it as a `data:` URL -- this is NOT real character art,
  * it exists purely to prove the whole pipeline (rig -> actions -> compile ->
- * render -> export) end to end without waiting on an artist. library.ts's
- * one seed skin ("placeholder-v1") is built entirely from this function's
- * output; swapping in real art later means replacing the `imageRef` +
- * `partRects` that skin uses, nothing about the rig or the renderer.
+ * render -> export) end to end without waiting on an artist. Every seed skin
+ * in library.ts ("placeholder-v1" and its recolored siblings) is built
+ * entirely from this function's output, one call per skin with its own
+ * palette (see PlaceholderAtlasPalette below); swapping in real art later
+ * means replacing the `imageRef` + `partRects` those skins use, nothing about
+ * the rig or the renderer.
  *
  * Packing is a fixed, hand-laid-out grid (two shelves: head + both mouth
  * shapes on the first, torso + limbs on the second) -- with only ~9 parts
@@ -46,6 +48,29 @@ const EYE_COLOR = "#2a2a2a";
 const MOUTH_COLOR = "#7a2f2f";
 const OUTLINE_COLOR = "rgba(0,0,0,0.18)";
 
+/**
+ * The subset of this file's colors that actually vary seed-character to
+ * seed-character (library.ts's Phase 5 second/third skin) -- eye/outline
+ * color stay fixed module constants above since nothing needs those to
+ * differ yet. `hairColor` is optional (not part of DEFAULT_PALETTE below) so
+ * the original "Sam" skin's bald look stays pixel-identical when no palette
+ * is passed at all, rather than every existing caller needing an update.
+ */
+export interface PlaceholderAtlasPalette {
+  skinTone: string;
+  shirtColor: string;
+  pantsColor: string;
+  mouthColor: string;
+  hairColor?: string;
+}
+
+const DEFAULT_PALETTE: PlaceholderAtlasPalette = {
+  skinTone: SKIN_TONE,
+  shirtColor: SHIRT_COLOR,
+  pantsColor: PANTS_COLOR,
+  mouthColor: MOUTH_COLOR,
+};
+
 function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number, fill: string): void {
   const r = Math.min(radius, width / 2, height / 2);
   ctx.beginPath();
@@ -62,18 +87,36 @@ function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, wi
   ctx.stroke();
 }
 
-function drawHead(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+function drawHead(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
   const radius = rect.sWidth / 2 - 12;
 
   ctx.beginPath();
   ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-  ctx.fillStyle = SKIN_TONE;
+  ctx.fillStyle = palette.skinTone;
   ctx.fill();
   ctx.strokeStyle = OUTLINE_COLOR;
   ctx.lineWidth = 2;
   ctx.stroke();
+
+  // A simple clipped "cap" over the top of the head -- the cheapest possible
+  // way for a second/third seed skin to read as a visibly different
+  // character rather than a recolored clone, without a real hairline/strand
+  // art pass. Clipped to the head circle so it can never spill past it
+  // regardless of the ellipse's own size. Skipped entirely when no
+  // hairColor is given (see PlaceholderAtlasPalette's own doc comment).
+  if (palette.hairColor) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY - radius * 0.35, radius * 1.05, radius * 0.75, 0, Math.PI, Math.PI * 2);
+    ctx.fillStyle = palette.hairColor;
+    ctx.fill();
+    ctx.restore();
+  }
 
   // Two simple dot eyes, baked directly into the head part (per this
   // feature's spec -- eyes are never a separate swappable part the way the
@@ -90,28 +133,35 @@ function drawHead(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
   }
 }
 
-function drawMouthClosed(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+function drawMouthClosed(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
   ctx.beginPath();
   ctx.ellipse(centerX, centerY, 15, 3, 0, 0, Math.PI * 2);
-  ctx.fillStyle = MOUTH_COLOR;
+  ctx.fillStyle = palette.mouthColor;
   ctx.fill();
 }
 
-function drawMouthOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+function drawMouthOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
   ctx.beginPath();
   ctx.ellipse(centerX, centerY, 11, 9, 0, 0, Math.PI * 2);
-  ctx.fillStyle = MOUTH_COLOR;
+  ctx.fillStyle = palette.mouthColor;
   ctx.fill();
 }
 
-/** Builds the one shared placeholder atlas image plus every part/mouth-shape
- * rect drawn into it -- library.ts's `placeholder-v1` skin is built directly
- * from this return value. */
-export function buildPlaceholderAtlas(): { dataUrl: string; partRects: Record<string, AtlasRect> } {
+/** Builds one packed placeholder atlas image plus every part/mouth-shape rect
+ * drawn into it -- library.ts's seed skins are each built directly from one
+ * call's return value. `paletteOverrides` lets a second/third seed skin
+ * (Phase 5) reuse this exact same procedural drawing rather than needing its
+ * own draw pipeline; omitting it entirely (as `placeholder-v1`/"Sam" does)
+ * reproduces the original palette exactly, since DEFAULT_PALETTE carries no
+ * hairColor. The returned `partRects` are identical across every call
+ * (packing is fixed layout math, not palette-dependent) -- only `dataUrl`
+ * differs. */
+export function buildPlaceholderAtlas(paletteOverrides: Partial<PlaceholderAtlasPalette> = {}): { dataUrl: string; partRects: Record<string, AtlasRect> } {
+  const palette: PlaceholderAtlasPalette = { ...DEFAULT_PALETTE, ...paletteOverrides };
   const partRects: Record<string, AtlasRect> = {
     head: HEAD_RECT,
     // The mouth "slot" part (see skin.ts's AvatarSkinMouthShape doc
@@ -154,14 +204,14 @@ export function buildPlaceholderAtlas(): { dataUrl: string; partRects: Record<st
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("buildPlaceholderAtlas: 2D context unavailable");
 
-  drawHead(ctx, HEAD_RECT);
-  drawMouthClosed(ctx, MOUTH_CLOSED_RECT);
-  drawMouthOpen(ctx, MOUTH_OPEN_RECT);
-  drawRoundedRect(ctx, TORSO_RECT.sx + 6, TORSO_RECT.sy + 6, TORSO_RECT.sWidth - 12, TORSO_RECT.sHeight - 12, 14, SHIRT_COLOR);
-  drawRoundedRect(ctx, ARM_L_RECT.sx + 4, ARM_L_RECT.sy + 4, ARM_L_RECT.sWidth - 8, ARM_L_RECT.sHeight - 8, 14, SKIN_TONE);
-  drawRoundedRect(ctx, ARM_R_RECT.sx + 4, ARM_R_RECT.sy + 4, ARM_R_RECT.sWidth - 8, ARM_R_RECT.sHeight - 8, 14, SKIN_TONE);
-  drawRoundedRect(ctx, LEG_L_RECT.sx + 4, LEG_L_RECT.sy + 4, LEG_L_RECT.sWidth - 8, LEG_L_RECT.sHeight - 8, 17, PANTS_COLOR);
-  drawRoundedRect(ctx, LEG_R_RECT.sx + 4, LEG_R_RECT.sy + 4, LEG_R_RECT.sWidth - 8, LEG_R_RECT.sHeight - 8, 17, PANTS_COLOR);
+  drawHead(ctx, HEAD_RECT, palette);
+  drawMouthClosed(ctx, MOUTH_CLOSED_RECT, palette);
+  drawMouthOpen(ctx, MOUTH_OPEN_RECT, palette);
+  drawRoundedRect(ctx, TORSO_RECT.sx + 6, TORSO_RECT.sy + 6, TORSO_RECT.sWidth - 12, TORSO_RECT.sHeight - 12, 14, palette.shirtColor);
+  drawRoundedRect(ctx, ARM_L_RECT.sx + 4, ARM_L_RECT.sy + 4, ARM_L_RECT.sWidth - 8, ARM_L_RECT.sHeight - 8, 14, palette.skinTone);
+  drawRoundedRect(ctx, ARM_R_RECT.sx + 4, ARM_R_RECT.sy + 4, ARM_R_RECT.sWidth - 8, ARM_R_RECT.sHeight - 8, 14, palette.skinTone);
+  drawRoundedRect(ctx, LEG_L_RECT.sx + 4, LEG_L_RECT.sy + 4, LEG_L_RECT.sWidth - 8, LEG_L_RECT.sHeight - 8, 17, palette.pantsColor);
+  drawRoundedRect(ctx, LEG_R_RECT.sx + 4, LEG_R_RECT.sy + 4, LEG_R_RECT.sWidth - 8, LEG_R_RECT.sHeight - 8, 17, palette.pantsColor);
 
   return { dataUrl: canvas.toDataURL("image/png"), partRects };
 }

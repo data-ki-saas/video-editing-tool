@@ -105,20 +105,45 @@ function actionIdsForAvatar(avatarId: string): string[] {
   return actionIds.length > 0 ? actionIds : BASELINE_ACTION_IDS;
 }
 
-// A plain person silhouette -- this gallery's default "unknown character"
-// glyph, shown for every AVATAR_LIBRARY card regardless of its own skin
-// (there's no per-avatar static thumbnail image today -- see
-// AvatarDesign.meta.thumbnail's own "unused this phase" doc comment in
-// design.ts -- the live canvas to the left is this dialog's one and only
-// animated preview, per this file's own module comment on why the gallery
-// cards themselves stay unanimated).
-function AvatarGlyphIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <circle cx="12" cy="8" r="3.5" />
-      <path d="M5 19.5c0-3.6 3.1-6.5 7-6.5s7 2.9 7 6.5" />
-    </svg>
-  );
+/**
+ * One static rendered frame per gallery card -- reuses the exact
+ * compile/pose/draw pipeline AvatarPreviewCanvas (below) drives for the live
+ * left-pane preview, but drawn ONCE (idle, t=0) rather than looped: a whole
+ * gallery of simultaneous rAF loops would be needless cost for a picker
+ * whose job is "show me which character this is," not "show me it acting" --
+ * that live performance is exactly what the left pane is already for. Per
+ * AvatarDesign.meta.thumbnail's own "unused this phase" doc comment
+ * (design.ts), there's still no static image asset per skin -- this renders
+ * a real frame off the same live rig instead of waiting on one.
+ */
+function AvatarThumbnailCanvas({ avatarId, className }: { avatarId: string; className?: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCompiledAvatar(avatarId)
+      .then((compiled) => {
+        if (cancelled) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext("2d");
+        if (!canvas || !ctx) return;
+        const width = Math.max(1, Math.round(canvas.getBoundingClientRect().width));
+        const height = Math.max(1, Math.round(canvas.getBoundingClientRect().height));
+        canvas.width = width;
+        canvas.height = height;
+        const pose = computeAvatarPose(compiled.topology, "idle", 0, ambientEffectSeed(avatarId));
+        const mouthShapeId = computeMouthShapeId("idle", 0);
+        drawAvatar(ctx, compiled, pose, { x: 0, y: 0, width, height }, mouthShapeId);
+      })
+      .catch((err) => {
+        console.error("Avatar thumbnail compile failed for avatarId=%s", avatarId, err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [avatarId]);
+
+  return <canvas ref={canvasRef} className={className} />;
 }
 
 /**
@@ -381,11 +406,17 @@ export function AvatarFramingDialog({
                   type="button"
                   onClick={() => setAvatarId(entry.design.designId)}
                   className={
-                    "flex flex-col items-center gap-1 rounded-md border-2 p-2 text-xs " +
+                    "flex flex-col gap-1 rounded-md border-2 p-1.5 text-xs " +
                     (avatarId === entry.design.designId ? "border-accent bg-accent/10" : "border-border hover:bg-background")
                   }
                 >
-                  <AvatarGlyphIcon className="h-6 w-6 text-foreground" />
+                  {/* Media box mirrors /library's own card pattern (aspect-[9/16],
+                      black background, rounded) -- see this component's own
+                      AvatarThumbnailCanvas doc comment for why it's one static
+                      frame rather than a per-card animation loop. */}
+                  <div className="relative aspect-[9/16] w-full overflow-hidden rounded bg-black">
+                    <AvatarThumbnailCanvas avatarId={entry.design.designId} className="absolute inset-0 h-full w-full" />
+                  </div>
                   <span className="w-full truncate text-center text-foreground">{entry.design.meta.name}</span>
                 </button>
               ))}
