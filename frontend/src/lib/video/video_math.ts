@@ -1162,13 +1162,16 @@ export function findActiveWordIndex(overlay: TtsOverlay, timeSeconds: number): n
 }
 
 /**
- * One scheduled beat of an avatar's motion -- a later phase's LLM director
- * (script -> timed action sequence) is what actually populates
- * AvatarOverlayClip.actionTimeline with these; nothing reads that field yet
- * (see its own comment below). `params` is reserved for a future per-action
- * tuning knob (e.g. a "talk" beat's intensity) -- no action in avatar/library.ts
- * consumes it today, it's just here so the shape doesn't need to change when
- * one does.
+ * One scheduled beat of an avatar's motion -- populated by Phase 4's LLM
+ * director (backend/src/avatar/, AvatarFramingDialog's "Direct with AI"),
+ * script -> timed action sequence spanning the linked narration's own
+ * duration. `startMs`/`endMs` are relative to the OWNING AvatarOverlayClip's
+ * own start, same relative-to-start convention as TtsWordTiming's
+ * startMs/endMs (see findActiveWordIndex's own doc comment) -- read by
+ * CanvasPlayer.tsx/exportTimeline.ts's resolveAvatarTalkState. `params` is
+ * reserved for a future per-action tuning knob (e.g. a "talk" beat's
+ * intensity) -- no action in avatar/library.ts consumes it today, it's just
+ * here so the shape doesn't need to change when one does.
  */
 export interface AvatarAction {
   // `AvatarActionId | (string & {})` rather than the bare union -- an open
@@ -1211,11 +1214,12 @@ export interface AvatarOverlayClip {
   // clip needs to be able to name any of those extras too, not just the
   // guaranteed baseline six.
   defaultAction: AvatarActionId | (string & {});
-  // Populated by a later phase's LLM director (script -> timed action
-  // sequence) -- NOT read by the render loop yet: today the render loop uses
-  // `defaultAction` above for the clip's entire time range regardless of what
-  // (if anything) is authored here. Declared now so the type is stable once
-  // that phase lands, rather than a breaking schema change later.
+  // Populated by Phase 4's LLM director (AvatarFramingDialog's "Direct with
+  // AI") -- when present, whichever beat covers the current instant wins
+  // over `defaultAction` above for that stretch of the clip's time range
+  // (see resolveAvatarTalkState in CanvasPlayer.tsx/exportTimeline.ts).
+  // `defaultAction` remains the fallback for any instant outside every
+  // beat's own range (no actionTimeline at all, or a gap in one).
   actionTimeline?: AvatarAction[];
 }
 
@@ -1230,6 +1234,22 @@ export const DEFAULT_AVATAR_OVERLAY_RECT: CropRect = { x: 0.62, y: 0.55, width: 
  * above (multiple avatars can be on screen together, no exclusivity). */
 export function findActiveAvatarOverlays(overlays: AvatarOverlayClip[], timeSeconds: number): AvatarOverlayClip[] {
   return overlays.filter((overlay) => timeSeconds >= overlay.startTimeSeconds && timeSeconds < overlay.endTimeSeconds);
+}
+
+/** The first TTS narration overlay whose time RANGE overlaps `clip`'s own
+ * [startTimeSeconds, endTimeSeconds) -- used by AvatarFramingDialog's
+ * "Direct with AI" (Phase 4) to find which narration script/duration to hand
+ * the LLM director for a given avatar overlay. Deliberately a range overlap
+ * (any intersection counts), not full containment or a single-instant check
+ * like findActiveTtsOverlays above -- a creator placing an avatar loosely
+ * alongside a narration block is the expected common case, not an error.
+ * candidates[0] is a deterministic pick if more than one narration overlaps,
+ * same tie-break convention as CanvasPlayer.tsx's resolveAvatarTalkState. */
+export function findOverlappingTtsOverlay(overlays: TtsOverlay[], clip: AvatarOverlayClip): TtsOverlay | null {
+  const candidates = overlays.filter(
+    (overlay) => overlay.startTimeSeconds < clip.endTimeSeconds && ttsOverlayEndTimeSeconds(overlay) > clip.startTimeSeconds
+  );
+  return candidates.length > 0 ? candidates[0] : null;
 }
 
 /**

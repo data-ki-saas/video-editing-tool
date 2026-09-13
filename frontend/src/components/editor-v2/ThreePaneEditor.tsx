@@ -63,6 +63,7 @@ import {
   DEFAULT_MAIN_AUDIO_VOLUME,
   DEFAULT_BACKGROUND_VOLUME,
   videoOverlayStartThumbnailKey,
+  type AvatarAction,
   type AvatarOverlayClip,
   type CropRect,
   type ImageOverlayClip,
@@ -116,6 +117,7 @@ import {
   applyAvatarOverlayRangeChange,
   applyAvatarOverlayPositionChange,
   applyDeleteAvatarOverlay,
+  applyDirectAvatarOverlay,
   applyAddVideoOverlay,
   applyChangeVideoOverlayLayout,
   applyToggleSplitScreenOrientation,
@@ -2504,6 +2506,17 @@ export function ThreePaneEditor({
     setEditingAvatarOverlayIndex(null);
   }
 
+  // AvatarFramingDialog's "Direct with AI" (Phase 4) -- persists the LLM
+  // director's returned actionTimeline onto the overlay being edited via its
+  // own dedicated transformation (never reuses applyEditAvatarOverlay, since
+  // direction doesn't touch avatarId/defaultAction/rect). Unlike
+  // handleSaveAvatarOverlay, this never closes the dialog -- the creator can
+  // keep adjusting other fields, or re-direct, right after.
+  function handleDirectAvatarOverlay(overlayIndex: number, actionTimeline: AvatarAction[]) {
+    const { label, state } = applyDirectAvatarOverlay(selections, overlayIndex, actionTimeline);
+    pushChange(label, state);
+  }
+
   function handleChangeAvatarOverlayRange(overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
     setLiveAvatarOverlayRangeEdit({ index: overlayIndex, startTimeSeconds, endTimeSeconds });
   }
@@ -2999,6 +3012,7 @@ export function ThreePaneEditor({
           isAvatarDialogOpen={isAvatarDialogOpen}
           editingAvatarOverlay={editingAvatarOverlayIndex !== null ? (displayedAvatarOverlays[editingAvatarOverlayIndex] ?? null) : null}
           onSaveAvatarOverlay={handleSaveAvatarOverlay}
+          onDirectAvatarOverlay={handleDirectAvatarOverlay}
           onCloseAvatarDialog={handleCloseAvatarDialog}
           onDeleteAvatarOverlay={handleDeleteAvatarOverlay}
           onOpenCutawayDialog={handleOpenCutawayDialog}

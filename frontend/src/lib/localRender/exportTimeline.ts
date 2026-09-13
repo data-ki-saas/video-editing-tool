@@ -117,16 +117,29 @@ function clamp01(value: number): number {
 }
 
 /**
- * Which action + mouth shape an avatar clip should render at THIS instant --
- * driven automatically by whichever TTS narration overlaps the SAME moment,
- * if any, rather than a field a creator has to set: place a narration
- * overlay and an avatar overlay near each other on the timeline and this
- * falls out on its own, same "smart default, no extra configuration" spirit
- * as every other avatar/camera3D/ambientEffect toggle in this app.
+ * Which action + mouth shape an avatar clip should render at THIS instant.
  *
- * - No narration active at `sequenceTimeSeconds` at all: unchanged Phase 1/2
- *   behavior -- the clip's own `defaultAction`, mouth shape from
- *   computeMouthShapeId's generic fixed-rate flap.
+ * Phase 4 adds a director-authored `actionTimeline` (AvatarFramingDialog's
+ * "Direct with AI") as the PRIMARY source of the body action: whichever beat
+ * covers `localElapsed` (converted to ms, the same relative-to-clip-start
+ * convention as AvatarAction.startMs/endMs -- see video_math.ts's own doc
+ * comment) wins outright, no second-guessing -- the director already
+ * reasoned about the full script+narration together when placing it
+ * (including its own "talk"-family beats during speaking portions), so
+ * there's nothing to override it with. Mouth shape stays independently
+ * word-driven whenever a narration word is actively playing, REGARDLESS of
+ * which body action a beat has chosen -- mouth shape is its own atlas-rect
+ * swap (see actions.ts's computeMouthShapeIdForWord), not part of the body
+ * pose, so a directed "walk" beat can still mouth along with the narration
+ * exactly like a "talk" beat would.
+ *
+ * Outside any actionTimeline beat (no actionTimeline at all, or a gap in
+ * one) -- unchanged Phase 1-3 smart default, driven automatically by
+ * whichever TTS narration overlaps the SAME moment, if any, rather than a
+ * field a creator has to set:
+ * - No narration active at `sequenceTimeSeconds` at all: the clip's own
+ *   `defaultAction`, mouth shape from computeMouthShapeId's generic
+ *   fixed-rate flap.
  * - A narration is active and a word is actively being spoken right now
  *   (findActiveWordIndex >= 0): "talk", mouth shape from
  *   computeMouthShapeIdForWord against THAT WORD's own progress (derived
@@ -139,13 +152,14 @@ function clamp01(value: number): number {
  * findActiveTtsOverlays/findActiveWordIndex already use elsewhere in this
  * file for karaoke captions -- never `localElapsed` (relative to the avatar
  * clip's own start), which is used here only as computeMouthShapeId's own
- * fallback-path argument (mirroring computeAvatarPose's unchanged
- * elapsedSeconds argument at the call site below). Mixing the two clocks up
- * would desync the avatar's mouth from the narration by however far into
- * the timeline the avatar clip itself starts. At most one narration is
- * ordinarily active at once; if more than one somehow overlaps, candidates[0]
- * is a deterministic (never random) pick, same convention as every other
- * "pick one of possibly-several actives" lookup in this app.
+ * fallback-path argument and as actionTimeline's own lookup clock (mirroring
+ * computeAvatarPose's unchanged elapsedSeconds argument at the call site
+ * below). Mixing the two clocks up would desync the avatar's mouth from the
+ * narration by however far into the timeline the avatar clip itself starts.
+ * At most one narration is ordinarily active at once; if more than one
+ * somehow overlaps, candidates[0] is a deterministic (never random) pick,
+ * same convention as every other "pick one of possibly-several actives"
+ * lookup in this app.
  *
  * Mirrors CanvasPlayer.tsx's own resolveAvatarTalkState exactly (same
  * branches, same derivation order) -- the one deliberate difference between
@@ -161,16 +175,32 @@ function resolveAvatarTalkState(
 ): { actionId: string; mouthShapeId: string } {
   const candidates = findActiveTtsOverlays(ttsOverlays, sequenceTimeSeconds);
   const narration = candidates.length > 0 ? candidates[0] : null;
+  const wordIndex = narration ? findActiveWordIndex(narration, sequenceTimeSeconds) : -1;
+
+  // Word-driven mouth shape, independent of which body action ends up
+  // active -- shared by both the directed-beat branch below and the
+  // undirected fallback's own talk branch, so the two don't duplicate this
+  // derivation.
+  function wordMouthShapeId(): string | null {
+    if (!narration || wordIndex < 0) return null;
+    const word = narration.wordTimings[wordIndex];
+    const relativeMs = (sequenceTimeSeconds - narration.startTimeSeconds) * 1000;
+    const progress01 = clamp01((relativeMs - word.startMs) / Math.max(1, word.endMs - word.startMs));
+    return computeMouthShapeIdForWord(word.word, progress01);
+  }
+
+  const localElapsedMs = localElapsed * 1000;
+  const beat = clip.actionTimeline?.find((b) => localElapsedMs >= b.startMs && localElapsedMs < b.endMs);
+  if (beat) {
+    return { actionId: beat.action, mouthShapeId: wordMouthShapeId() ?? computeMouthShapeId(beat.action, localElapsed) };
+  }
+
   if (!narration) {
     return { actionId: clip.defaultAction, mouthShapeId: computeMouthShapeId(clip.defaultAction, localElapsed) };
   }
-  const wordIndex = findActiveWordIndex(narration, sequenceTimeSeconds);
   if (wordIndex < 0) {
     return { actionId: "idle", mouthShapeId: computeMouthShapeId("idle", localElapsed) };
   }
-  const word = narration.wordTimings[wordIndex];
-  const relativeMs = (sequenceTimeSeconds - narration.startTimeSeconds) * 1000;
-  const progress01 = clamp01((relativeMs - word.startMs) / Math.max(1, word.endMs - word.startMs));
   // Prefer the creator's OWN talk-family pick (e.g. library.ts's
   // "talkEmphasize" gesture) over a hardcoded plain "talk" -- narration
   // driving the mouth shouldn't downgrade a deliberately-chosen talking
@@ -178,7 +208,7 @@ function resolveAvatarTalkState(
   // when defaultAction isn't a talking pose at all (e.g. "walk"/"sleep"),
   // same convention as computeMouthShapeId's own id-prefix check.
   const actionId = clip.defaultAction.startsWith("talk") ? clip.defaultAction : "talk";
-  return { actionId, mouthShapeId: computeMouthShapeIdForWord(word.word, progress01) };
+  return { actionId, mouthShapeId: wordMouthShapeId()! };
 }
 
 export interface LocalRenderInput {
@@ -1824,14 +1854,13 @@ export async function exportVideoLocally(
         const compiled = compiledAvatarsById.get(clip.avatarId);
         if (!compiled) continue;
         const localElapsed = sourceTimeSeconds - clip.startTimeSeconds;
-        // Phase 1: no actionTimeline evaluation yet -- see CanvasPlayer.tsx's
-        // identical comment on this same simplification.
-        //
-        // Talk action + mouth shape ARE, however, already driven
-        // automatically by whichever TTS narration overlaps this same
-        // instant (see resolveAvatarTalkState's own doc comment above) --
-        // falls back to defaultAction/computeMouthShapeId's generic flap
-        // whenever none does.
+        // Phase 4: a director-authored actionTimeline beat covering this
+        // instant wins outright; outside any beat, falls back to the clip's
+        // own defaultAction, further overridden to talk/idle by whichever TTS
+        // narration overlaps this same instant -- see resolveAvatarTalkState's
+        // own doc comment above for the full precedence. Same call shape as
+        // CanvasPlayer.tsx's live-preview loop, so export and preview never
+        // disagree on which action/mouth shape is active at a given instant.
         const { actionId, mouthShapeId } = resolveAvatarTalkState(clip, selections.ttsOverlays, sourceTimeSeconds, localElapsed);
         const seed = ambientEffectSeed(clip.id);
         const pose = computeAvatarPose(compiled.topology, actionId, localElapsed, seed);

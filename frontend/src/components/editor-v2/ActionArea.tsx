@@ -59,6 +59,7 @@ import { computeFlipSegments, ttsOverlayEndTimeSeconds, formatTimeRange, describ
 import type { Asset } from "@/lib/api";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
 import type {
+  AvatarAction,
   AvatarOverlayClip,
   CropRect,
   ImageOverlayClip,
@@ -270,6 +271,7 @@ export function ActionArea({
   onSaveAvatarOverlay,
   onCloseAvatarDialog,
   onDeleteAvatarOverlay,
+  onDirectAvatarOverlay,
   onOpenCutawayDialog,
   isCutawayDialogOpen,
   editingCutaway,
@@ -438,6 +440,10 @@ export function ActionArea({
   // comment for why this is index-aware (keeps editingAvatarOverlay pointed
   // at the same overlay through a deletion earlier in the array).
   onDeleteAvatarOverlay: (overlayIndex: number) => void;
+  // AvatarFramingDialog's "Direct with AI" (Phase 4) -- same index-aware
+  // shape as onDeleteAvatarOverlay above, for the same reason (persists onto
+  // avatarOverlays[overlayIndex] via applyDirectAvatarOverlay).
+  onDirectAvatarOverlay: (overlayIndex: number, actionTimeline: AvatarAction[]) => void;
   onOpenCutawayDialog: () => void;
   isCutawayDialogOpen: boolean;
   // Non-null when CutawayDialog was reopened from the Cutaways rail to edit
@@ -739,8 +745,21 @@ export function ActionArea({
           editingOverlay={editingAvatarOverlay}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
+          ttsOverlays={ttsOverlays}
           onSave={onSaveAvatarOverlay}
           onClose={onCloseAvatarDialog}
+          // Same "resolve the index via the object's own stable id" idiom as
+          // onDelete below -- editingAvatarOverlay is the resolved OBJECT,
+          // not the index applyDirectAvatarOverlay needs.
+          onDirect={
+            editingAvatarOverlay
+              ? (actionTimeline) =>
+                  onDirectAvatarOverlay(
+                    avatarOverlays.findIndex((overlay) => overlay.id === editingAvatarOverlay.id),
+                    actionTimeline
+                  )
+              : undefined
+          }
           // editingAvatarOverlay is the resolved OBJECT (see this prop's own
           // doc comment above), not the index onDeleteAvatarOverlay needs --
           // recovered here via its own stable `id` against the same

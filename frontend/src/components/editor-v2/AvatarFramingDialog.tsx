@@ -38,13 +38,23 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
+import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
 import { getCompiledAvatar, type CompiledAvatar } from "@/lib/video/avatar/compile";
 import { computeAvatarPose, computeMouthShapeId } from "@/lib/video/avatar/actions";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { AVATAR_LIBRARY, getAvatarLibraryEntry } from "@/lib/video/avatar/library";
 import type { AvatarActionId } from "@/lib/video/avatar/topology";
 import { ambientEffectSeed } from "@/lib/video/ambientEffects";
-import { DEFAULT_AVATAR_OVERLAY_RECT, type AvatarOverlayClip, type CropRect } from "@/lib/video/video_math";
+import {
+  DEFAULT_AVATAR_OVERLAY_RECT,
+  findOverlappingTtsOverlay,
+  type AvatarAction,
+  type AvatarOverlayClip,
+  type CropRect,
+  type TtsOverlay,
+} from "@/lib/video/video_math";
+import { directAvatarActions, FeatureLockedError } from "@/lib/api";
+import { usePermissions } from "@/lib/usePermissions";
 
 // Human-readable labels for the six baseline actions (topology.ts's
 // AvatarActionId) plus this feature's own first non-baseline extra
@@ -213,13 +223,18 @@ export function AvatarFramingDialog({
   editingOverlay,
   previewFrameUrl,
   frameAspectRatio,
+  ttsOverlays,
   onSave,
   onClose,
   onDelete,
+  onDirect,
 }: {
   editingOverlay: AvatarOverlayClip | null;
   previewFrameUrl: string | null;
   frameAspectRatio: number | null;
+  // Needed only for "Direct with AI" below (findOverlappingTtsOverlay) --
+  // every other prop here is unrelated to narration.
+  ttsOverlays: TtsOverlay[];
   onSave: (avatarId: string, defaultAction: AvatarActionId | (string & {}), rect: CropRect) => void;
   onClose: () => void;
   // Only ever passed (and only ever rendered, see the button row below) when
@@ -227,6 +242,13 @@ export function AvatarFramingDialog({
   // delete yet. Same optional, edit-only "Remove" affordance as
   // TextSlideDialog's own onDelete.
   onDelete?: () => void;
+  // "Direct with AI" (Phase 4) -- persists the returned actionTimeline onto
+  // THIS overlay via its own dedicated transformation (applyDirectAvatarOverlay),
+  // never folded into onSave since direction doesn't touch avatarId/
+  // defaultAction/rect at all. Same "only when editing an already-added
+  // overlay" gating as onDelete -- a brand-new, not-yet-saved overlay has no
+  // committed time range yet for findOverlappingTtsOverlay to match against.
+  onDirect?: (actionTimeline: AvatarAction[]) => void;
 }) {
   const [avatarId, setAvatarId] = useState(editingOverlay?.avatarId ?? AVATAR_LIBRARY[0]?.design.designId ?? "");
   // Widened to plain `string` (rather than AvatarActionId) because the
@@ -272,6 +294,35 @@ export function AvatarFramingDialog({
   function handleSave() {
     if (!canSave) return;
     onSave(avatarId, defaultAction, rect);
+  }
+
+  // "Direct with AI" (Phase 4) -- the narration this clip's own committed
+  // time range overlaps, if any (see findOverlappingTtsOverlay's own doc
+  // comment). Only meaningful for an already-added overlay (editingOverlay),
+  // same as onDirect itself.
+  const overlappingNarration = editingOverlay ? findOverlappingTtsOverlay(ttsOverlays, editingOverlay) : null;
+
+  const [isDirecting, setIsDirecting] = useState(false);
+  const [directError, setDirectError] = useState<string | null>(null);
+  const [directorNote, setDirectorNote] = useState<string | null>(null);
+  const [lockedError, setLockedError] = useState<FeatureLockedError | null>(null);
+  const { loading: isLoadingPermissions, has: hasFeature } = usePermissions();
+  const canDirect = isLoadingPermissions || hasFeature("avatar_direct");
+
+  async function handleDirectWithAi() {
+    if (!onDirect || !overlappingNarration || isDirecting) return;
+    setIsDirecting(true);
+    setDirectError(null);
+    try {
+      const result = await directAvatarActions(overlappingNarration.text, overlappingNarration.durationSeconds, actionOptions);
+      onDirect(result.actionTimeline);
+      setDirectorNote(result.directorNote);
+    } catch (err) {
+      if (err instanceof FeatureLockedError) setLockedError(err);
+      else setDirectError(err instanceof Error ? err.message : "Failed to direct this avatar");
+    } finally {
+      setIsDirecting(false);
+    }
   }
 
   return (
@@ -359,6 +410,27 @@ export function AvatarFramingDialog({
               ))}
             </div>
 
+            {editingOverlay && onDirect && (
+              <div className="mb-3">
+                <button
+                  type="button"
+                  onClick={handleDirectWithAi}
+                  disabled={!overlappingNarration || isDirecting}
+                  title={!overlappingNarration ? "Add a narration overlay overlapping this avatar first" : undefined}
+                  className="flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                >
+                  {isDirecting ? "Directing…" : "Direct with AI"}
+                  {!canDirect && (
+                    <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase">Pro</span>
+                  )}
+                </button>
+                {directError && <p className="mt-1 text-[11px] text-red-600">{directError}</p>}
+                {directorNote && !directError && (
+                  <p className="mt-1 text-[11px] italic text-muted">&ldquo;{directorNote}&rdquo;</p>
+                )}
+              </div>
+            )}
+
             <div className="mt-auto flex items-center gap-2">
               {editingOverlay && onDelete && (
                 <button type="button" onClick={onDelete} className="text-xs text-red-600 hover:underline">
@@ -386,6 +458,7 @@ export function AvatarFramingDialog({
           </div>
         </div>
       </div>
+      {lockedError && <UpgradeRequiredDialog error={lockedError} onClose={() => setLockedError(null)} />}
     </div>
   );
 }

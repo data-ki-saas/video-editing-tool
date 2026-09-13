@@ -1,8 +1,17 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
-# Intentionally empty: the HeyGen-backed talking-avatar-video endpoints this
-# router used to expose (generate/get_generation/webhook) have been
-# retired -- see the project's Avatar Design plan. Phase 4 (script ->
-# action-timeline LLM glue) adds this router's new endpoints. Still
-# registered in main.py so that addition needs no wiring change.
+from src.avatar import service
+from src.avatar.schemas import DirectAvatarRequest, DirectAvatarResponse
+from src.core.auth import CurrentUser, require_feature
+from src.llm.client import get_llm_provider
+
 router = APIRouter(prefix="/api/avatar", tags=["avatar"])
+
+
+@router.post("/direct", response_model=DirectAvatarResponse)
+async def direct_avatar(
+    request: DirectAvatarRequest, user: CurrentUser = Depends(require_feature("avatar_direct"))
+) -> DirectAvatarResponse:
+    return await service.direct_avatar_actions(
+        request.script, request.narration_duration_seconds, request.action_ids, user.id, get_llm_provider()
+    )

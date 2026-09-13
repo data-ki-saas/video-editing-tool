@@ -32,6 +32,7 @@ import {
   DEFAULT_OVERLAY_FRAMING,
   DEFAULT_SPLIT_SCREEN_RATIO,
   MIN_VIDEO_OVERLAY_DURATION_SECONDS,
+  type AvatarAction,
   type AvatarOverlayClip,
   type BackgroundRemovalState,
   type CropRect,
@@ -1620,6 +1621,25 @@ export function applyEditAvatarOverlay(
   const nextOverlays = [...selections.avatarOverlays];
   nextOverlays[overlayIndex] = { ...overlay, avatarId, defaultAction, ...(rect ? { rect } : {}) };
   return { label: "Edited avatar", state: { ...selections, avatarOverlays: nextOverlays } };
+}
+
+/** Sets (or replaces) an avatar overlay's actionTimeline -- from
+ * AvatarFramingDialog's "Direct with AI" (Phase 4), which asks the backend's
+ * script -> action-timeline director for a beat sequence and stores the
+ * result here. Everything else about the overlay (avatarId/defaultAction/
+ * rect/time range) is untouched -- direction is its own concern, same
+ * one-apply-function-per-concern split as applyAvatarOverlayRangeChange/
+ * applyAvatarOverlayPositionChange below. */
+export function applyDirectAvatarOverlay(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  actionTimeline: AvatarAction[]
+): TransformationResult {
+  const overlay = selections.avatarOverlays[overlayIndex];
+  if (!overlay) return { label: "Directed avatar", state: selections };
+  const nextOverlays = [...selections.avatarOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, actionTimeline };
+  return { label: "Directed avatar", state: { ...selections, avatarOverlays: nextOverlays } };
 }
 
 /** Dragging an avatar overlay's segment edges on AvatarOverlayTrack -- how

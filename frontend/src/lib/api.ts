@@ -341,8 +341,58 @@ export async function listTtsVoices(): Promise<{ voices: TtsVoiceOption[] }> {
 
 // The HeyGen-backed talking-avatar-video API (generateAvatarVideo/
 // listAvatars/getAvatarGeneration) has been retired -- see the project's
-// Avatar Design plan. Phase 4 (script -> action-timeline LLM glue) adds
-// this module's replacement functions.
+// Avatar Design plan.
+
+export interface AvatarActionBeat {
+  action: string;
+  startMs: number;
+  endMs: number;
+  params?: Record<string, number>;
+}
+
+export interface DirectAvatarResult {
+  actionTimeline: AvatarActionBeat[];
+  directorNote: string | null;
+}
+
+/** POST /api/avatar/direct (Phase 4) -- asks the LLM director to turn
+ * `script` (the narration overlapping this avatar clip -- see video_math.ts's
+ * findOverlappingTtsOverlay) into a timed sequence of beats spanning
+ * `narrationDurationSeconds`, picking only from `actionIds` (the SPECIFIC
+ * avatar's own resolved topology actions -- AvatarFramingDialog's
+ * actionIdsForAvatar, not a hardcoded list). The wire response is snake_case
+ * (action_timeline/start_ms/end_ms/director_note) -- converted to camelCase
+ * here, same boundary convention as synthesizeTts above, since the result
+ * flows straight into AvatarOverlayClip.actionTimeline (video_math.ts),
+ * which is already camelCase throughout. */
+export async function directAvatarActions(
+  script: string,
+  narrationDurationSeconds: number,
+  actionIds: string[]
+): Promise<DirectAvatarResult> {
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/direct`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({
+      script,
+      narration_duration_seconds: narrationDurationSeconds,
+      action_ids: actionIds,
+    }),
+  });
+  const body = await handleResponse<{
+    action_timeline: { action: string; start_ms: number; end_ms: number; params?: Record<string, number> | null }[];
+    director_note: string | null;
+  }>(response);
+  return {
+    actionTimeline: body.action_timeline.map((beat) => ({
+      action: beat.action,
+      startMs: beat.start_ms,
+      endMs: beat.end_ms,
+      ...(beat.params ? { params: beat.params } : {}),
+    })),
+    directorNote: body.director_note,
+  };
+}
 
 export type BackgroundRemovalStatus = "waiting" | "completed" | "failed";
 
