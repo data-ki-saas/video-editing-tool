@@ -63,6 +63,7 @@ import {
   DEFAULT_MAIN_AUDIO_VOLUME,
   DEFAULT_BACKGROUND_VOLUME,
   videoOverlayStartThumbnailKey,
+  type AvatarOverlayClip,
   type CropRect,
   type ImageOverlayClip,
   type MusicClip,
@@ -74,6 +75,7 @@ import {
   type VideoOverlayLayout,
   type ZoomEffect,
 } from "@/lib/video/video_math";
+import type { AvatarActionId } from "@/lib/video/avatar/topology";
 import {
   applySelectClipRect,
   applyCropRectCommit,
@@ -109,6 +111,11 @@ import {
   applyDeleteTtsOverlay,
   applyTtsOverlayPositionChange,
   applyTtsOverlayVolumeChange,
+  applyAddAvatarOverlay,
+  applyEditAvatarOverlay,
+  applyAvatarOverlayRangeChange,
+  applyAvatarOverlayPositionChange,
+  applyDeleteAvatarOverlay,
   applyEnableTranscriptCaption,
   applyUpdateTranscriptCaption,
   applyDisableTranscriptCaption,
@@ -316,6 +323,19 @@ export function ThreePaneEditor({
   const [liveTtsOverlayPositionEdit, setLiveTtsOverlayPositionEdit] = useState<{ index: number; startTimeSeconds: number } | null>(null);
   const [liveTtsOverlayVolumeEdit, setLiveTtsOverlayVolumeEdit] = useState<{ index: number; volume: number } | null>(null);
 
+  // AvatarOverlayTrack's own edge drag (trim) and body drag (move without
+  // changing duration) -- same two-way live-edit split as video/image
+  // overlays' own range/position pair above (no rect-drag entry here: an
+  // avatar's rect is only ever adjusted inside AvatarFramingDialog itself,
+  // same as a TTS overlay's own caption rect -- see that dialog's own
+  // module comment on why it needs no FrameStrip active-tile drag handle).
+  const [liveAvatarOverlayRangeEdit, setLiveAvatarOverlayRangeEdit] = useState<{
+    index: number;
+    startTimeSeconds: number;
+    endTimeSeconds: number;
+  } | null>(null);
+  const [liveAvatarOverlayPositionEdit, setLiveAvatarOverlayPositionEdit] = useState<{ index: number; startTimeSeconds: number } | null>(null);
+
   // BackgroundTrackStrip's own edge drag (trim, ALSO moves sourceStartSeconds
   // -- see that file's own module comment on why this differs from
   // liveVideoOverlayRangeEdit above) and body drag (move), same live-edit
@@ -407,6 +427,11 @@ export function ThreePaneEditor({
   // duality as the text dialog's above.
   const [isTtsDialogOpen, setIsTtsDialogOpen] = useState(false);
   const [editingTtsOverlayIndex, setEditingTtsOverlayIndex] = useState<number | null>(null);
+
+  // AvatarFramingDialog's own open/edit-target state -- same add-vs-edit
+  // duality as the text/tts dialogs above.
+  const [isAvatarDialogOpen, setIsAvatarDialogOpen] = useState(false);
+  const [editingAvatarOverlayIndex, setEditingAvatarOverlayIndex] = useState<number | null>(null);
 
   // TranscriptCaptionDialog's open state -- no edit-target index needed,
   // there's only ever one transcript caption config (see
@@ -673,6 +698,10 @@ export function ThreePaneEditor({
     overlayImages,
     textOverlays: rawSelections.textOverlays ?? [],
     ttsOverlays: rawSelections.ttsOverlays ?? [],
+    // No ThreePaneEditor editing UI for these yet (no drag/resize handles,
+    // no picker dialog) -- round-tripped unchanged, same "carry it through,
+    // never touch it" treatment musicClips' own comment below describes.
+    avatarOverlays: rawSelections.avatarOverlays ?? [],
     sequenceClips,
     videoOverlays,
     transcriptCaption: rawSelections.transcriptCaption ?? null,
@@ -2496,6 +2525,71 @@ export function ThreePaneEditor({
     if (deletedOverlay) cleanupOrphanedTtsAsset(deletedOverlay.assetId, state);
   }
 
+  // "Avatar" button in UserActions -- opens the dialog fresh (no pre-fill).
+  function handleOpenAvatarDialog() {
+    setEditingAvatarOverlayIndex(null);
+    setIsAvatarDialogOpen(true);
+  }
+
+  // AvatarOverlayTrack's click-to-edit/"Edit avatar" -- reopens the dialog
+  // pre-filled, same pattern as handleRequestEditTextOverlay.
+  function handleRequestEditAvatarOverlay(overlayIndex: number) {
+    setEditingAvatarOverlayIndex(overlayIndex);
+    setIsAvatarDialogOpen(true);
+  }
+
+  function handleCloseAvatarDialog() {
+    setIsAvatarDialogOpen(false);
+    setEditingAvatarOverlayIndex(null);
+  }
+
+  // AvatarFramingDialog's Add/Save -- dispatches to add-new or edit-existing
+  // depending on whether it was opened via handleOpenAvatarDialog or
+  // handleRequestEditAvatarOverlay, same shape as handleSaveTextOverlay.
+  function handleSaveAvatarOverlay(avatarId: string, defaultAction: AvatarActionId, rect: CropRect) {
+    const { label, state } =
+      editingAvatarOverlayIndex !== null
+        ? applyEditAvatarOverlay(selections, editingAvatarOverlayIndex, avatarId, defaultAction, rect)
+        : applyAddAvatarOverlay(selections, avatarId, defaultAction, currentTimeSeconds, videoDurationSeconds, rect);
+    pushChange(label, state);
+    setIsAvatarDialogOpen(false);
+    setEditingAvatarOverlayIndex(null);
+  }
+
+  function handleChangeAvatarOverlayRange(overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
+    setLiveAvatarOverlayRangeEdit({ index: overlayIndex, startTimeSeconds, endTimeSeconds });
+  }
+
+  function handleCommitAvatarOverlayRange(overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) {
+    setLiveAvatarOverlayRangeEdit(null);
+    const { label, state } = applyAvatarOverlayRangeChange(selections, overlayIndex, startTimeSeconds, endTimeSeconds);
+    pushChange(label, state);
+  }
+
+  function handleChangeAvatarOverlayPosition(overlayIndex: number, startTimeSeconds: number) {
+    setLiveAvatarOverlayPositionEdit({ index: overlayIndex, startTimeSeconds });
+  }
+
+  function handleCommitAvatarOverlayPosition(overlayIndex: number, startTimeSeconds: number) {
+    setLiveAvatarOverlayPositionEdit(null);
+    const { label, state } = applyAvatarOverlayPositionChange(selections, overlayIndex, startTimeSeconds);
+    pushChange(label, state);
+  }
+
+  function handleDeleteAvatarOverlay(overlayIndex: number) {
+    setLiveAvatarOverlayRangeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    setLiveAvatarOverlayPositionEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    // Same index-shift bookkeeping as handleDeleteTextOverlay -- keeps
+    // editingAvatarOverlayIndex pointed at the same overlay through the
+    // deletion's array shift (or falls back to "Add" mode if THIS was the
+    // one being edited).
+    setEditingAvatarOverlayIndex((prev) =>
+      prev === null ? null : prev === overlayIndex ? null : prev > overlayIndex ? prev - 1 : prev
+    );
+    const { label, state } = applyDeleteAvatarOverlay(selections, overlayIndex);
+    pushChange(label, state);
+  }
+
   function handleSeek(seconds: number) {
     canvasPlayerRef.current?.seekTo(seconds);
   }
@@ -2677,6 +2771,25 @@ export function ThreePaneEditor({
     }
     if (liveTtsOverlayVolumeEdit?.index === index) {
       return { ...overlay, volume: liveTtsOverlayVolumeEdit.volume };
+    }
+    return overlay;
+  });
+
+  // Splices any in-progress AvatarOverlayTrack range/position drag into the
+  // persisted array at its own index, same pattern as displayedVideoOverlays
+  // above (no rect edit to splice here -- see liveAvatarOverlayRangeEdit's
+  // own doc comment on why that lives only inside AvatarFramingDialog).
+  const displayedAvatarOverlays: AvatarOverlayClip[] = selections.avatarOverlays.map((overlay, index) => {
+    if (liveAvatarOverlayRangeEdit?.index === index) {
+      return {
+        ...overlay,
+        startTimeSeconds: liveAvatarOverlayRangeEdit.startTimeSeconds,
+        endTimeSeconds: liveAvatarOverlayRangeEdit.endTimeSeconds,
+      };
+    }
+    if (liveAvatarOverlayPositionEdit?.index === index) {
+      const duration = overlay.endTimeSeconds - overlay.startTimeSeconds;
+      return { ...overlay, startTimeSeconds: liveAvatarOverlayPositionEdit.startTimeSeconds, endTimeSeconds: liveAvatarOverlayPositionEdit.startTimeSeconds + duration };
     }
     return overlay;
   });
@@ -2947,6 +3060,12 @@ export function ThreePaneEditor({
           onCloseTtsDialog={handleCloseTtsDialog}
           onEditTtsOverlay={handleRequestEditTtsOverlay}
           onDeleteTtsOverlay={handleDeleteTtsOverlay}
+          onOpenAvatarDialog={handleOpenAvatarDialog}
+          isAvatarDialogOpen={isAvatarDialogOpen}
+          editingAvatarOverlay={editingAvatarOverlayIndex !== null ? (displayedAvatarOverlays[editingAvatarOverlayIndex] ?? null) : null}
+          onSaveAvatarOverlay={handleSaveAvatarOverlay}
+          onCloseAvatarDialog={handleCloseAvatarDialog}
+          onDeleteAvatarOverlay={handleDeleteAvatarOverlay}
           onOpenTranscriptDialog={handleOpenTranscriptDialog}
           isTranscriptDialogOpen={isTranscriptDialogOpen}
           transcriptCaption={selections.transcriptCaption}
@@ -2991,6 +3110,7 @@ export function ThreePaneEditor({
           ttsOverlays={displayedTtsOverlays}
           sequenceClips={playbackClips}
           videoOverlays={displayedVideoOverlays}
+          avatarOverlays={displayedAvatarOverlays}
           musicClips={displayedMusicClips}
           mainAudioVolume={mainAudioVolume}
           backgroundVolume={backgroundVolume}
@@ -3005,6 +3125,7 @@ export function ThreePaneEditor({
             overlayImages: displayedOverlayImages,
             textOverlays: displayedTextOverlays,
             videoOverlays: displayedVideoOverlays,
+            avatarOverlays: displayedAvatarOverlays,
           }}
           videoDurationSeconds={videoDurationSeconds}
           currentTimeSeconds={currentTimeSeconds}
@@ -3093,6 +3214,13 @@ export function ThreePaneEditor({
           onCommitTtsOverlayVolume={handleCommitTtsOverlayVolume}
           onEditTtsOverlay={handleRequestEditTtsOverlay}
           onDeleteTtsOverlay={handleDeleteTtsOverlay}
+          avatarOverlays={displayedAvatarOverlays}
+          onChangeAvatarOverlayRange={handleChangeAvatarOverlayRange}
+          onCommitAvatarOverlayRange={handleCommitAvatarOverlayRange}
+          onChangeAvatarOverlayPosition={handleChangeAvatarOverlayPosition}
+          onCommitAvatarOverlayPosition={handleCommitAvatarOverlayPosition}
+          onEditAvatarOverlay={handleRequestEditAvatarOverlay}
+          onDeleteAvatarOverlay={handleDeleteAvatarOverlay}
           videoOverlays={displayedVideoOverlays}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
           videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}

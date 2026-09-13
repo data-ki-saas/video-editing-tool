@@ -1,6 +1,7 @@
 import { deleteProject as deleteProjectViaBackend, resetProject as resetProjectViaBackend } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import type {
+  AvatarOverlayClip,
   CropRect,
   ImageOverlayClip,
   MusicClip,
@@ -85,6 +86,13 @@ export interface EditSelectionsSnapshot {
   // as textOverlays, but the content comes from a backend speech-synthesis
   // call rather than a template alone.
   ttsOverlays: TtsOverlay[];
+  // Positioned 2D character overlays (see lib/video/avatar/ and
+  // video_math.ts's AvatarOverlayClip) -- same positioned-rect-plus-time-range
+  // shape as overlayImages/textOverlays/ttsOverlays, but the content is a
+  // rigged, animated character rendered from a library Design rather than an
+  // uploaded asset or authored text. One static Design per clip for now
+  // (no per-clip look overrides yet -- see AvatarDesign in avatar/design.ts).
+  avatarOverlays: AvatarOverlayClip[];
   // Which assets play, in order, concatenated into one continuous
   // sequence -- right-click "Add" on a video asset appends a "video" entry
   // (transformations.ts's applyAddSequenceClip); the "Image Templates"
@@ -131,6 +139,7 @@ export const DEFAULT_EDIT_SELECTIONS: EditSelectionsSnapshot = {
   overlayImages: [],
   textOverlays: [],
   ttsOverlays: [],
+  avatarOverlays: [],
   sequenceClips: [],
   videoOverlays: [],
   transcriptCaption: null,

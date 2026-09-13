@@ -195,6 +195,10 @@ export function MobileEditor({
     overlayImages,
     textOverlays: rawSelections.textOverlays ?? [],
     ttsOverlays: rawSelections.ttsOverlays ?? [],
+    // This editor has no avatar-overlay editing UI either (see this file's
+    // own module comment on the fields it deliberately doesn't expose) --
+    // round-tripped unchanged, same treatment as musicClips below.
+    avatarOverlays: rawSelections.avatarOverlays ?? [],
     sequenceClips,
     videoOverlays,
     transcriptCaption: rawSelections.transcriptCaption ?? null,
@@ -554,6 +558,7 @@ export function MobileEditor({
               textOverlays={selections.textOverlays}
               ttsOverlays={selections.ttsOverlays}
               videoOverlays={selections.videoOverlays}
+              avatarOverlays={selections.avatarOverlays}
               assetUrlById={assetUrlById}
               musicClips={selections.musicClips}
               mainAudioVolume={mainAudioVolume}

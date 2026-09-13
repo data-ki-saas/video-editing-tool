@@ -30,11 +30,11 @@
  *    CutawayTrack.tsx) and each overlay (ImageOverlayTrack.tsx/
  *    VideoOverlayTrack.tsx) gets its own, via that clip's own right-click
  *    "Filter".
- *  - OVERLAYS (amber): Video Overlay, Image Overlay, Text, TTS -- what
- *    composites ON TOP of the base. All four share the same amber family now
- *    (previously each had its own unrelated hue -- amber/sky/violet --
- *    which read as unrelated colors rather than one "overlays" group);
- *    shade alone now distinguishes them within the cluster.
+ *  - OVERLAYS (amber): Video Overlay, Image Overlay, Text, TTS, Avatar --
+ *    what composites ON TOP of the base. All five share the same amber
+ *    family now (previously each had its own unrelated hue -- amber/sky/
+ *    violet -- which read as unrelated colors rather than one "overlays"
+ *    group); shade alone now distinguishes them within the cluster.
  *  - CAPTIONS (emerald): Auto-Caption -- its own cluster since it's a
  *    different kind of thing (server-side transcription, not a user-placed
  *    clip/overlay). Only one member, so it just gets the group's own
@@ -156,6 +156,20 @@ function TtsIcon({ className }: { className?: string }) {
   );
 }
 
+// A simple person silhouette in a rounded frame -- "Avatar" 's identity,
+// distinct from every other Overlays-cluster glyph above (none of them are
+// a character), same darkest-shade-last convention as this cluster's own
+// module comment describes.
+function AvatarPersonIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <rect x="2.5" y="3.5" width="19" height="17" rx="2" />
+      <circle cx="12" cy="10" r="2.8" />
+      <path d="M6.5 17c0-2.9 2.5-5 5.5-5s5.5 2.1 5.5 5" />
+    </svg>
+  );
+}
+
 // Small notification-style count badge, pinned to the bottom of a tab
 // trigger once it has at least one item -- the at-a-glance equivalent of
 // Clip's own preview swatch (also bottom-pinned via mt-auto) for the tabs
@@ -212,6 +226,8 @@ export function UserActions({
   textOverlayCount,
   onOpenTtsDialog,
   ttsOverlayCount,
+  onOpenAvatarDialog,
+  avatarOverlayCount,
   onOpenTranscriptDialog,
   autoCaptionEnabled,
   onOpenCoverPicker,
@@ -231,6 +247,8 @@ export function UserActions({
   textOverlayCount: number;
   onOpenTtsDialog: () => void;
   ttsOverlayCount: number;
+  onOpenAvatarDialog: () => void;
+  avatarOverlayCount: number;
   onOpenTranscriptDialog: () => void;
   autoCaptionEnabled: boolean;
   onOpenCoverPicker: () => void;
@@ -299,7 +317,7 @@ export function UserActions({
         </button>
       </div>
 
-      {/* OVERLAYS -- amber family, lightest to darkest: Video Overlay, Image Overlay, Text, TTS, TTS + Avatar */}
+      {/* OVERLAYS -- amber family, lightest to darkest: Video Overlay, Image Overlay, Text, TTS, Avatar */}
       <div className="relative flex h-full gap-3">
         <GroupLabel colorClassName="text-amber-600">Overlays</GroupLabel>
         <button
@@ -349,6 +367,18 @@ export function UserActions({
             TTS
           </span>
           <CountBadge count={ttsOverlayCount} />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenAvatarDialog}
+          title="Avatar -- a 2D animated character (pick who, pick what they're doing) placed on the frame"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-800 hover:bg-background"
+        >
+          <AvatarPersonIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            Avatar
+          </span>
+          <CountBadge count={avatarOverlayCount} />
         </button>
       </div>
 

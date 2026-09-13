@@ -70,8 +70,13 @@
  * video (matches CanvasPlayer.tsx/exportTimeline.ts's own draw order
  * exactly -- see those files' own comments): TtsOverlayTrack (narration
  * captions draw last of all, on top of everything -- see CanvasPlayer.tsx's
- * own draw order), then TextOverlayTrack, then ImageOverlayTrack's
- * Picture-in-Picture row(s), then VideoOverlayTrack's
+ * own draw order), then TextOverlayTrack, then AvatarOverlayTrack (grouped
+ * here with text/TTS since all three share the same plain
+ * positioned-rect-plus-time-range shape -- CanvasPlayer.tsx actually draws
+ * avatars a tier further down, right after the PiP image/video overlays
+ * below, before text; this rail's own stacking order doesn't need to match
+ * that exactly, see AvatarOverlayTrack's own render comment below), then
+ * ImageOverlayTrack's Picture-in-Picture row(s), then VideoOverlayTrack's
  * Picture-in-Picture row(s), then ImageOverlayTrack's exclusive
  * (Full-Screen/Split-Screen) row, then VideoOverlayTrack's exclusive row,
  * then the thumbnails themselves (the base plate). ZoomEffectsTrack (every
@@ -103,6 +108,7 @@ import { FlipTrack } from "./FlipTrack";
 import { TrimTrack } from "./TrimTrack";
 import { TextOverlayTrack } from "./TextOverlayTrack";
 import { TtsOverlayTrack } from "./TtsOverlayTrack";
+import { AvatarOverlayTrack } from "./AvatarOverlayTrack";
 import { VideoOverlayTrack } from "./VideoOverlayTrack";
 import { ImageOverlayTrack } from "./ImageOverlayTrack";
 import { MarkerTrack } from "./MarkerTrack";
@@ -122,6 +128,7 @@ import {
   findClosestTimestampIndex,
   findTrimRangeIndexAt,
   videoOverlayStartThumbnailKey,
+  type AvatarOverlayClip,
   type CropRect,
   type ImageOverlayClip,
   type SequenceEntry,
@@ -515,6 +522,13 @@ export function FrameStrip({
   onCommitTtsOverlayVolume,
   onEditTtsOverlay,
   onDeleteTtsOverlay,
+  avatarOverlays,
+  onChangeAvatarOverlayRange,
+  onCommitAvatarOverlayRange,
+  onChangeAvatarOverlayPosition,
+  onCommitAvatarOverlayPosition,
+  onEditAvatarOverlay,
+  onDeleteAvatarOverlay,
   videoOverlays,
   videoThumbnailUrlByAssetId,
   videoOverlayStartThumbnailByKey,
@@ -646,6 +660,13 @@ export function FrameStrip({
   onCommitTtsOverlayVolume: (overlayIndex: number, level: number) => void;
   onEditTtsOverlay: (overlayIndex: number) => void;
   onDeleteTtsOverlay: (overlayIndex: number) => void;
+  avatarOverlays: AvatarOverlayClip[];
+  onChangeAvatarOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCommitAvatarOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onChangeAvatarOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onCommitAvatarOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onEditAvatarOverlay: (overlayIndex: number) => void;
+  onDeleteAvatarOverlay: (overlayIndex: number) => void;
   videoOverlays: VideoOverlayClip[];
   videoThumbnailUrlByAssetId: Record<string, string>;
   // Seeded-start-frame fallback for resolveVideoOverlayFrameUrl above, used
@@ -1180,6 +1201,24 @@ export function FrameStrip({
           onCommitRange={onCommitTextOverlayRange}
           onEdit={onRequestEditTextOverlay}
           onDelete={onDeleteTextOverlay}
+        />
+
+        {/* Avatar overlays render just below text captions -- no fixed
+            compositing-order rule pins this yet (CanvasPlayer.tsx currently
+            draws avatars right after every PiP image/video overlay, before
+            text -- see that file's own comment), this is simply grouped
+            with text/TTS in this rail STACK since all three share the same
+            plain positioned-rect-plus-time-range shape, unlike the
+            layout-switching image/video overlay rails below it. */}
+        <AvatarOverlayTrack
+          avatarOverlays={avatarOverlays}
+          videoDurationSeconds={durationSeconds}
+          onChangeRange={onChangeAvatarOverlayRange}
+          onCommitRange={onCommitAvatarOverlayRange}
+          onChangePosition={onChangeAvatarOverlayPosition}
+          onCommitPosition={onCommitAvatarOverlayPosition}
+          onEdit={onEditAvatarOverlay}
+          onDelete={onDeleteAvatarOverlay}
         />
 
         <ImageOverlayTrack

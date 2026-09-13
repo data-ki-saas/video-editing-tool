@@ -34,6 +34,8 @@ import { StockMediaDialog } from "./StockMediaDialog";
 import { UserActions } from "./UserActions";
 import { TextOverlayDialog } from "./TextOverlayDialog";
 import { TtsOverlayDialog } from "./TtsOverlayDialog";
+import { AvatarFramingDialog } from "./AvatarFramingDialog";
+import { getAvatarLibraryEntry } from "@/lib/video/avatar/library";
 import { TranscriptCaptionDialog } from "./TranscriptCaptionDialog";
 import { CutawayDialog } from "./CutawayDialog";
 import { TextSlideDialog } from "./TextSlideDialog";
@@ -59,6 +61,7 @@ import { computeFlipSegments, ttsOverlayEndTimeSeconds, formatTimeRange, describ
 import type { Asset } from "@/lib/api";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
 import type {
+  AvatarOverlayClip,
   CropRect,
   ImageOverlayClip,
   MusicClip,
@@ -73,6 +76,7 @@ import type {
 } from "@/lib/video/video_math";
 import type { TextTemplateId } from "@/lib/video/textTemplates";
 import type { TranscriptCaptionTemplateId } from "@/lib/video/transcriptCaptionTemplates";
+import type { AvatarActionId } from "@/lib/video/avatar/topology";
 import type { RefObject } from "react";
 
 function ActiveTransformationsList({
@@ -129,6 +133,13 @@ function ActiveTransformationsList({
     rows.push(
       `Video overlay (${describeOverlayLayout(overlay.layout)}${filterSuffix(overlay.colorFilterId)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`
     );
+  }
+  for (const overlay of selections.avatarOverlays) {
+    // Falls back to a generic label rather than throwing -- same "since-
+    // removed/renamed library entry" tolerance as AvatarOverlayTrack's own
+    // identical fallback.
+    const avatarName = getAvatarLibraryEntry(overlay.avatarId)?.design.meta.name ?? "Avatar";
+    rows.push(`Avatar (${avatarName}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
   }
   if (selections.sequenceClips.length > 1) {
     rows.push(`Sequence: ${selections.sequenceClips.length} clips`);
@@ -263,6 +274,12 @@ export function ActionArea({
   onCloseTtsDialog,
   onEditTtsOverlay,
   onDeleteTtsOverlay,
+  onOpenAvatarDialog,
+  isAvatarDialogOpen,
+  editingAvatarOverlay,
+  onSaveAvatarOverlay,
+  onCloseAvatarDialog,
+  onDeleteAvatarOverlay,
   onOpenTranscriptDialog,
   isTranscriptDialogOpen,
   transcriptCaption,
@@ -304,6 +321,7 @@ export function ActionArea({
   ttsOverlays,
   sequenceClips,
   videoOverlays,
+  avatarOverlays,
   musicClips,
   mainAudioVolume,
   backgroundVolume,
@@ -427,6 +445,15 @@ export function ActionArea({
   onCloseTtsDialog: () => void;
   onEditTtsOverlay: (overlayIndex: number) => void;
   onDeleteTtsOverlay: (overlayIndex: number) => void;
+  onOpenAvatarDialog: () => void;
+  isAvatarDialogOpen: boolean;
+  editingAvatarOverlay: AvatarOverlayClip | null;
+  onSaveAvatarOverlay: (avatarId: string, defaultAction: AvatarActionId, rect: CropRect) => void;
+  onCloseAvatarDialog: () => void;
+  // AvatarOverlayTrack's own "Remove avatar" -- see onDeleteTextOverlay's
+  // comment for why this is index-aware (keeps editingAvatarOverlay pointed
+  // at the same overlay through a deletion earlier in the array).
+  onDeleteAvatarOverlay: (overlayIndex: number) => void;
   onOpenTranscriptDialog: () => void;
   isTranscriptDialogOpen: boolean;
   transcriptCaption: TranscriptCaption | null;
@@ -496,6 +523,13 @@ export function ActionArea({
   ttsOverlays: TtsOverlay[];
   sequenceClips: (SequenceEntry & { url: string })[];
   videoOverlays: VideoOverlayClip[];
+  // Positioned 2D character overlays -- forwarded straight through to
+  // CanvasPlayer's own avatarOverlays prop (see its doc comment). AvatarOverlayTrack
+  // itself renders in FrameStrip/Playground (not here), same split as every
+  // other overlay type's own Track component -- ThreePaneEditor passes the
+  // "displayed" (live-drag-spliced) variant here, same convention as
+  // textOverlays/videoOverlays below.
+  avatarOverlays: AvatarOverlayClip[];
   musicClips: MusicClip[];
   mainAudioVolume: number;
   backgroundVolume: number;
@@ -607,6 +641,8 @@ export function ActionArea({
           textOverlayCount={textOverlays.length}
           onOpenTtsDialog={onOpenTtsDialog}
           ttsOverlayCount={ttsOverlays.length}
+          onOpenAvatarDialog={onOpenAvatarDialog}
+          avatarOverlayCount={avatarOverlays.length}
           onOpenTranscriptDialog={onOpenTranscriptDialog}
           autoCaptionEnabled={transcriptCaption !== null}
           onOpenCoverPicker={onOpenCoverPicker}
@@ -636,6 +672,7 @@ export function ActionArea({
             textOverlays={textOverlays}
             ttsOverlays={ttsOverlays}
             videoOverlays={videoOverlays}
+            avatarOverlays={avatarOverlays}
             musicClips={musicClips}
             mainAudioVolume={mainAudioVolume}
             backgroundVolume={backgroundVolume}
@@ -723,6 +760,35 @@ export function ActionArea({
           currentTimeSeconds={currentTimeSeconds}
           onSave={onSaveTtsOverlay}
           onClose={onCloseTtsDialog}
+        />
+      )}
+
+      {isAvatarDialogOpen && (
+        <AvatarFramingDialog
+          editingOverlay={editingAvatarOverlay}
+          previewFrameUrl={previewFrameUrl}
+          frameAspectRatio={frameAspectRatio}
+          onSave={onSaveAvatarOverlay}
+          onClose={onCloseAvatarDialog}
+          // editingAvatarOverlay is the resolved OBJECT (see this prop's own
+          // doc comment above), not the index onDeleteAvatarOverlay needs --
+          // recovered here via its own stable `id` against the same
+          // avatarOverlays array this component already has, rather than
+          // threading a second "editing index" prop through just for this.
+          // Also closes the dialog (unlike AvatarOverlayTrack's own "Remove
+          // avatar" context-menu entry, which never has a dialog open to
+          // begin with): this dialog's open/closed state is a separate
+          // boolean from "which overlay is being edited" (same add-vs-edit
+          // duality as TextOverlayDialog/TtsOverlayDialog), so without this
+          // it would stay open post-delete and silently flip to "Add avatar".
+          onDelete={
+            editingAvatarOverlay
+              ? () => {
+                  onDeleteAvatarOverlay(avatarOverlays.findIndex((overlay) => overlay.id === editingAvatarOverlay.id));
+                  onCloseAvatarDialog();
+                }
+              : undefined
+          }
         />
       )}
 

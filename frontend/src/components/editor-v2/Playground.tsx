@@ -76,6 +76,7 @@ import { MicrophoneIcon, MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { CutawaySegment } from "./CutawayTrack";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
 import type {
+  AvatarOverlayClip,
   CropRect,
   ImageOverlayClip,
   MusicClip,
@@ -204,6 +205,13 @@ export function Playground({
   onCommitTtsOverlayVolume,
   onEditTtsOverlay,
   onDeleteTtsOverlay,
+  avatarOverlays,
+  onChangeAvatarOverlayRange,
+  onCommitAvatarOverlayRange,
+  onChangeAvatarOverlayPosition,
+  onCommitAvatarOverlayPosition,
+  onEditAvatarOverlay,
+  onDeleteAvatarOverlay,
   videoOverlays,
   videoThumbnailUrlByAssetId,
   videoOverlayStartThumbnailByKey,
@@ -321,6 +329,13 @@ export function Playground({
   onCommitTtsOverlayVolume: (overlayIndex: number, level: number) => void;
   onEditTtsOverlay: (overlayIndex: number) => void;
   onDeleteTtsOverlay: (overlayIndex: number) => void;
+  avatarOverlays: AvatarOverlayClip[];
+  onChangeAvatarOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onCommitAvatarOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
+  onChangeAvatarOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onCommitAvatarOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onEditAvatarOverlay: (overlayIndex: number) => void;
+  onDeleteAvatarOverlay: (overlayIndex: number) => void;
   videoOverlays: VideoOverlayClip[];
   videoThumbnailUrlByAssetId: Record<string, string>;
   // A still frame captured at each overlay placement's own sourceStartSeconds
@@ -457,6 +472,13 @@ export function Playground({
             onCommitTtsOverlayVolume={onCommitTtsOverlayVolume}
             onEditTtsOverlay={onEditTtsOverlay}
             onDeleteTtsOverlay={onDeleteTtsOverlay}
+            avatarOverlays={avatarOverlays}
+            onChangeAvatarOverlayRange={onChangeAvatarOverlayRange}
+            onCommitAvatarOverlayRange={onCommitAvatarOverlayRange}
+            onChangeAvatarOverlayPosition={onChangeAvatarOverlayPosition}
+            onCommitAvatarOverlayPosition={onCommitAvatarOverlayPosition}
+            onEditAvatarOverlay={onEditAvatarOverlay}
+            onDeleteAvatarOverlay={onDeleteAvatarOverlay}
             videoOverlays={videoOverlays}
             videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
             videoOverlayStartThumbnailByKey={videoOverlayStartThumbnailByKey}

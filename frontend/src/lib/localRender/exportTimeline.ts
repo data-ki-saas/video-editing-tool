@@ -47,6 +47,9 @@ import {
 import { loadVideoElement, seekVideoTo, drawImageFlipped, drawImageFlippedMasked, drawImageFlippedChromaKeyed } from "@/lib/video/video";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
+import { getCompiledAvatar, type CompiledAvatar } from "@/lib/video/avatar/compile";
+import { computeAvatarPose, computeMouthShapeId } from "@/lib/video/avatar/actions";
+import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { detectFaceGeometry, type FaceGeometry } from "@/lib/video/faceLandmarks";
 import { computeAudioEnvelope, sampleMusicClipsEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
@@ -66,6 +69,7 @@ import {
   ttsOverlayEndTimeSeconds,
   findActiveExclusiveOverlay,
   findActivePictureInPictureOverlays,
+  findActiveAvatarOverlays,
   computeOverlayRects,
   computeCoverFitSourceRect,
   MIN_PICTURE_IN_PICTURE_ZOOM,
@@ -973,6 +977,35 @@ export async function exportVideoLocally(
       }
     }
 
+    // Avatar overlays (lib/video/avatar/) -- unlike every asset loaded
+    // above, this file has no `<video>`/`<img>` element to seek per frame:
+    // getCompiledAvatar resolves a library avatarId into a ready-to-draw
+    // CompiledAvatar ONCE (it's already promise-cached internally, see
+    // compile.ts's own doc comment), so every distinct avatarId used by
+    // this reel's avatarOverlays is compiled up front, in parallel, before
+    // the frame loop starts -- there is no per-frame async step left for
+    // the draw loop below to wait on, mirroring CanvasPlayer.tsx's own
+    // avatarCompiledByIdRef (populated by its own effect ahead of playback)
+    // but as a plain Map built once here rather than a React ref. A
+    // failed compile (e.g. an unknown avatarId) is skipped with a warning,
+    // same "one broken overlay shouldn't block the rest" policy as every
+    // other optional asset above -- that avatar simply never draws in this
+    // render rather than failing the whole export.
+    const compiledAvatarsById = new Map<string, CompiledAvatar>();
+    const distinctAvatarIds = Array.from(new Set(selections.avatarOverlays.map((overlay) => overlay.avatarId)));
+    await Promise.all(
+      distinctAvatarIds.map(async (avatarId) => {
+        try {
+          compiledAvatarsById.set(avatarId, await getCompiledAvatar(avatarId));
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          const message = `An avatar overlay (avatarId ${avatarId}) couldn't be compiled for this render: ${reason}`;
+          console.warn(`Edge Render: ${message}`);
+          warnings.push(message);
+        }
+      })
+    );
+
     // Resolves which source an image overlay actually draws from -- the
     // precomputed chroma-key cutout, the real AI matte once resolved (a
     // still-processing job just falls through to the plain photo, same
@@ -1706,6 +1739,29 @@ export async function exportVideoLocally(
         if (pip.ambientEffect && !pip.camera3D) {
           drawAmbientEffect(ctx, pip.ambientEffect, destX, destY, destWidth, destHeight, sourceTimeSeconds - pip.startTimeSeconds, ambientEffectSeed(pip.startTimeSeconds));
         }
+      }
+
+      // Avatar overlays -- mirrors CanvasPlayer.tsx's own avatar-overlay
+      // loop exactly (same order relative to the PiP image-overlay loop
+      // above and the text-overlay loop below, same per-clip derivations),
+      // just reading from compiledAvatarsById (built once, up front, above)
+      // instead of a React ref, and driven by sourceTimeSeconds instead of
+      // a live elapsedSeconds clock.
+      for (const clip of findActiveAvatarOverlays(selections.avatarOverlays, sourceTimeSeconds)) {
+        const compiled = compiledAvatarsById.get(clip.avatarId);
+        if (!compiled) continue;
+        const localElapsed = sourceTimeSeconds - clip.startTimeSeconds;
+        // Phase 1: no actionTimeline evaluation yet -- see CanvasPlayer.tsx's
+        // identical comment on this same simplification.
+        const actionId = clip.defaultAction;
+        const seed = ambientEffectSeed(clip.id);
+        const pose = computeAvatarPose(compiled.topology, actionId, localElapsed, seed);
+        const mouthShapeId = computeMouthShapeId(actionId, localElapsed);
+        const destX = clip.rect.x * canvas.width;
+        const destY = clip.rect.y * canvas.height;
+        const destWidth = clip.rect.width * canvas.width;
+        const destHeight = clip.rect.height * canvas.height;
+        drawAvatar(ctx, compiled, pose, { x: destX, y: destY, width: destWidth, height: destHeight }, mouthShapeId);
       }
 
       for (const overlay of findActiveTextOverlays(selections.textOverlays, sourceTimeSeconds)) {

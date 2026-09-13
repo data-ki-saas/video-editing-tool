@@ -73,6 +73,9 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { extractPreviewFrames, getVideoDuration, drawImageFlipped, drawImageFlippedMasked } from "@/lib/video/video";
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
+import { getCompiledAvatar, type CompiledAvatar } from "@/lib/video/avatar/compile";
+import { computeAvatarPose, computeMouthShapeId } from "@/lib/video/avatar/actions";
+import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { detectFaceGeometry, type FaceGeometry } from "@/lib/video/faceLandmarks";
 import { computeAudioEnvelope, sampleMusicClipsEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
@@ -91,6 +94,7 @@ import {
   findActiveTextOverlays,
   findActiveExclusiveOverlay,
   findActivePictureInPictureOverlays,
+  findActiveAvatarOverlays,
   computeOverlayRects,
   computeCoverFitSourceRect,
   MIN_PICTURE_IN_PICTURE_ZOOM,
@@ -115,6 +119,7 @@ import {
   scaleCropRectCentered,
   type CropRect,
   type ImageOverlayClip,
+  type AvatarOverlayClip,
   type MusicClip,
   type SequenceClipInfo,
   type SequenceEntry,
@@ -330,6 +335,12 @@ export const CanvasPlayer = forwardRef<
     // (below) resolves each overlay's assetId the same way it already does
     // for image overlays.
     videoOverlays: VideoOverlayClip[];
+    // Positioned 2D character overlays (see lib/video/avatar/ and
+    // video_math.ts's AvatarOverlayClip) -- own rail, own multiple-at-once
+    // semantics (see findActiveAvatarOverlays), drawn after every
+    // image/video PiP overlay above but before text overlays, same tier as
+    // the picture-in-picture image overlay loop right above it.
+    avatarOverlays: AvatarOverlayClip[];
     assetUrlById: Record<string, string>;
     // Freely positioned/resizable background-music clips (see
     // video_math.ts's MusicClip and BackgroundTrackStrip.tsx) -- each
@@ -379,6 +390,7 @@ export const CanvasPlayer = forwardRef<
     textOverlays,
     ttsOverlays,
     videoOverlays,
+    avatarOverlays,
     assetUrlById,
     musicClips,
     mainAudioVolume,
@@ -534,6 +546,17 @@ export const CanvasPlayer = forwardRef<
   // peeking-through-the-silhouette occlusion the base sequence gets -- a
   // known, accepted scope limitation, not a bug.
   const overlayFaceGeometriesRef = useRef<Record<string, FaceGeometry | null>>({});
+  // One compiled avatar (lib/video/avatar/compile.ts's CompiledAvatar) per
+  // distinct avatarId currently in use, keyed by avatarId (not per-clip --
+  // two avatar overlay clips reusing the same avatarId share one compiled
+  // entry, same sharing convention as overlayImagesRef/videoOverlayFramesByAssetIdRef
+  // above). getCompiledAvatar itself is async (it decodes the skin atlas
+  // image, see compile.ts's own doc comment) and this file's draw loop is
+  // synchronous, so compilation happens in its own effect below and this
+  // ref is just where the resolved value lands -- drawFrameAt below simply
+  // skips drawing an avatar overlay whose avatarId hasn't resolved into
+  // this ref yet, same tolerance as a still-loading overlay image.
+  const avatarCompiledByIdRef = useRef<Record<string, CompiledAvatar>>({});
   // Extracted preview frames for every video overlay's own source asset,
   // keyed by assetId (shared across multiple overlay clips reusing the
   // same asset, not per-clip) -- same extractPreviewFrames/frameIndexAtTime
@@ -1504,6 +1527,33 @@ export const CanvasPlayer = forwardRef<
       }
     }
 
+    // Avatar overlays (lib/video/avatar/) draw after every image/video PiP
+    // overlay above -- own rail, multiple-at-once (see findActiveAvatarOverlays'
+    // own doc comment in video_math.ts), no exclusive/PiP layering to
+    // reason about. Each one is a synchronous read of avatarCompiledByIdRef
+    // (populated by its own compile effect further below) -- a not-yet-
+    // compiled avatarId just isn't drawn this frame, same "skip a
+    // still-loading asset rather than block/throw" tolerance as a video
+    // overlay's own not-yet-extracted frames above.
+    for (const clip of findActiveAvatarOverlays(avatarOverlays, elapsedSeconds)) {
+      const compiled = avatarCompiledByIdRef.current[clip.avatarId];
+      if (!compiled) continue;
+      const localElapsed = elapsedSeconds - clip.startTimeSeconds;
+      // Phase 1: no actionTimeline evaluation yet -- always the clip's own
+      // defaultAction for its whole time range (see AvatarOverlayClip's own
+      // doc comment on actionTimeline in video_math.ts). A later phase picks
+      // from actionTimeline when present.
+      const actionId = clip.defaultAction;
+      const seed = ambientEffectSeed(clip.id);
+      const pose = computeAvatarPose(compiled.topology, actionId, localElapsed, seed);
+      const mouthShapeId = computeMouthShapeId(actionId, localElapsed);
+      const destX = clip.rect.x * canvas.width;
+      const destY = clip.rect.y * canvas.height;
+      const destWidth = clip.rect.width * canvas.width;
+      const destHeight = clip.rect.height * canvas.height;
+      drawAvatar(ctx, compiled, pose, { x: destX, y: destY, width: destWidth, height: destHeight }, mouthShapeId);
+    }
+
     // Text overlays draw last, always on top of every overlay above.
     for (const overlay of findActiveTextOverlays(textOverlays, elapsedSeconds)) {
       const renderer = getTextTemplateRenderer(overlay.templateId);
@@ -2310,6 +2360,7 @@ export const CanvasPlayer = forwardRef<
     textOverlays,
     ttsOverlays,
     videoOverlays,
+    avatarOverlays,
     isReady,
     isPlaying,
   ]);
@@ -2365,6 +2416,47 @@ export const CanvasPlayer = forwardRef<
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
   }, [overlayImages, assetUrlById, isReady, isPlaying]);
+
+  // Compiles each currently-referenced avatar once (cached in
+  // avatarCompiledByIdRef by avatarId, see that ref's own doc comment) and
+  // redraws the current frame once any of them finish -- same "load once,
+  // cache, redraw if paused" shape as the overlay-image loading effect just
+  // above, just keyed on avatarId instead of assetId and calling
+  // getCompiledAvatar (already itself promise-cached, see compile.ts) instead
+  // of this file's own loadImage. Only the distinct, not-yet-cached
+  // avatarIds are (re)compiled -- reusing an already-compiled avatar across
+  // renders/clips never re-decodes its atlas image.
+  useEffect(() => {
+    let cancelled = false;
+    const distinctAvatarIds = Array.from(new Set(avatarOverlays.map((overlay) => overlay.avatarId)));
+    const toCompile = distinctAvatarIds.filter((avatarId) => !(avatarId in avatarCompiledByIdRef.current));
+    if (toCompile.length === 0) return;
+
+    Promise.all(
+      toCompile.map((avatarId) =>
+        getCompiledAvatar(avatarId)
+          .then((compiled) => ({ avatarId, compiled }))
+          .catch((err) => {
+            console.error("Avatar compile failed for avatarId=%s", avatarId, err);
+            return null;
+          })
+      )
+    ).then((compiledEntries) => {
+      if (cancelled) return;
+      let didCompileAny = false;
+      for (const entry of compiledEntries) {
+        if (!entry) continue;
+        avatarCompiledByIdRef.current[entry.avatarId] = entry.compiled;
+        didCompileAny = true;
+      }
+      if (didCompileAny && isReady && !isPlaying) drawFrameAt(pausedAtSecondsRef.current);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- drawFrameAt is freshly defined every render and always closes over the latest crop/zoom props
+  }, [avatarOverlays, isReady, isPlaying]);
 
   // Loads each currently-referenced Text Slide's own optional background/
   // layout image once (cached in textSlideImagesRef by assetId) and

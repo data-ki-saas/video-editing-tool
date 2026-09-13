@@ -14,6 +14,7 @@ import type { CanvasFillMode } from "./canvasFillPresets";
 import type { AmbientEffectId } from "./ambientEffects";
 import type { FaceEffectId } from "./faceLandmarks";
 import type { TextSlideTransitionId } from "./textSlideTransitions";
+import type { AvatarActionId } from "./avatar/topology";
 
 /**
  * Timestamps (seconds) to sample a clip of the given duration at a fixed
@@ -1178,6 +1179,66 @@ export function findActiveTtsOverlays(overlays: TtsOverlay[], timeSeconds: numbe
 export function findActiveWordIndex(overlay: TtsOverlay, timeSeconds: number): number {
   const relativeMs = (timeSeconds - overlay.startTimeSeconds) * 1000;
   return overlay.wordTimings.findIndex((w) => relativeMs >= w.startMs && relativeMs < w.endMs);
+}
+
+/**
+ * One scheduled beat of an avatar's motion -- a later phase's LLM director
+ * (script -> timed action sequence) is what actually populates
+ * AvatarOverlayClip.actionTimeline with these; nothing reads that field yet
+ * (see its own comment below). `params` is reserved for a future per-action
+ * tuning knob (e.g. a "talk" beat's intensity) -- no action in avatar/library.ts
+ * consumes it today, it's just here so the shape doesn't need to change when
+ * one does.
+ */
+export interface AvatarAction {
+  action: AvatarActionId;
+  startMs: number;
+  endMs: number;
+  params?: Record<string, number>;
+}
+
+/**
+ * A 2D character overlay (see lib/video/avatar/) composited on top of the
+ * base video for a time range. Deliberately NOT built on VideoOverlayLayout
+ * like VideoOverlayClip/ImageOverlayClip above -- `rect` is just a
+ * positioned/resizable box, the same plain shape as TextOverlay/TtsOverlay's
+ * own `rect`, because an avatar is simple direct-manipulation content (drag
+ * the box, resize the box) rather than a second video track with a
+ * Full-Screen/Picture-in-Picture/Split-Screen distinction to reason about.
+ * Any number of avatar overlays can be active and visible at once, same
+ * multiple-at-once semantics as text/TTS overlays, not the exclusive-vs-PiP
+ * layering VideoOverlayLayout governs -- see findActiveAvatarOverlays below.
+ */
+export interface AvatarOverlayClip {
+  id: string;
+  // Resolves against avatar/library.ts's getAvatarLibraryEntry -- a static
+  // seed-library id for now. A later phase adds user-generated avatars from
+  // a DB table, resolved the same way from every caller's perspective, so
+  // this field's meaning doesn't change when that lands.
+  avatarId: string;
+  startTimeSeconds: number;
+  endTimeSeconds: number;
+  rect: CropRect;
+  defaultAction: AvatarActionId;
+  // Populated by a later phase's LLM director (script -> timed action
+  // sequence) -- NOT read by the render loop yet: today the render loop uses
+  // `defaultAction` above for the clip's entire time range regardless of what
+  // (if anything) is authored here. Declared now so the type is stable once
+  // that phase lands, rather than a breaking schema change later.
+  actionTimeline?: AvatarAction[];
+}
+
+// Bottom-right, bust-framed -- clear of the center content a reel's main
+// subject usually occupies, same "safe corner, not dead-center" reasoning as
+// DEFAULT_TTS_OVERLAY_RECT/DEFAULT_TEXT_OVERLAY_RECT's own bottom-third
+// default above.
+export const DEFAULT_AVATAR_OVERLAY_RECT: CropRect = { x: 0.62, y: 0.55, width: 0.34, height: 0.4 };
+
+/** Every avatar overlay visible at `timeSeconds` -- same multiple-at-once,
+ * half-open-interval semantics as findActiveTextOverlays/findActiveTtsOverlays
+ * above (multiple avatars can be on screen together, no exclusivity). */
+export function findActiveAvatarOverlays(overlays: AvatarOverlayClip[], timeSeconds: number): AvatarOverlayClip[] {
+  return overlays.filter((overlay) => timeSeconds >= overlay.startTimeSeconds && timeSeconds < overlay.endTimeSeconds);
 }
 
 /**

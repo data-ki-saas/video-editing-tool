@@ -58,7 +58,7 @@ export function ambientEffectSeed(input: string | number): number {
  * used only to lay out each effect's fixed particle field once per draw
  * call (never to drive motion directly -- motion is a pure function of
  * elapsedSeconds so it's identical across repeated calls at the same time). */
-function mulberry32(seed01: number): () => number {
+export function mulberry32(seed01: number): () => number {
   let a = Math.floor(seed01 * 0xffffffff) >>> 0;
   return function random() {
     a |= 0;

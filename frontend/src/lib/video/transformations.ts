@@ -29,9 +29,11 @@ import {
   isExclusiveLayout,
   DEFAULT_TEXT_OVERLAY_RECT,
   DEFAULT_TRANSCRIPT_CAPTION_RECT,
+  DEFAULT_AVATAR_OVERLAY_RECT,
   DEFAULT_OVERLAY_FRAMING,
   DEFAULT_SPLIT_SCREEN_RATIO,
   MIN_VIDEO_OVERLAY_DURATION_SECONDS,
+  type AvatarOverlayClip,
   type BackgroundRemovalState,
   type CropRect,
   type ImageOverlayClip,
@@ -51,6 +53,7 @@ import { getCanvasFillOption, type CanvasFillMode } from "./canvasFillPresets";
 import type { AmbientEffectId } from "./ambientEffects";
 import type { FaceEffectId } from "./faceLandmarks";
 import type { TextSlideTransitionId } from "./textSlideTransitions";
+import type { AvatarActionId } from "./avatar/topology";
 
 export const DEFAULT_ZOOM_DURATION_SECONDS = 2;
 
@@ -1561,6 +1564,103 @@ export function applyDeleteTtsOverlay(selections: EditSelectionsSnapshot, overla
   return {
     label: "Removed narration",
     state: { ...selections, ttsOverlays: selections.ttsOverlays.filter((_, index) => index !== overlayIndex) },
+  };
+}
+
+// Same modest, clearly-adjustable default window as text overlays -- an
+// avatar clip is the same "positioned rect + time range" shape as
+// TextOverlay (see video_math.ts's AvatarOverlayClip doc comment), so it
+// gets the identical placement rule.
+const DEFAULT_AVATAR_OVERLAY_DURATION_SECONDS = DEFAULT_OVERLAY_DURATION_SECONDS;
+
+/** Adds a new avatar overlay starting at the current playhead, from
+ * AvatarFramingDialog's "Add" -- mirrors applyAddTextOverlay exactly
+ * (same start-at-playhead/clamped-duration rule), except the picked content
+ * is an avatarId + defaultAction rather than typed text + a templateId. */
+export function applyAddAvatarOverlay(
+  selections: EditSelectionsSnapshot,
+  avatarId: string,
+  defaultAction: AvatarActionId,
+  currentTimeSeconds: number,
+  videoDurationSeconds: number,
+  rect: CropRect = DEFAULT_AVATAR_OVERLAY_RECT
+): TransformationResult {
+  const startTimeSeconds = currentTimeSeconds;
+  const endTimeSeconds = Math.min(
+    startTimeSeconds + DEFAULT_AVATAR_OVERLAY_DURATION_SECONDS,
+    videoDurationSeconds > startTimeSeconds ? videoDurationSeconds : startTimeSeconds + DEFAULT_AVATAR_OVERLAY_DURATION_SECONDS
+  );
+  const newOverlay: AvatarOverlayClip = {
+    id: crypto.randomUUID(),
+    avatarId,
+    startTimeSeconds,
+    endTimeSeconds,
+    rect,
+    defaultAction,
+  };
+  return {
+    label: "Added avatar",
+    state: { ...selections, avatarOverlays: [...selections.avatarOverlays, newOverlay] },
+  };
+}
+
+/** Changes an existing avatar overlay's picked character/action/rect --
+ * from AvatarFramingDialog's "Save", reopened via AvatarOverlayTrack's
+ * "Edit avatar." Its time range is untouched (that's AvatarOverlayTrack's
+ * own drag handles' job, same split as applyEditTextOverlay), and its own
+ * id/actionTimeline survive unchanged. */
+export function applyEditAvatarOverlay(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  avatarId: string,
+  defaultAction: AvatarActionId,
+  rect?: CropRect
+): TransformationResult {
+  const overlay = selections.avatarOverlays[overlayIndex];
+  if (!overlay) return { label: "Edited avatar", state: selections };
+  const nextOverlays = [...selections.avatarOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, avatarId, defaultAction, ...(rect ? { rect } : {}) };
+  return { label: "Edited avatar", state: { ...selections, avatarOverlays: nextOverlays } };
+}
+
+/** Dragging an avatar overlay's segment edges on AvatarOverlayTrack -- how
+ * many frames it's visible for. Mirrors applyTextOverlayRangeChange. */
+export function applyAvatarOverlayRangeChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  startTimeSeconds: number,
+  endTimeSeconds: number
+): TransformationResult {
+  const overlay = selections.avatarOverlays[overlayIndex];
+  if (!overlay) return { label: "Adjusted avatar range", state: selections };
+  const nextOverlays = [...selections.avatarOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, startTimeSeconds, endTimeSeconds };
+  return { label: "Adjusted avatar range", state: { ...selections, avatarOverlays: nextOverlays } };
+}
+
+/** Dragging the MIDDLE of an avatar overlay's segment on AvatarOverlayTrack
+ * (move without changing duration) -- mirrors applyVideoOverlayPositionChange/
+ * applyImageOverlayPositionChange. */
+export function applyAvatarOverlayPositionChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  startTimeSeconds: number
+): TransformationResult {
+  const overlay = selections.avatarOverlays[overlayIndex];
+  if (!overlay) return { label: "Moved avatar", state: selections };
+  const durationSeconds = overlay.endTimeSeconds - overlay.startTimeSeconds;
+  const nextOverlays = [...selections.avatarOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, startTimeSeconds, endTimeSeconds: startTimeSeconds + durationSeconds };
+  return { label: "Moved avatar", state: { ...selections, avatarOverlays: nextOverlays } };
+}
+
+/** Removes one avatar overlay outright -- from AvatarOverlayTrack's
+ * "Remove avatar" context menu entry. */
+export function applyDeleteAvatarOverlay(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {
+  if (!selections.avatarOverlays[overlayIndex]) return { label: "Removed avatar", state: selections };
+  return {
+    label: "Removed avatar",
+    state: { ...selections, avatarOverlays: selections.avatarOverlays.filter((_, index) => index !== overlayIndex) },
   };
 }
 
