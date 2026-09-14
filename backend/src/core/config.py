@@ -71,10 +71,22 @@ class Settings(BaseSettings):
     # tier) -- still a hard ceiling per CLAUDE.md's abuse-rate-limiting
     # scope, not billing.
     matting_daily_cap: int = 20
-    # No external vendor cost at all (local mediapipe + Pillow, see
+    # No external vendor cost at all (Pillow atlas compositing, see
     # avatar_gen/service.py) -- purely an abuse guard, not a budget guard, so
     # this can afford to be more generous than matting_daily_cap above.
     avatar_generate_daily_cap: int = 10
+
+    # The standalone face-analysis/ Cloud Run (GPU) service -- moved out of
+    # this backend because Render's native Python runtime can't load
+    # mediapipe's compiled bindings (missing libGLESv2.so.2, no apt/root
+    # access to install it; see [[project_avatar_phase6_photo_gen]] and
+    # avatar_gen/photo_analysis.py's own doc comment). Left blank,
+    # analyze_photo fails closed to a generic-toned avatar rather than
+    # erroring the whole generation -- same fail-open-on-the-*feature*,
+    # never-fail-open-on-*security* posture as this file's other optional
+    # integrations.
+    face_analysis_service_url: str = ""
+    face_analysis_service_secret: str = ""
 
     # Estimated external costs backing usage_ledger.cost_estimate_cents (see
     # backend/src/metering/pricing.py) -- hand-maintained placeholders, not

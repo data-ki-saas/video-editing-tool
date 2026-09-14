@@ -430,11 +430,24 @@ function toGeneratedAvatarDetail(wire: GeneratedAvatarDetailWire): GeneratedAvat
   return { id: wire.id, name: wire.name, skin: wire.skin, design: wire.design, createdAt: wire.created_at };
 }
 
+/** Only meaningful right at generation time -- `faceDetected: false` means
+ * the returned avatar is a generic-toned default, not personalized from the
+ * photo (mediapipe found no face, or the face-analysis service itself was
+ * unreachable). See backend/src/avatar_gen/schemas.py's
+ * GeneratedAvatarCreateResponse for the wire shape this narrows. */
+export interface GeneratedAvatarCreateResult extends GeneratedAvatarDetail {
+  faceDetected: boolean;
+}
+
+interface GeneratedAvatarCreateResponseWire extends GeneratedAvatarDetailWire {
+  face_detected: boolean;
+}
+
 /** POST /api/avatar/generated (multipart) -- runs the uploaded photo through
  * the backend's face-analysis + parametric-template pipeline and returns a
  * ready-to-compile AvatarSkin+Design pair bound to the same "biped-simple"
  * topology every seed avatar rides. */
-export async function generateAvatarFromPhoto(file: File, name?: string): Promise<GeneratedAvatarDetail> {
+export async function generateAvatarFromPhoto(file: File, name?: string): Promise<GeneratedAvatarCreateResult> {
   const formData = new FormData();
   formData.append("file", file);
   if (name?.trim()) formData.append("name", name.trim());
@@ -444,7 +457,8 @@ export async function generateAvatarFromPhoto(file: File, name?: string): Promis
     headers: await authHeader(),
     body: formData,
   });
-  return toGeneratedAvatarDetail(await handleResponse<GeneratedAvatarDetailWire>(response));
+  const wire = await handleResponse<GeneratedAvatarCreateResponseWire>(response);
+  return { ...toGeneratedAvatarDetail(wire), faceDetected: wire.face_detected };
 }
 
 export async function listGeneratedAvatars(): Promise<GeneratedAvatarSummary[]> {

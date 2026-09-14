@@ -388,12 +388,15 @@ export function AvatarFramingDialog({
     setIsGenerating(true);
     setGenerateError(null);
     try {
-      const entry = await generateAvatarFromPhoto(file);
+      const { entry, faceDetected } = await generateAvatarFromPhoto(file);
       setMyAvatars((prev) => [
         { id: entry.design.designId, name: entry.design.meta.name, thumbnailUrl: null, createdAt: new Date().toISOString() },
         ...prev,
       ]);
       selectAvatar(entry.design.designId);
+      if (!faceDetected) {
+        setGenerateError("Couldn't detect a face in that photo, so this uses a default look instead of your photo. Try a clearer, front-facing, well-lit photo.");
+      }
     } catch (err) {
       if (err instanceof FeatureLockedError) setLockedError(err);
       else setGenerateError(err instanceof Error ? err.message : "Couldn't generate an avatar from that photo");

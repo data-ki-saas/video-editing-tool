@@ -269,19 +269,22 @@ the next push that touches `supabase/migrations/`.
    | `FAL_API_KEY` | required for the background-removal feature (video AND photo cutaways) | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) — pay-per-use, calls both VEED's video background removal model and fal-ai/imageutils/rembg (photos) |
    | `FAL_WEBHOOK_SECRET` | required for VIDEO cutaway background removal only | any long random string you generate — appended as a query param on the callback URL handed to fal, and checked against fal's own signed-webhook headers when present; see `matting/providers/fal_veed_provider.py`'s own comment. A photo cutaway's own job is synchronous (no webhook), so this isn't needed for that path |
    | `MATTING_DAILY_CAP` | optional | `20` — real cost is a few cents/clip |
-   | `AVATAR_GENERATE_DAILY_CAP` | optional | `10` — no external vendor cost (local mediapipe + Pillow), so this is purely an abuse guard |
+   | `AVATAR_GENERATE_DAILY_CAP` | optional | `10` — no LLM cost, but the face-analysis call below does have real (small) Cloud Run GPU cost, so this is still worth keeping as an abuse guard |
+   | `FACE_ANALYSIS_SERVICE_URL` | required for the "Generate from photo" avatar feature | `<YOUR_FACE_ANALYSIS_CLOUD_RUN_URL>` (no trailing slash) — see step 4a below |
+   | `FACE_ANALYSIS_SERVICE_SECRET` | required for the "Generate from photo" avatar feature | Self-generated: `openssl rand -hex 32` — must exactly match the same-named env var set on the Cloud Run service in step 4a |
 
-   The "Generate from photo" avatar feature (backend/src/avatar_gen/) needs
-   no API key or extra config -- it's local CV (mediapipe) + image synthesis
-   (Pillow), same no-billing posture as everything else in this POC. On
-   first use it downloads MediaPipe's ~3.7MB `face_landmarker.task` model
-   bundle from `storage.googleapis.com` to a local temp-dir cache; this
-   needs the backend host to have outbound internet access (true for a
-   normal Render deploy) and adds a one-time delay to the first request
-   after each deploy/restart (the ephemeral filesystem doesn't persist the
-   cache across deploys). A download failure, or no face found in the
-   photo, degrades gracefully to a default palette rather than failing the
-   request (see `photo_analysis.py`'s own comment).
+   The "Generate from photo" avatar feature (`backend/src/avatar_gen/`) calls
+   out to a separate `face-analysis/` service (step 4a below) over HTTPS
+   rather than running mediapipe in-process here -- Render's native Python
+   runtime has no apt/root access to install the Mesa/GLES system libraries
+   mediapipe's compiled bindings need (`OSError: libGLESv2.so.2: cannot open
+   shared object file`), which silently made every photo analysis on Render
+   fail closed to a generic (non-personalized) default. Left unconfigured,
+   this feature still "succeeds" but every generated avatar is that same
+   generic default -- see `photo_analysis.py`'s own comment. A face-analysis
+   call failure of any kind (unreachable service, timeout, bad secret) also
+   degrades gracefully to the default palette rather than failing the
+   request.
 
    The background-removal feature (cutting a cutaway's subject out to
    composite over a new backdrop, via fal.ai/VEED for video, fal.ai/rembg
@@ -300,6 +303,80 @@ the next push that touches `supabase/migrations/`.
    ```
 4. Check the deploy log for `CORS allow_origins=[...]` (logged once at
    startup) and confirm it shows your Vercel URL, not `[]`.
+
+---
+
+## 4a. Face analysis (Cloud Run, GPU)
+
+A separate, minimal service (`face-analysis/`) that runs mediapipe's
+`FaceLandmarker` against an uploaded photo and returns a small JSON palette
+(skin/hair tone, face-width scale) -- everything the backend's
+`avatar_gen/service.py` needs to generate a personalized avatar skin. It's
+its own Docker-deployed Cloud Run service, not part of the Render backend,
+for two reasons: Render's native Python runtime can't install the Mesa/GLES
+system libraries mediapipe's compiled bindings need (no apt/root access, see
+step 4's own note on `libGLESv2.so.2`), and an actual GPU delegate needs a
+CUDA-capable container Cloud Run's GPU nodes can attach to.
+
+**Cost note**: unlike the rest of this POC, this is NOT free-tier -- an
+NVIDIA L4-attached Cloud Run instance bills for GPU time while a request is
+being served (and continuously if you set a minimum instance count above
+zero). Keep `--min-instances=0` (scale-to-zero between requests) unless
+you've deliberately decided the cold-start latency isn't acceptable.
+
+1. **One-time GCP setup**: create (or pick) a GCP project with billing
+   enabled, then enable the **Cloud Run API**, **Cloud Build API**, and
+   **Artifact Registry API**. Confirm NVIDIA L4 GPU support is available in
+   your target region under Cloud Run's current docs -- both region
+   availability and the supported CUDA/driver pairing shift over time and
+   weren't re-verified here; `face-analysis/Dockerfile`'s own top comment
+   flags the same caveat for its base image tag.
+2. **Connect this GitHub repo for continuous deployment** (Cloud Run
+   console > **Create Service** > **Continuously deploy new revisions from a
+   source repository** > **Set up with Cloud Build**):
+   - Authenticate and install the **Cloud Build GitHub App** on this
+     repository (one-time GitHub-side authorization).
+   - Repository: this repo. Branch: `^main$`.
+   - Build type: **Dockerfile**. Source location: `/face-analysis` (the
+     subdirectory containing its own `Dockerfile`/`pyproject.toml`/
+     `uv.lock` -- Cloud Build only builds this subtree, not the whole
+     monorepo).
+   - After the trigger is created, edit it in **Cloud Build > Triggers** to
+     add an **included files filter** of `face-analysis/**` -- without this,
+     a push touching only `backend/`/`frontend/` would also rebuild and
+     redeploy this service for no reason.
+3. **Service configuration** (Cloud Run console, this service > Edit &
+   deploy new revision):
+   - **CPU allocation**: "CPU is always allocated" (`--no-cpu-throttling`)
+     -- required when attaching a GPU.
+   - **GPU**: 1x NVIDIA L4. This requires the **second generation execution
+     environment**.
+   - **Minimum instances**: `0` (see the cost note above); **Maximum
+     instances**: small (e.g. `2`) -- this only ever serves the backend's
+     own photo-analysis calls, never public traffic.
+   - **Authentication**: allow unauthenticated invocations -- the Render
+     backend has no GCP identity to present, so this service is protected by
+     its own `x-internal-secret` shared-secret check instead (same
+     app-level-secret-over-a-public-HTTPS-endpoint posture as
+     `WORKER_INTERNAL_SECRET` between `worker/` and `backend/`), not Cloud
+     Run's IAM layer. Keep the secret itself out of source control either
+     way.
+   - **Environment variables**: `FACE_ANALYSIS_SERVICE_SECRET` (`openssl
+     rand -hex 32` -- copy this exact value into the backend's own env var
+     of the same name, step 4 above) and `FACE_ANALYSIS_USE_GPU=true`.
+4. Deploy, then verify:
+   ```
+   curl https://<your-face-analysis-service>.run.app/health
+   # -> {"status": "ok"}
+   ```
+5. Copy this service's URL into the backend's `FACE_ANALYSIS_SERVICE_URL`
+   env var (step 4 above) and redeploy the backend.
+6. Try "Generate from photo" in the editor with a real, clear, front-facing
+   photo. If it still falls back to a generic look, check this service's
+   Cloud Run logs first (a GPU delegate failure falls back to CPU
+   automatically and logs why -- see `photo_analysis.py`'s own comment),
+   then the backend's own logs (a face-analysis call failure of any kind
+   also degrades gracefully and logs why).
 
 ---
 
@@ -475,6 +552,16 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | `GOOGLE_OAUTH_CLIENT_SECRET` | `""` | Same credential screen as above |
 | `SOCIAL_OAUTH_STATE_SECRET` | `""` | Self-generated: `openssl rand -hex 32` |
 | `FRONTEND_PUBLIC_URL` | `""` | This app's own production frontend URL — same value as the frontend's `SITE_URL` below |
+| `AVATAR_GENERATE_DAILY_CAP` | `10` | Not fetched — pick a number, optional to set |
+| `FACE_ANALYSIS_SERVICE_URL` | `""` | The face-analysis Cloud Run service's own URL (below) |
+| `FACE_ANALYSIS_SERVICE_SECRET` | `""` | Self-generated: `openssl rand -hex 32` — same value set on the face-analysis service below |
+
+### Face analysis (Cloud Run), from `face-analysis/.env.example`
+
+| Variable | Where to get it |
+|---|---|
+| `FACE_ANALYSIS_SERVICE_SECRET` | Self-generated: run `openssl rand -hex 32`. Set the *same* value on the backend (above) |
+| `FACE_ANALYSIS_USE_GPU` | `true` on a GPU-attached Cloud Run revision (step 4a), `false` for a local run or a CPU-only deploy |
 
 ### Render-transfer worker (Render), from `worker/.env.example`
 
@@ -516,6 +603,7 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | Creatomate > Settings > API Keys | `CREATOMATE_API_KEY` |
 | DeepSeek dashboard > API Keys | `DEEPSEEK_API_KEY` |
 | Pexels > API | `PEXELS_API_KEY` |
+| Google Cloud Console > Cloud Run > face-analysis service | `FACE_ANALYSIS_SERVICE_URL` (the service's own URL) |
 | Freesound > apiv2/apply | `FREESOUND_API_KEY` |
 | Creatomate > project > Preview SDK | `NEXT_PUBLIC_CREATOMATE_PUBLIC_TOKEN` |
 | Google Cloud Console > APIs & Services > Credentials | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` |

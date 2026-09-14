@@ -14,6 +14,7 @@ import {
   generateAvatarFromPhoto as apiGenerateAvatarFromPhoto,
   getGeneratedAvatar as apiGetGeneratedAvatar,
   listGeneratedAvatars,
+  type GeneratedAvatarCreateResult,
   type GeneratedAvatarDetail,
   type GeneratedAvatarSummary,
 } from "@/lib/api";
@@ -52,8 +53,16 @@ export async function fetchGeneratedAvatarEntry(avatarId: string): Promise<Avata
   return detail ? toEntry(detail) : null;
 }
 
-export async function generateAvatarFromPhoto(file: File, name?: string): Promise<AvatarLibraryEntry> {
-  return toEntry(await apiGenerateAvatarFromPhoto(file, name));
+/** `faceDetected: false` means the entry is a generic-toned default, not
+ * personalized from the photo -- AvatarFramingDialog.tsx's own caller is
+ * responsible for telling the creator that, since this module only resolves
+ * ids to entries and doesn't own any UI. */
+export async function generateAvatarFromPhoto(
+  file: File,
+  name?: string
+): Promise<{ entry: AvatarLibraryEntry; faceDetected: boolean }> {
+  const result: GeneratedAvatarCreateResult = await apiGenerateAvatarFromPhoto(file, name);
+  return { entry: toEntry(result), faceDetected: result.faceDetected };
 }
 
 export async function listMyGeneratedAvatars(): Promise<GeneratedAvatarSummary[]> {

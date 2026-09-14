@@ -21,3 +21,14 @@ class GeneratedAvatarDetail(BaseModel):
     skin: dict
     design: dict
     created_at: str
+
+
+class GeneratedAvatarCreateResponse(GeneratedAvatarDetail):
+    """The one response that also reports whether a face was actually
+    detected in the uploaded photo -- `detected=False` means the returned
+    avatar is a generic-toned default, not a personalized one (see
+    photo_analysis.py's own fallback contract). Only meaningful right at
+    generation time, so this doesn't belong on GeneratedAvatarDetail itself
+    (get/list never recompute it)."""
+
+    face_detected: bool

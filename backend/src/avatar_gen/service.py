@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from src.avatar_gen import repository
 from src.avatar_gen.atlas_builder import _PANTS_COLOR, _SHIRT_COLOR, build_atlas_png
 from src.avatar_gen.photo_analysis import analyze_photo
-from src.avatar_gen.schemas import GeneratedAvatarDetail, GeneratedAvatarSummary
+from src.avatar_gen.schemas import GeneratedAvatarCreateResponse, GeneratedAvatarDetail, GeneratedAvatarSummary
 from src.core.auth import CurrentUser, bypasses_daily_caps
 from src.core.config import settings
 from src.metering import repository as metering_repository
@@ -75,7 +75,7 @@ def _resolve(record: repository.AvatarDesignRecord) -> GeneratedAvatarDetail:
     return GeneratedAvatarDetail(id=record.id, name=record.name, skin=skin, design=design, created_at=record.created_at)
 
 
-async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, file_content_type: str | None, photo_bytes: bytes) -> GeneratedAvatarDetail:
+async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, file_content_type: str | None, photo_bytes: bytes) -> GeneratedAvatarCreateResponse:
     if file_content_type not in _ALLOWED_PHOTO_TYPES:
         raise HTTPException(status_code=400, detail="Only .jpg/.png photos are supported")
     if not photo_bytes:
@@ -161,7 +161,8 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
         cost_estimate_cents=0,
     )
 
-    return _resolve(record)
+    detail = _resolve(record)
+    return GeneratedAvatarCreateResponse(**detail.model_dump(), face_detected=palette.detected)
 
 
 def list_generated_avatars(user: CurrentUser) -> list[GeneratedAvatarSummary]:

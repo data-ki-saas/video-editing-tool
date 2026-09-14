@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from src.avatar_gen import service
-from src.avatar_gen.schemas import GeneratedAvatarDetail, GeneratedAvatarSummary
+from src.avatar_gen.schemas import GeneratedAvatarCreateResponse, GeneratedAvatarDetail, GeneratedAvatarSummary
 from src.core.auth import CurrentUser, get_current_user, require_feature
 
 # Nested under /api/avatar (same URL family as avatar/router.py's own
@@ -12,12 +12,12 @@ from src.core.auth import CurrentUser, get_current_user, require_feature
 router = APIRouter(prefix="/api/avatar/generated", tags=["avatar"])
 
 
-@router.post("", response_model=GeneratedAvatarDetail, status_code=201)
+@router.post("", response_model=GeneratedAvatarCreateResponse, status_code=201)
 async def generate_from_photo(
     file: UploadFile = File(...),
     name: str | None = Form(default=None),
     user: CurrentUser = Depends(require_feature("avatar_generate")),
-) -> GeneratedAvatarDetail:
+) -> GeneratedAvatarCreateResponse:
     body = await file.read()
     return await service.generate_avatar_from_photo(user=user, name=name, file_content_type=file.content_type, photo_bytes=body)
 
