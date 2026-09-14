@@ -12,6 +12,7 @@ fallback contract so avatar_gen/service.py needs no changes at all.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 
@@ -20,6 +21,15 @@ import httpx
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _fingerprint(value: str) -> str:
+    """TEMPORARY diagnostic for a live secret-mismatch against face-analysis/
+    src/main.py's matching debug line -- an 8-hex-char SHA-256 prefix, never
+    the secret itself, just enough to compare Render's and Cloud Run's env
+    vars without pasting either into logs/chat. Remove both once the 401 is
+    resolved."""
+    return hashlib.sha256(value.encode()).hexdigest()[:8] if value else "(empty)"
 
 _TIMEOUT_SECONDS = 20.0
 
@@ -45,6 +55,12 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
         logger.error("FACE_ANALYSIS_SERVICE_URL is not configured; using default proportions")
         return FacePalette(skin_tone=_DEFAULT_SKIN_TONE, hair_tone=None, detected=False)
 
+    logger.info(
+        "calling face-analysis: url=%s secret_len=%d secret_fp=%s",
+        settings.face_analysis_service_url,
+        len(settings.face_analysis_service_secret),
+        _fingerprint(settings.face_analysis_service_secret),
+    )
     try:
         response = httpx.post(
             f"{settings.face_analysis_service_url}/analyze",
