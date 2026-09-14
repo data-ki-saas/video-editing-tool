@@ -5,26 +5,38 @@ uploaded photo rather than live video. Uses mediapipe's Tasks API
 `FaceLandmarker` against the same 468/478-point face mesh topology
 faceLandmarks.ts already uses, so the same landmark indices apply.
 
-Lives in its own Cloud Run (GPU) service, not backend/ -- Render's native
-Python runtime has no apt/root access to install the Mesa/GLES system
-libraries mediapipe's compiled bindings need (`libGLESv2.so.2` et al), so
-this moved out to a container we control end-to-end. backend/src/avatar_gen/
-photo_analysis.py is now a thin HTTP client calling this service; this file
-is the real implementation, otherwise unchanged from its original in-process
-form.
+Lives in its own Cloud Run service, not backend/ -- Render's native Python
+runtime has no apt/root access to install the Mesa/GLES/EGL system libraries
+mediapipe's compiled bindings need, so this moved out to a container we
+control end-to-end. backend/src/avatar_gen/photo_analysis.py is now a thin
+HTTP client calling this service; this file is the real implementation.
 
-Deliberately NOT an LLM call (see the avatar plan doc's own note that Phase
-6 is "deterministic landmark -> template mapping") -- this is pure
-computer-vision heuristics feeding a parametric template (atlas_builder.py,
-still in backend/, since it has no mediapipe/native dependency of its own),
-not generative synthesis.
+Deliberately NOT an LLM call, and NOT a generative image model (see the
+avatar plan doc's own note that Phase 6 is "deterministic landmark ->
+template mapping") -- this is pure computer-vision heuristics feeding a
+parametric template (atlas_builder.py, still in backend/, since it has no
+mediapipe/native dependency of its own).
+
+What this extracts, and why it stops here: mediapipe's face mesh returns 468
+points total. ~152 of them are CONTOUR/BOUNDARY points for named features
+(face outline, both eyes, both eyebrows, lips, nose) -- this file extracts
+essentially all of those, via mediapipe's own published
+`FaceLandmarksConnections` groups (imported directly from the installed
+package and graph-traced into ordered point loops/chains at import time --
+see `_trace`/`_face_landmark_groups` below -- NOT hand-typed index numbers,
+after an earlier landmark-index mixup elsewhere in this project). The
+remaining ~316 points are dense interior TESSELLATION for 3D surface
+curvature (cheek/forehead bulge, etc.) -- meaningful for a shaded 3D mesh,
+meaningless for the flat 2D cartoon silhouettes atlas_builder.py draws, so
+they're not used here; using them for real would mean building an actual
+shaded 3D face, a different product direction than this one.
 """
 
 from __future__ import annotations
 
 import logging
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import Literal
@@ -36,6 +48,7 @@ from src.config import settings
 
 FaceShape = Literal["oval", "round", "wide"]
 HairLength = Literal["bald", "short", "medium", "long"]
+Point = tuple[float, float]
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +59,8 @@ _MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/fa
 _MODEL_CACHE_PATH = Path(tempfile.gettempdir()) / "reel_creator_face_landmarker.task"
 
 # Same landmark indices as frontend/src/lib/video/faceLandmarks.ts's LM_*
-# constants -- both run against the same face mesh topology.
+# constants -- both run against the same face mesh topology. Also the
+# normalization anchors for every contour extracted below (see `_normalize`).
 _LM_HAIRLINE_CENTER = 10
 _LM_CHIN = 152
 _LM_LEFT_CHEEK = 234
@@ -62,21 +76,13 @@ _DEFAULT_SKIN_TONE = "#e8b48c"
 # hairline->chin vector the same way that file already does.
 _TOP_OF_HEAD_EXTRAPOLATION_FACTOR = 0.55
 
-# A typical cheek-width/face-height ratio (see FacePalette.face_width_scale's
-# own comment) -- the neutral point face_width_scale=1.0 is calibrated
-# around, not a literal measurement of any specific face.
+# A typical cheek-width/face-height ratio -- kept as a FALLBACK signal for
+# when no face_oval contour is available (detected=False), and to seed
+# face_width_scale/face_shape for backward compatibility. Once a real
+# face_oval polygon is present, atlas_builder.py prefers that over these.
 _TYPICAL_FACE_ASPECT = 0.75
-# How strongly a measured aspect away from _TYPICAL_FACE_ASPECT moves
-# face_width_scale, clamped into a subtle, never-grotesque range -- this is
-# a cartoon template accent, not a precise reconstruction.
 _FACE_WIDTH_SCALE_MIN = 0.88
 _FACE_WIDTH_SCALE_MAX = 1.12
-# Same cheek-width/face-height aspect used for face_width_scale, but bucketed
-# into a discrete outline STYLE (atlas_builder.py draws a genuinely different
-# silhouette per bucket -- an oval, a soft round circle, or a wider rounded-
-# rectangle jaw) rather than only stretching one ellipse. A deadband around
-# _TYPICAL_FACE_ASPECT keeps an average face solidly "round" instead of
-# flip-flopping between buckets on measurement noise.
 _FACE_SHAPE_DEADBAND = 0.05
 
 _PATCH_HALF_SIZE = 6
@@ -85,13 +91,18 @@ _PATCH_HALF_SIZE = 6
 # (same hairline->chin extrapolation direction as the existing top-of-head
 # hair sample) and count how many still look hair-colored. No hair/body
 # segmentation model involved -- this is a cheap heuristic, not a precise
-# measurement (same "informal, human judgment, no similarity metric" posture
-# as the rest of this file), and a real risk is a dark background behind the
-# subject getting mistaken for long hair. Fails toward "short" (the least
-# visually committal bucket) when the signal is weak/ambiguous rather than
+# measurement, and a real risk is a dark background behind the subject
+# getting mistaken for long hair. Fails toward "short" (the least visually
+# committal bucket) when the signal is weak/ambiguous rather than
 # confidently guessing "long."
 _HAIR_SAMPLE_STEPS: tuple[float, ...] = (0.3, 0.7, 1.1)
 _HAIR_COLOR_MATCH_DISTANCE = 40.0
+
+# Neutral mouth-width reference (as a fraction of face_height) --
+# mouth_width_scale=1.0 is calibrated around this, same "deadband around a
+# typical ratio" pattern as _TYPICAL_FACE_ASPECT.
+_TYPICAL_MOUTH_WIDTH_RATIO = 0.38
+_TYPICAL_NOSE_WIDTH_RATIO = 0.22
 
 
 @dataclass
@@ -99,21 +110,26 @@ class FacePalette:
     skin_tone: str
     hair_tone: str | None
     detected: bool
-    # A ready-to-multiply horizontal head-width scale (1.0 = neutral/default)
-    # -- derived from cheek-width DIVIDED BY hairline-to-chin height (a
-    # ratio internal to the face itself), not raw cheek-to-cheek pixel width
-    # alone. Raw width would mostly measure how zoomed-in/far-away the photo
-    # is, not the face's actual shape, since a close-up selfie and a
-    # far-away photo of the same person produce wildly different pixel
-    # widths -- the height-normalized ratio is framing-invariant, so a
-    # narrow-vs-round face reads consistently regardless of photo framing.
+    # Legacy scalar/bucket signals -- still computed (cheap, harmless) as
+    # the fallback path's driver when no contour is available. See each
+    # field's own history: face_width_scale/face_shape were the ONLY shape
+    # signal before face_oval existed.
     face_width_scale: float = 1.0
-    # Discrete outline style, see _FACE_SHAPE_DEADBAND's own comment.
     face_shape: FaceShape = "round"
-    # Discrete hair-coverage bucket, see _HAIR_SAMPLE_STEPS's own comment.
-    # "bald" only ever comes from hair_tone being None (no hair sample at
-    # all), never from the length heuristic itself.
     hair_length: HairLength = "short"
+    # Real per-person contours, normalized to face-relative units (origin =
+    # hairline/chin midpoint, unit = hairline-to-chin distance, same
+    # reference frame face_width_scale always used -- see `_normalize`).
+    # atlas_builder.py remaps these into actual atlas pixel coordinates; this
+    # module never draws anything itself. Empty whenever detected=False.
+    face_oval: list[Point] = field(default_factory=list)  # 36 pts, closed polygon
+    left_eye: list[Point] = field(default_factory=list)  # 16 pts, closed polygon
+    right_eye: list[Point] = field(default_factory=list)  # 16 pts, closed polygon
+    left_eyebrow: list[Point] = field(default_factory=list)  # 5 pts, open arc
+    right_eyebrow: list[Point] = field(default_factory=list)  # 5 pts, open arc
+    mouth_width_scale: float = 1.0  # from the 20-pt outer-lips contour's width
+    nose_width_scale: float = 1.0  # from the 24-pt nose region's width
+    nose_center: Point = (0.0, 0.0)  # from the 24-pt nose region's centroid
 
 
 def _ensure_model() -> Path:
@@ -190,6 +206,84 @@ def _estimate_hair_length(
     return "short"
 
 
+def _trace(connections) -> list[int]:
+    """Traces mediapipe's own published FaceLandmarksConnections edge list
+    into a single ordered point sequence -- verified against the installed
+    package directly at import time (see `_face_landmark_groups`), not
+    hand-typed indices. Every contour used here (face oval, one eye, outer
+    lips) is a simple cycle where each point has degree 2 in the undirected
+    edge graph, so a greedy "follow any not-yet-used edge" walk traces the
+    full loop back to its start; an eyebrow arc is the same walk over an
+    OPEN chain, which just runs out of edges without closing."""
+    adjacency: dict[int, list[int]] = {}
+    edges = set()
+    for c in connections:
+        adjacency.setdefault(c.start, []).append(c.end)
+        adjacency.setdefault(c.end, []).append(c.start)
+        edges.add(frozenset((c.start, c.end)))
+    start = connections[0].start
+    order = [start]
+    used: set[frozenset[int]] = set()
+    current = start
+    while len(used) < len(edges):
+        next_point = next(
+            (candidate for candidate in adjacency[current] if frozenset((current, candidate)) not in used), None
+        )
+        if next_point is None:
+            break
+        used.add(frozenset((current, next_point)))
+        if next_point != start:
+            order.append(next_point)
+        current = next_point
+    return order
+
+
+def _component_containing(connections, point: int) -> list:
+    """Lips is two disconnected loops (outer + inner contour) inside one
+    connection list -- this isolates whichever one contains `point` (61 is a
+    well-known outer-lip corner) so `_trace` only walks that one."""
+    adjacency: dict[int, set[int]] = {}
+    for c in connections:
+        adjacency.setdefault(c.start, set()).add(c.end)
+        adjacency.setdefault(c.end, set()).add(c.start)
+    stack, component = [point], {point}
+    while stack:
+        node = stack.pop()
+        for neighbor in adjacency.get(node, ()):
+            if neighbor not in component:
+                component.add(neighbor)
+                stack.append(neighbor)
+    return [c for c in connections if c.start in component and c.end in component]
+
+
+_face_landmark_groups_cache: dict[str, list[int]] | None = None
+
+
+def _face_landmark_groups() -> dict[str, list[int]]:
+    """Ordered landmark-index lists per facial feature, computed once (not
+    per-request) from mediapipe's own installed FaceLandmarksConnections.
+    Deferred import (not module-scope) so this file still imports cleanly
+    anywhere mediapipe itself isn't installed (e.g. a future test file)."""
+    global _face_landmark_groups_cache
+    if _face_landmark_groups_cache is not None:
+        return _face_landmark_groups_cache
+
+    from mediapipe.tasks.python.vision.face_landmarker import FaceLandmarksConnections as C
+
+    outer_lips = _component_containing(C.FACE_LANDMARKS_LIPS, 61)
+    nose_points = sorted({c.start for c in C.FACE_LANDMARKS_NOSE} | {c.end for c in C.FACE_LANDMARKS_NOSE})
+    _face_landmark_groups_cache = {
+        "face_oval": _trace(C.FACE_LANDMARKS_FACE_OVAL),
+        "left_eye": _trace(C.FACE_LANDMARKS_LEFT_EYE),
+        "right_eye": _trace(C.FACE_LANDMARKS_RIGHT_EYE),
+        "left_eyebrow": _trace(C.FACE_LANDMARKS_LEFT_EYEBROW),
+        "right_eyebrow": _trace(C.FACE_LANDMARKS_RIGHT_EYEBROW),
+        "outer_lips": _trace(outer_lips),
+        "nose": nose_points,
+    }
+    return _face_landmark_groups_cache
+
+
 def _create_landmarker(model_path: Path, use_gpu: bool):
     from mediapipe.tasks.python.core.base_options import BaseOptions
     from mediapipe.tasks.python.vision import FaceLandmarker, FaceLandmarkerOptions
@@ -220,21 +314,16 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
 
         mp_image = MpImage(image_format=ImageFormat.SRGB, data=np.asarray(image))
 
-        # This service is deployed on an NVIDIA L4 Cloud Run instance
-        # specifically so this can run on the GPU delegate -- but mediapipe's
-        # Linux GPU delegate support is narrower than its mobile (Android/
-        # iOS) support and hasn't been exercised on real hardware from this
-        # dev environment (no GPU available here). Try GPU first, fall back
-        # to CPU on ANY construction/detection failure rather than assume it
-        # works -- verify against real Cloud Run logs after deploying, and
-        # flip settings.face_analysis_use_gpu off if the GPU delegate proves
-        # unreliable rather than fighting it.
-        landmarker_cm = None
+        # Try the GPU delegate first, fall back to CPU on ANY construction/
+        # detection failure rather than assume it works -- mediapipe's Linux
+        # GPU delegate support is narrower than mobile, and this has never
+        # run on real GPU hardware from this dev environment. Off by default
+        # (settings.face_analysis_use_gpu) -- this service dropped its GPU
+        # after a Cloud Run quota wall; see project memory.
         result = None
         if settings.face_analysis_use_gpu:
             try:
-                landmarker_cm = _create_landmarker(model_path, use_gpu=True)
-                with landmarker_cm as landmarker:
+                with _create_landmarker(model_path, use_gpu=True) as landmarker:
                     result = landmarker.detect(mp_image)
             except Exception:
                 logger.exception("GPU delegate failed, falling back to CPU delegate for this request")
@@ -248,7 +337,7 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
 
         landmarks = result.face_landmarks[0]
 
-        def point(index: int) -> tuple[float, float]:
+        def point(index: int) -> Point:
             lm = landmarks[index]
             return lm.x * width, lm.y * height
 
@@ -281,8 +370,6 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
         face_shape: FaceShape = "round"
         if face_height > 0:
             aspect = cheek_width / face_height
-            # Linear around the neutral point, clamped to a subtle range --
-            # see this file's own _FACE_WIDTH_SCALE_MIN/MAX comment.
             face_width_scale = max(
                 _FACE_WIDTH_SCALE_MIN, min(_FACE_WIDTH_SCALE_MAX, 1.0 + (aspect - _TYPICAL_FACE_ASPECT))
             )
@@ -295,6 +382,41 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
         if hair_tone is not None:
             hair_length = _estimate_hair_length(pixels, width, height, hairline, chin, hair_tone)
 
+        # Face-relative normalization: origin at the hairline/chin midpoint,
+        # unit = hairline-to-chin distance -- the SAME reference frame
+        # face_width_scale has always used, just applied to every contour
+        # point instead of two scalar distances. Framing-invariant (a
+        # close-up selfie and a far-away photo of the same person normalize
+        # to the same shape) for the same reason the original comment on
+        # face_width_scale gave.
+        origin = ((hairline[0] + chin[0]) / 2, (hairline[1] + chin[1]) / 2)
+        scale = face_height if face_height > 0 else 1.0
+
+        def normalize(index: int) -> Point:
+            px, py = point(index)
+            return (px - origin[0]) / scale, (py - origin[1]) / scale
+
+        groups = _face_landmark_groups()
+        face_oval = [normalize(i) for i in groups["face_oval"]]
+        left_eye = [normalize(i) for i in groups["left_eye"]]
+        right_eye = [normalize(i) for i in groups["right_eye"]]
+        left_eyebrow = [normalize(i) for i in groups["left_eyebrow"]]
+        right_eyebrow = [normalize(i) for i in groups["right_eyebrow"]]
+
+        outer_lips_raw = [point(i) for i in groups["outer_lips"]]
+        lips_xs = [p[0] for p in outer_lips_raw]
+        mouth_width_px = max(lips_xs) - min(lips_xs)
+        mouth_width_ratio = mouth_width_px / face_height if face_height > 0 else _TYPICAL_MOUTH_WIDTH_RATIO
+        mouth_width_scale = mouth_width_ratio / _TYPICAL_MOUTH_WIDTH_RATIO if _TYPICAL_MOUTH_WIDTH_RATIO > 0 else 1.0
+
+        nose_raw = [point(i) for i in groups["nose"]]
+        nose_xs = [p[0] for p in nose_raw]
+        nose_width_px = max(nose_xs) - min(nose_xs)
+        nose_width_ratio = nose_width_px / face_height if face_height > 0 else _TYPICAL_NOSE_WIDTH_RATIO
+        nose_width_scale = nose_width_ratio / _TYPICAL_NOSE_WIDTH_RATIO if _TYPICAL_NOSE_WIDTH_RATIO > 0 else 1.0
+        nose_center_raw = (sum(p[0] for p in nose_raw) / len(nose_raw), sum(p[1] for p in nose_raw) / len(nose_raw))
+        nose_center = ((nose_center_raw[0] - origin[0]) / scale, (nose_center_raw[1] - origin[1]) / scale)
+
         return FacePalette(
             skin_tone=skin_tone,
             hair_tone=hair_tone,
@@ -302,6 +424,14 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             face_width_scale=face_width_scale,
             face_shape=face_shape,
             hair_length=hair_length,
+            face_oval=face_oval,
+            left_eye=left_eye,
+            right_eye=right_eye,
+            left_eyebrow=left_eyebrow,
+            right_eyebrow=right_eyebrow,
+            mouth_width_scale=max(0.7, min(1.4, mouth_width_scale)),
+            nose_width_scale=max(0.7, min(1.4, nose_width_scale)),
+            nose_center=nose_center,
         )
     except Exception:
         logger.exception("face photo analysis failed; falling back to default proportions")

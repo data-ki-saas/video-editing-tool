@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from src.config import settings
-from src.photo_analysis import FaceShape, HairLength, analyze_photo
+from src.photo_analysis import FaceShape, HairLength, Point, analyze_photo
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,6 +20,14 @@ class FacePaletteResponse(BaseModel):
     face_width_scale: float
     face_shape: FaceShape
     hair_length: HairLength
+    face_oval: list[Point]
+    left_eye: list[Point]
+    right_eye: list[Point]
+    left_eyebrow: list[Point]
+    right_eyebrow: list[Point]
+    mouth_width_scale: float
+    nose_width_scale: float
+    nose_center: Point
 
 
 def _require_internal_secret(x_internal_secret: str = Header(default="")) -> None:
@@ -44,4 +52,12 @@ async def analyze(file: UploadFile = File(...)) -> FacePaletteResponse:
         face_width_scale=palette.face_width_scale,
         face_shape=palette.face_shape,
         hair_length=palette.hair_length,
+        face_oval=palette.face_oval,
+        left_eye=palette.left_eye,
+        right_eye=palette.right_eye,
+        left_eyebrow=palette.left_eyebrow,
+        right_eyebrow=palette.right_eyebrow,
+        mouth_width_scale=palette.mouth_width_scale,
+        nose_width_scale=palette.nose_width_scale,
+        nose_center=palette.nose_center,
     )
