@@ -68,6 +68,23 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
         )
         response.raise_for_status()
         body = response.json()
+        # TEMPORARY diagnostic -- a real-photo test rendered with invisible
+        # eyes/nose and no obvious bug found by code review; logs the wire
+        # response's actual shape so it's visible in Render's own logs
+        # (mirrors a similar log on the face-analysis/ side of this same
+        # call). Remove once the eyes/nose rendering is confirmed fixed.
+        logger.info(
+            "face-analysis response: detected=%s face_oval_n=%d left_eye_n=%d right_eye_n=%d "
+            "left_eyebrow_n=%d mouth_width_scale=%s nose_width_scale=%s nose_center=%s",
+            body.get("detected"),
+            len(body.get("face_oval") or []),
+            len(body.get("left_eye") or []),
+            len(body.get("right_eye") or []),
+            len(body.get("left_eyebrow") or []),
+            body.get("mouth_width_scale"),
+            body.get("nose_width_scale"),
+            body.get("nose_center"),
+        )
         return FacePalette(
             skin_tone=body["skin_tone"],
             hair_tone=body["hair_tone"],

@@ -417,7 +417,7 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
         nose_center_raw = (sum(p[0] for p in nose_raw) / len(nose_raw), sum(p[1] for p in nose_raw) / len(nose_raw))
         nose_center = ((nose_center_raw[0] - origin[0]) / scale, (nose_center_raw[1] - origin[1]) / scale)
 
-        return FacePalette(
+        result_palette = FacePalette(
             skin_tone=skin_tone,
             hair_tone=hair_tone,
             detected=True,
@@ -433,6 +433,42 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             nose_width_scale=max(0.7, min(1.4, nose_width_scale)),
             nose_center=nose_center,
         )
+
+        # TEMPORARY diagnostic -- the rendered output doesn't match what
+        # synthetic test data predicted (real photo: eyes/nose came out
+        # essentially invisible), and code review alone hasn't found why.
+        # Logs the actual measured numbers so the next real-photo test gives
+        # real data to compare against instead of another guess. Remove once
+        # the eyes/nose rendering is confirmed fixed against a real photo.
+        def _bbox(pts: list[Point]) -> tuple[float, float, float, float] | None:
+            if not pts:
+                return None
+            xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+            return min(xs), min(ys), max(xs), max(ys)
+
+        logger.info(
+            "analyze_photo contours: image=%dx%d face_oval_n=%d bbox=%s left_eye_n=%d bbox=%s "
+            "right_eye_n=%d bbox=%s left_brow_n=%d bbox=%s mouth_width_scale=%.3f nose_width_scale=%.3f "
+            "nose_center=%s face_width_scale=%.3f face_shape=%s hair_length=%s",
+            width,
+            height,
+            len(face_oval),
+            _bbox(face_oval),
+            len(left_eye),
+            _bbox(left_eye),
+            len(right_eye),
+            _bbox(right_eye),
+            len(left_eyebrow),
+            _bbox(left_eyebrow),
+            result_palette.mouth_width_scale,
+            result_palette.nose_width_scale,
+            nose_center,
+            face_width_scale,
+            face_shape,
+            hair_length,
+        )
+
+        return result_palette
     except Exception:
         logger.exception("face photo analysis failed; falling back to default proportions")
         return FacePalette(skin_tone=_DEFAULT_SKIN_TONE, hair_tone=None, detected=False)
