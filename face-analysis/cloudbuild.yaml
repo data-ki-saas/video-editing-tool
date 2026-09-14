@@ -1,0 +1,50 @@
+# Explicit build config (replaces the trigger's auto-detected "Dockerfile"
+# build type) -- needed only because a custom-service-account trigger (what
+# Cloud Run's own "Continuously deploy" wizard creates) requires an explicit
+# logging destination, which isn't exposed as a console field for the
+# Dockerfile-only build type; see options.logging below.
+#
+# $_AR_HOSTNAME / $_AR_PROJECT_ID / $_AR_REPOSITORY / $_DEPLOY_REGION /
+# $_SERVICE_NAME are trigger-level substitutions Cloud Run's own "Continuously
+# deploy" wizard already injected on this trigger -- if a build fails with an
+# "unknown substitution" error, check Cloud Build > Triggers > this trigger's
+# "Substitution variables" list and match names/values from there instead
+# (the wizard's exact variable names have shifted across console versions).
+#
+# The deploy step intentionally passes only --image/--region/--platform --
+# every other setting configured via console (GPU, min/max instances, env
+# vars, ingress, unauthenticated access) lives on the Service/revision
+# template already and `gcloud run deploy` carries it forward unless you
+# explicitly override it, so this won't silently reset anything you set up
+# earlier in this conversation.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - "-t"
+      - "$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$_SERVICE_NAME:$COMMIT_SHA"
+      - "-f"
+      - face-analysis/Dockerfile
+      - face-analysis
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - "$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$_SERVICE_NAME:$COMMIT_SHA"
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - $_SERVICE_NAME
+      - --image=$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$_SERVICE_NAME:$COMMIT_SHA
+      - --region=$_DEPLOY_REGION
+      - --platform=managed
+      - --quiet
+
+images:
+  - "$_AR_HOSTNAME/$_AR_PROJECT_ID/$_AR_REPOSITORY/$_SERVICE_NAME:$COMMIT_SHA"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
