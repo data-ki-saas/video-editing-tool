@@ -27,11 +27,15 @@ import tempfile
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Literal
 
 import httpx
 from PIL import Image
 
 from src.config import settings
+
+FaceShape = Literal["oval", "round", "wide"]
+HairLength = Literal["bald", "short", "medium", "long"]
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +71,27 @@ _TYPICAL_FACE_ASPECT = 0.75
 # a cartoon template accent, not a precise reconstruction.
 _FACE_WIDTH_SCALE_MIN = 0.88
 _FACE_WIDTH_SCALE_MAX = 1.12
+# Same cheek-width/face-height aspect used for face_width_scale, but bucketed
+# into a discrete outline STYLE (atlas_builder.py draws a genuinely different
+# silhouette per bucket -- an oval, a soft round circle, or a wider rounded-
+# rectangle jaw) rather than only stretching one ellipse. A deadband around
+# _TYPICAL_FACE_ASPECT keeps an average face solidly "round" instead of
+# flip-flopping between buckets on measurement noise.
+_FACE_SHAPE_DEADBAND = 0.05
 
 _PATCH_HALF_SIZE = 6
+
+# Hair-length estimation: sample points progressively further below the chin
+# (same hairline->chin extrapolation direction as the existing top-of-head
+# hair sample) and count how many still look hair-colored. No hair/body
+# segmentation model involved -- this is a cheap heuristic, not a precise
+# measurement (same "informal, human judgment, no similarity metric" posture
+# as the rest of this file), and a real risk is a dark background behind the
+# subject getting mistaken for long hair. Fails toward "short" (the least
+# visually committal bucket) when the signal is weak/ambiguous rather than
+# confidently guessing "long."
+_HAIR_SAMPLE_STEPS: tuple[float, ...] = (0.3, 0.7, 1.1)
+_HAIR_COLOR_MATCH_DISTANCE = 40.0
 
 
 @dataclass
@@ -85,6 +108,12 @@ class FacePalette:
     # widths -- the height-normalized ratio is framing-invariant, so a
     # narrow-vs-round face reads consistently regardless of photo framing.
     face_width_scale: float = 1.0
+    # Discrete outline style, see _FACE_SHAPE_DEADBAND's own comment.
+    face_shape: FaceShape = "round"
+    # Discrete hair-coverage bucket, see _HAIR_SAMPLE_STEPS's own comment.
+    # "bald" only ever comes from hair_tone being None (no hair sample at
+    # all), never from the length heuristic itself.
+    hair_length: HairLength = "short"
 
 
 def _ensure_model() -> Path:
@@ -105,6 +134,14 @@ def _ensure_model() -> Path:
 def _to_hex(rgb: tuple[float, float, float]) -> str:
     r, g, b = (max(0, min(255, round(c))) for c in rgb)
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _hex_to_rgb(color: str) -> tuple[int, int, int]:
+    return int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+
+
+def _color_distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
 
 
 def _average_patch_color(pixels, width: int, height: int, cx: float, cy: float) -> tuple[float, float, float] | None:
@@ -129,6 +166,28 @@ def _average_patch_color(pixels, width: int, height: int, cx: float, cy: float) 
     if count == 0:
         return None
     return total_r / count, total_g / count, total_b / count
+
+
+def _estimate_hair_length(
+    pixels, width: int, height: int, hairline: tuple[float, float], chin: tuple[float, float], hair_tone: str
+) -> HairLength:
+    """Extends the hairline->chin vector further past the chin (toward where
+    shoulders would be in a typical portrait) and checks how many of those
+    points still look hair-colored -- more matches, further down, means
+    longer hair. See this file's own _HAIR_SAMPLE_STEPS comment for the
+    accepted false-positive risk (a hair-toned background)."""
+    dx, dy = chin[0] - hairline[0], chin[1] - hairline[1]
+    target = _hex_to_rgb(hair_tone)
+    matches = 0
+    for t in _HAIR_SAMPLE_STEPS:
+        sample = _average_patch_color(pixels, width, height, chin[0] + dx * t, chin[1] + dy * t)
+        if sample is not None and _color_distance(sample, target) < _HAIR_COLOR_MATCH_DISTANCE:
+            matches += 1
+    if matches >= len(_HAIR_SAMPLE_STEPS):
+        return "long"
+    if matches >= 1:
+        return "medium"
+    return "short"
 
 
 def _create_landmarker(model_path: Path, use_gpu: bool):
@@ -219,6 +278,7 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
         cheek_width = ((left_cheek[0] - right_cheek[0]) ** 2 + (left_cheek[1] - right_cheek[1]) ** 2) ** 0.5
         face_height = ((hairline[0] - chin[0]) ** 2 + (hairline[1] - chin[1]) ** 2) ** 0.5
         face_width_scale = 1.0
+        face_shape: FaceShape = "round"
         if face_height > 0:
             aspect = cheek_width / face_height
             # Linear around the neutral point, clamped to a subtle range --
@@ -226,8 +286,23 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             face_width_scale = max(
                 _FACE_WIDTH_SCALE_MIN, min(_FACE_WIDTH_SCALE_MAX, 1.0 + (aspect - _TYPICAL_FACE_ASPECT))
             )
+            if aspect < _TYPICAL_FACE_ASPECT - _FACE_SHAPE_DEADBAND:
+                face_shape = "oval"
+            elif aspect > _TYPICAL_FACE_ASPECT + _FACE_SHAPE_DEADBAND:
+                face_shape = "wide"
 
-        return FacePalette(skin_tone=skin_tone, hair_tone=hair_tone, detected=True, face_width_scale=face_width_scale)
+        hair_length: HairLength = "bald"
+        if hair_tone is not None:
+            hair_length = _estimate_hair_length(pixels, width, height, hairline, chin, hair_tone)
+
+        return FacePalette(
+            skin_tone=skin_tone,
+            hair_tone=hair_tone,
+            detected=True,
+            face_width_scale=face_width_scale,
+            face_shape=face_shape,
+            hair_length=hair_length,
+        )
     except Exception:
         logger.exception("face photo analysis failed; falling back to default proportions")
         return FacePalette(skin_tone=_DEFAULT_SKIN_TONE, hair_tone=None, detected=False)

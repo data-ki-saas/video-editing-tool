@@ -14,7 +14,7 @@ from io import BytesIO
 
 from PIL import Image, ImageChops, ImageDraw
 
-from src.avatar_gen.photo_analysis import FacePalette
+from src.avatar_gen.photo_analysis import FacePalette, FaceShape, HairLength
 
 GAP = 8
 
@@ -62,44 +62,103 @@ def _rounded_rect(draw: ImageDraw.ImageDraw, rect: dict, inset: float, radius: f
     draw.rounded_rectangle((x0 + inset, y0 + inset, x1 - inset, y1 - inset), radius=radius, fill=fill, outline=_OUTLINE_COLOR, width=2)
 
 
+# Extra (radius_x, radius_y) multipliers layered on top of the existing
+# width_scale math, one outline STYLE per face_shape bucket -- "wide" is
+# drawn as a rounded rectangle instead of a stretched ellipse (see
+# _draw_head below) since no amount of ellipse-stretching reads as
+# "square-ish jaw" the way an actual different silhouette shape does.
+# face_width_scale (continuous, photo_analysis.py) still nudges within
+# whichever bucket face_shape (discrete) picks -- the two signals compose.
+_FACE_SHAPE_RADIUS_MULT: dict[FaceShape, tuple[float, float]] = {
+    "round": (1.0, 1.0),
+    "oval": (0.85, 1.08),
+    "wide": (1.08, 0.96),
+}
+
+# Hair is drawn as "head silhouette MINUS a protected face-skin window", not
+# as one big hair ellipse -- growing a single hair ellipse for longer
+# buckets was tried first and it inevitably swallowed the center-face once
+# it got big enough (no amount of clipping fixes a shape with no hole in the
+# middle). The skin window is (horizontal extent, vertical half-height,
+# vertical center offset) as multipliers of (radius_x, radius_y, radius_y):
+# it SHRINKS for longer buckets (more of the head reads as hair, framing the
+# sides more) but never disappears, so eyes/cheeks/chin stay visible at
+# every bucket -- see _draw_head's hair block below for how it's subtracted.
+_SKIN_WINDOW: dict[HairLength, tuple[float, float, float]] = {
+    "short": (0.9, 0.85, 0.22),
+    "medium": (0.68, 0.68, 0.16),
+    "long": (0.5, 0.55, 0.12),
+    "bald": (1.0, 1.0, 0.0),  # unused -- hair_tone is None whenever bald
+}
+
+
+def _head_outline_mask(image_size: tuple[int, int], face_shape: FaceShape, bbox: tuple[float, float, float, float]) -> Image.Image:
+    """A 0/255 mask of the actual head silhouette just drawn -- must match
+    _draw_head's own outline choice below (ellipse vs. rounded rectangle) or
+    a "wide" head's hair would paste outside its squared-off corners."""
+    mask = Image.new("L", image_size, 0)
+    mask_draw = ImageDraw.Draw(mask)
+    if face_shape == "wide":
+        mask_draw.rounded_rectangle(bbox, radius=(bbox[2] - bbox[0]) * 0.22, fill=255)
+    else:
+        mask_draw.ellipse(bbox, fill=255)
+    return mask
+
+
 def _draw_head(
-    image: Image.Image, draw: ImageDraw.ImageDraw, rect: dict, skin_tone: str, hair_tone: str | None, width_scale: float
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    rect: dict,
+    skin_tone: str,
+    hair_tone: str | None,
+    width_scale: float,
+    face_shape: FaceShape,
+    hair_length: HairLength,
 ) -> None:
     cx = rect["sx"] + rect["sWidth"] / 2
     cy = rect["sy"] + rect["sHeight"] / 2
     base_radius = rect["sWidth"] / 2 - 12
-    # Only the HORIZONTAL radius varies with the photo's measured face
-    # width-scale (see FacePalette.face_width_scale's own doc comment) --
-    # vertical stays fixed, so this reads as "narrower/wider face", not
-    # "shorter/taller head". Clamped range keeps this well inside the
-    # rect's own 12px margin (rect half-width 70, radius_x maxes out at
-    # 58*1.12 =~ 65).
-    radius_x = base_radius * width_scale
-    radius_y = base_radius
+    shape_x_mult, shape_y_mult = _FACE_SHAPE_RADIUS_MULT[face_shape]
+    # HORIZONTAL radius varies with both signals: the photo's continuous
+    # face_width_scale (see FacePalette's own doc comment) AND the discrete
+    # face_shape bucket's own multiplier. VERTICAL radius only follows
+    # face_shape -- width_scale alone never makes the head "shorter/taller",
+    # only "narrower/wider" within whichever outline style face_shape chose.
+    radius_x = base_radius * width_scale * shape_x_mult
+    radius_y = base_radius * shape_y_mult
     head_bbox = (cx - radius_x, cy - radius_y, cx + radius_x, cy + radius_y)
-    draw.ellipse(head_bbox, fill=skin_tone, outline=_OUTLINE_COLOR, width=2)
 
-    # A simple clipped "cap" over the top of the head, same as
-    # placeholderAtlas.ts's own drawHead -- intersect a head-circle mask with
-    # an ellipse mask (ImageChops.darker on two 0/255 masks is a plain AND),
-    # then paste the hair color through that combined mask so it can never
-    # spill past the head circle regardless of the ellipse's own size.
+    if face_shape == "wide":
+        # A soft rounded-rectangle jaw reads as genuinely more square/wide
+        # than any ellipse can, however stretched -- a different outline
+        # character, not just a bigger circle.
+        draw.rounded_rectangle(head_bbox, radius=radius_x * 0.45, fill=skin_tone, outline=_OUTLINE_COLOR, width=2)
+    else:
+        draw.ellipse(head_bbox, fill=skin_tone, outline=_OUTLINE_COLOR, width=2)
+
+    # Hair = head silhouette minus a protected face-skin window (see
+    # _SKIN_WINDOW's own comment on why, not a directly-sized hair shape).
+    # ImageChops.subtract on two 0/255 masks is "head AND NOT skin_window":
+    # 255-255=0 inside the protected window, 255-0=255 everywhere else in
+    # the head, 0-anything=0 outside the head entirely.
     if hair_tone:
-        head_mask = Image.new("L", image.size, 0)
-        ImageDraw.Draw(head_mask).ellipse(head_bbox, fill=255)
-        hair_mask = Image.new("L", image.size, 0)
-        hair_bbox = (
-            cx - radius_x * 1.05,
-            cy - radius_y * 0.35 - radius_y * 0.75,
-            cx + radius_x * 1.05,
-            cy - radius_y * 0.35 + radius_y * 0.75,
+        head_mask = _head_outline_mask(image.size, face_shape, head_bbox)
+        skin_h, skin_v, skin_offset = _SKIN_WINDOW[hair_length]
+        skin_cy = cy + radius_y * skin_offset
+        skin_window_bbox = (
+            cx - radius_x * skin_h,
+            skin_cy - radius_y * skin_v,
+            cx + radius_x * skin_h,
+            skin_cy + radius_y * skin_v,
         )
-        ImageDraw.Draw(hair_mask).ellipse(hair_bbox, fill=255)
-        combined_mask = ImageChops.darker(head_mask, hair_mask)
+        skin_window_mask = Image.new("L", image.size, 0)
+        ImageDraw.Draw(skin_window_mask).ellipse(skin_window_bbox, fill=255)
+        hair_mask = ImageChops.subtract(head_mask, skin_window_mask)
         hair_layer = Image.new("RGBA", image.size, hair_tone)
-        image.paste(hair_layer, (0, 0), combined_mask)
+        image.paste(hair_layer, (0, 0), hair_mask)
 
-    # Two simple dot eyes, baked directly into the head part -- same as
+    # Two simple dot eyes, baked directly into the head part, drawn LAST so
+    # they always stay visible even under generous hair coverage -- same as
     # placeholderAtlas.ts, never a separately swappable part. Offset scales
     # with the head's own width so the eyes stay plausibly placed relative
     # to a narrower or wider face instead of drifting toward/past its edge.
@@ -128,7 +187,16 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
     image = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
 
-    _draw_head(image, draw, HEAD_RECT, palette.skin_tone, palette.hair_tone, palette.face_width_scale)
+    _draw_head(
+        image,
+        draw,
+        HEAD_RECT,
+        palette.skin_tone,
+        palette.hair_tone,
+        palette.face_width_scale,
+        palette.face_shape,
+        palette.hair_length,
+    )
     _draw_mouth_closed(draw, MOUTH_CLOSED_RECT)
     _draw_mouth_open(draw, MOUTH_OPEN_RECT)
     _rounded_rect(draw, TORSO_RECT, inset=6, radius=14, fill=_SHIRT_COLOR)
