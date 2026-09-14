@@ -1,30 +1,29 @@
-# Cloud Run GPU (NVIDIA L4) service for backend/src/avatar_gen's photo
-# analysis step. Deliberately its own Docker-based deploy (unlike backend/'s
-# Render-native-Python service) for two reasons: (1) mediapipe's compiled
-# bindings need Mesa/GLES system libraries Render's native runtime has no
-# apt/root access to install -- owning the base image fixes that outright;
-# (2) an actual GPU delegate needs a CUDA runtime matching whatever driver
-# Cloud Run's GPU nodes provide.
-#
-# NOTE: verify this base image's CUDA version against Cloud Run's currently
-# documented/supported GPU driver version before deploying -- Google updates
-# that pairing over time and this was not verified against a live Cloud Run
-# GPU deploy. Cloud Run's forward-compatible driver model generally tolerates
-# a CUDA runtime at or below the host driver's supported version; adjust the
-# tag below if `gcloud run deploy` rejects it or the GPU delegate can't
-# initialize (photo_analysis.py falls back to CPU either way, so this is a
-# performance concern, not a correctness one).
-FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+# Cloud Run (CPU) service for backend/src/avatar_gen's photo analysis step.
+# Deliberately its own Docker-based deploy (unlike backend/'s Render-native-
+# Python service) because mediapipe's compiled bindings need Mesa/EGL/GLES
+# system libraries Render's native runtime has no apt/root access to
+# install -- owning the base image fixes that outright. Originally deployed
+# with an NVIDIA L4 GPU attached; dropped after hitting a GCP GPU-quota wall
+# ("no quota for GPUs without zonal redundancy") -- see
+# [[project_face_analysis_service]]. CPU-only turned out to need this same
+# fix anyway: mediapipe's `Image` construction pulls in its full compiled
+# core (GLES *and* EGL) unconditionally, regardless of which delegate
+# (CPU/GPU) ends up being used -- there's no smaller dependency set for a
+# CPU-only deploy.
+FROM ubuntu:22.04
 
-# libgles2 (Mesa's GLESv2, the actual missing `libGLESv2.so.2` from Render's
-# environment) + the handful of other shared libs mediapipe's native bindings
+# libgles2 (Mesa's GLESv2, `libGLESv2.so.2` -- the original error on Render)
+# + libegl1 (`libEGL.so.1` -- found missing on a first Cloud Run attempt,
+# even CPU-only) + libgbm1/libdrm2 (EGL's headless buffer-management chain
+# on Linux) + the rest of the shared libs mediapipe's native bindings
 # commonly need on a minimal Debian/Ubuntu base (libgomp1 for OpenMP-based
 # CPU parallelism, the rest for the image/video decode paths inside
-# mediapipe's compiled core) -- this is the entire fix for Bug 1, independent
-# of whether the GPU delegate itself ends up working.
+# mediapipe's compiled core). Installed generously in one pass rather than
+# discovering each missing .so via a separate failed deploy.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.11 python3-pip python3.11-venv \
-    libgles2 libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 \
+    libgles2 libegl1 libgl1 libglx-mesa0 libgbm1 libdrm2 \
+    libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

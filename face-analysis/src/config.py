@@ -14,9 +14,10 @@ class Settings(BaseSettings):
     # Attempt mediapipe's GPU delegate before falling back to CPU (see
     # photo_analysis.py's own comment on why this is try-then-fallback, not
     # assumed to work) -- only meaningful when this service is actually
-    # deployed on a GPU-attached Cloud Run instance. Leave off for a plain
-    # CPU deploy or local run.
-    face_analysis_use_gpu: bool = True
+    # deployed on a GPU-attached Cloud Run instance. Defaults off: this
+    # service dropped its GPU (Cloud Run GPU quota wall, see
+    # [[project_face_analysis_service]]) and now always runs CPU-only.
+    face_analysis_use_gpu: bool = False
 
 
 settings = Settings()
