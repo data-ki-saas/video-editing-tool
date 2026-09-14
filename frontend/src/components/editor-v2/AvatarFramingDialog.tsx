@@ -714,11 +714,12 @@ export function AvatarFramingDialog({
                     (avatarId === entry.design.designId ? "border-accent bg-accent/10" : "border-border hover:bg-background")
                   }
                 >
-                  {/* Media box mirrors /library's own card pattern (aspect-[9/16],
-                      black background, rounded) -- see this component's own
-                      AvatarThumbnailCanvas doc comment for why it's one static
-                      frame rather than a per-card animation loop. */}
-                  <div className="relative aspect-[9/16] w-full overflow-hidden rounded bg-black">
+                  {/* Square, not /library's own tall aspect-[9/16] video-card
+                      pattern this originally mirrored -- AvatarThumbnailCanvas
+                      now crops to a head-only shot (see its own doc comment),
+                      and a roughly-square source region wants a roughly-square
+                      box, not a tall one with dead space above/below the face. */}
+                  <div className="relative aspect-square w-full overflow-hidden rounded bg-black">
                     <AvatarThumbnailCanvas avatarId={entry.design.designId} className="absolute inset-0 h-full w-full" />
                   </div>
                   <span className="w-full truncate text-center text-foreground">{entry.design.meta.name}</span>
@@ -735,7 +736,7 @@ export function AvatarFramingDialog({
                     (avatarId === summary.id ? "border-accent bg-accent/10" : "border-border hover:bg-background")
                   }
                 >
-                  <div className="relative aspect-[9/16] w-full overflow-hidden rounded bg-black">
+                  <div className="relative aspect-square w-full overflow-hidden rounded bg-black">
                     <AvatarThumbnailCanvas avatarId={summary.id} className="absolute inset-0 h-full w-full" />
                     <span
                       role="button"
@@ -766,7 +767,7 @@ export function AvatarFramingDialog({
                 disabled={isGenerating}
                 className="flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-border p-1.5 text-xs text-muted hover:bg-background disabled:opacity-50"
               >
-                <div className="flex aspect-[9/16] w-full items-center justify-center rounded bg-background text-2xl">
+                <div className="flex aspect-square w-full items-center justify-center rounded bg-background text-2xl">
                   {isGenerating ? "…" : "+"}
                 </div>
                 <span>{isGenerating ? "Generating…" : "From a photo"}</span>
