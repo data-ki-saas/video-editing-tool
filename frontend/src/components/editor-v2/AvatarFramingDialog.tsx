@@ -130,15 +130,21 @@ function actionIdsForAvatar(avatarId: string): string[] {
 }
 
 /**
- * One static rendered frame per gallery card -- reuses the exact
- * compile/pose/draw pipeline AvatarPreviewCanvas (below) drives for the live
- * left-pane preview, but drawn ONCE (idle, t=0) rather than looped: a whole
- * gallery of simultaneous rAF loops would be needless cost for a picker
- * whose job is "show me which character this is," not "show me it acting" --
- * that live performance is exactly what the left pane is already for. Per
- * AvatarDesign.meta.thumbnail's own "unused this phase" doc comment
- * (design.ts), there's still no static image asset per skin -- this renders
- * a real frame off the same live rig instead of waiting on one.
+ * One static HEAD-ONLY crop per gallery card -- deliberately NOT
+ * drawAvatar's full-body bone/pose pipeline (used for the live left-pane
+ * preview and the real editor canvas, where a full-body character genuinely
+ * belongs). A picker's job is "which face is this," and drawAvatar's
+ * "fit the whole rig by height" scaling, applied to this card's small
+ * aspect-[9/16] box, shrinks the head part to a sliver of its own 140px
+ * source size -- fine detail (eyes, eyebrows, the Phase-6-generated
+ * contour features) doesn't survive that downscale, even though the
+ * source atlas itself renders them correctly (confirmed by inspecting a
+ * generated atlas PNG directly). So this bypasses bones/pose entirely and
+ * draws the "head" CompiledPart's own atlasRect straight from the atlas
+ * image, scaled to fill the card by its own aspect ratio (contain-fit,
+ * top-anchored so there's breathing room below rather than dead space
+ * above) -- the head fills the thumbnail the way a profile picture would,
+ * not a tiny figure standing in a tall box.
  */
 function AvatarThumbnailCanvas({ avatarId, className }: { avatarId: string; className?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -153,11 +159,33 @@ function AvatarThumbnailCanvas({ avatarId, className }: { avatarId: string; clas
         if (!canvas || !ctx) return;
         const width = Math.max(1, Math.round(canvas.getBoundingClientRect().width));
         const height = Math.max(1, Math.round(canvas.getBoundingClientRect().height));
-        canvas.width = width;
-        canvas.height = height;
-        const pose = computeAvatarPose(compiled.topology, "idle", 0, ambientEffectSeed(avatarId));
-        const mouthShapeId = computeMouthShapeId("idle", 0);
-        drawAvatar(ctx, compiled, pose, { x: 0, y: 0, width, height }, mouthShapeId);
+        // Render at devicePixelRatio so fine features (thin eyebrow
+        // strokes, small eye shapes) get real source pixels to downscale
+        // from instead of blurring away on a high-DPI screen.
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const headPart = compiled.skin.parts.find((part) => part.partId === "head");
+        if (!headPart) return;
+        const { atlasRect } = headPart;
+        const scale = Math.min(width / atlasRect.sWidth, height / atlasRect.sHeight);
+        const drawWidth = atlasRect.sWidth * scale;
+        const drawHeight = atlasRect.sHeight * scale;
+        const destX = (width - drawWidth) / 2;
+        const destY = Math.max(0, (height - drawHeight) * 0.15); // top-anchored, not dead-centered
+        ctx.drawImage(
+          compiled.skin.atlasImage,
+          atlasRect.sx,
+          atlasRect.sy,
+          atlasRect.sWidth,
+          atlasRect.sHeight,
+          destX,
+          destY,
+          drawWidth,
+          drawHeight
+        );
       })
       .catch((err) => {
         console.error("Avatar thumbnail compile failed for avatarId=%s", avatarId, err);
