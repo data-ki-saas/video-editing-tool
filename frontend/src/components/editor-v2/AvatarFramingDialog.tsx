@@ -144,7 +144,18 @@ function actionIdsForAvatar(avatarId: string): string[] {
  * image, scaled to fill the card by its own aspect ratio (contain-fit,
  * top-anchored so there's breathing room below rather than dead space
  * above) -- the head fills the thumbnail the way a profile picture would,
- * not a tiny figure standing in a tall box.
+ * not a tiny figure standing in a tall box. The mouth is a SEPARATE
+ * CompiledPart (its own atlasRect, drawn from mouthShapes.closed for a
+ * static idle look) that isn't inside the head's own atlasRect at all --
+ * omitting it was an oversight in the first version of this fix. Both
+ * "head" and "mouth" ride the SAME bone in every topology this app has
+ * (biped-simple), so their relative position is just their PIVOT
+ * difference, without needing the full bone/world-matrix machinery
+ * renderer.ts's drawAvatar uses: drawImage places a part such that its own
+ * (pivotX, pivotY) lands at the bone's world origin, so two same-bone
+ * parts' top-left corners differ by exactly (partA.pivot - partB.pivot) --
+ * see the mouthDestX/Y math below. Skipped (falls back to head-only) if a
+ * future topology ever puts the mouth on a different bone.
  */
 function AvatarThumbnailCanvas({ avatarId, className }: { avatarId: string; className?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -186,6 +197,24 @@ function AvatarThumbnailCanvas({ avatarId, className }: { avatarId: string; clas
           drawWidth,
           drawHeight
         );
+
+        const mouthPart = compiled.skin.mouthShapes.closed ?? compiled.skin.parts.find((part) => part.partId === "mouth");
+        if (mouthPart && mouthPart.boneIndex === headPart.boneIndex) {
+          const mouthRect = mouthPart.atlasRect;
+          const mouthDestX = destX + (headPart.pivotX - mouthPart.pivotX) * scale;
+          const mouthDestY = destY + (headPart.pivotY - mouthPart.pivotY) * scale;
+          ctx.drawImage(
+            compiled.skin.atlasImage,
+            mouthRect.sx,
+            mouthRect.sy,
+            mouthRect.sWidth,
+            mouthRect.sHeight,
+            mouthDestX,
+            mouthDestY,
+            mouthRect.sWidth * scale,
+            mouthRect.sHeight * scale
+          );
+        }
       })
       .catch((err) => {
         console.error("Avatar thumbnail compile failed for avatarId=%s", avatarId, err);
