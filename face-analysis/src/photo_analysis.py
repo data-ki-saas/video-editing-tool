@@ -130,6 +130,16 @@ class FacePalette:
     mouth_width_scale: float = 1.0  # from the 20-pt outer-lips contour's width
     nose_width_scale: float = 1.0  # from the 24-pt nose region's width
     nose_center: Point = (0.0, 0.0)  # from the 24-pt nose region's centroid
+    # Raw PIXEL-space crop boxes for THIS specific photo (unlike every other
+    # field above, deliberately NOT normalized to face-relative units) --
+    # backend/src/avatar_gen crops these directly out of the (possibly
+    # fal.ai-cartoonified) image bytes it already has, no denormalization
+    # math needed on that side. None whenever detected=False. See
+    # `_compute_crop_regions`' own comment for why the boxes are sized the
+    # way they are.
+    head_crop_box: tuple[float, float, float, float] | None = None
+    mouth_crop_box: tuple[float, float, float, float] | None = None
+    background_rgb: tuple[int, int, int] | None = None
 
 
 def _ensure_model() -> Path:
@@ -204,6 +214,74 @@ def _estimate_hair_length(
     if matches >= 1:
         return "medium"
     return "short"
+
+
+# Crop-box tuning for the "real photo/cartoonified photo as the avatar head"
+# path (as opposed to the parametric-drawing path's face_oval polygon) --
+# hand-tuned against one real cartoonified test image, not derived from any
+# formula. face_oval's own bbox stops at the forehead/hairline, well short of
+# actual hair volume, so the top edge needs pushing up well past it or the
+# result reads as bald; the sides need a smaller margin since face_oval
+# already reaches past the cheeks close to where hair starts.
+_HEAD_CROP_HAIR_MARGIN_FACTOR = 0.32
+_HEAD_CROP_SIDE_MARGIN_FACTOR = 0.06
+_MOUTH_CROP_PAD_X_FACTOR = 0.25
+_MOUTH_CROP_PAD_Y_FACTOR = 0.6
+
+
+def _compute_crop_regions(
+    face_oval_px: list[Point], outer_lips_px: list[Point], face_height: float, width: int, height: int, pixels
+) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float], tuple[int, int, int]]:
+    """Returns (head_crop_box, mouth_crop_box, background_rgb) in raw pixel
+    coordinates of the image just analyzed. head_crop_box is a SQUARE box
+    (so resizing it into the atlas's square HEAD_RECT never distorts
+    proportions), extended upward/outward from face_oval's own bbox to
+    include hair, then clamped to the image's own bounds by SHIFTING (not
+    shrinking) it -- shrinking would distort the square-ness this atlas
+    layout depends on."""
+    fx0 = min(p[0] for p in face_oval_px)
+    fy0 = min(p[1] for p in face_oval_px)
+    fx1 = max(p[0] for p in face_oval_px)
+    fy1 = max(p[1] for p in face_oval_px)
+
+    hair_margin = face_height * _HEAD_CROP_HAIR_MARGIN_FACTOR
+    side_margin = (fx1 - fx0) * _HEAD_CROP_SIDE_MARGIN_FACTOR
+    fy0_with_hair = fy0 - hair_margin
+    fx0e, fx1e = fx0 - side_margin, fx1 + side_margin
+
+    box_w, box_h = fx1e - fx0e, fy1 - fy0_with_hair
+    side = max(box_w, box_h) * 1.02
+    cx, cy = (fx0e + fx1e) / 2, (fy0_with_hair + fy1) / 2
+    bx0, by0, bx1, by1 = cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2
+
+    if bx0 < 0:
+        bx1 -= bx0
+        bx0 = 0
+    if by0 < 0:
+        by1 -= by0
+        by0 = 0
+    if bx1 > width:
+        bx0 -= bx1 - width
+        bx1 = width
+    if by1 > height:
+        by0 -= by1 - height
+        by1 = height
+    head_box = (max(0.0, bx0), max(0.0, by0), bx1, by1)
+
+    lx0 = min(p[0] for p in outer_lips_px)
+    ly0 = min(p[1] for p in outer_lips_px)
+    lx1 = max(p[0] for p in outer_lips_px)
+    ly1 = max(p[1] for p in outer_lips_px)
+    pad_x, pad_y = (lx1 - lx0) * _MOUTH_CROP_PAD_X_FACTOR, (ly1 - ly0) * _MOUTH_CROP_PAD_Y_FACTOR
+    mouth_box = (lx0 - pad_x, ly0 - pad_y, lx1 + pad_x, ly1 + pad_y)
+
+    # Sampled near the image's own corner -- reliably background, never
+    # face/hair, for a portrait-framed photo. A rough heuristic (same
+    # "informal, no similarity metric" posture as this file's other color
+    # sampling), not a real segmentation model.
+    background_rgb = pixels[5, 5]
+
+    return head_box, mouth_box, background_rgb
 
 
 def _trace(connections) -> list[int]:
@@ -397,6 +475,7 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             return (px - origin[0]) / scale, (py - origin[1]) / scale
 
         groups = _face_landmark_groups()
+        face_oval_raw = [point(i) for i in groups["face_oval"]]
         face_oval = [normalize(i) for i in groups["face_oval"]]
         left_eye = [normalize(i) for i in groups["left_eye"]]
         right_eye = [normalize(i) for i in groups["right_eye"]]
@@ -417,6 +496,10 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
         nose_center_raw = (sum(p[0] for p in nose_raw) / len(nose_raw), sum(p[1] for p in nose_raw) / len(nose_raw))
         nose_center = ((nose_center_raw[0] - origin[0]) / scale, (nose_center_raw[1] - origin[1]) / scale)
 
+        head_crop_box, mouth_crop_box, background_rgb = _compute_crop_regions(
+            face_oval_raw, outer_lips_raw, face_height, width, height, pixels
+        )
+
         result_palette = FacePalette(
             skin_tone=skin_tone,
             hair_tone=hair_tone,
@@ -432,6 +515,9 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             mouth_width_scale=max(0.7, min(1.4, mouth_width_scale)),
             nose_width_scale=max(0.7, min(1.4, nose_width_scale)),
             nose_center=nose_center,
+            head_crop_box=head_crop_box,
+            mouth_crop_box=mouth_crop_box,
+            background_rgb=background_rgb,
         )
 
         # TEMPORARY diagnostic -- the rendered output doesn't match what

@@ -71,16 +71,19 @@ class Settings(BaseSettings):
     # tier) -- still a hard ceiling per CLAUDE.md's abuse-rate-limiting
     # scope, not billing.
     matting_daily_cap: int = 20
-    # No external vendor cost at all (Pillow atlas compositing, see
-    # avatar_gen/service.py) -- purely an abuse guard, not a budget guard, so
-    # this can afford to be more generous than matting_daily_cap above.
+    # Real external cost now (fal.ai cartoonify, ~10 cents/image -- see
+    # cartoonify_cost_cents_per_image below), unlike this feature's original
+    # zero-cost pure-Pillow version -- still an abuse guard first and a
+    # budget guard second, same posture as matting_daily_cap, but no longer
+    # able to be quite as generous as when this really did cost nothing.
     avatar_generate_daily_cap: int = 10
 
-    # The standalone face-analysis/ Cloud Run (GPU) service -- moved out of
-    # this backend because Render's native Python runtime can't load
-    # mediapipe's compiled bindings (missing libGLESv2.so.2, no apt/root
-    # access to install it; see [[project_avatar_phase6_photo_gen]] and
-    # avatar_gen/photo_analysis.py's own doc comment). Left blank,
+    # The standalone face-analysis/ Cloud Run service -- moved out of this
+    # backend because Render's native Python runtime can't load mediapipe's
+    # compiled bindings (missing libGLESv2.so.2/libEGL.so.1, no apt/root
+    # access to install them; see [[project_avatar_phase6_photo_gen]] and
+    # avatar_gen/photo_analysis.py's own doc comment). CPU-only (started as
+    # GPU, dropped after a Cloud Run GPU-quota wall). Left blank,
     # analyze_photo fails closed to a generic-toned avatar rather than
     # erroring the whole generation -- same fail-open-on-the-*feature*,
     # never-fail-open-on-*security* posture as this file's other optional
@@ -104,6 +107,11 @@ class Settings(BaseSettings):
     # per-image price -- this is a rough placeholder flat estimate (a
     # typical single-image inference), not a real per-request measurement.
     rembg_cost_cents_per_image: float = 0.15
+    # fal-ai/image-editing/cartoonify's own published flat per-image rate
+    # (avatar_gen/cartoonify_provider.py) -- an ACTUAL cost, unlike the
+    # $0-cost placeholder this feature carried before it called any external
+    # vendor; see avatar_generate_daily_cap's own updated comment.
+    cartoonify_cost_cents_per_image: float = 10.0
     tts_cost_cents_per_second: float = 0.0  # edge-tts is free
     deepseek_cost_cents_per_1k_tokens: float = 0.14
     anthropic_cost_cents_per_1k_input_tokens: float = 0.3

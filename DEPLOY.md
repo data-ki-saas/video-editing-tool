@@ -266,25 +266,27 @@ the next push that touches `supabase/migrations/`.
    | `SOCIAL_OAUTH_STATE_SECRET` | required for the YouTube/Meta posting features | Self-generated: `openssl rand -hex 32` — shared across every social provider's connect flow |
    | `FRONTEND_PUBLIC_URL` | required for the YouTube/Meta posting features | This app's own production frontend URL — same value as the frontend's own `SITE_URL` (step 6) — lets the OAuth callback redirect the browser back to `/settings` once a platform is connected |
    | `BACKEND_PUBLIC_URL` | required for video background removal and the YouTube/Meta posting features | this same backend's own Render URL, e.g. `https://<your-backend>.onrender.com` (no trailing slash) -- lets it hand fal.ai/Google/Meta a callback/redirect URL pointing back at itself |
-   | `FAL_API_KEY` | required for the background-removal feature (video AND photo cutaways) | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) — pay-per-use, calls both VEED's video background removal model and fal-ai/imageutils/rembg (photos) |
+   | `FAL_API_KEY` | required for the background-removal feature (video AND photo cutaways) AND the "Generate from photo" avatar feature | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) — pay-per-use, calls VEED's video background removal, fal-ai/imageutils/rembg (photos), and fal-ai/image-editing/cartoonify (avatar photo generation) |
    | `FAL_WEBHOOK_SECRET` | required for VIDEO cutaway background removal only | any long random string you generate — appended as a query param on the callback URL handed to fal, and checked against fal's own signed-webhook headers when present; see `matting/providers/fal_veed_provider.py`'s own comment. A photo cutaway's own job is synchronous (no webhook), so this isn't needed for that path |
    | `MATTING_DAILY_CAP` | optional | `20` — real cost is a few cents/clip |
-   | `AVATAR_GENERATE_DAILY_CAP` | optional | `10` — no LLM cost, but the face-analysis call below does have real (small) Cloud Run GPU cost, so this is still worth keeping as an abuse guard |
+   | `AVATAR_GENERATE_DAILY_CAP` | optional | `10` — real cost now (fal.ai cartoonify, ~$0.10/image, only charged when a face was actually detected -- see below), so this is a budget guard as well as an abuse guard |
    | `FACE_ANALYSIS_SERVICE_URL` | required for the "Generate from photo" avatar feature | `<YOUR_FACE_ANALYSIS_CLOUD_RUN_URL>` (no trailing slash) — see step 4a below |
    | `FACE_ANALYSIS_SERVICE_SECRET` | required for the "Generate from photo" avatar feature | Self-generated: `openssl rand -hex 32` — must exactly match the same-named env var set on the Cloud Run service in step 4a |
 
    The "Generate from photo" avatar feature (`backend/src/avatar_gen/`) calls
    out to a separate `face-analysis/` service (step 4a below) over HTTPS
    rather than running mediapipe in-process here -- Render's native Python
-   runtime has no apt/root access to install the Mesa/GLES system libraries
-   mediapipe's compiled bindings need (`OSError: libGLESv2.so.2: cannot open
-   shared object file`), which silently made every photo analysis on Render
-   fail closed to a generic (non-personalized) default. Left unconfigured,
-   this feature still "succeeds" but every generated avatar is that same
-   generic default -- see `photo_analysis.py`'s own comment. A face-analysis
-   call failure of any kind (unreachable service, timeout, bad secret) also
-   degrades gracefully to the default palette rather than failing the
-   request.
+   runtime has no apt/root access to install the Mesa/GLES/EGL system
+   libraries mediapipe's compiled bindings need, which silently made every
+   photo analysis on Render fail closed to a generic (non-personalized)
+   default. It's called TWICE per generation: once on the original upload
+   (a free, local face-detection gate -- no external spend happens unless
+   this finds a clear face) and, only if that succeeds, once again on the
+   fal.ai-cartoonified result (to get real pixel crop coordinates for the
+   head/mouth). A face-analysis call failure of any kind (unreachable
+   service, timeout, bad secret) or a fal.ai failure both degrade gracefully
+   to the free parametric-drawing fallback rather than failing the request
+   -- see `photo_analysis.py`'s and `service.py`'s own comments.
 
    The background-removal feature (cutting a cutaway's subject out to
    composite over a new backdrop, via fal.ai/VEED for video, fal.ai/rembg

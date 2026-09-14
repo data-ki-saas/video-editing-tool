@@ -26,6 +26,7 @@ _TIMEOUT_SECONDS = 20.0
 FaceShape = Literal["oval", "round", "wide"]
 HairLength = Literal["bald", "short", "medium", "long"]
 Point = tuple[float, float]
+Box = tuple[float, float, float, float]
 
 
 @dataclass
@@ -44,6 +45,13 @@ class FacePalette:
     mouth_width_scale: float = 1.0
     nose_width_scale: float = 1.0
     nose_center: Point = (0.0, 0.0)
+    # Raw pixel-space crop boxes for the exact image bytes just analyzed --
+    # used by the fal.ai-cartoonify photo-avatar path (avatar_gen/service.py)
+    # to crop the head/mouth directly out of real image bytes, not draw them.
+    # None whenever detected=False.
+    head_crop_box: Box | None = None
+    mouth_crop_box: Box | None = None
+    background_rgb: tuple[int, int, int] | None = None
 
 
 _DEFAULT_SKIN_TONE = "#e8b48c"
@@ -68,23 +76,6 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
         )
         response.raise_for_status()
         body = response.json()
-        # TEMPORARY diagnostic -- a real-photo test rendered with invisible
-        # eyes/nose and no obvious bug found by code review; logs the wire
-        # response's actual shape so it's visible in Render's own logs
-        # (mirrors a similar log on the face-analysis/ side of this same
-        # call). Remove once the eyes/nose rendering is confirmed fixed.
-        logger.info(
-            "face-analysis response: detected=%s face_oval_n=%d left_eye_n=%d right_eye_n=%d "
-            "left_eyebrow_n=%d mouth_width_scale=%s nose_width_scale=%s nose_center=%s",
-            body.get("detected"),
-            len(body.get("face_oval") or []),
-            len(body.get("left_eye") or []),
-            len(body.get("right_eye") or []),
-            len(body.get("left_eyebrow") or []),
-            body.get("mouth_width_scale"),
-            body.get("nose_width_scale"),
-            body.get("nose_center"),
-        )
         return FacePalette(
             skin_tone=body["skin_tone"],
             hair_tone=body["hair_tone"],
@@ -100,6 +91,9 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             mouth_width_scale=body["mouth_width_scale"],
             nose_width_scale=body["nose_width_scale"],
             nose_center=tuple(body["nose_center"]),
+            head_crop_box=tuple(body["head_crop_box"]) if body.get("head_crop_box") else None,
+            mouth_crop_box=tuple(body["mouth_crop_box"]) if body.get("mouth_crop_box") else None,
+            background_rgb=tuple(body["background_rgb"]) if body.get("background_rgb") else None,
         )
     except Exception:
         logger.exception("face-analysis service call failed; falling back to default proportions")

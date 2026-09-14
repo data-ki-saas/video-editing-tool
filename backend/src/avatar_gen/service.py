@@ -3,11 +3,13 @@ import tempfile
 import uuid
 from pathlib import Path
 
+import httpx
 from fastapi import HTTPException
 
 from src.avatar_gen import repository
-from src.avatar_gen.atlas_builder import _PANTS_COLOR, _SHIRT_COLOR, build_atlas_png
-from src.avatar_gen.photo_analysis import analyze_photo
+from src.avatar_gen.atlas_builder import _PANTS_COLOR, _SHIRT_COLOR, build_atlas_png, build_atlas_png_from_photo
+from src.avatar_gen.cartoonify_provider import cartoonify_image
+from src.avatar_gen.photo_analysis import FacePalette, analyze_photo
 from src.avatar_gen.schemas import GeneratedAvatarCreateResponse, GeneratedAvatarDetail, GeneratedAvatarSummary
 from src.core.auth import CurrentUser, bypasses_daily_caps
 from src.core.config import settings
@@ -75,6 +77,49 @@ def _resolve(record: repository.AvatarDesignRecord) -> GeneratedAvatarDetail:
     return GeneratedAvatarDetail(id=record.id, name=record.name, skin=skin, design=design, created_at=record.created_at)
 
 
+async def _cartoonify_and_crop(*, user_id: str, photo_bytes: bytes, original_palette: FacePalette) -> tuple[bytes, dict[str, dict]] | None:
+    """The fal.ai path: stage the real photo in R2 (fal needs a fetchable
+    URL, not raw bytes -- same reason matting/service.py presigns a URL
+    before calling fal's rembg), cartoonify it, then re-run face analysis on
+    the CARTOONIFIED result (not the original) since the crop boxes must be
+    in that image's own pixel coordinates. Returns None on ANY failure so the
+    caller falls back to the free parametric-drawing path rather than
+    failing the whole generation over a flaky external call -- same
+    posture every other optional integration in this codebase takes.
+    Only ever called after `original_palette.detected` is already True
+    (see generate_avatar_from_photo) -- this is what gates the real fal.ai
+    spend on "we know there's a clear face", per this feature's own design."""
+    temp_key = f"avatars-tmp/{user_id}/{uuid.uuid4().hex}.jpg"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+        tmp.write(photo_bytes)
+        tmp_path = Path(tmp.name)
+    try:
+        r2_client.upload_file(tmp_path, temp_key, "image/jpeg")
+        source_url = r2_client.presigned_get_url(temp_key)
+
+        cartoon_url = await cartoonify_image(image_url=source_url)
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.get(cartoon_url)
+        response.raise_for_status()
+        cartoon_bytes = response.content
+
+        cartoon_palette = analyze_photo(cartoon_bytes)
+        if not cartoon_palette.detected:
+            logger.warning("fal.ai cartoonify output had no detectable face for user=%s; falling back", user_id)
+            return None
+
+        return build_atlas_png_from_photo(cartoon_bytes, cartoon_palette)
+    except Exception:
+        logger.exception("fal.ai cartoonify path failed for user=%s; falling back to parametric drawing", user_id)
+        return None
+    finally:
+        tmp_path.unlink(missing_ok=True)
+        try:
+            r2_client.delete_object(temp_key)
+        except Exception:
+            logger.exception("failed to clean up temp cartoonify source %r", temp_key)
+
+
 async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, file_content_type: str | None, photo_bytes: bytes) -> GeneratedAvatarCreateResponse:
     if file_content_type not in _ALLOWED_PHOTO_TYPES:
         raise HTTPException(status_code=400, detail="Only .jpg/.png photos are supported")
@@ -103,7 +148,17 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
             )
 
     palette = analyze_photo(photo_bytes)
-    atlas_png, part_rects = build_atlas_png(palette)
+
+    # Only spend on fal.ai once we already know there's a clear face -- a
+    # photo with none would just waste the call. detected=False keeps the
+    # existing free, zero-cost parametric-drawing fallback exactly as before.
+    used_fal = False
+    fal_result = await _cartoonify_and_crop(user_id=user.id, photo_bytes=photo_bytes, original_palette=palette) if palette.detected else None
+    if fal_result is not None:
+        atlas_png, part_rects = fal_result
+        used_fal = True
+    else:
+        atlas_png, part_rects = build_atlas_png(palette)
 
     design_id = f"gen-{uuid.uuid4().hex}"
     atlas_key = f"avatars/{user.id}/{design_id}/atlas.png"
@@ -149,16 +204,17 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
         raise HTTPException(status_code=502, detail="Couldn't save the generated avatar -- try again") from exc
 
     repository.record_generate_event(user.id)
-    # No external vendor call, so zero cost -- this event exists purely for
-    # the usage dashboard's own visibility into feature use, not billing (per
-    # this project's no-billing-during-POC convention).
+    # Real external cost when the fal.ai path actually ran (see
+    # cartoonify_cost_cents_per_image's own comment); the parametric fallback
+    # is still genuinely free, so cost_estimate_cents reflects which path
+    # this specific generation actually took, not a flat guess either way.
     metering_repository.record_event(
         user_id=user.id,
         event_type="avatar_generate",
-        provider="local",
+        provider="fal_ai" if used_fal else "local",
         quantity=1,
         unit="images",
-        cost_estimate_cents=0,
+        cost_estimate_cents=settings.cartoonify_cost_cents_per_image if used_fal else 0,
     )
 
     detail = _resolve(record)

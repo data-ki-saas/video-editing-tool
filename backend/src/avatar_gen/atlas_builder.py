@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from src.avatar_gen.photo_analysis import FacePalette, FaceShape, HairLength, Point
 
@@ -278,6 +278,93 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
     )
     _draw_mouth_closed(draw, MOUTH_CLOSED_RECT, palette.mouth_width_scale)
     _draw_mouth_open(draw, MOUTH_OPEN_RECT, palette.mouth_width_scale)
+    _rounded_rect(draw, TORSO_RECT, inset=6, radius=14, fill=_SHIRT_COLOR)
+    _rounded_rect(draw, ARM_L_RECT, inset=4, radius=14, fill=palette.skin_tone)
+    _rounded_rect(draw, ARM_R_RECT, inset=4, radius=14, fill=palette.skin_tone)
+    _rounded_rect(draw, LEG_L_RECT, inset=4, radius=17, fill=_PANTS_COLOR)
+    _rounded_rect(draw, LEG_R_RECT, inset=4, radius=17, fill=_PANTS_COLOR)
+
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+
+    part_rects = {
+        "head": HEAD_RECT,
+        "mouth": MOUTH_CLOSED_RECT,
+        "closed": MOUTH_CLOSED_RECT,
+        "open": MOUTH_OPEN_RECT,
+        "torso": TORSO_RECT,
+        "armL": ARM_L_RECT,
+        "armR": ARM_R_RECT,
+        "legL": LEG_L_RECT,
+        "legR": LEG_R_RECT,
+    }
+    return buffer.getvalue(), part_rects
+
+
+# How much taller the mouth-open crop is made vs. the real mouth-closed crop
+# -- there's no second "mouth open" photo to crop, so this synthesizes one by
+# vertically stretching the real crop. Not a real speech viseme, just enough
+# visible motion to read as "talking" -- same fidelity ceiling the drawn
+# mouth-swap already had (two fixed shapes, not per-phoneme lip shapes).
+_MOUTH_OPEN_STRETCH = 1.7
+
+
+def _background_removal_mask(image: Image.Image, background_rgb: tuple[int, int, int], threshold: int = 45) -> Image.Image:
+    """Cheap chroma-key: pixels close to `background_rgb` become transparent
+    (mask=0), everything else opaque (mask=255). `ImageChops.difference` +
+    `.convert('L')` is a luminance-weighted proxy for color distance, not a
+    true Euclidean one -- adequate for a fairly uniform background (this
+    project's existing "informal heuristic, no real segmentation model"
+    posture, same as photo_analysis.py's own color-sampling code), and
+    avoids needing numpy in this venv (backend/ doesn't have it -- mediapipe/
+    numpy live only in face-analysis/ now, see that split's own history)."""
+    bg_solid = Image.new("RGB", image.size, background_rgb)
+    diff = ImageChops.difference(image.convert("RGB"), bg_solid).convert("L")
+    return diff.point(lambda v: 255 if v > threshold else 0)
+
+
+def build_atlas_png_from_photo(cartoon_image_bytes: bytes, palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
+    """The fal.ai-cartoonify path: crops the head and mouth directly out of
+    `cartoon_image_bytes` (a real, if AI-stylized, photo -- see
+    avatar_gen/cartoonify_provider.py) using `palette.head_crop_box`/
+    `mouth_crop_box`/`background_rgb` (raw pixel coordinates for THESE exact
+    bytes, computed by photo_analysis.py's `_compute_crop_regions` against
+    the SAME image), rather than drawing a parametric cartoon head the way
+    `build_atlas_png` above does. Requires `palette.detected` -- the caller
+    (avatar_gen/service.py) only reaches this function once a clear face was
+    already confirmed on the original upload, which is also what gates the
+    fal.ai spend in the first place.
+
+    The body (torso/arms/legs) is unchanged from `build_atlas_png` -- same
+    flat-drawn shapes, same colors. This is a KNOWN, accepted style seam (a
+    detailed/shaded cartoon face next to flat-colored primitive limbs) -- see
+    [[project_face_analysis_service]]'s notes on why this was tried and kept
+    anyway (the alternative, drawing the whole body too, is a separate,
+    larger investment not yet scoped)."""
+    assert palette.head_crop_box and palette.mouth_crop_box and palette.background_rgb, (
+        "build_atlas_png_from_photo requires a detected face's crop regions -- caller must gate on palette.detected"
+    )
+
+    cartoon_image = Image.open(BytesIO(cartoon_image_bytes)).convert("RGB")
+
+    head_crop = cartoon_image.crop(tuple(round(v) for v in palette.head_crop_box)).resize(
+        (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), Image.LANCZOS
+    )
+    oval_mask = Image.new("L", (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), 0)
+    ImageDraw.Draw(oval_mask).ellipse((0, 2, HEAD_RECT["sWidth"], HEAD_RECT["sHeight"] - 2), fill=255)
+    bg_mask = _background_removal_mask(head_crop, palette.background_rgb).filter(ImageFilter.GaussianBlur(1.0))
+    head_mask = ImageChops.multiply(oval_mask, bg_mask)
+
+    mouth_crop = cartoon_image.crop(tuple(round(v) for v in palette.mouth_crop_box))
+    mouth_closed = mouth_crop.resize((MOUTH_CLOSED_RECT["sWidth"], MOUTH_CLOSED_RECT["sHeight"]), Image.LANCZOS)
+    stretched = mouth_crop.resize((mouth_crop.width, round(mouth_crop.height * _MOUTH_OPEN_STRETCH)), Image.LANCZOS)
+    mouth_open = stretched.resize((MOUTH_OPEN_RECT["sWidth"], MOUTH_OPEN_RECT["sHeight"]), Image.LANCZOS)
+
+    image = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    image.paste(head_crop.convert("RGBA"), (HEAD_RECT["sx"], HEAD_RECT["sy"]), head_mask)
+    image.paste(mouth_closed.convert("RGBA"), (MOUTH_CLOSED_RECT["sx"], MOUTH_CLOSED_RECT["sy"]))
+    image.paste(mouth_open.convert("RGBA"), (MOUTH_OPEN_RECT["sx"], MOUTH_OPEN_RECT["sy"]))
     _rounded_rect(draw, TORSO_RECT, inset=6, radius=14, fill=_SHIRT_COLOR)
     _rounded_rect(draw, ARM_L_RECT, inset=4, radius=14, fill=palette.skin_tone)
     _rounded_rect(draw, ARM_R_RECT, inset=4, radius=14, fill=palette.skin_tone)

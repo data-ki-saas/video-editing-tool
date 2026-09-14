@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="face-analysis")
 
+_Box = tuple[float, float, float, float]
+
 
 class FacePaletteResponse(BaseModel):
     skin_tone: str
@@ -28,6 +30,9 @@ class FacePaletteResponse(BaseModel):
     mouth_width_scale: float
     nose_width_scale: float
     nose_center: Point
+    head_crop_box: _Box | None
+    mouth_crop_box: _Box | None
+    background_rgb: tuple[int, int, int] | None
 
 
 def _require_internal_secret(x_internal_secret: str = Header(default="")) -> None:
@@ -60,4 +65,7 @@ async def analyze(file: UploadFile = File(...)) -> FacePaletteResponse:
         mouth_width_scale=palette.mouth_width_scale,
         nose_width_scale=palette.nose_width_scale,
         nose_center=palette.nose_center,
+        head_crop_box=palette.head_crop_box,
+        mouth_crop_box=palette.mouth_crop_box,
+        background_rgb=palette.background_rgb,
     )
