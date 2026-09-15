@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat
 
 from src.avatar_gen.photo_analysis import FacePalette, FaceShape, HairLength, Point
 
@@ -97,6 +97,19 @@ def _darken(hex_color: str, amount: float) -> str:
     r, g, b = int(hex_color[1:3], 16), int(hex_color[3:5], 16), int(hex_color[5:7], 16)
     r, g, b = (max(0, round(c * (1 - amount))) for c in (r, g, b))
     return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _average_color(image: Image.Image, box: tuple[float, float, float, float]) -> tuple[int, int, int]:
+    """Mean RGB over a region -- used to sample a real photo's own lip color
+    so a synthesized mouth-gap can match that specific avatar instead of one
+    fixed constant. Falls back to `_MOUTH_COLOR`'s own RGB if the box is
+    degenerate (shouldn't happen against this module's fixed rect sizes, but
+    cheaper to guard than to assume)."""
+    region = image.convert("RGB").crop(tuple(round(v) for v in box))
+    if region.width == 0 or region.height == 0:
+        return (0x7A, 0x2F, 0x2F)
+    r, g, b = ImageStat.Stat(region).mean[:3]
+    return (round(r), round(g), round(b))
 
 
 def _box(rect: dict) -> tuple[float, float, float, float]:
@@ -446,10 +459,17 @@ def build_atlas_png_from_photo(cartoon_image_bytes: bytes, palette: FacePalette)
     # on BOTH copies, at the SAME two sizes _draw_mouth_closed/_draw_mouth_open
     # use on the parametric (non-photo) path below -- a solid_half_h of 3px vs
     # 9px is what actually makes "closed" and "open" differ, not which one
-    # happens to have a decal. `_darken(_MOUTH_COLOR, ...)` for contrast that
-    # doesn't depend on the source photo/cartoon's own coloring either.
-    gap_color = _darken(_MOUTH_COLOR, 0.5)
+    # happens to have a decal.
+    #
+    # `gap_color` is sampled from THIS avatar's own real lip pixels (the same
+    # cx-15..cx+15 band the closed-mouth ellipse below draws over), darkened
+    # for contrast -- not the fixed `_MOUTH_COLOR` constant the parametric
+    # path uses, which read as an odd, mismatched color against some skin/lip
+    # tones since it never varied per photo. Sampled from `mouth_base` (the
+    # untouched photo crop) before either copy below gets a gap drawn onto it.
     cx, cy = mouth_base.width / 2, mouth_base.height * 0.55
+    sampled_lip_rgb = _average_color(mouth_base, (cx - 15, cy - 4, cx + 15, cy + 4))
+    gap_color = _darken("#{:02x}{:02x}{:02x}".format(*sampled_lip_rgb), 0.5)
 
     mouth_closed = mouth_base.copy()
     ImageDraw.Draw(mouth_closed).ellipse((cx - 15, cy - 3, cx + 15, cy + 3), fill=gap_color)
