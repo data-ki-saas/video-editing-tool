@@ -301,14 +301,6 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
     return buffer.getvalue(), part_rects
 
 
-# How much taller the mouth-open crop is made vs. the real mouth-closed crop
-# -- there's no second "mouth open" photo to crop, so this synthesizes one by
-# vertically stretching the real crop. Not a real speech viseme, just enough
-# visible motion to read as "talking" -- same fidelity ceiling the drawn
-# mouth-swap already had (two fixed shapes, not per-phoneme lip shapes).
-_MOUTH_OPEN_STRETCH = 1.7
-
-
 def _background_removal_mask(image: Image.Image, background_rgb: tuple[int, int, int], threshold: int = 45) -> Image.Image:
     """Cheap chroma-key: pixels close to `background_rgb` become transparent
     (mask=0), everything else opaque (mask=255). `ImageChops.difference` +
@@ -356,9 +348,32 @@ def build_atlas_png_from_photo(cartoon_image_bytes: bytes, palette: FacePalette)
     head_mask = ImageChops.multiply(oval_mask, bg_mask)
 
     mouth_crop = cartoon_image.crop(tuple(round(v) for v in palette.mouth_crop_box))
-    mouth_closed = mouth_crop.resize((MOUTH_CLOSED_RECT["sWidth"], MOUTH_CLOSED_RECT["sHeight"]), Image.LANCZOS)
-    stretched = mouth_crop.resize((mouth_crop.width, round(mouth_crop.height * _MOUTH_OPEN_STRETCH)), Image.LANCZOS)
-    mouth_open = stretched.resize((MOUTH_OPEN_RECT["sWidth"], MOUTH_OPEN_RECT["sHeight"]), Image.LANCZOS)
+    mouth_closed = mouth_crop.resize((MOUTH_CLOSED_RECT["sWidth"], MOUTH_CLOSED_RECT["sHeight"]), Image.LANCZOS).convert("RGBA")
+    # A single photo of a closed mouth has no actual gap/interior to reveal --
+    # geometrically warping it (the previous approach: stretch then resize
+    # back down) either cancels itself out (the original bug: "open" and
+    # "closed" rendered pixel-near-identical) or, once that's fixed, just
+    # shows a distorted closed-lip line, which still doesn't read as "open".
+    # Instead, draw a dark mouth-interior gap directly on top of the real
+    # photo crop -- same "accept a drawn detail on an otherwise-photoreal
+    # face" precedent this function already uses for the flat-drawn body.
+    mouth_open = mouth_closed.copy()
+    gap_draw = ImageDraw.Draw(mouth_open)
+    w, h = mouth_open.size
+    gap_half_w = w * 0.30
+    gap_cy = h * 0.55
+    gap_half_h = h * 0.24
+    # Solid fill, no alpha -- image.paste() below has no mask argument, so a
+    # partial-alpha fill here wouldn't blend with the photo underneath (paste
+    # without a mask overwrites raw pixel values, it doesn't composite); a
+    # translucent-looking result would just be a lower alpha baked into the
+    # atlas texture itself, read back as partial transparency at render time.
+    # Reuses _MOUTH_COLOR so the drawn gap ties into the same mouth-interior
+    # color the parametric (non-photo) path already draws.
+    gap_draw.ellipse(
+        (w / 2 - gap_half_w, gap_cy - gap_half_h, w / 2 + gap_half_w, gap_cy + gap_half_h),
+        fill=_MOUTH_COLOR,
+    )
 
     image = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)

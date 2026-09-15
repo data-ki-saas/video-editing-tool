@@ -152,6 +152,15 @@ function clamp01(value: number): number {
   return Math.min(Math.max(value, 0), 1);
 }
 
+/** `m:ss` for the fullscreen scrub bar's own time labels -- reels are always
+ * well under an hour, so no hour component to worry about. */
+function formatTimecode(seconds: number): string {
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
 /**
  * Which action + mouth shape an avatar clip should render at THIS instant.
  *
@@ -789,6 +798,14 @@ export const CanvasPlayer = forwardRef<
   // along with the rest of the editor chrome.
   const playerRootRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Mirrors the playback clock into React state so a scrub bar can render a
+  // moving marker -- unlike `onTimeUpdate` (a plain callback prop, cheap to
+  // fire every RAF tick even when the parent ignores it), turning this into
+  // state means every tick also re-renders THIS component. Only meant to
+  // drive the fullscreen scrub bar below (see the FrameStrip timeline this
+  // duplicates the idea of, which lives outside this component and so isn't
+  // reachable once fullscreen hides the rest of the editor chrome).
+  const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
 
   /** The real user-authored `trimRanges` PLUS a synthetic "skip" range for
    * every cut-transition boundary (see video_math.ts's own module comment
@@ -802,6 +819,16 @@ export const CanvasPlayer = forwardRef<
    * state, and this list is tiny. */
   function getEffectiveSkipRanges(): TrimRange[] {
     return [...trimRanges, ...buildVirtualCutTransitionSkipRanges(loadedClipsRef.current, cutTransitionById)];
+  }
+
+  /** The one place that reports the playback clock moving -- calls the
+   * `onTimeUpdate` prop (for FrameStrip's own playhead, unaffected) and
+   * mirrors the same value into `currentTimeSeconds` state (for this file's
+   * own fullscreen scrub bar). Replaces every direct `onTimeUpdate?.(...)`
+   * call so the two never drift apart. */
+  function reportTime(seconds: number) {
+    onTimeUpdate?.(seconds);
+    setCurrentTimeSeconds(seconds);
   }
 
   function ensureAudioContext(): AudioContext {
@@ -1714,7 +1741,7 @@ export const CanvasPlayer = forwardRef<
           return;
         }
         drawFrameAt(durationRef.current);
-        onTimeUpdate?.(durationRef.current);
+        reportTime(durationRef.current);
         pausedAtSecondsRef.current = 0;
         setIsPlaying(false);
         return;
@@ -1730,14 +1757,14 @@ export const CanvasPlayer = forwardRef<
         return;
       }
       drawFrameAt(durationRef.current);
-      onTimeUpdate?.(durationRef.current);
+      reportTime(durationRef.current);
       stopPlaybackLoop();
       pausedAtSecondsRef.current = 0;
       setIsPlaying(false);
       return;
     }
     drawFrameAt(elapsed);
-    onTimeUpdate?.(elapsed);
+    reportTime(elapsed);
     animationFrameIdRef.current = requestAnimationFrame(tick);
   }
 
@@ -2033,7 +2060,7 @@ export const CanvasPlayer = forwardRef<
     }
     stopPlaybackLoop();
     setIsPlaying(false);
-    onTimeUpdate?.(pausedAtSecondsRef.current);
+    reportTime(pausedAtSecondsRef.current);
   }
 
   function handlePlayPause() {
@@ -2083,22 +2110,29 @@ export const CanvasPlayer = forwardRef<
     }
   }
 
+  /** Jumps playback to `seconds` -- shared by the imperative `seekTo` handle
+   * (FrameStrip's own timeline, outside this component) and the fullscreen
+   * scrub bar below (this component's own timeline, for when FrameStrip
+   * isn't reachable). Identical either way: same clamping, same mid-cut
+   * skip-forward, same "keep playing" vs "redraw the paused frame" branch. */
+  function seekToOffset(seconds: number) {
+    if (!isReady) return;
+    const clamped = Math.min(Math.max(seconds, 0), durationRef.current);
+    if (isPlaying) {
+      stopPlaybackLoop();
+      resumePlaybackFrom(clamped);
+    } else {
+      // resumePlaybackFrom already skips past a cut internally -- this
+      // branch doesn't call it, so it needs the same skip itself.
+      const adjusted = Math.min(skipTrimmedRanges(getEffectiveSkipRanges(), clamped), durationRef.current);
+      pausedAtSecondsRef.current = adjusted;
+      drawFrameAt(adjusted);
+      reportTime(adjusted);
+    }
+  }
+
   useImperativeHandle(ref, () => ({
-    seekTo(seconds: number) {
-      if (!isReady) return;
-      const clamped = Math.min(Math.max(seconds, 0), durationRef.current);
-      if (isPlaying) {
-        stopPlaybackLoop();
-        resumePlaybackFrom(clamped);
-      } else {
-        // resumePlaybackFrom already skips past a cut internally -- this
-        // branch doesn't call it, so it needs the same skip itself.
-        const adjusted = Math.min(skipTrimmedRanges(getEffectiveSkipRanges(), clamped), durationRef.current);
-        pausedAtSecondsRef.current = adjusted;
-        drawFrameAt(adjusted);
-        onTimeUpdate?.(adjusted);
-      }
-    },
+    seekTo: seekToOffset,
     captureFrame() {
       if (!isReady || !canvasRef.current) return Promise.resolve(null);
       const canvas = canvasRef.current;
@@ -2132,7 +2166,7 @@ export const CanvasPlayer = forwardRef<
     loadedClipsRef.current = [];
     audioBufferRef.current = null;
     pausedAtSecondsRef.current = 0;
-    onTimeUpdate?.(0);
+    reportTime(0);
 
     async function load() {
       if (clips.length === 0) return;
@@ -3010,6 +3044,35 @@ export const CanvasPlayer = forwardRef<
           </button>
         )}
       </div>
+
+      {/* Fullscreen-only scrub bar -- FrameStrip (the editor's own timeline,
+          with its own draggable playhead) lives outside this component's
+          DOM subtree, so once fullscreen hides the rest of the editor chrome
+          it's unreachable; without this there's no way to jump forward/back
+          while reviewing full-window. A native range input, not a bespoke
+          drag handle: same "drag a dot along a line" directness the rest of
+          the editor favors (see this repo's own driving-vision notes), and
+          it comes with touch/keyboard scrubbing for free. */}
+      {isFullscreen && isReady && durationRef.current > 0 && (
+        <div className="flex w-full shrink-0 flex-row items-center gap-2 px-1">
+          <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-white/70">
+            {formatTimecode(currentTimeSeconds)}
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={durationRef.current}
+            step={0.01}
+            value={Math.min(currentTimeSeconds, durationRef.current)}
+            onChange={(event) => seekToOffset(Number(event.target.value))}
+            aria-label="Seek"
+            className="h-1.5 flex-1 cursor-pointer accent-accent"
+          />
+          <span className="w-9 shrink-0 text-[11px] tabular-nums text-white/70">
+            {formatTimecode(durationRef.current)}
+          </span>
+        </div>
+      )}
 
       {/* Icon-only, transparent background -- reads as video-player
           controls rather than generic form buttons -- below the video
