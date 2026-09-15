@@ -498,6 +498,23 @@ export async function renameGeneratedAvatar(avatarId: string, name: string): Pro
   return toGeneratedAvatarDetail(await handleResponse<GeneratedAvatarDetailWire>(response));
 }
 
+/** POST /api/avatar/generated/{id}/duplicate -- saves a copy of one of this
+ * user's own avatars as a brand-new library entry, with `overrides` (if any)
+ * baked permanently into the copy instead of only ever living on one clip's
+ * AvatarOverlayClip.designOverrides. This is what lets a "Customize with AI"
+ * edit made inside one reel survive that reel being deleted later. */
+export async function duplicateGeneratedAvatar(
+  avatarId: string,
+  options?: { name?: string; overrides?: unknown }
+): Promise<GeneratedAvatarDetail> {
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/generated/${encodeURIComponent(avatarId)}/duplicate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ name: options?.name, overrides: options?.overrides }),
+  });
+  return toGeneratedAvatarDetail(await handleResponse<GeneratedAvatarDetailWire>(response));
+}
+
 export async function deleteGeneratedAvatar(avatarId: string): Promise<void> {
   const response = await apiFetch(`${API_BASE_URL}/api/avatar/generated/${encodeURIComponent(avatarId)}`, {
     method: "DELETE",

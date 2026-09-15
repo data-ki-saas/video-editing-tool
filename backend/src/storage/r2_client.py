@@ -54,6 +54,19 @@ def delete_object(key: str) -> None:
     get_r2_client().delete_object(Bucket=settings.r2_bucket_name, Key=key)
 
 
+def copy_object(source_key: str, dest_key: str) -> None:
+    """Server-side copy within the private uploads bucket -- used by
+    avatar_gen/service.py's duplicate_generated_avatar to give a saved
+    customization its own atlas object, so it isn't left sharing one R2 key
+    with the avatar it was copied from (each avatar_designs row is expected
+    to own its atlas_key exclusively, see delete_generated_avatar)."""
+    get_r2_client().copy_object(
+        Bucket=settings.r2_bucket_name,
+        CopySource={"Bucket": settings.r2_bucket_name, "Key": source_key},
+        Key=dest_key,
+    )
+
+
 def delete_render_object(project_id: str, render_id: str) -> None:
     """Matches the key format worker/src/server.js's transferRenderToR2 wrote
     it under -- see that function's own `key` line. Only called once a

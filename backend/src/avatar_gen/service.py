@@ -271,6 +271,65 @@ def rename_generated_avatar(design_id: str, user: CurrentUser, name: str) -> Gen
     return _resolve(renamed)
 
 
+_OVERRIDE_FIELDS = ("boneScaleOverrides", "colorSlotOverrides", "attachedAccessories", "expressionBias", "garmentId")
+
+
+def _has_any_override(overrides: dict | None) -> bool:
+    """Mirrors design.ts's hasAnyDesignOverride -- an overrides object with
+    every field empty/absent is treated as "nothing to bake in"."""
+    if not overrides:
+        return False
+    return any(overrides.get(field) for field in _OVERRIDE_FIELDS)
+
+
+def duplicate_generated_avatar(design_id: str, user: CurrentUser, name: str | None, overrides: dict | None) -> GeneratedAvatarDetail:
+    """Saves a copy of one of this user's own avatars as a brand-new library
+    entry, with `overrides` (if any) baked permanently into the copy's own
+    `design` row instead of only ever living on one clip's
+    AvatarOverlayClip.designOverrides. This is what lets a "Customize with AI"
+    edit made inside a single reel survive that reel being deleted -- without
+    it, the base gen-* avatar this was customized FROM would still be safe
+    (avatar_designs has no project_id at all), but the customization itself
+    was never persisted anywhere but that one project's timeline.
+
+    Always creates a NEW row/atlas object rather than mutating the source in
+    place: the same avatarId can be used, with different overrides, by clips
+    in several different projects, so baking overrides into the shared record
+    would leak one clip's customization into every other clip riding the same
+    base avatar."""
+    record = repository.get(design_id, user.id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Avatar not found")
+
+    new_design_id = f"gen-{uuid.uuid4().hex}"
+    new_atlas_key = f"avatars/{user.id}/{new_design_id}/atlas.png"
+    try:
+        r2_client.copy_object(record.atlas_key, new_atlas_key)
+    except Exception as exc:
+        logger.exception("avatar atlas copy failed for user=%s design=%s", user.id, design_id)
+        raise HTTPException(status_code=502, detail="Couldn't save this avatar -- try again") from exc
+
+    new_name = (name or "").strip() or f"{record.name} (customized)"
+    new_skin = {**record.skin, "skinId": new_design_id}
+    new_design = {**record.design, "designId": new_design_id, "skinId": new_design_id, "meta": {**record.design["meta"], "name": new_name}}
+    if _has_any_override(overrides):
+        for field in _OVERRIDE_FIELDS:
+            if overrides.get(field):
+                new_design[field] = overrides[field]
+
+    try:
+        new_record = repository.create(id=new_design_id, user_id=user.id, name=new_name, skin=new_skin, design=new_design, atlas_key=new_atlas_key)
+    except Exception as exc:
+        logger.exception("avatar design duplicate insert failed for user=%s design=%s", user.id, design_id)
+        try:
+            r2_client.delete_object(new_atlas_key)
+        except Exception:
+            logger.exception("failed to clean up orphaned avatar atlas copy %r", new_atlas_key)
+        raise HTTPException(status_code=502, detail="Couldn't save this avatar -- try again") from exc
+
+    return _resolve(new_record)
+
+
 def delete_generated_avatar(design_id: str, user: CurrentUser) -> None:
     record = repository.delete(design_id, user.id)
     if record is None:

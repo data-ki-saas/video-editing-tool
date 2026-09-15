@@ -25,6 +25,7 @@ import { SignOutButton } from "@/components/SignOutButton";
 import { ReelIcon } from "@/components/IconButton";
 import {
   AccountIcon,
+  AvatarsIcon,
   BookmarkIcon,
   DashboardIcon,
   LibraryIcon,
@@ -86,6 +87,7 @@ export function GlobalTopNav() {
   const navLinks: NavLink[] = [
     { key: "dashboard", href: "/dashboard", label: "Dashboard", icon: DashboardIcon },
     { key: "library", href: "/library", label: "Library", icon: LibraryIcon },
+    { key: "avatars", href: "/avatars", label: "Avatars", icon: AvatarsIcon },
     { key: "recordings", href: "/recordings", label: "Recordings", icon: RecordingsIcon },
     { key: "templates", href: "/library?tab=templates", label: "Templates", icon: BookmarkIcon },
     ...(isAdmin ? [{ key: "admin", href: "/admin", label: "Admin", icon: ToolsIcon }] : []),

@@ -17,7 +17,7 @@ import { useRouter } from "next/navigation";
 import { listProjects, type Project } from "@/lib/projects";
 import { SignOutButton } from "@/components/SignOutButton";
 import { ReelIcon } from "@/components/IconButton";
-import { AccountIcon, BookmarkIcon, LibraryIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
+import { AccountIcon, AvatarsIcon, BookmarkIcon, LibraryIcon, SettingsIcon, ToolsIcon } from "@/components/icons/UIIcons";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 
 export function MobileReelMenu({ currentProjectId, onClose }: { currentProjectId: string; onClose: () => void }) {
@@ -123,6 +123,15 @@ export function MobileReelMenu({ currentProjectId, onClose }: { currentProjectId
             className="rounded-full p-2 text-muted hover:bg-foreground/10"
           >
             <BookmarkIcon className="h-5 w-5" />
+          </Link>
+          <Link
+            href="/avatars"
+            onClick={onClose}
+            aria-label="Avatars"
+            title="Avatars"
+            className="rounded-full p-2 text-muted hover:bg-foreground/10"
+          >
+            <AvatarsIcon className="h-5 w-5" />
           </Link>
           <Link
             href="/account/usage"

@@ -43,7 +43,8 @@ import { useEffect, useRef, useState } from "react";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
 import { InlineEditableText } from "@/components/InlineEditableText";
 import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
-import { getCompiledAvatar, getCompiledAvatarForClip, type CompiledAvatar } from "@/lib/video/avatar/compile";
+import { AvatarThumbnailCanvas } from "@/components/AvatarThumbnailCanvas";
+import { getCompiledAvatarForClip, type CompiledAvatar } from "@/lib/video/avatar/compile";
 import { computeAvatarPose, computeMouthShapeId } from "@/lib/video/avatar/actions";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { AVATAR_LIBRARY, BIPED_SIMPLE_TOPOLOGY, getAvatarLibraryEntry } from "@/lib/video/avatar/library";
@@ -53,6 +54,7 @@ import {
   generateAvatarFromPhoto,
   listMyGeneratedAvatars,
   renameGeneratedAvatar,
+  saveCustomizedAvatar,
   type GeneratedAvatarSummary,
 } from "@/lib/video/avatar/generatedLibrary";
 import type { AvatarActionId, AvatarTopology } from "@/lib/video/avatar/topology";
@@ -144,104 +146,6 @@ function actionIdsForAvatar(avatarId: string): string[] {
     (avatarId.startsWith(GENERATED_AVATAR_ID_PREFIX) ? BIPED_SIMPLE_TOPOLOGY : null);
   const actionIds = Object.keys(topology?.actions ?? {});
   return actionIds.length > 0 ? actionIds : BASELINE_ACTION_IDS;
-}
-
-/**
- * One static HEAD-ONLY crop per gallery card -- deliberately NOT
- * drawAvatar's full-body bone/pose pipeline (used for the live left-pane
- * preview and the real editor canvas, where a full-body character genuinely
- * belongs). A picker's job is "which face is this," and drawAvatar's
- * "fit the whole rig by height" scaling, applied to this card's small
- * aspect-[9/16] box, shrinks the head part to a sliver of its own 140px
- * source size -- fine detail (eyes, eyebrows, the Phase-6-generated
- * contour features) doesn't survive that downscale, even though the
- * source atlas itself renders them correctly (confirmed by inspecting a
- * generated atlas PNG directly). So this bypasses bones/pose entirely and
- * draws the "head" CompiledPart's own atlasRect straight from the atlas
- * image, scaled to fill the card by its own aspect ratio (contain-fit,
- * top-anchored so there's breathing room below rather than dead space
- * above) -- the head fills the thumbnail the way a profile picture would,
- * not a tiny figure standing in a tall box. The mouth is a SEPARATE
- * CompiledPart (its own atlasRect, drawn from mouthShapes.closed for a
- * static idle look) that isn't inside the head's own atlasRect at all --
- * omitting it was an oversight in the first version of this fix. Both
- * "head" and "mouth" ride the SAME bone in every topology this app has
- * (biped-simple), so their relative position is just their PIVOT
- * difference, without needing the full bone/world-matrix machinery
- * renderer.ts's drawAvatar uses: drawImage places a part such that its own
- * (pivotX, pivotY) lands at the bone's world origin, so two same-bone
- * parts' top-left corners differ by exactly (partA.pivot - partB.pivot) --
- * see the mouthDestX/Y math below. Skipped (falls back to head-only) if a
- * future topology ever puts the mouth on a different bone.
- */
-function AvatarThumbnailCanvas({ avatarId, className }: { avatarId: string; className?: string }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    getCompiledAvatar(avatarId)
-      .then((compiled) => {
-        if (cancelled) return;
-        const canvas = canvasRef.current;
-        const ctx = canvas?.getContext("2d");
-        if (!canvas || !ctx) return;
-        const width = Math.max(1, Math.round(canvas.getBoundingClientRect().width));
-        const height = Math.max(1, Math.round(canvas.getBoundingClientRect().height));
-        // Render at devicePixelRatio so fine features (thin eyebrow
-        // strokes, small eye shapes) get real source pixels to downscale
-        // from instead of blurring away on a high-DPI screen.
-        const dpr = Math.max(1, window.devicePixelRatio || 1);
-        canvas.width = Math.round(width * dpr);
-        canvas.height = Math.round(height * dpr);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-        const headPart = compiled.skin.parts.find((part) => part.partId === "head");
-        if (!headPart) return;
-        const { atlasRect } = headPart;
-        const scale = Math.min(width / atlasRect.sWidth, height / atlasRect.sHeight);
-        const drawWidth = atlasRect.sWidth * scale;
-        const drawHeight = atlasRect.sHeight * scale;
-        const destX = (width - drawWidth) / 2;
-        const destY = Math.max(0, (height - drawHeight) * 0.15); // top-anchored, not dead-centered
-        ctx.drawImage(
-          compiled.skin.atlasImage,
-          atlasRect.sx,
-          atlasRect.sy,
-          atlasRect.sWidth,
-          atlasRect.sHeight,
-          destX,
-          destY,
-          drawWidth,
-          drawHeight
-        );
-
-        const mouthPart = compiled.skin.mouthShapes.closed ?? compiled.skin.parts.find((part) => part.partId === "mouth");
-        if (mouthPart && mouthPart.boneIndex === headPart.boneIndex) {
-          const mouthRect = mouthPart.atlasRect;
-          const mouthDestX = destX + (headPart.pivotX - mouthPart.pivotX) * scale;
-          const mouthDestY = destY + (headPart.pivotY - mouthPart.pivotY) * scale;
-          ctx.drawImage(
-            compiled.skin.atlasImage,
-            mouthRect.sx,
-            mouthRect.sy,
-            mouthRect.sWidth,
-            mouthRect.sHeight,
-            mouthDestX,
-            mouthDestY,
-            mouthRect.sWidth * scale,
-            mouthRect.sHeight * scale
-          );
-        }
-      })
-      .catch((err) => {
-        console.error("Avatar thumbnail compile failed for avatarId=%s", avatarId, err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [avatarId]);
-
-  return <canvas ref={canvasRef} className={className} />;
 }
 
 /**
@@ -676,6 +580,34 @@ export function AvatarFramingDialog({
 
   const canResetDesignOverrides = hasAnyDesignOverride(pendingOverrides);
 
+  // "Save as new avatar" -- persists pendingOverrides permanently onto a
+  // brand-new avatar_designs row (backend/src/avatar_gen's duplicate
+  // endpoint) instead of leaving them living only on this one clip's
+  // designOverrides inside this project's timeline. Only offered for one of
+  // this creator's OWN generated avatars (gen-* ids) -- a seed character's
+  // atlas isn't a private R2 object this account owns, so there's nothing
+  // for the backend to copy for it yet.
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
+  const [saveAvatarError, setSaveAvatarError] = useState<string | null>(null);
+  const [savedAvatarName, setSavedAvatarName] = useState<string | null>(null);
+  const canSaveAsNewAvatar = canResetDesignOverrides && avatarId.startsWith(GENERATED_AVATAR_ID_PREFIX);
+
+  async function handleSaveAsNewAvatar() {
+    if (!canSaveAsNewAvatar || isSavingAvatar) return;
+    setIsSavingAvatar(true);
+    setSaveAvatarError(null);
+    setSavedAvatarName(null);
+    try {
+      const summary = await saveCustomizedAvatar(avatarId, pendingOverrides);
+      setMyAvatars((prev) => [summary, ...prev]);
+      setSavedAvatarName(summary.name);
+    } catch (err) {
+      setSaveAvatarError(err instanceof Error ? err.message : "Couldn't save this avatar -- try again");
+    } finally {
+      setIsSavingAvatar(false);
+    }
+  }
+
   return (
     <div
       role="dialog"
@@ -766,13 +698,30 @@ export function AvatarFramingDialog({
               </div>
               {editDesignError && <p className="text-[11px] text-red-600">{editDesignError}</p>}
               {canResetDesignOverrides && (
-                <button
-                  type="button"
-                  onClick={() => setPendingOverrides({})}
-                  className="self-start text-[11px] text-muted hover:text-foreground hover:underline"
-                >
-                  Reset customization
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingOverrides({})}
+                    className="self-start text-[11px] text-muted hover:text-foreground hover:underline"
+                  >
+                    Reset customization
+                  </button>
+                  {canSaveAsNewAvatar && (
+                    <button
+                      type="button"
+                      onClick={handleSaveAsNewAvatar}
+                      disabled={isSavingAvatar}
+                      title="Save this look to My Avatars so it survives even if this reel is deleted later"
+                      className="self-start text-[11px] text-muted hover:text-foreground hover:underline disabled:opacity-50"
+                    >
+                      {isSavingAvatar ? "Saving…" : "Save as new avatar"}
+                    </button>
+                  )}
+                </div>
+              )}
+              {saveAvatarError && <p className="text-[11px] text-red-600">{saveAvatarError}</p>}
+              {savedAvatarName && !saveAvatarError && (
+                <p className="text-[11px] text-accent">Saved to My Avatars as &ldquo;{savedAvatarName}&rdquo;</p>
               )}
             </div>
           </div>

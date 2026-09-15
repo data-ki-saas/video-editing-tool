@@ -27,6 +27,19 @@ class GeneratedAvatarRenameRequest(BaseModel):
     name: str
 
 
+class GeneratedAvatarDuplicateRequest(BaseModel):
+    """Body for POST /{design_id}/duplicate -- `overrides` is untyped (same
+    posture as skin/design above) but expected to be a raw
+    AvatarDesignOverrides object (frontend/src/lib/video/avatar/design.ts):
+    boneScaleOverrides/colorSlotOverrides/attachedAccessories/expressionBias/
+    garmentId. Lets a creator's Phase-7 "Customize with AI" edits on ONE
+    clip get saved as their own permanent library entry, independent of
+    whichever project that clip lives in."""
+
+    name: str | None = None
+    overrides: dict | None = None
+
+
 class GeneratedAvatarCreateResponse(GeneratedAvatarDetail):
     """The one response that also reports whether a face was actually
     detected in the uploaded photo -- `detected=False` means the returned

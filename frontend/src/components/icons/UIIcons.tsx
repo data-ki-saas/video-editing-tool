@@ -387,3 +387,19 @@ export function RecordingsIcon(props: IconProps) {
     </svg>
   );
 }
+
+// A rounded square framing a smiling face -- links to /avatars (this
+// creator's own generated-avatar library, backend/src/avatar_gen/).
+// Deliberately a "character card" shape rather than AccountIcon's plain
+// person-in-circle, so it reads as "a gallery of characters" not "your
+// account," at a glance in the same nav row.
+export function AvatarsIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="3" y="3" width="18" height="18" rx="4" />
+      <circle cx="9" cy="10" r="1.25" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="10" r="1.25" fill="currentColor" stroke="none" />
+      <path d="M8.5 14.5a4 4 0 0 0 7 0" />
+    </svg>
+  );
+}

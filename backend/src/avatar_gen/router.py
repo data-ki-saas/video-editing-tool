@@ -4,6 +4,7 @@ from src.avatar_gen import service
 from src.avatar_gen.schemas import (
     GeneratedAvatarCreateResponse,
     GeneratedAvatarDetail,
+    GeneratedAvatarDuplicateRequest,
     GeneratedAvatarRenameRequest,
     GeneratedAvatarSummary,
 )
@@ -42,6 +43,13 @@ async def rename_generated(
     design_id: str, body: GeneratedAvatarRenameRequest, user: CurrentUser = Depends(get_current_user)
 ) -> GeneratedAvatarDetail:
     return service.rename_generated_avatar(design_id, user, body.name)
+
+
+@router.post("/{design_id}/duplicate", response_model=GeneratedAvatarDetail, status_code=201)
+async def duplicate_generated(
+    design_id: str, body: GeneratedAvatarDuplicateRequest, user: CurrentUser = Depends(get_current_user)
+) -> GeneratedAvatarDetail:
+    return service.duplicate_generated_avatar(design_id, user, body.name, body.overrides)
 
 
 @router.delete("/{design_id}", status_code=204)

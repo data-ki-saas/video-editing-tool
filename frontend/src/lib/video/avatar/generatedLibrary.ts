@@ -11,6 +11,7 @@
  */
 import {
   deleteGeneratedAvatar as apiDeleteGeneratedAvatar,
+  duplicateGeneratedAvatar as apiDuplicateGeneratedAvatar,
   generateAvatarFromPhoto as apiGenerateAvatarFromPhoto,
   getGeneratedAvatar as apiGetGeneratedAvatar,
   listGeneratedAvatars,
@@ -19,7 +20,7 @@ import {
   type GeneratedAvatarDetail,
   type GeneratedAvatarSummary,
 } from "@/lib/api";
-import type { AvatarDesign } from "./design";
+import type { AvatarDesign, AvatarDesignOverrides } from "./design";
 import type { AvatarSkin } from "./skin";
 import { BIPED_SIMPLE_TOPOLOGY, type AvatarLibraryEntry } from "./library";
 
@@ -68,6 +69,25 @@ export async function generateAvatarFromPhoto(
 
 export async function listMyGeneratedAvatars(): Promise<GeneratedAvatarSummary[]> {
   return listGeneratedAvatars();
+}
+
+/** Saves a copy of `avatarId` (a seed OR a gen-* avatar) as this creator's
+ * own brand-new library entry, with `overrides` (Phase 7's
+ * boneScaleOverrides/colorSlotOverrides/attachedAccessories/expressionBias/
+ * garmentId) baked permanently into the copy -- the "Save as new avatar"
+ * action on AvatarFramingDialog's Customize-with-AI panel, so a look tuned
+ * for one clip survives that clip's project being deleted later, instead of
+ * only ever living in that one project's timeline. Returns a summary ready
+ * to prepend to a "My avatars" list, same shape generateAvatarFromPhoto's
+ * caller already builds by hand. */
+export async function saveCustomizedAvatar(
+  avatarId: string,
+  overrides: AvatarDesignOverrides,
+  name?: string
+): Promise<GeneratedAvatarSummary> {
+  const detail = await apiDuplicateGeneratedAvatar(avatarId, { name, overrides });
+  const entry = toEntry(detail);
+  return { id: detail.id, name: entry.design.meta.name, thumbnailUrl: null, createdAt: detail.createdAt };
 }
 
 export async function deleteGeneratedAvatar(avatarId: string): Promise<void> {
