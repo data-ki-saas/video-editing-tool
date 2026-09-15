@@ -432,32 +432,30 @@ def build_atlas_png_from_photo(cartoon_image_bytes: bytes, palette: FacePalette)
     head_mask = ImageChops.multiply(oval_mask, bg_mask)
 
     mouth_crop = cartoon_image.crop(tuple(round(v) for v in palette.mouth_crop_box))
-    mouth_closed = mouth_crop.resize((MOUTH_CLOSED_RECT["sWidth"], MOUTH_CLOSED_RECT["sHeight"]), Image.LANCZOS).convert("RGBA")
+    mouth_base = mouth_crop.resize((MOUTH_CLOSED_RECT["sWidth"], MOUTH_CLOSED_RECT["sHeight"]), Image.LANCZOS).convert("RGBA")
     # A single photo of a closed mouth has no actual gap/interior to reveal --
-    # geometrically warping it (the previous approach: stretch then resize
-    # back down) either cancels itself out (the original bug: "open" and
-    # "closed" rendered pixel-near-identical) or, once that's fixed, just
-    # shows a distorted closed-lip line, which still doesn't read as "open".
-    # Instead, draw a dark mouth-interior gap directly on top of the real
-    # photo crop -- same "accept a drawn detail on an otherwise-photoreal
-    # face" precedent this function already uses for the flat-drawn body.
-    mouth_open = mouth_closed.copy()
-    gap_draw = ImageDraw.Draw(mouth_open)
-    w, h = mouth_open.size
-    gap_half_w = w * 0.30
-    gap_cy = h * 0.55
-    gap_half_h = h * 0.24
-    # Solid fill, no alpha -- image.paste() below has no mask argument, so a
-    # partial-alpha fill here wouldn't blend with the photo underneath (paste
-    # without a mask overwrites raw pixel values, it doesn't composite); a
-    # translucent-looking result would just be a lower alpha baked into the
-    # atlas texture itself, read back as partial transparency at render time.
-    # Reuses _MOUTH_COLOR so the drawn gap ties into the same mouth-interior
-    # color the parametric (non-photo) path already draws.
-    gap_draw.ellipse(
-        (w / 2 - gap_half_w, gap_cy - gap_half_h, w / 2 + gap_half_w, gap_cy + gap_half_h),
-        fill=_MOUTH_COLOR,
-    )
+    # geometrically warping it (an earlier approach: stretch then resize back
+    # down) either cancels itself out (open/closed render pixel-near-
+    # identical) or just shows a distorted closed-lip line, which still
+    # doesn't read as "open". A later fix drew a dark gap ellipse on the
+    # "open" copy ONLY, leaving "closed" as pure untouched photo -- SAME bug,
+    # different cause: "closed" then reads as however dark/light the source
+    # photo's own lip color happens to be, which can still land close enough
+    # to the drawn gap's color to look barely different, especially against a
+    # cartoonify style's own heavy dark outlines. Fixed by drawing a real gap
+    # on BOTH copies, at the SAME two sizes _draw_mouth_closed/_draw_mouth_open
+    # use on the parametric (non-photo) path below -- a solid_half_h of 3px vs
+    # 9px is what actually makes "closed" and "open" differ, not which one
+    # happens to have a decal. `_darken(_MOUTH_COLOR, ...)` for contrast that
+    # doesn't depend on the source photo/cartoon's own coloring either.
+    gap_color = _darken(_MOUTH_COLOR, 0.5)
+    cx, cy = mouth_base.width / 2, mouth_base.height * 0.55
+
+    mouth_closed = mouth_base.copy()
+    ImageDraw.Draw(mouth_closed).ellipse((cx - 15, cy - 3, cx + 15, cy + 3), fill=gap_color)
+
+    mouth_open = mouth_base.copy()
+    ImageDraw.Draw(mouth_open).ellipse((cx - 11, cy - 9, cx + 11, cy + 9), fill=gap_color)
 
     image = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
