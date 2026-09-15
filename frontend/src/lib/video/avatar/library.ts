@@ -1,17 +1,19 @@
 /**
  * The Avatar animation engine's seed content: one hand-authored Topology
- * ("biped-simple") and, riding it, three Skins built from
- * placeholderAtlas.ts's procedural art (a base palette plus two recolors),
- * each wrapped in one trivial Design ("Sam"/"Maya"/"Leo") with no overrides.
- * Everything downstream (compile.ts/actions.ts/renderer.ts) is generic over
- * ANY topology/skin/design triple -- this file is the only place that
- * actually decides what a rig looks like and how big each bone group's
- * motion is. Growing the library later (more recolors, eventually
- * hand-drawn or photo-generated art) means adding another AvatarLibraryEntry
- * here, never touching the engine.
+ * ("biped-simple") and, riding it, one Skin built from placeholderAtlas.ts's
+ * procedural art, wrapped in one trivial Design ("Maya") with no overrides
+ * -- the library's only, and therefore default, seed character (two other
+ * recolors, "Sam"/"Leo", were removed at the user's request; see
+ * AVATAR_LIBRARY's own doc comment below). Everything downstream
+ * (compile.ts/actions.ts/renderer.ts) is generic over ANY topology/skin/
+ * design triple -- this file is the only place that actually decides what a
+ * rig looks like and how big each bone group's motion is. Growing the
+ * library later (more recolors, eventually hand-drawn or photo-generated
+ * art) means adding another AvatarLibraryEntry here, never touching the
+ * engine.
  */
-import type { ActionCurveSpec, AvatarAnchor, AvatarTopology, BoneTransform, ExpressionParamSpec } from "./topology";
-import type { AvatarSkin, AvatarSkinColorSlot, AvatarSkinPart, AvatarSkinMouthShape } from "./skin";
+import type { ActionCurveSpec, AvatarAnchor, AvatarBustFraming, AvatarTopology, BoneTransform, ExpressionParamSpec } from "./topology";
+import type { AvatarSkin, AvatarSkinColorSlot, AvatarSkinPart, AvatarSkinMouthShape, AvatarSkinGarmentShape } from "./skin";
 import type { AvatarDesign } from "./design";
 import { buildPlaceholderAtlas, type PlaceholderAtlasPalette } from "./placeholderAtlas";
 
@@ -303,6 +305,21 @@ const ACTIONS: AvatarTopology["actions"] = {
   talkEmphasize: TALK_EMPHASIZE,
 };
 
+// Phase 8 ("Portrait mode") -- the hip joint (ROOT, see DEFAULT_LOCAL_POSE's
+// own comment: "root (hip) = (100, 258)") is exactly where the legs attach,
+// so hiding LEG_L/LEG_R and fitting-by-height to just past that y (rather
+// than the full 400-tall rig) is what turns "full body" into "hands+torso,
+// no legs" -- the "sitting position" framing this phase's own feature
+// request asked for. The +22 over the bare hip y=258 is slack for the hand
+// anchors, which dangle a little BELOW the hip line at rest (ANCHORS'
+// handL/handR = armL/armR + local (0, 115), landing near world y=263) plus
+// idle/talk's own small breathing bob -- without it, a hand would render a
+// few px past this framing's own destRect bottom edge on some frames.
+const BUST_FRAMING: AvatarBustFraming = {
+  hiddenBoneIndices: [LEG_L, LEG_R],
+  frameHeight: 280,
+};
+
 // Exported so avatar_gen's frontend client (generatedLibrary.ts) can bind a
 // Phase-6 photo-generated Skin to this exact same shared Topology -- every
 // generated skin rides "biped-simple" too (see
@@ -320,11 +337,23 @@ export const BIPED_SIMPLE_TOPOLOGY: AvatarTopology = {
   anchors: ANCHORS,
   actions: ACTIONS,
   expressionParams: EXPRESSION_PARAMS,
+  bustFraming: BUST_FRAMING,
 };
 
 const MOUTH_SHAPES: AvatarSkinMouthShape[] = [
   { shapeId: "closed", partId: "mouth" },
   { shapeId: "open", partId: "mouth" },
+];
+
+// Phase 8 ("selectable torsos") -- "plainShirt" (the base "torso" rect every
+// skin already has) is deliberately NOT listed here; a Design's `garmentId`
+// left absent/unresolvable already falls back to it (compile.ts), same
+// convention MOUTH_SHAPES itself doesn't need a special "no override" entry
+// for either.
+const GARMENT_SHAPES: AvatarSkinGarmentShape[] = [
+  { shapeId: "polo", partId: "torso" },
+  { shapeId: "blazer", partId: "torso" },
+  { shapeId: "suit", partId: "torso" },
 ];
 
 /**
@@ -401,53 +430,38 @@ function buildSeedSkin(skinId: string, palette: Partial<PlaceholderAtlasPalette>
     parts: PLACEHOLDER_SKIN_PARTS,
     mouthShapes: MOUTH_SHAPES,
     colorSlots: colorSlotsForPalette(atlas.resolvedPalette),
+    garmentShapes: GARMENT_SHAPES,
   };
 }
 
-const PLACEHOLDER_SKIN = buildSeedSkin("placeholder-v1", {});
-// Two recolors (plus a simple hair cap, see placeholderAtlas.ts's own doc
-// comment) of the exact same procedural rig -- proves the gallery/picker
-// added in this phase actually distinguishes between characters, without
-// waiting on real character art.
+// "Sam" and "Leo" (the original placeholder-v1/v3 recolors) were removed at
+// the user's request -- Maya is now this library's only, and therefore
+// default, seed character (AVATAR_LIBRARY[0], read as the default by every
+// caller that falls back to "the first seed entry" -- AvatarFramingDialog's
+// own initial/reset avatarId state). A project whose timeline still
+// references the old "seed-friendly-1"/"seed-leo-1" designIds will no longer
+// resolve (getAvatarLibraryEntry returns null) -- an accepted consequence
+// for this POC-phase app, not a migration this change attempts to paper
+// over.
 const MAYA_SKIN = buildSeedSkin("placeholder-v2", {
   skinTone: "#c98a5e",
   shirtColor: "#9a3f6b",
   pantsColor: "#22344a",
   hairColor: "#241a14",
 });
-const LEO_SKIN = buildSeedSkin("placeholder-v3", {
-  skinTone: "#f0c9a0",
-  shirtColor: "#d9782d",
-  pantsColor: "#33363d",
-  hairColor: "#3a2a1c",
-});
 
-const SEED_FRIENDLY_DESIGN: AvatarDesign = {
-  schemaVersion: 1,
-  designId: "seed-friendly-1",
-  skinId: PLACEHOLDER_SKIN.skinId,
-  meta: { name: "Sam" },
-};
 const SEED_MAYA_DESIGN: AvatarDesign = {
   schemaVersion: 1,
   designId: "seed-maya-1",
   skinId: MAYA_SKIN.skinId,
   meta: { name: "Maya" },
 };
-const SEED_LEO_DESIGN: AvatarDesign = {
-  schemaVersion: 1,
-  designId: "seed-leo-1",
-  skinId: LEO_SKIN.skinId,
-  meta: { name: "Leo" },
-};
 
-/** The whole seed Avatar library -- three hand-authored entries, all riding
+/** The whole seed Avatar library -- one hand-authored entry, riding
  * `biped-simple` (see this file's own doc comment on how growing the library
  * mostly means adding entries here, not new topology/engine code). */
 export const AVATAR_LIBRARY: AvatarLibraryEntry[] = [
-  { design: SEED_FRIENDLY_DESIGN, skin: PLACEHOLDER_SKIN, topology: BIPED_SIMPLE_TOPOLOGY },
   { design: SEED_MAYA_DESIGN, skin: MAYA_SKIN, topology: BIPED_SIMPLE_TOPOLOGY },
-  { design: SEED_LEO_DESIGN, skin: LEO_SKIN, topology: BIPED_SIMPLE_TOPOLOGY },
 ];
 
 /** Looks up a library entry by its Design's own id -- the same id an

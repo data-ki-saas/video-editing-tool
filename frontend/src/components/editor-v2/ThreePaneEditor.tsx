@@ -2501,12 +2501,13 @@ export function ThreePaneEditor({
     avatarId: string,
     defaultAction: AvatarActionId | (string & {}),
     rect: CropRect,
-    designOverrides?: AvatarDesignOverrides
+    designOverrides?: AvatarDesignOverrides,
+    framing?: "full" | "bust"
   ) {
     const { label, state } =
       editingAvatarOverlayIndex !== null
-        ? applyEditAvatarOverlay(selections, editingAvatarOverlayIndex, avatarId, defaultAction, rect, designOverrides)
-        : applyAddAvatarOverlay(selections, avatarId, defaultAction, currentTimeSeconds, videoDurationSeconds, rect, designOverrides);
+        ? applyEditAvatarOverlay(selections, editingAvatarOverlayIndex, avatarId, defaultAction, rect, designOverrides, framing)
+        : applyAddAvatarOverlay(selections, avatarId, defaultAction, currentTimeSeconds, videoDurationSeconds, rect, designOverrides, framing);
     pushChange(label, state);
     setIsAvatarDialogOpen(false);
     setEditingAvatarOverlayIndex(null);

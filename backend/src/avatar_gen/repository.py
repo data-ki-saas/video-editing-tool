@@ -55,6 +55,25 @@ def get(design_id: str, user_id: str) -> AvatarDesignRecord | None:
     return AvatarDesignRecord(**result.data[0])
 
 
+def rename(design_id: str, user_id: str, name: str, design: dict) -> AvatarDesignRecord | None:
+    """Updates the row's own `name` column AND the mirrored `design.meta.name`
+    together, in one UPDATE, so a rename can never leave the two fields
+    disagreeing partway through -- the caller (service.py's
+    rename_generated_avatar) is expected to have already patched `design`
+    with the same `name`."""
+    result = (
+        get_supabase_client()
+        .table(_TABLE)
+        .update({"name": name, "design": design})
+        .eq("id", design_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not result.data:
+        return None
+    return AvatarDesignRecord(**result.data[0])
+
+
 def delete(design_id: str, user_id: str) -> AvatarDesignRecord | None:
     result = get_supabase_client().table(_TABLE).delete().eq("id", design_id).eq("user_id", user_id).execute()
     if not result.data:

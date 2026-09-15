@@ -62,6 +62,15 @@ export interface AvatarDesign {
   // translating to `{ browAngle: 0.8, colorMood: 0.6 }`. A paramId absent
   // here simply sits at that param's own declared `default`.
   expressionBias?: Record<string, number>;
+
+  // Phase 8 ("selectable torsos") -- one of the owning Skin's own
+  // `garmentShapes` (skin.ts) shapeIds ("polo"/"suit"/"blazer"), or
+  // absent/unresolvable for the base "torso" rect every skin already has
+  // (see AvatarSkinGarmentShape's own doc comment for the exact fallback
+  // rule). A plain single field, not a Record like colorSlotOverrides,
+  // since there's only ever one outfit choice active at a time -- not one
+  // per color slot.
+  garmentId?: string;
 }
 
 /**
@@ -75,7 +84,7 @@ export interface AvatarDesign {
  */
 export type AvatarDesignOverrides = Pick<
   AvatarDesign,
-  "boneScaleOverrides" | "colorSlotOverrides" | "attachedAccessories" | "expressionBias"
+  "boneScaleOverrides" | "colorSlotOverrides" | "attachedAccessories" | "expressionBias" | "garmentId"
 >;
 
 /** True when `overrides` actually carries at least one real override --
@@ -93,7 +102,8 @@ export function hasAnyDesignOverride(overrides: AvatarDesignOverrides | undefine
     (overrides.boneScaleOverrides && Object.keys(overrides.boneScaleOverrides).length > 0) ||
       (overrides.colorSlotOverrides && Object.keys(overrides.colorSlotOverrides).length > 0) ||
       (overrides.expressionBias && Object.keys(overrides.expressionBias).length > 0) ||
-      (overrides.attachedAccessories && overrides.attachedAccessories.length > 0)
+      (overrides.attachedAccessories && overrides.attachedAccessories.length > 0) ||
+      Boolean(overrides.garmentId)
   );
 }
 
@@ -113,5 +123,6 @@ export function mergeDesignOverrides(base: AvatarDesign, overrides: AvatarDesign
     colorSlotOverrides: { ...base.colorSlotOverrides, ...overrides.colorSlotOverrides },
     expressionBias: { ...base.expressionBias, ...overrides.expressionBias },
     attachedAccessories: overrides.attachedAccessories ?? base.attachedAccessories,
+    garmentId: overrides.garmentId ?? base.garmentId,
   };
 }

@@ -35,8 +35,24 @@ const ARM_R_RECT: AtlasRect = { sx: ARM_L_RECT.sx + ARM_L_RECT.sWidth + GAP, sy:
 const LEG_L_RECT: AtlasRect = { sx: ARM_R_RECT.sx + ARM_R_RECT.sWidth + GAP, sy: ROW2_Y, sWidth: 42, sHeight: 150 };
 const LEG_R_RECT: AtlasRect = { sx: LEG_L_RECT.sx + LEG_L_RECT.sWidth + GAP, sy: ROW2_Y, sWidth: 42, sHeight: 150 };
 
-const CANVAS_WIDTH = LEG_R_RECT.sx + LEG_R_RECT.sWidth + GAP;
-const CANVAS_HEIGHT = Math.max(TORSO_RECT.sy + TORSO_RECT.sHeight, LEG_L_RECT.sy + LEG_L_RECT.sHeight) + GAP;
+// Row 3 (Phase 8, "selectable torsos") -- three alternate torso silhouettes
+// ("polo"/"blazer"/"suit"), each the SAME sWidth/sHeight as TORSO_RECT so a
+// picked garment's atlas rect can substitute for the "torso" part's own rect
+// with no change to that part's own pivot (skin.ts's AvatarSkinGarmentShape
+// doc comment) -- pivot is measured relative to the rect's OWN top-left, so
+// a differently-sized rect would need its own pivot too. Extra (2x GAP)
+// clearance above this row, not the usual single GAP, because these shapes'
+// own collar/lapel details deliberately draw a few px past the rect's own
+// top edge (see drawTorsoPolo/drawTorsoSuit below) -- this row starting
+// further down is what keeps that overshoot from ever touching Row 2's
+// bottom edge.
+const ROW3_Y = Math.max(TORSO_RECT.sy + TORSO_RECT.sHeight, LEG_L_RECT.sy + LEG_L_RECT.sHeight) + GAP * 2;
+const POLO_RECT: AtlasRect = { sx: GAP, sy: ROW3_Y, sWidth: 120, sHeight: 140 };
+const BLAZER_RECT: AtlasRect = { sx: POLO_RECT.sx + POLO_RECT.sWidth + GAP, sy: ROW3_Y, sWidth: 120, sHeight: 140 };
+const SUIT_RECT: AtlasRect = { sx: BLAZER_RECT.sx + BLAZER_RECT.sWidth + GAP, sy: ROW3_Y, sWidth: 120, sHeight: 140 };
+
+const CANVAS_WIDTH = Math.max(LEG_R_RECT.sx + LEG_R_RECT.sWidth, SUIT_RECT.sx + SUIT_RECT.sWidth) + GAP;
+const CANVAS_HEIGHT = SUIT_RECT.sy + SUIT_RECT.sHeight + GAP;
 
 // Flat, pleasant placeholder colors -- this is explicitly not meant to look
 // polished, just to read unambiguously as "a simple person" with cleanly
@@ -85,6 +101,172 @@ function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, wi
   ctx.strokeStyle = OUTLINE_COLOR;
   ctx.lineWidth = 2;
   ctx.stroke();
+}
+
+/** The plain rounded-rect torso body every garment variant below starts
+ * from -- exactly what TORSO_RECT ("plain shirt") has always drawn, pulled
+ * into its own function so drawTorsoPolo/Blazer/Suit can reuse it rather
+ * than duplicating the same three drawRoundedRect args three more times. */
+function drawTorsoBody(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  drawRoundedRect(ctx, rect.sx + 6, rect.sy + 6, rect.sWidth - 12, rect.sHeight - 12, 14, palette.shirtColor);
+}
+
+/** Fills+strokes one filled triangle in the shirt's own color -- used by
+ * drawTorsoPolo (collar points)/drawTorsoSuit (lapel wedges) to ADD to the
+ * plain body's silhouette. Deliberately always `palette.shirtColor`, never a
+ * second contrasting color: compile.ts's colorSlotOverrides recolor
+ * (recolorAtlas) re-tints a WHOLE target rect uniformly wherever it isn't
+ * fully transparent, so any internal color contrast drawn here would just
+ * get flattened away the moment a creator picks a non-default shirt color --
+ * only a SILHOUETTE difference (added or cut-away area) survives that
+ * recolor, which is exactly what distinguishes these four garments from each
+ * other and from the plain shirt. */
+function fillGarmentTriangle(ctx: CanvasRenderingContext2D, points: [number, number][], palette: PlaceholderAtlasPalette): void {
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+  for (const [x, y] of points.slice(1)) ctx.lineTo(x, y);
+  ctx.closePath();
+  ctx.fillStyle = palette.shirtColor;
+  ctx.fill();
+  ctx.strokeStyle = OUTLINE_COLOR;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+/** Cuts a triangular, fully-transparent notch out of whatever's already
+ * drawn -- `destination-out` erases alpha rather than painting a color, so
+ * (unlike fillGarmentTriangle) this survives a colorSlotOverrides recolor
+ * exactly as drawn: an open collar stays open no matter what shirt color is
+ * picked. A thin outline traced back in normal composite mode afterward
+ * gives the cut a visible edge instead of a bare hard-alpha cliff. */
+function cutGarmentNotch(ctx: CanvasRenderingContext2D, points: [number, number][]): void {
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+  for (const [x, y] of points.slice(1)) ctx.lineTo(x, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+  for (const [x, y] of points.slice(1)) ctx.lineTo(x, y);
+  ctx.strokeStyle = OUTLINE_COLOR;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+/** "Polo" -- the plain shirt body plus two small collar-point triangles
+ * poking up from the neckline, same shirtColor as the body (see
+ * fillGarmentTriangle's own doc comment on why). */
+function drawTorsoPolo(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  ctx.save();
+  ctx.beginPath();
+  // Widened GAP px above the rect's own top edge -- the collar/lapel details
+  // below deliberately poke a few px past `rect.sy` itself (see this
+  // function's own coordinates), and a clip at EXACTLY rect.sy would crop
+  // that overshoot flat, erasing the very feature it's meant to draw. GAP is
+  // well inside the GAP*2 clearance ROW3_Y left above this whole row, so
+  // this still can't bleed into Row 2.
+  ctx.rect(rect.sx, rect.sy - GAP, rect.sWidth, rect.sHeight + GAP);
+  ctx.clip();
+  drawTorsoBody(ctx, rect, palette);
+  const cx = rect.sx + rect.sWidth / 2;
+  const topY = rect.sy + 6;
+  fillGarmentTriangle(
+    ctx,
+    [
+      [cx - 30, topY],
+      [cx - 10, topY - 12],
+      [cx - 6, topY],
+    ],
+    palette
+  );
+  fillGarmentTriangle(
+    ctx,
+    [
+      [cx + 30, topY],
+      [cx + 10, topY - 12],
+      [cx + 6, topY],
+    ],
+    palette
+  );
+  ctx.restore();
+}
+
+/** "Blazer" -- the plain shirt body with an open, V-shaped collar notch cut
+ * into the top-center (see cutGarmentNotch's own doc comment). */
+function drawTorsoBlazer(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  ctx.save();
+  ctx.beginPath();
+  // Widened GAP px above the rect's own top edge -- the collar/lapel details
+  // below deliberately poke a few px past `rect.sy` itself (see this
+  // function's own coordinates), and a clip at EXACTLY rect.sy would crop
+  // that overshoot flat, erasing the very feature it's meant to draw. GAP is
+  // well inside the GAP*2 clearance ROW3_Y left above this whole row, so
+  // this still can't bleed into Row 2.
+  ctx.rect(rect.sx, rect.sy - GAP, rect.sWidth, rect.sHeight + GAP);
+  ctx.clip();
+  drawTorsoBody(ctx, rect, palette);
+  const cx = rect.sx + rect.sWidth / 2;
+  const topY = rect.sy + 6;
+  cutGarmentNotch(
+    ctx,
+    [
+      [cx - 20, topY],
+      [cx, topY + 30],
+      [cx + 20, topY],
+    ]
+  );
+  ctx.restore();
+}
+
+/** "Suit" -- blazer's open collar notch, cut DEEPER, plus two small peaked-
+ * lapel triangles added at the shoulders -- both a bigger cut-away AND an
+ * added silhouette bump, reading as more structured/formal than a bare
+ * blazer at this size. */
+function drawTorsoSuit(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  ctx.save();
+  ctx.beginPath();
+  // Widened GAP px above the rect's own top edge -- the collar/lapel details
+  // below deliberately poke a few px past `rect.sy` itself (see this
+  // function's own coordinates), and a clip at EXACTLY rect.sy would crop
+  // that overshoot flat, erasing the very feature it's meant to draw. GAP is
+  // well inside the GAP*2 clearance ROW3_Y left above this whole row, so
+  // this still can't bleed into Row 2.
+  ctx.rect(rect.sx, rect.sy - GAP, rect.sWidth, rect.sHeight + GAP);
+  ctx.clip();
+  drawTorsoBody(ctx, rect, palette);
+  const cx = rect.sx + rect.sWidth / 2;
+  const topY = rect.sy + 6;
+  fillGarmentTriangle(
+    ctx,
+    [
+      [rect.sx + 8, topY + 18],
+      [rect.sx + 8, topY - 6],
+      [cx - 16, topY],
+    ],
+    palette
+  );
+  fillGarmentTriangle(
+    ctx,
+    [
+      [rect.sx + rect.sWidth - 8, topY + 18],
+      [rect.sx + rect.sWidth - 8, topY - 6],
+      [cx + 16, topY],
+    ],
+    palette
+  );
+  cutGarmentNotch(
+    ctx,
+    [
+      [cx - 26, topY],
+      [cx, topY + 44],
+      [cx + 26, topY],
+    ]
+  );
+  ctx.restore();
 }
 
 function drawHead(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
@@ -182,6 +364,11 @@ export function buildPlaceholderAtlas(
     armR: ARM_R_RECT,
     legL: LEG_L_RECT,
     legR: LEG_R_RECT,
+    // Phase 8 ("selectable torsos") -- additional swappable rects for the
+    // "torso" part slot, same pattern as "open"/"closed" above for "mouth".
+    polo: POLO_RECT,
+    blazer: BLAZER_RECT,
+    suit: SUIT_RECT,
   };
 
   // `document` doesn't exist outside a browser. library.ts calls this
@@ -212,11 +399,14 @@ export function buildPlaceholderAtlas(
   drawHead(ctx, HEAD_RECT, palette);
   drawMouthClosed(ctx, MOUTH_CLOSED_RECT, palette);
   drawMouthOpen(ctx, MOUTH_OPEN_RECT, palette);
-  drawRoundedRect(ctx, TORSO_RECT.sx + 6, TORSO_RECT.sy + 6, TORSO_RECT.sWidth - 12, TORSO_RECT.sHeight - 12, 14, palette.shirtColor);
+  drawTorsoBody(ctx, TORSO_RECT, palette);
   drawRoundedRect(ctx, ARM_L_RECT.sx + 4, ARM_L_RECT.sy + 4, ARM_L_RECT.sWidth - 8, ARM_L_RECT.sHeight - 8, 14, palette.skinTone);
   drawRoundedRect(ctx, ARM_R_RECT.sx + 4, ARM_R_RECT.sy + 4, ARM_R_RECT.sWidth - 8, ARM_R_RECT.sHeight - 8, 14, palette.skinTone);
   drawRoundedRect(ctx, LEG_L_RECT.sx + 4, LEG_L_RECT.sy + 4, LEG_L_RECT.sWidth - 8, LEG_L_RECT.sHeight - 8, 17, palette.pantsColor);
   drawRoundedRect(ctx, LEG_R_RECT.sx + 4, LEG_R_RECT.sy + 4, LEG_R_RECT.sWidth - 8, LEG_R_RECT.sHeight - 8, 17, palette.pantsColor);
+  drawTorsoPolo(ctx, POLO_RECT, palette);
+  drawTorsoBlazer(ctx, BLAZER_RECT, palette);
+  drawTorsoSuit(ctx, SUIT_RECT, palette);
 
   return { dataUrl: canvas.toDataURL("image/png"), partRects, resolvedPalette: palette };
 }

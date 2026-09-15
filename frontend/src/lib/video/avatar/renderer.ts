@@ -24,11 +24,12 @@ import type { BoneTransform } from "./topology";
  * pure draw step with no action-evaluation concerns of its own.
  *
  * Algorithm:
- *  1. Fit-by-height: the rig's `rigHeight` is scaled to exactly fill
- *     `destRect`'s height, centered horizontally within its width (so a
- *     destRect proportionally wider than the rig leaves slack on the sides
- *     -- expected/fine for a bust-framed portrait character dropped into a
- *     wider box, not a bug).
+ *  1. Fit-by-height: the rig's `rigHeight` (or, in "bust" framing -- see
+ *     `framing` below -- the topology's own `bustFraming.frameHeight`) is
+ *     scaled to exactly fill `destRect`'s height, centered horizontally
+ *     within its width (so a destRect proportionally wider than the rig
+ *     leaves slack on the sides -- expected/fine for a bust-framed portrait
+ *     character dropped into a wider box, not a bug).
  *  2. Forward kinematics, bone 0 (root) through boneCount-1, building each
  *     bone's WORLD matrix from its PARENT's already-built world matrix
  *     (bone 0 builds from a root matrix derived straight from the fit
@@ -40,22 +41,35 @@ import type { BoneTransform } from "./topology";
  *     transforming into its own bone's world matrix and drawing its atlas
  *     rect offset by its own pivot -- substituting the active mouth shape's
  *     rect/pivot in place of the mouth slot's own, when this part IS that
- *     slot.
+ *     slot. In "bust" framing, a part riding one of the topology's own
+ *     `bustFraming.hiddenBoneIndices` (the legs) is skipped outright.
  *  4. Draw every Phase 7 accessory (compiled.accessories) on top of every
- *     part, riding its own anchor bone's already-built world matrix.
+ *     part, riding its own anchor bone's already-built world matrix -- also
+ *     skipped in "bust" framing when anchored to a hidden bone.
  */
 export function drawAvatar(
   ctx: CanvasRenderingContext2D,
   compiled: CompiledAvatar,
   pose: BoneTransform[],
   destRect: { x: number; y: number; width: number; height: number },
-  mouthShapeId: string
+  mouthShapeId: string,
+  // Phase 8 ("Portrait mode") -- "full" (default, and every call site
+  // predating this phase) draws the whole rig exactly as before. "bust"
+  // hides the topology's own `bustFraming.hiddenBoneIndices` (the legs, on
+  // every seed/generated topology today) and fits-by-height against
+  // `bustFraming.frameHeight` instead of the full rig, so hands+torso+head
+  // fill the destRect the same way a full body does in "full" framing. A
+  // topology with no `bustFraming` at all falls back to full-rig behavior
+  // even when "bust" is requested, rather than this function ever erroring.
+  framing: "full" | "bust" = "full"
 ): void {
   if (destRect.width <= 0 || destRect.height <= 0) return;
 
   const { topology, skin, accessories } = compiled;
+  const bustFraming = framing === "bust" ? topology.bustFraming : undefined;
+  const hiddenBoneIndices = bustFraming?.hiddenBoneIndices ?? [];
 
-  const scale = destRect.height / topology.rigHeight;
+  const scale = destRect.height / (bustFraming?.frameHeight ?? topology.rigHeight);
   const scaledRigWidth = topology.rigWidth * scale;
   const originX = destRect.x + (destRect.width - scaledRigWidth) / 2;
   const originY = destRect.y;
@@ -84,6 +98,7 @@ export function drawAvatar(
   }
 
   for (const part of skin.parts) {
+    if (hiddenBoneIndices.includes(part.boneIndex)) continue;
     // A mouth shape swaps in for whichever `parts` entry is its own slot --
     // recognized here by partId equality against the active mouthShapeId's
     // resolved entry (compile.ts builds every mouthShapes[] entry sharing
@@ -127,6 +142,7 @@ export function drawAvatar(
   // naturally inherits that bone's current rotation/scale (a hat tilts with
   // a tilted head) rather than needing its own forward-kinematics pass.
   for (const accessory of accessories) {
+    if (hiddenBoneIndices.includes(accessory.boneIndex)) continue;
     const boneMatrix = worldMatrices[accessory.boneIndex];
     if (!boneMatrix) continue;
     const anchorMatrix = boneMatrix.translate(accessory.offsetX, accessory.offsetY);

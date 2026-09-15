@@ -1589,7 +1589,11 @@ export function applyAddAvatarOverlay(
   // to this character BEFORE ever hitting "Add" (AvatarFramingDialog's own
   // pendingOverrides). Optional/empty for the overwhelmingly common
   // never-edited case.
-  designOverrides?: AvatarDesignOverrides
+  designOverrides?: AvatarDesignOverrides,
+  // Phase 8 ("Portrait mode") -- omitted (undefined) means "full", same as
+  // every clip persisted before this phase (video_math.ts's own doc comment
+  // on AvatarOverlayClip.framing).
+  framing?: "full" | "bust"
 ): TransformationResult {
   const startTimeSeconds = currentTimeSeconds;
   const endTimeSeconds = Math.min(
@@ -1604,6 +1608,7 @@ export function applyAddAvatarOverlay(
     rect,
     defaultAction,
     designOverrides,
+    framing,
   };
   return {
     label: "Added avatar",
@@ -1631,7 +1636,11 @@ export function applyEditAvatarOverlay(
   avatarId: string,
   defaultAction: AvatarActionId | (string & {}),
   rect?: CropRect,
-  designOverrides?: AvatarDesignOverrides
+  designOverrides?: AvatarDesignOverrides,
+  // Phase 8 -- same "always replaces, including back to undefined/full" rule
+  // as designOverrides above (AvatarFramingDialog is this field's only
+  // writer too, and always passes its own current framing state).
+  framing?: "full" | "bust"
 ): TransformationResult {
   const overlay = selections.avatarOverlays[overlayIndex];
   if (!overlay) return { label: "Edited avatar", state: selections };
@@ -1642,6 +1651,7 @@ export function applyEditAvatarOverlay(
     defaultAction,
     ...(rect ? { rect } : {}),
     designOverrides,
+    framing,
   };
   return { label: "Edited avatar", state: { ...selections, avatarOverlays: nextOverlays } };
 }

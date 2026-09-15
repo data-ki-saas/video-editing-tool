@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from src.avatar_gen import service
-from src.avatar_gen.schemas import GeneratedAvatarCreateResponse, GeneratedAvatarDetail, GeneratedAvatarSummary
+from src.avatar_gen.schemas import (
+    GeneratedAvatarCreateResponse,
+    GeneratedAvatarDetail,
+    GeneratedAvatarRenameRequest,
+    GeneratedAvatarSummary,
+)
 from src.core.auth import CurrentUser, get_current_user, require_feature
 
 # Nested under /api/avatar (same URL family as avatar/router.py's own
@@ -30,6 +35,13 @@ async def list_generated(user: CurrentUser = Depends(get_current_user)) -> list[
 @router.get("/{design_id}", response_model=GeneratedAvatarDetail)
 async def get_generated(design_id: str, user: CurrentUser = Depends(get_current_user)) -> GeneratedAvatarDetail:
     return service.get_generated_avatar(design_id, user)
+
+
+@router.patch("/{design_id}", response_model=GeneratedAvatarDetail)
+async def rename_generated(
+    design_id: str, body: GeneratedAvatarRenameRequest, user: CurrentUser = Depends(get_current_user)
+) -> GeneratedAvatarDetail:
+    return service.rename_generated_avatar(design_id, user, body.name)
 
 
 @router.delete("/{design_id}", status_code=204)

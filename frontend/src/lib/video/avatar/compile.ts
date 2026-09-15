@@ -19,7 +19,7 @@
  * mis-rendered frame. Same philosophy as this repo's DB schema migrations:
  * fail loudly at the boundary, not quietly downstream.
  */
-import type { ActionCurveSpec, AvatarTopology, BoneTransform, ExpressionParamSpec } from "./topology";
+import type { ActionCurveSpec, AvatarBustFraming, AvatarTopology, BoneTransform, ExpressionParamSpec } from "./topology";
 import type { AtlasRect, AvatarSkin, AvatarSkinColorSlot } from "./skin";
 import type { AvatarDesign, AvatarDesignOverrides } from "./design";
 import { hasAnyDesignOverride, mergeDesignOverrides } from "./design";
@@ -57,6 +57,11 @@ export interface CompiledTopology {
   // file's own computeEffectiveSlotColors (color deltas). Absent for any
   // topology declaring no expression params at all.
   expressionParams?: Record<string, ExpressionParamSpec>;
+  // Phase 8 -- carried straight through from AvatarTopology, consumed by
+  // renderer.ts's drawAvatar when a clip requests "bust" framing. Absent for
+  // any topology declaring no bust framing at all (see AvatarBustFraming's
+  // own doc comment on the "bust" == "full" fallback that then applies).
+  bustFraming?: AvatarBustFraming;
 }
 
 /** The atlas image plus every resolved part/mouth-shape draw entry. */
@@ -157,6 +162,7 @@ function compileTopology(topology: AvatarTopology): CompiledTopology {
     rigWidth: topology.rigWidth,
     rigHeight: topology.rigHeight,
     expressionParams: topology.expressionParams,
+    bustFraming: topology.bustFraming,
   };
 }
 
@@ -314,7 +320,19 @@ function recolorAtlas(baseImage: HTMLImageElement, colorSlots: AvatarSkinColorSl
  * decoded atlas -- skipped entirely whenever every slot's effective color
  * still equals its own default, so a plain, never-recolored skin costs
  * nothing beyond the plain decode this function already always does. */
-async function compileSkin(skin: AvatarSkin, boneCount: number, effectiveColors: Record<string, string> | null): Promise<CompiledSkin> {
+async function compileSkin(
+  skin: AvatarSkin,
+  boneCount: number,
+  effectiveColors: Record<string, string> | null,
+  // Phase 8 ("selectable torsos") -- a Design's own `garmentId`, resolved
+  // once here (not per-frame like a mouth shape) into a substitute atlas
+  // rect for whichever part slot declares it. Undefined, or naming a shapeId
+  // this skin doesn't declare, just falls back to that part's own base rect
+  // -- see AvatarSkinGarmentShape's own doc comment (skin.ts) for why this
+  // is a graceful fallback rather than the throw every OTHER cross-reference
+  // in this function gets.
+  garmentId: string | undefined
+): Promise<CompiledSkin> {
   const atlasImage = await loadAtlasImage(skin.atlas.imageRef);
 
   const sortedParts = [...skin.parts].sort((a, b) => a.zOrder - b.zOrder);
@@ -322,7 +340,8 @@ async function compileSkin(skin: AvatarSkin, boneCount: number, effectiveColors:
     if (!(part.boneIndex >= 0 && part.boneIndex < boneCount)) {
       throw new Error(`compileAvatar: skin "${skin.skinId}" part "${part.partId}" references out-of-range boneIndex ${part.boneIndex}`);
     }
-    const atlasRect = skin.atlas.partRects[part.partId];
+    const garmentShape = garmentId ? skin.garmentShapes?.find((shape) => shape.partId === part.partId && shape.shapeId === garmentId) : undefined;
+    const atlasRect = skin.atlas.partRects[garmentShape?.shapeId ?? part.partId];
     if (!atlasRect) {
       throw new Error(`compileAvatar: skin "${skin.skinId}" part "${part.partId}" has no matching atlas rect`);
     }
@@ -404,7 +423,7 @@ export async function compileAvatar(topology: AvatarTopology, skin: AvatarSkin, 
   const compiledTopology = compileTopology(topology);
   applyBoneScaleOverrides(compiledTopology, topology.boneGroups, design.boneScaleOverrides);
   const effectiveColors = computeEffectiveSlotColors(skin, topology, design);
-  const compiledSkin = await compileSkin(skin, compiledTopology.boneCount, effectiveColors);
+  const compiledSkin = await compileSkin(skin, compiledTopology.boneCount, effectiveColors, design.garmentId);
   const accessories = await compileAccessories(topology, design.attachedAccessories);
   return { topology: compiledTopology, skin: compiledSkin, design, accessories };
 }

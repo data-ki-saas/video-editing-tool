@@ -14,6 +14,7 @@ import {
   generateAvatarFromPhoto as apiGenerateAvatarFromPhoto,
   getGeneratedAvatar as apiGetGeneratedAvatar,
   listGeneratedAvatars,
+  renameGeneratedAvatar as apiRenameGeneratedAvatar,
   type GeneratedAvatarCreateResult,
   type GeneratedAvatarDetail,
   type GeneratedAvatarSummary,
@@ -72,4 +73,16 @@ export async function listMyGeneratedAvatars(): Promise<GeneratedAvatarSummary[]
 export async function deleteGeneratedAvatar(avatarId: string): Promise<void> {
   knownEntries.delete(avatarId);
   await apiDeleteGeneratedAvatar(avatarId);
+}
+
+/** In-place rename (AvatarFramingDialog's "My avatars" gallery). Also drops
+ * this id from `knownEntries` rather than patching it in place -- a stale
+ * cached entry's own `design.meta.name` would otherwise keep reading the OLD
+ * name until something else re-triggers a compile, and the next
+ * getCompiledAvatar/fetchGeneratedAvatarEntry call re-fetches it fresh
+ * (cheap: this only runs right after an explicit user rename action, not a
+ * hot path). */
+export async function renameGeneratedAvatar(avatarId: string, name: string): Promise<void> {
+  knownEntries.delete(avatarId);
+  await apiRenameGeneratedAvatar(avatarId, name);
 }

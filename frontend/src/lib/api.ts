@@ -486,6 +486,18 @@ export async function getGeneratedAvatar(avatarId: string): Promise<GeneratedAva
   return toGeneratedAvatarDetail(await handleResponse<GeneratedAvatarDetailWire>(response));
 }
 
+/** PATCH /api/avatar/generated/{id} -- AvatarFramingDialog's "My avatars"
+ * gallery in-place rename (InlineEditableText), same PATCH-one-field idiom
+ * as updateLibraryVideo above. */
+export async function renameGeneratedAvatar(avatarId: string, name: string): Promise<GeneratedAvatarDetail> {
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/generated/${encodeURIComponent(avatarId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ name }),
+  });
+  return toGeneratedAvatarDetail(await handleResponse<GeneratedAvatarDetailWire>(response));
+}
+
 export async function deleteGeneratedAvatar(avatarId: string): Promise<void> {
   const response = await apiFetch(`${API_BASE_URL}/api/avatar/generated/${encodeURIComponent(avatarId)}`, {
     method: "DELETE",

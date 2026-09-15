@@ -41,6 +41,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
+import { InlineEditableText } from "@/components/InlineEditableText";
 import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
 import { getCompiledAvatar, getCompiledAvatarForClip, type CompiledAvatar } from "@/lib/video/avatar/compile";
 import { computeAvatarPose, computeMouthShapeId } from "@/lib/video/avatar/actions";
@@ -51,6 +52,7 @@ import {
   fetchGeneratedAvatarEntry,
   generateAvatarFromPhoto,
   listMyGeneratedAvatars,
+  renameGeneratedAvatar,
   type GeneratedAvatarSummary,
 } from "@/lib/video/avatar/generatedLibrary";
 import type { AvatarActionId, AvatarTopology } from "@/lib/video/avatar/topology";
@@ -94,6 +96,17 @@ const AVATAR_ACTION_LABELS: Record<string, string> = {
   talkEmphasize: "Talking + Pointing",
 };
 
+// Phase 8 ("selectable torsos") -- human-readable labels for the garment
+// shapeIds library.ts's GARMENT_SHAPES/avatar_gen's own _GARMENT_SHAPES
+// declare. "Shirt" (id `undefined`) isn't in here -- see garmentOptions
+// below for why it's a separate, always-first synthetic entry rather than a
+// real shapeId.
+const GARMENT_LABELS: Record<string, string> = {
+  polo: "Polo",
+  suit: "Suit",
+  blazer: "Blazer",
+};
+
 // Defensive fallback ONLY -- used if getAvatarLibraryEntry can't resolve the
 // currently-picked avatarId at all (see actionIdsForAvatar below). Every
 // real seed Topology defines all six baseline actions (library.ts's own doc
@@ -112,6 +125,10 @@ function humanizeActionId(actionId: string): string {
 
 function actionLabel(actionId: string): string {
   return AVATAR_ACTION_LABELS[actionId] ?? humanizeActionId(actionId);
+}
+
+function garmentLabel(shapeId: string): string {
+  return GARMENT_LABELS[shapeId] ?? humanizeActionId(shapeId);
 }
 
 // The actual pickable action ids for whichever avatar is CURRENTLY
@@ -247,6 +264,7 @@ function AvatarPreviewCanvas({
   avatarId,
   action,
   designOverrides,
+  framing,
   className,
 }: {
   avatarId: string;
@@ -257,11 +275,24 @@ function AvatarPreviewCanvas({
   // component (gallery thumbnails) still uses. Omitted entirely for those
   // callers, which behave exactly as before this phase.
   designOverrides?: AvatarDesignOverrides;
+  // Phase 8 ("Portrait mode") -- previewed live the same way, defaulting to
+  // "full" so every pre-Phase-8 caller (there are none besides this dialog,
+  // but the default keeps this prop genuinely optional) is unaffected.
+  framing?: "full" | "bust";
   className?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const compiledRef = useRef<CompiledAvatar | null>(null);
   const seedRef = useRef(0);
+  // Read fresh every frame by the rAF loop below without being one of its
+  // OWN restart triggers -- same "ref, not a dependency" treatment as
+  // avatarId itself (see the loop's own comment): toggling Full body/
+  // Portrait mid-preview should re-frame the very next drawn frame, not
+  // rewind the animation clock the way switching ACTION deliberately does.
+  const framingRef = useRef<"full" | "bust">(framing ?? "full");
+  useEffect(() => {
+    framingRef.current = framing ?? "full";
+  }, [framing]);
 
   // (Re)compiles whenever the picked avatarId OR its pending overrides
   // change. `cancelled` guards against a stale resolution landing after the
@@ -328,7 +359,7 @@ function AvatarPreviewCanvas({
         if (compiled) {
           const pose = computeAvatarPose(compiled.topology, action, elapsedSeconds, seedRef.current, compiled.design.expressionBias);
           const mouthShapeId = computeMouthShapeId(action, elapsedSeconds);
-          drawAvatar(ctx, compiled, pose, { x: 0, y: 0, width: canvas.width, height: canvas.height }, mouthShapeId);
+          drawAvatar(ctx, compiled, pose, { x: 0, y: 0, width: canvas.width, height: canvas.height }, mouthShapeId, framingRef.current);
         }
       }
       rafId = requestAnimationFrame(draw);
@@ -361,7 +392,13 @@ export function AvatarFramingDialog({
   // omitted (not an empty `{}`) otherwise, so a never-customized avatar's
   // clip stays exactly as lean as before this phase (see design.ts's
   // hasAnyDesignOverride).
-  onSave: (avatarId: string, defaultAction: AvatarActionId | (string & {}), rect: CropRect, designOverrides?: AvatarDesignOverrides) => void;
+  onSave: (
+    avatarId: string,
+    defaultAction: AvatarActionId | (string & {}),
+    rect: CropRect,
+    designOverrides?: AvatarDesignOverrides,
+    framing?: "full" | "bust"
+  ) => void;
   onClose: () => void;
   // Only ever passed (and only ever rendered, see the button row below) when
   // editingOverlay is non-null -- a not-yet-added avatar has nothing to
@@ -384,6 +421,12 @@ export function AvatarFramingDialog({
   // AvatarOverlayClip.defaultAction's own widened type (video_math.ts).
   const [defaultAction, setDefaultAction] = useState<string>(editingOverlay?.defaultAction ?? "idle");
   const [rect, setRect] = useState<CropRect>(editingOverlay?.rect ?? DEFAULT_AVATAR_OVERLAY_RECT);
+  // Phase 8 ("Portrait mode") -- "full" (whole rig) vs. "bust" (hands+torso+
+  // head, legs cropped out -- see avatar/topology.ts's AvatarBustFraming).
+  // A plain crop choice, independent of `defaultAction`: the existing "sit"
+  // action is a different animated POSE (the character sitting), not this
+  // framing -- a creator can combine either action with either framing.
+  const [framing, setFraming] = useState<"full" | "bust">(editingOverlay?.framing ?? "full");
   // Phase 7 -- this clip's own bone-scale/color-slot/accessory/expression-bias
   // customization, edited in place via "Edit with AI" and previewed live
   // (AvatarPreviewCanvas below) before ever being committed to the clip on
@@ -399,6 +442,7 @@ export function AvatarFramingDialog({
     setDefaultAction(editingOverlay?.defaultAction ?? "idle");
     setRect(editingOverlay?.rect ?? DEFAULT_AVATAR_OVERLAY_RECT);
     setPendingOverrides(editingOverlay?.designOverrides ?? {});
+    setFraming(editingOverlay?.framing ?? "full");
   }, [editingOverlay]);
 
   // Switching to a DIFFERENT character mid-dialog clears any pending
@@ -473,6 +517,21 @@ export function AvatarFramingDialog({
     }
   }
 
+  // In-place rename (InlineEditableText on the "My avatars" gallery card) --
+  // optimistic, same "update local state first, revert on a caught error"
+  // posture as /library's own handleUpdateMetadata, since a failed PATCH
+  // here is rare and not worth a per-card loading state.
+  async function handleRenameGenerated(id: string, name: string) {
+    const previous = myAvatars.find((a) => a.id === id)?.name;
+    setMyAvatars((prev) => prev.map((a) => (a.id === id ? { ...a, name } : a)));
+    try {
+      await renameGeneratedAvatar(id, name);
+    } catch (err) {
+      console.error("Failed to rename generated avatar", err);
+      if (previous !== undefined) setMyAvatars((prev) => prev.map((a) => (a.id === id ? { ...a, name: previous } : a)));
+    }
+  }
+
   // Phase 7 -- the raw topology/skin (NOT the compiled form) for whichever
   // avatar is picked RIGHT NOW: "Edit with AI" needs the actual
   // boneGroups/colorSlots/anchors/expressionParams ids to (a) tell the
@@ -509,6 +568,18 @@ export function AvatarFramingDialog({
   // enough that memoizing it would just be ceremony).
   const actionOptions = actionIdsForAvatar(avatarId);
 
+  // Phase 8 ("selectable torsos") -- "Shirt" (garmentId `undefined`, the
+  // base "torso" rect) is always first and always offered, even before
+  // resolvedEntry has resolved; the real shapeIds come from THIS avatar's
+  // own skin.garmentShapes (same "derive from what this avatar actually
+  // supports" principle as actionOptions above), so a foreign/older skin
+  // with none just offers Shirt alone rather than a swap that would silently
+  // no-op at compile time.
+  const garmentOptions: { id: string | undefined; label: string }[] = [
+    { id: undefined, label: "Shirt" },
+    ...(resolvedEntry?.skin.garmentShapes ?? []).map((shape) => ({ id: shape.shapeId, label: garmentLabel(shape.shapeId) })),
+  ];
+
   // If the picked action isn't even IN that list -- e.g. the user just
   // switched to a different avatar card whose topology doesn't define
   // whatever action was picked for the previous one -- fall back to "idle"
@@ -528,7 +599,7 @@ export function AvatarFramingDialog({
 
   function handleSave() {
     if (!canSave) return;
-    onSave(avatarId, defaultAction, rect, hasAnyDesignOverride(pendingOverrides) ? pendingOverrides : undefined);
+    onSave(avatarId, defaultAction, rect, hasAnyDesignOverride(pendingOverrides) ? pendingOverrides : undefined, framing);
   }
 
   // "Direct with AI" (Phase 4) -- the narration this clip's own committed
@@ -646,7 +717,13 @@ export function AvatarFramingDialog({
                 borderColorClassName="border-teal-400"
                 handleColorClassName="bg-teal-400"
                 renderInner={
-                  <AvatarPreviewCanvas avatarId={avatarId} action={defaultAction} designOverrides={pendingOverrides} className="h-full w-full" />
+                  <AvatarPreviewCanvas
+                    avatarId={avatarId}
+                    action={defaultAction}
+                    designOverrides={pendingOverrides}
+                    framing={framing}
+                    className="h-full w-full"
+                  />
                 }
               />
             </div>
@@ -726,17 +803,26 @@ export function AvatarFramingDialog({
                 </button>
               ))}
 
+              {/* A plain `div` card, not a `button` -- unlike the seed
+                  Character cards above, this one needs a nested interactive
+                  name edit (InlineEditableText) below, and a `button` can't
+                  legally contain another one. Selecting the avatar is now
+                  the thumbnail's own click target instead of the whole
+                  card's. */}
               {myAvatars.map((summary) => (
-                <button
+                <div
                   key={summary.id}
-                  type="button"
-                  onClick={() => selectAvatar(summary.id)}
                   className={
                     "flex flex-col gap-1 rounded-md border-2 p-1.5 text-xs " +
                     (avatarId === summary.id ? "border-accent bg-accent/10" : "border-border hover:bg-background")
                   }
                 >
-                  <div className="relative aspect-square w-full overflow-hidden rounded bg-black">
+                  <button
+                    type="button"
+                    onClick={() => selectAvatar(summary.id)}
+                    aria-label={`Select ${summary.name}`}
+                    className="relative aspect-square w-full overflow-hidden rounded bg-black"
+                  >
                     <AvatarThumbnailCanvas avatarId={summary.id} className="absolute inset-0 h-full w-full" />
                     <span
                       role="button"
@@ -747,9 +833,15 @@ export function AvatarFramingDialog({
                     >
                       ✕
                     </span>
-                  </div>
-                  <span className="w-full truncate text-center text-foreground">{summary.name}</span>
-                </button>
+                  </button>
+                  <InlineEditableText
+                    value={summary.name}
+                    onCommit={(name) => handleRenameGenerated(summary.id, name)}
+                    ariaLabel="Avatar name"
+                    className="w-full truncate text-center text-foreground"
+                    inputClassName="block w-full truncate rounded border border-border bg-background px-1 text-center text-foreground outline-none"
+                  />
+                </div>
               ))}
 
               {/* "Sophisticated faces" (Phase 6) -- generate a new character
@@ -799,6 +891,63 @@ export function AvatarFramingDialog({
                   {actionLabel(actionId)}
                 </button>
               ))}
+            </div>
+
+            {/* Phase 8 -- "Portrait mode": crops the legs so just
+                hands+torso+head fill the rect, like a seated close-up shot.
+                A plain two-way toggle (not a dropdown/checkbox) per this
+                product's own bias toward simple, obvious direct-manipulation
+                controls over form-y widgets. */}
+            <h3 className="mb-1.5 text-xs font-medium text-foreground">Framing</h3>
+            <div className="mb-3 grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => setFraming("full")}
+                className={
+                  "rounded-md border py-1.5 text-xs font-medium " +
+                  (framing === "full" ? "border-accent bg-accent text-accent-foreground" : "border-border text-foreground hover:bg-background")
+                }
+              >
+                Full body
+              </button>
+              <button
+                type="button"
+                onClick={() => setFraming("bust")}
+                title="Hands and torso only, legs cropped out"
+                className={
+                  "rounded-md border py-1.5 text-xs font-medium " +
+                  (framing === "bust" ? "border-accent bg-accent text-accent-foreground" : "border-border text-foreground hover:bg-background")
+                }
+              >
+                Portrait
+              </button>
+            </div>
+
+            {/* Phase 8 -- "Outfit": swaps the torso's own silhouette
+                (shirt/polo/suit/blazer, avatar/skin.ts's
+                AvatarSkinGarmentShape) via `pendingOverrides.garmentId` --
+                the SAME per-clip override object "Customize with AI"/
+                "Reset customization" already manage, so this composes with
+                that flow (and with the shirtColor slot, which keeps
+                recoloring whichever outfit is picked) for free. */}
+            <h3 className="mb-1.5 text-xs font-medium text-foreground">Outfit</h3>
+            <div className="mb-3 grid grid-cols-2 gap-1.5">
+              {garmentOptions.map((option) => {
+                const isActive = (pendingOverrides.garmentId ?? undefined) === option.id;
+                return (
+                  <button
+                    key={option.label}
+                    type="button"
+                    onClick={() => setPendingOverrides((prev) => ({ ...prev, garmentId: option.id }))}
+                    className={
+                      "rounded-md border py-1.5 text-xs font-medium " +
+                      (isActive ? "border-accent bg-accent text-accent-foreground" : "border-border text-foreground hover:bg-background")
+                    }
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
             </div>
 
             {editingOverlay && onDirect && (

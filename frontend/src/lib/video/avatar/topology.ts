@@ -152,6 +152,23 @@ export interface ExpressionParamSpec {
 }
 
 /**
+ * Phase 8 ("Portrait mode") -- what an AvatarOverlayClip's `framing: "bust"`
+ * (video_math.ts) actually does to THIS topology's rig: which bones to skip
+ * drawing entirely (renderer.ts's drawAvatar), and what rig-space height to
+ * fit-by-height against instead of the full `rigHeight` (so the torso/arms/
+ * head fill the box the same way the full rig fills it in "full" framing,
+ * rather than shrinking to leave dead space where the legs used to be).
+ * Optional on AvatarTopology -- a topology that never defines this (a future
+ * half-body-only rig, or one authored before this phase) just has "bust"
+ * framing silently behave identically to "full" (see renderer.ts's own
+ * fallback), rather than every topology being forced to declare it.
+ */
+export interface AvatarBustFraming {
+  hiddenBoneIndices: number[];
+  frameHeight: number;
+}
+
+/**
  * The shared skeleton + action library one or more Skins bind to. This is
  * the ONE layer of the three (Topology/Skin/Design) that owns bone-driven
  * animation logic -- action curves, scalable bone groupings, attachment
@@ -223,4 +240,7 @@ export interface AvatarTopology {
   // edit-ops validator) already treats a missing/empty map as "no expression
   // capability for this avatar" rather than erroring.
   expressionParams?: Record<string, ExpressionParamSpec>;
+
+  // Phase 8 -- see AvatarBustFraming's own doc comment above.
+  bustFraming?: AvatarBustFraming;
 }

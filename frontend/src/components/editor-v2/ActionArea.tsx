@@ -439,7 +439,8 @@ export function ActionArea({
     avatarId: string,
     defaultAction: AvatarActionId | (string & {}),
     rect: CropRect,
-    designOverrides?: AvatarDesignOverrides
+    designOverrides?: AvatarDesignOverrides,
+    framing?: "full" | "bust"
   ) => void;
   onCloseAvatarDialog: () => void;
   // AvatarOverlayTrack's own "Remove avatar" -- see onDeleteTextOverlay's

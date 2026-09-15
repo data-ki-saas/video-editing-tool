@@ -1875,7 +1875,7 @@ export async function exportVideoLocally(
         const destY = clip.rect.y * canvas.height;
         const destWidth = clip.rect.width * canvas.width;
         const destHeight = clip.rect.height * canvas.height;
-        drawAvatar(ctx, compiled, pose, { x: destX, y: destY, width: destWidth, height: destHeight }, mouthShapeId);
+        drawAvatar(ctx, compiled, pose, { x: destX, y: destY, width: destWidth, height: destHeight }, mouthShapeId, clip.framing ?? "full");
       }
 
       for (const overlay of findActiveTextOverlays(selections.textOverlays, sourceTimeSeconds)) {

@@ -1671,7 +1671,7 @@ export const CanvasPlayer = forwardRef<
       const destY = clip.rect.y * canvas.height;
       const destWidth = clip.rect.width * canvas.width;
       const destHeight = clip.rect.height * canvas.height;
-      drawAvatar(ctx, compiled, pose, { x: destX, y: destY, width: destWidth, height: destHeight }, mouthShapeId);
+      drawAvatar(ctx, compiled, pose, { x: destX, y: destY, width: destWidth, height: destHeight }, mouthShapeId, clip.framing ?? "full");
     }
 
     // Text overlays draw last, always on top of every overlay above.

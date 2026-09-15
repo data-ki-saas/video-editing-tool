@@ -58,6 +58,26 @@ export interface AvatarSkinMouthShape {
 }
 
 /**
+ * One swappable atlas rect for a garment (torso outfit) part slot -- the
+ * same whole-rect-substitution idea as AvatarSkinMouthShape, except resolved
+ * ONCE at compile time (compile.ts) rather than re-picked every frame: an
+ * outfit choice doesn't change frame to frame the way a talking mouth does.
+ * `partId` names which `AvatarSkin.parts` entry this shape substitutes for
+ * ("torso" on every skin today, but keyed the same open way mouth shapes are
+ * in case a future topology ever grows a second garment-bearing part). A
+ * skin need not declare any garment shapes at all -- and even a Design whose
+ * `garmentId` names a shapeId THIS skin doesn't define simply can't be
+ * re-outfitted -- compile.ts falls back to that part's own base atlas rect
+ * rather than throwing, since an outfit pick is an optional cosmetic choice,
+ * not a required structural cross-reference the way a mouth shape's own
+ * partId is.
+ */
+export interface AvatarSkinGarmentShape {
+  shapeId: string;
+  partId: string;
+}
+
+/**
  * One recolorable region of the atlas (Phase 7 -- conversational Design
  * edits, e.g. "make the shirt red"). Deliberately scoped to parts whose
  * ENTIRE drawn rect is a single flat fill color (a skin's shirt/pants, never
@@ -107,4 +127,9 @@ export interface AvatarSkin {
   // slots simply can't be recolored via `AvatarDesign.colorSlotOverrides`
   // (compile.ts's own recolor step is a no-op for it).
   colorSlots?: AvatarSkinColorSlot[];
+  // Phase 8 ("selectable torsos") -- optional, possibly entirely absent: a
+  // skin with no garment shapes simply can't be re-outfitted via
+  // `AvatarDesign.garmentId` (compile.ts's own resolution just falls back to
+  // the base "torso" rect either way).
+  garmentShapes?: AvatarSkinGarmentShape[];
 }

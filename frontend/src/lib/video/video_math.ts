@@ -1233,6 +1233,14 @@ export interface AvatarOverlayClip {
   // same "small override record on shared content" idea Design itself
   // already applies one level up over Skin.
   designOverrides?: AvatarDesignOverrides;
+  // Phase 8 ("Portrait mode") -- "full" (the default when this field is
+  // absent, matching every clip persisted before this phase) draws the
+  // whole rig; "bust" hides the legs and fits hands+torso+head to `rect`
+  // instead (avatar/renderer.ts's drawAvatar, avatar/topology.ts's
+  // AvatarBustFraming) -- a plain crop-only choice, independent of
+  // `defaultAction`/`actionTimeline` (picking the "sit" action is a
+  // different animation, not this framing).
+  framing?: "full" | "bust";
 }
 
 // Bottom-right, bust-framed -- clear of the center content a reel's main

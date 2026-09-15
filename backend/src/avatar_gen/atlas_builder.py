@@ -45,8 +45,20 @@ ARM_R_RECT = {"sx": ARM_L_RECT["sx"] + ARM_L_RECT["sWidth"] + GAP, "sy": _ROW2_Y
 LEG_L_RECT = {"sx": ARM_R_RECT["sx"] + ARM_R_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 42, "sHeight": 150}
 LEG_R_RECT = {"sx": LEG_L_RECT["sx"] + LEG_L_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 42, "sHeight": 150}
 
-CANVAS_WIDTH = LEG_R_RECT["sx"] + LEG_R_RECT["sWidth"] + GAP
-CANVAS_HEIGHT = max(TORSO_RECT["sy"] + TORSO_RECT["sHeight"], LEG_L_RECT["sy"] + LEG_L_RECT["sHeight"]) + GAP
+# Row 3 -- mirrors frontend/src/lib/video/avatar/placeholderAtlas.ts's own
+# Row 3 exactly (same rect sizes/order/extra GAP*2 clearance -- see that
+# file's own comment on why these shapes' collar/lapel details need the
+# extra headroom): three alternate torso silhouettes ("polo"/"blazer"/
+# "suit"), each the SAME sWidth/sHeight as TORSO_RECT so a picked garment's
+# rect can substitute for the "torso" part's own rect with no change to that
+# part's own pivot.
+_ROW3_Y = max(TORSO_RECT["sy"] + TORSO_RECT["sHeight"], LEG_L_RECT["sy"] + LEG_L_RECT["sHeight"]) + GAP * 2
+POLO_RECT = {"sx": GAP, "sy": _ROW3_Y, "sWidth": 120, "sHeight": 140}
+BLAZER_RECT = {"sx": POLO_RECT["sx"] + POLO_RECT["sWidth"] + GAP, "sy": _ROW3_Y, "sWidth": 120, "sHeight": 140}
+SUIT_RECT = {"sx": BLAZER_RECT["sx"] + BLAZER_RECT["sWidth"] + GAP, "sy": _ROW3_Y, "sWidth": 120, "sHeight": 140}
+
+CANVAS_WIDTH = max(LEG_R_RECT["sx"] + LEG_R_RECT["sWidth"], SUIT_RECT["sx"] + SUIT_RECT["sWidth"]) + GAP
+CANVAS_HEIGHT = SUIT_RECT["sy"] + SUIT_RECT["sHeight"] + GAP
 
 # Kept fixed (not photo-derived) -- only skin/hair tone vary per generated
 # character, same scope placeholderAtlas.ts's own PlaceholderAtlasPalette
@@ -94,6 +106,72 @@ def _box(rect: dict) -> tuple[float, float, float, float]:
 def _rounded_rect(draw: ImageDraw.ImageDraw, rect: dict, inset: float, radius: float, fill: str) -> None:
     x0, y0, x1, y1 = _box(rect)
     draw.rounded_rectangle((x0 + inset, y0 + inset, x1 - inset, y1 - inset), radius=radius, fill=fill, outline=_OUTLINE_COLOR, width=2)
+
+
+def _torso_body(draw: ImageDraw.ImageDraw, rect: dict) -> None:
+    """The plain rounded-rect torso body every garment variant below starts
+    from -- exactly what TORSO_RECT ("plain shirt") has always drawn, mirrors
+    placeholderAtlas.ts's own drawTorsoBody."""
+    _rounded_rect(draw, rect, inset=6, radius=14, fill=_SHIRT_COLOR)
+
+
+def _fill_garment_triangle(draw: ImageDraw.ImageDraw, points: list[tuple[float, float]]) -> None:
+    """Fills+outlines one triangle in the shirt's own color -- ADDS to the
+    plain body's silhouette (a polo collar point, a suit lapel wedge).
+    Deliberately always `_SHIRT_COLOR`, never a second contrasting color: a
+    generated Design's colorSlotOverrides recolor (compile.ts's
+    recolorAtlas, frontend) re-tints a WHOLE target rect uniformly wherever
+    it isn't fully transparent, so only a SILHOUETTE difference survives
+    that recolor -- see placeholderAtlas.ts's own fillGarmentTriangle doc
+    comment for the full reasoning, mirrored here exactly."""
+    draw.polygon(points, fill=_SHIRT_COLOR)
+    draw.line([*points, points[0]], fill=_OUTLINE_COLOR, width=2, joint="curve")
+
+
+def _cut_garment_notch(draw: ImageDraw.ImageDraw, points: list[tuple[float, float]]) -> None:
+    """Cuts a triangular, fully-transparent notch out of whatever's already
+    drawn -- PIL's ImageDraw sets raw RGBA pixel values rather than
+    alpha-compositing, so `fill=(0, 0, 0, 0)` genuinely erases alpha here
+    (the same effect as placeholderAtlas.ts's `destination-out` composite),
+    and survives a colorSlotOverrides recolor exactly as drawn: an open
+    collar stays open no matter what shirt color is picked. A thin outline
+    traced back afterward gives the cut a visible edge instead of a bare
+    hard-alpha cliff."""
+    draw.polygon(points, fill=(0, 0, 0, 0))
+    draw.line(points, fill=_OUTLINE_COLOR, width=2, joint="curve")
+
+
+def _draw_torso_polo(draw: ImageDraw.ImageDraw, rect: dict) -> None:
+    """Plain shirt body plus two small collar-point triangles poking up from
+    the neckline -- mirrors placeholderAtlas.ts's drawTorsoPolo."""
+    _torso_body(draw, rect)
+    cx = rect["sx"] + rect["sWidth"] / 2
+    top_y = rect["sy"] + 6
+    _fill_garment_triangle(draw, [(cx - 30, top_y), (cx - 10, top_y - 12), (cx - 6, top_y)])
+    _fill_garment_triangle(draw, [(cx + 30, top_y), (cx + 10, top_y - 12), (cx + 6, top_y)])
+
+
+def _draw_torso_blazer(draw: ImageDraw.ImageDraw, rect: dict) -> None:
+    """Plain shirt body with an open, V-shaped collar notch cut into the
+    top-center -- mirrors placeholderAtlas.ts's drawTorsoBlazer."""
+    _torso_body(draw, rect)
+    cx = rect["sx"] + rect["sWidth"] / 2
+    top_y = rect["sy"] + 6
+    _cut_garment_notch(draw, [(cx - 20, top_y), (cx, top_y + 30), (cx + 20, top_y)])
+
+
+def _draw_torso_suit(draw: ImageDraw.ImageDraw, rect: dict) -> None:
+    """Blazer's open collar notch, cut deeper, plus two small peaked-lapel
+    triangles added at the shoulders -- mirrors placeholderAtlas.ts's
+    drawTorsoSuit."""
+    _torso_body(draw, rect)
+    cx = rect["sx"] + rect["sWidth"] / 2
+    top_y = rect["sy"] + 6
+    _fill_garment_triangle(draw, [(rect["sx"] + 8, top_y + 18), (rect["sx"] + 8, top_y - 6), (cx - 16, top_y)])
+    _fill_garment_triangle(
+        draw, [(rect["sx"] + rect["sWidth"] - 8, top_y + 18), (rect["sx"] + rect["sWidth"] - 8, top_y - 6), (cx + 16, top_y)]
+    )
+    _cut_garment_notch(draw, [(cx - 26, top_y), (cx, top_y + 44), (cx + 26, top_y)])
 
 
 # Fallback-only (no face_oval contour available, e.g. detected=False): the
@@ -278,11 +356,14 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
     )
     _draw_mouth_closed(draw, MOUTH_CLOSED_RECT, palette.mouth_width_scale)
     _draw_mouth_open(draw, MOUTH_OPEN_RECT, palette.mouth_width_scale)
-    _rounded_rect(draw, TORSO_RECT, inset=6, radius=14, fill=_SHIRT_COLOR)
+    _torso_body(draw, TORSO_RECT)
     _rounded_rect(draw, ARM_L_RECT, inset=4, radius=14, fill=palette.skin_tone)
     _rounded_rect(draw, ARM_R_RECT, inset=4, radius=14, fill=palette.skin_tone)
     _rounded_rect(draw, LEG_L_RECT, inset=4, radius=17, fill=_PANTS_COLOR)
     _rounded_rect(draw, LEG_R_RECT, inset=4, radius=17, fill=_PANTS_COLOR)
+    _draw_torso_polo(draw, POLO_RECT)
+    _draw_torso_blazer(draw, BLAZER_RECT)
+    _draw_torso_suit(draw, SUIT_RECT)
 
     buffer = BytesIO()
     image.save(buffer, format="PNG")
@@ -297,6 +378,9 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
         "armR": ARM_R_RECT,
         "legL": LEG_L_RECT,
         "legR": LEG_R_RECT,
+        "polo": POLO_RECT,
+        "blazer": BLAZER_RECT,
+        "suit": SUIT_RECT,
     }
     return buffer.getvalue(), part_rects
 
@@ -380,11 +464,14 @@ def build_atlas_png_from_photo(cartoon_image_bytes: bytes, palette: FacePalette)
     image.paste(head_crop.convert("RGBA"), (HEAD_RECT["sx"], HEAD_RECT["sy"]), head_mask)
     image.paste(mouth_closed.convert("RGBA"), (MOUTH_CLOSED_RECT["sx"], MOUTH_CLOSED_RECT["sy"]))
     image.paste(mouth_open.convert("RGBA"), (MOUTH_OPEN_RECT["sx"], MOUTH_OPEN_RECT["sy"]))
-    _rounded_rect(draw, TORSO_RECT, inset=6, radius=14, fill=_SHIRT_COLOR)
+    _torso_body(draw, TORSO_RECT)
     _rounded_rect(draw, ARM_L_RECT, inset=4, radius=14, fill=palette.skin_tone)
     _rounded_rect(draw, ARM_R_RECT, inset=4, radius=14, fill=palette.skin_tone)
     _rounded_rect(draw, LEG_L_RECT, inset=4, radius=17, fill=_PANTS_COLOR)
     _rounded_rect(draw, LEG_R_RECT, inset=4, radius=17, fill=_PANTS_COLOR)
+    _draw_torso_polo(draw, POLO_RECT)
+    _draw_torso_blazer(draw, BLAZER_RECT)
+    _draw_torso_suit(draw, SUIT_RECT)
 
     buffer = BytesIO()
     image.save(buffer, format="PNG")
@@ -399,5 +486,8 @@ def build_atlas_png_from_photo(cartoon_image_bytes: bytes, palette: FacePalette)
         "armR": ARM_R_RECT,
         "legL": LEG_L_RECT,
         "legR": LEG_R_RECT,
+        "polo": POLO_RECT,
+        "blazer": BLAZER_RECT,
+        "suit": SUIT_RECT,
     }
     return buffer.getvalue(), part_rects

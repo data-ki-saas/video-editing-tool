@@ -23,6 +23,10 @@ class GeneratedAvatarDetail(BaseModel):
     created_at: str
 
 
+class GeneratedAvatarRenameRequest(BaseModel):
+    name: str
+
+
 class GeneratedAvatarCreateResponse(GeneratedAvatarDetail):
     """The one response that also reports whether a face was actually
     detected in the uploaded photo -- `detected=False` means the returned

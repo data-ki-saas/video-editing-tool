@@ -59,6 +59,17 @@ _COLOR_SLOTS = [
     {"slotId": "pantsColor", "targetPartIds": ["legL", "legR"], "defaultColor": _PANTS_COLOR, "respondsToExpressionParams": ["colorMood"]},
 ]
 
+# Phase 8 ("selectable torsos") -- mirrors frontend/src/lib/video/avatar/
+# library.ts's own GARMENT_SHAPES exactly. "plainShirt" (the base "torso"
+# rect) is deliberately not listed here -- a Design with no `garmentId` (or
+# one this skin doesn't define) already falls back to it, same convention
+# _MOUTH_SHAPES doesn't need a "no override" entry for either.
+_GARMENT_SHAPES = [
+    {"shapeId": "polo", "partId": "torso"},
+    {"shapeId": "blazer", "partId": "torso"},
+    {"shapeId": "suit", "partId": "torso"},
+]
+
 _ALLOWED_PHOTO_TYPES = {"image/jpeg", "image/png"}
 
 
@@ -185,6 +196,7 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
         "parts": _PARTS,
         "mouthShapes": _MOUTH_SHAPES,
         "colorSlots": _COLOR_SLOTS,
+        "garmentShapes": _GARMENT_SHAPES,
     }
     design = {
         "schemaVersion": 1,
@@ -238,6 +250,25 @@ def get_generated_avatar(design_id: str, user: CurrentUser) -> GeneratedAvatarDe
     if record is None:
         raise HTTPException(status_code=404, detail="Avatar not found")
     return _resolve(record)
+
+
+def rename_generated_avatar(design_id: str, user: CurrentUser, name: str) -> GeneratedAvatarDetail:
+    """In-place rename (the frontend's InlineEditableText on AvatarFramingDialog's
+    "My avatars" gallery card) -- patches the row's `name` column and the
+    mirrored `design.meta.name` together (repository.rename), never forking a
+    new record. 404s the same way get/delete do for an id that doesn't exist
+    or isn't this user's."""
+    trimmed = name.strip()
+    if not trimmed:
+        raise HTTPException(status_code=400, detail="Name can't be empty")
+    record = repository.get(design_id, user.id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Avatar not found")
+    design = {**record.design, "meta": {**record.design["meta"], "name": trimmed}}
+    renamed = repository.rename(design_id, user.id, trimmed, design)
+    if renamed is None:
+        raise HTTPException(status_code=404, detail="Avatar not found")
+    return _resolve(renamed)
 
 
 def delete_generated_avatar(design_id: str, user: CurrentUser) -> None:
