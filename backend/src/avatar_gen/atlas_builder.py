@@ -437,6 +437,22 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
     return buffer.getvalue(), part_rects
 
 
+# Vertical/horizontal fraction of head_crop where the REAL face_oval bbox
+# sits, derived from face-analysis/src/photo_analysis.py's own
+# `_compute_crop_regions` margin factors (_HEAD_CROP_HAIR_MARGIN_FACTOR=0.32
+# hair margin added ABOVE the face, _HEAD_CROP_SIDE_MARGIN_FACTOR=0.06 side
+# margin either side, and a further flat 1.02 square-ify pad) -- both fixed
+# fractions of face_oval's own bbox, not photo-dependent, and unaffected by
+# that function's final "shift to stay in-bounds" clamp (a shift moves the
+# whole box, not the face's position within it). Solving that math backward:
+# the real face top lands ~24% down the crop, the chin ~97% down, and the
+# face width occupies the central ~55% -- used below to protect this region
+# from ever being zeroed by the background chroma-key, regardless of color.
+_FACE_PROTECTED_WIDTH_FRACTION = 0.55
+_FACE_PROTECTED_TOP_FRACTION = 0.24
+_FACE_PROTECTED_BOTTOM_FRACTION = 0.97
+
+
 def _background_removal_mask(image: Image.Image, background_rgb: tuple[int, int, int], threshold: int = 45) -> Image.Image:
     """Cheap chroma-key: pixels close to `background_rgb` become transparent
     (mask=0), everything else opaque (mask=255). `ImageChops.difference` +
@@ -491,7 +507,29 @@ def build_atlas_png_from_photo(
     )
     oval_mask = Image.new("L", (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), 0)
     ImageDraw.Draw(oval_mask).ellipse((0, 2, HEAD_RECT["sWidth"], HEAD_RECT["sHeight"] - 2), fill=255)
+
+    # `_background_removal_mask` is a blunt per-pixel color-distance check
+    # against a SINGLE sampled corner pixel (see that function's own doc
+    # comment) -- a cartoonify style's flat shading/highlights can read
+    # close enough to that one sampled color to get incorrectly zeroed,
+    # and GaussianBlur-ing that binary mask turns those false hits into
+    # partial (not just fully-transparent) alpha values, rendering as a
+    # partially see-through FACE rather than a cleanly removed background.
+    # `protected_mask` keeps the region the geometry guarantees is real face
+    # (see `_FACE_PROTECTED_*` above) fully opaque regardless of color, so
+    # chroma-key removal can only ever act on the hair-margin/side-margin
+    # band around it.
+    protected_mask = Image.new("L", (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), 0)
+    protected_half_w = HEAD_RECT["sWidth"] * _FACE_PROTECTED_WIDTH_FRACTION / 2
+    protected_cx = HEAD_RECT["sWidth"] / 2
+    protected_top = HEAD_RECT["sHeight"] * _FACE_PROTECTED_TOP_FRACTION
+    protected_bottom = HEAD_RECT["sHeight"] * _FACE_PROTECTED_BOTTOM_FRACTION
+    ImageDraw.Draw(protected_mask).ellipse(
+        (protected_cx - protected_half_w, protected_top, protected_cx + protected_half_w, protected_bottom), fill=255
+    )
+
     bg_mask = _background_removal_mask(head_crop, palette.background_rgb).filter(ImageFilter.GaussianBlur(1.0))
+    bg_mask = ImageChops.lighter(bg_mask, protected_mask)
     head_mask = ImageChops.multiply(oval_mask, bg_mask)
 
     mouth_crop = cartoon_image.crop(tuple(round(v) for v in palette.mouth_crop_box))
