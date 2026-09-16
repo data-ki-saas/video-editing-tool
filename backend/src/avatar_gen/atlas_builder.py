@@ -65,8 +65,24 @@ POLO_RECT = {"sx": GAP, "sy": _ROW3_Y, "sWidth": 120, "sHeight": 140}
 BLAZER_RECT = {"sx": POLO_RECT["sx"] + POLO_RECT["sWidth"] + GAP, "sy": _ROW3_Y, "sWidth": 120, "sHeight": 140}
 SUIT_RECT = {"sx": BLAZER_RECT["sx"] + BLAZER_RECT["sWidth"] + GAP, "sy": _ROW3_Y, "sWidth": 120, "sHeight": 140}
 
+# Row 4 -- "neck": a plain skin-tone patch riding the SAME bone as "torso"
+# (boneIndex=1 in service.py's _PARTS, same convention "mouth" already uses
+# to share HEAD's bone with "head"). Exists purely to sit BEHIND the
+# blazer/suit garments' open-collar cutout (`_cut_garment_notch` above
+# erases alpha to fully transparent on purpose, so a recolor never fills it
+# back in -- see that function's own doc comment) -- without this, that cut
+# has nothing opaque drawn under it, so the collar "hole" shows the raw
+# video frame straight through instead of reading as an open collar.
+# Sized/pivoted (service.py's "neck" pivot) so it starts just above the
+# bone joint and reaches down past the suit's deepest cut (topY+44,
+# cx+-26 -- see `_draw_torso_suit`); zOrder places it right after "torso"
+# and before "head"/"arms", the same layer conceptually a real neck bone
+# would occupy.
+_ROW4_Y = SUIT_RECT["sy"] + SUIT_RECT["sHeight"] + GAP
+NECK_RECT = {"sx": GAP, "sy": _ROW4_Y, "sWidth": 64, "sHeight": 50}
+
 CANVAS_WIDTH = max(LEG_R_RECT["sx"] + LEG_R_RECT["sWidth"], SUIT_RECT["sx"] + SUIT_RECT["sWidth"]) + GAP
-CANVAS_HEIGHT = SUIT_RECT["sy"] + SUIT_RECT["sHeight"] + GAP
+CANVAS_HEIGHT = NECK_RECT["sy"] + NECK_RECT["sHeight"] + GAP
 
 # Kept fixed (not photo-derived) -- only skin/hair tone vary per generated
 # character, same scope placeholderAtlas.ts's own PlaceholderAtlasPalette
@@ -165,6 +181,13 @@ def _torso_body(draw: ImageDraw.ImageDraw, rect: dict) -> None:
     from -- exactly what TORSO_RECT ("plain shirt") has always drawn, mirrors
     placeholderAtlas.ts's own drawTorsoBody."""
     _rounded_rect(draw, rect, inset=6, radius=14, fill=_SHIRT_COLOR)
+
+
+def _draw_neck(draw: ImageDraw.ImageDraw, rect: dict, skin_tone: str) -> None:
+    """Plain skin-tone patch for the "neck" part -- see NECK_RECT's own doc
+    comment above for why this exists (backing the blazer/suit collar
+    cutout). Mirrors placeholderAtlas.ts's drawNeck."""
+    _rounded_rect(draw, rect, inset=4, radius=10, fill=skin_tone)
 
 
 def _fill_garment_triangle(draw: ImageDraw.ImageDraw, points: list[tuple[float, float]]) -> None:
@@ -416,6 +439,7 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
     _draw_torso_polo(draw, POLO_RECT)
     _draw_torso_blazer(draw, BLAZER_RECT)
     _draw_torso_suit(draw, SUIT_RECT)
+    _draw_neck(draw, NECK_RECT, palette.skin_tone)
 
     buffer = BytesIO()
     image.save(buffer, format="PNG")
@@ -433,6 +457,7 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
         "polo": POLO_RECT,
         "blazer": BLAZER_RECT,
         "suit": SUIT_RECT,
+        "neck": NECK_RECT,
     }
     return buffer.getvalue(), part_rects
 
@@ -453,6 +478,38 @@ _FACE_PROTECTED_TOP_FRACTION = 0.24
 _FACE_PROTECTED_BOTTOM_FRACTION = 0.97
 
 
+def _border_connected_removal_mask(candidate: Image.Image) -> Image.Image:
+    """`candidate` is a single-channel "L" image, 0 = background-colored
+    (candidate for removal), 255 = clearly not background. Restricts actual
+    removal to whichever 0-valued pixels are 4-connected, via flood fill,
+    back to the crop's own border -- a real background region always
+    touches the crop's edge (`head_crop` is head-plus-margin, background
+    surrounding it on every side), so an isolated same-colored patch
+    INSIDE the face (a cartoonify style's flat highlight/shading landing
+    close enough to the one sampled background color) has no contiguous
+    path back to the edge and is left opaque instead of becoming a
+    false-positive translucent hole once the caller blurs this mask.
+    Strictly more conservative than a fixed-fraction "protected region"
+    guess (see `_FACE_PROTECTED_*` below, kept as an extra belt-and-braces
+    layer) -- this can only keep MORE pixels opaque, never fewer, and needs
+    no assumption about where the face actually sits in the crop."""
+    work = candidate.copy()
+    width, height = work.size
+    border_points = (
+        [(x, 0) for x in range(width)]
+        + [(x, height - 1) for x in range(width)]
+        + [(0, y) for y in range(height)]
+        + [(width - 1, y) for y in range(height)]
+    )
+    for point in border_points:
+        if work.getpixel(point) == 0:
+            ImageDraw.floodfill(work, point, 1, thresh=0)
+    # 1 = border-connected candidate -> confirmed removal (0). Anything else
+    # (0 = an unreached, isolated candidate; 255 = already foreground) stays
+    # opaque (255).
+    return work.point(lambda v: 0 if v == 1 else 255)
+
+
 def _background_removal_mask(image: Image.Image, background_rgb: tuple[int, int, int], threshold: int = 45) -> Image.Image:
     """Cheap chroma-key: pixels close to `background_rgb` become transparent
     (mask=0), everything else opaque (mask=255). `ImageChops.difference` +
@@ -461,10 +518,13 @@ def _background_removal_mask(image: Image.Image, background_rgb: tuple[int, int,
     project's existing "informal heuristic, no real segmentation model"
     posture, same as photo_analysis.py's own color-sampling code), and
     avoids needing numpy in this venv (backend/ doesn't have it -- mediapipe/
-    numpy live only in face-analysis/ now, see that split's own history)."""
+    numpy live only in face-analysis/ now, see that split's own history).
+    Only removes background-colored pixels that are actually
+    border-connected -- see `_border_connected_removal_mask`."""
     bg_solid = Image.new("RGB", image.size, background_rgb)
     diff = ImageChops.difference(image.convert("RGB"), bg_solid).convert("L")
-    return diff.point(lambda v: 255 if v > threshold else 0)
+    candidate = diff.point(lambda v: 0 if v <= threshold else 255)
+    return _border_connected_removal_mask(candidate)
 
 
 def build_atlas_png_from_photo(
@@ -508,17 +568,22 @@ def build_atlas_png_from_photo(
     oval_mask = Image.new("L", (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), 0)
     ImageDraw.Draw(oval_mask).ellipse((0, 2, HEAD_RECT["sWidth"], HEAD_RECT["sHeight"] - 2), fill=255)
 
-    # `_background_removal_mask` is a blunt per-pixel color-distance check
-    # against a SINGLE sampled corner pixel (see that function's own doc
-    # comment) -- a cartoonify style's flat shading/highlights can read
-    # close enough to that one sampled color to get incorrectly zeroed,
-    # and GaussianBlur-ing that binary mask turns those false hits into
-    # partial (not just fully-transparent) alpha values, rendering as a
-    # partially see-through FACE rather than a cleanly removed background.
-    # `protected_mask` keeps the region the geometry guarantees is real face
-    # (see `_FACE_PROTECTED_*` above) fully opaque regardless of color, so
-    # chroma-key removal can only ever act on the hair-margin/side-margin
-    # band around it.
+    # `_background_removal_mask` is a per-pixel color-distance check against
+    # a SINGLE sampled corner pixel (see that function's own doc comment) --
+    # a cartoonify style's flat shading/highlights can still read close
+    # enough to that one sampled color to get flagged, and GaussianBlur-ing
+    # that binary mask turns any false hit into a partial (not just
+    # fully-transparent) alpha value, rendering as a partially see-through
+    # FACE rather than a cleanly removed background. That function now
+    # restricts removal to border-connected regions only
+    # (`_border_connected_removal_mask`), which rules out most false hits
+    # (an isolated same-colored patch mid-face has no path back to the
+    # crop's edge) -- `protected_mask` below is kept as a second, cheaper
+    # belt-and-braces layer on top of that: it keeps the region the geometry
+    # guarantees is real face (see `_FACE_PROTECTED_*` above) fully opaque
+    # regardless of color, for the rare case a false hit's blob happens to
+    # touch the border too (e.g. a bright highlight running from a cheek
+    # out through the side margin).
     protected_mask = Image.new("L", (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), 0)
     protected_half_w = HEAD_RECT["sWidth"] * _FACE_PROTECTED_WIDTH_FRACTION / 2
     protected_cx = HEAD_RECT["sWidth"] / 2
@@ -588,6 +653,7 @@ def build_atlas_png_from_photo(
     _draw_torso_polo(draw, POLO_RECT)
     _draw_torso_blazer(draw, BLAZER_RECT)
     _draw_torso_suit(draw, SUIT_RECT)
+    _draw_neck(draw, NECK_RECT, palette.skin_tone)
 
     buffer = BytesIO()
     image.save(buffer, format="PNG")
@@ -605,5 +671,6 @@ def build_atlas_png_from_photo(
         "polo": POLO_RECT,
         "blazer": BLAZER_RECT,
         "suit": SUIT_RECT,
+        "neck": NECK_RECT,
     }
     return buffer.getvalue(), part_rects, mouth_pivot

@@ -106,6 +106,7 @@ function AvatarOverlaySegment({
   }
 
   function startBodyDrag(e: React.PointerEvent) {
+    if (e.button !== 0) return; // right-click reaches onContextMenu instead -- same guard CutawayTrack/MarkerTrack use, so a right-click doesn't also fire this body's own click-to-edit path
     e.preventDefault();
     const track = rootRef.current?.parentElement;
     if (!track || videoDurationSeconds <= 0) return;

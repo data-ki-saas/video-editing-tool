@@ -51,8 +51,24 @@ const POLO_RECT: AtlasRect = { sx: GAP, sy: ROW3_Y, sWidth: 120, sHeight: 140 };
 const BLAZER_RECT: AtlasRect = { sx: POLO_RECT.sx + POLO_RECT.sWidth + GAP, sy: ROW3_Y, sWidth: 120, sHeight: 140 };
 const SUIT_RECT: AtlasRect = { sx: BLAZER_RECT.sx + BLAZER_RECT.sWidth + GAP, sy: ROW3_Y, sWidth: 120, sHeight: 140 };
 
+// Row 4 -- "neck": a plain skin-tone patch riding the SAME bone as "torso"
+// (library.ts's PLACEHOLDER_SKIN_PARTS gives it boneIndex=TORSO, same
+// convention "mouth" already uses to share HEAD's bone with "head"). Exists
+// purely to sit BEHIND the blazer/suit garments' open-collar cutout
+// (cutGarmentNotch erases alpha to fully transparent on purpose, so a
+// recolor never fills it back in -- see that function's own doc comment) --
+// without this, that cut has nothing opaque drawn under it, so the collar
+// "hole" shows the raw video frame straight through instead of reading as
+// an open collar. Sized/pivoted (library.ts's "neck" pivot) so it starts
+// just above the bone joint and reaches down past the suit's deepest cut
+// (topY+44, cx+-26 -- see drawTorsoSuit above); zOrder places it right
+// after "torso" and before "arms"/"head", the same layer a real neck bone
+// would occupy.
+const ROW4_Y = SUIT_RECT.sy + SUIT_RECT.sHeight + GAP;
+const NECK_RECT: AtlasRect = { sx: GAP, sy: ROW4_Y, sWidth: 64, sHeight: 50 };
+
 const CANVAS_WIDTH = Math.max(LEG_R_RECT.sx + LEG_R_RECT.sWidth, SUIT_RECT.sx + SUIT_RECT.sWidth) + GAP;
-const CANVAS_HEIGHT = SUIT_RECT.sy + SUIT_RECT.sHeight + GAP;
+const CANVAS_HEIGHT = NECK_RECT.sy + NECK_RECT.sHeight + GAP;
 
 // Flat, pleasant placeholder colors -- this is explicitly not meant to look
 // polished, just to read unambiguously as "a simple person" with cleanly
@@ -269,6 +285,13 @@ function drawTorsoSuit(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: 
   ctx.restore();
 }
 
+/** Plain skin-tone patch for the "neck" part -- see NECK_RECT's own doc
+ * comment above for why this exists (backing the blazer/suit collar
+ * cutout). Mirrors atlas_builder.py's `_draw_neck`. */
+function drawNeck(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  drawRoundedRect(ctx, rect.sx + 4, rect.sy + 4, rect.sWidth - 8, rect.sHeight - 8, 10, palette.skinTone);
+}
+
 function drawHead(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
@@ -369,6 +392,7 @@ export function buildPlaceholderAtlas(
     polo: POLO_RECT,
     blazer: BLAZER_RECT,
     suit: SUIT_RECT,
+    neck: NECK_RECT,
   };
 
   // `document` doesn't exist outside a browser. library.ts calls this
@@ -407,6 +431,7 @@ export function buildPlaceholderAtlas(
   drawTorsoPolo(ctx, POLO_RECT, palette);
   drawTorsoBlazer(ctx, BLAZER_RECT, palette);
   drawTorsoSuit(ctx, SUIT_RECT, palette);
+  drawNeck(ctx, NECK_RECT, palette);
 
   return { dataUrl: canvas.toDataURL("image/png"), partRects, resolvedPalette: palette };
 }

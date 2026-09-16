@@ -362,10 +362,19 @@ const GARMENT_SHAPES: AvatarSkinGarmentShape[] = [
  * part's own drawn rect, does the owning bone's joint sit":
  *  - legL/legR pivot near TOP-center: the hip bone sits at the TOP of each
  *    leg image, which then hangs downward to the feet.
+ *  - neck (see NECK_RECT's own doc comment in placeholderAtlas.ts) rides the
+ *    SAME bone as torso, pivot also near TOP-center, drawn BEFORE (lower
+ *    zOrder than) torso on purpose: it's a plain, fully-opaque skin-tone
+ *    patch, so torso's own opaque shirt body (drawn after, on top) hides it
+ *    everywhere EXCEPT the blazer/suit garments' open-collar cutout (a
+ *    deliberately fully-transparent cut -- placeholderAtlas.ts's
+ *    cutGarmentNotch) -- that cutout has nothing else drawn under it, so
+ *    without "neck" underneath it reveals raw video instead of skin.
  *  - torso pivots near TOP-center too: the neck/shoulder bone sits at the
  *    top of the torso image, which extends downward to (and slightly past)
- *    the hip -- drawn AFTER (zOrder above) the legs so that overlap reads as
- *    a shirt covering the top of the pants, not the reverse.
+ *    the hip -- drawn AFTER (zOrder above) the legs (AND "neck") so that
+ *    overlap reads as a shirt covering the top of the pants (and hiding
+ *    "neck" except through its own cutout), not the reverse.
  *  - armL/armR pivot near TOP-center: the shoulder bone sits at the top of
  *    each arm image, hanging down to the hand.
  *  - head pivots near BOTTOM-center: the neck/chin bone sits at the BOTTOM
@@ -377,20 +386,22 @@ const GARMENT_SHAPES: AvatarSkinGarmentShape[] = [
  *    "closed") is active -- both shapes share one rect size (see
  *    placeholderAtlas.ts) specifically so one shared pivot keeps them
  *    aligned to each other.
- * zOrder is authored already ascending here (legs, then torso, then arms,
- * then head, then mouth on top of the head) -- compile.ts re-sorts
- * defensively, but skin.ts's own contract expects this array pre-sorted.
+ * zOrder is authored already ascending here (legs, then neck, then torso,
+ * then arms, then head, then mouth on top of the head) -- compile.ts
+ * re-sorts defensively, but skin.ts's own contract expects this array
+ * pre-sorted.
  */
 const PLACEHOLDER_SKIN_PARTS: AvatarSkinPart[] = [
   { partId: "legL", boneIndex: LEG_L, pivotX: 21, pivotY: 4, zOrder: 0 },
   { partId: "legR", boneIndex: LEG_R, pivotX: 21, pivotY: 4, zOrder: 1 },
-  { partId: "torso", boneIndex: TORSO, pivotX: 60, pivotY: 8, zOrder: 2 },
-  { partId: "armL", boneIndex: ARM_L, pivotX: 18, pivotY: 4, zOrder: 3 },
-  { partId: "armR", boneIndex: ARM_R, pivotX: 18, pivotY: 4, zOrder: 4 },
-  { partId: "head", boneIndex: HEAD, pivotX: 70, pivotY: 128, zOrder: 5 },
+  { partId: "neck", boneIndex: TORSO, pivotX: 32, pivotY: 4, zOrder: 2 },
+  { partId: "torso", boneIndex: TORSO, pivotX: 60, pivotY: 8, zOrder: 3 },
+  { partId: "armL", boneIndex: ARM_L, pivotX: 18, pivotY: 4, zOrder: 4 },
+  { partId: "armR", boneIndex: ARM_R, pivotX: 18, pivotY: 4, zOrder: 5 },
+  { partId: "head", boneIndex: HEAD, pivotX: 70, pivotY: 128, zOrder: 6 },
   // The mouth "slot" -- see AvatarSkinMouthShape's own doc comment (skin.ts)
   // for why this is its own `parts` entry rather than baked into "head".
-  { partId: "mouth", boneIndex: HEAD, pivotX: 25, pivotY: 40, zOrder: 6 },
+  { partId: "mouth", boneIndex: HEAD, pivotX: 25, pivotY: 40, zOrder: 7 },
 ];
 
 /** Phase 7's two recolorable slots -- shirt (targets "torso" alone) and

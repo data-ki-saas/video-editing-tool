@@ -46,11 +46,22 @@ _DEFAULT_NAME = "My Avatar"
 _PARTS = [
     {"partId": "legL", "boneIndex": 5, "pivotX": 21, "pivotY": 4, "zOrder": 0},
     {"partId": "legR", "boneIndex": 6, "pivotX": 21, "pivotY": 4, "zOrder": 1},
-    {"partId": "torso", "boneIndex": 1, "pivotX": 60, "pivotY": 8, "zOrder": 2},
-    {"partId": "armL", "boneIndex": 3, "pivotX": 18, "pivotY": 4, "zOrder": 3},
-    {"partId": "armR", "boneIndex": 4, "pivotX": 18, "pivotY": 4, "zOrder": 4},
-    {"partId": "head", "boneIndex": 2, "pivotX": 70, "pivotY": 128, "zOrder": 5},
-    {"partId": "mouth", "boneIndex": 2, "pivotX": 25, "pivotY": 40, "zOrder": 6},
+    # "neck" -- rides the SAME bone as "torso" (boneIndex=1, same convention
+    # "mouth" already uses to share HEAD's bone with "head"), drawn BEFORE
+    # (lower zOrder than) "torso" on purpose: it's a plain, fully-opaque
+    # skin-tone patch, so torso's own opaque shirt body (drawn after, on
+    # top) hides it everywhere EXCEPT the blazer/suit garments' open-collar
+    # cutout (a deliberate fully-transparent cut, see atlas_builder.py's
+    # `_cut_garment_notch` doc comment) -- that cutout has nothing else
+    # drawn under it, so without "neck" underneath it reveals the raw video
+    # frame instead of skin. See NECK_RECT's own doc comment in
+    # atlas_builder.py/placeholderAtlas.ts for the exact pivot math.
+    {"partId": "neck", "boneIndex": 1, "pivotX": 32, "pivotY": 4, "zOrder": 2},
+    {"partId": "torso", "boneIndex": 1, "pivotX": 60, "pivotY": 8, "zOrder": 3},
+    {"partId": "armL", "boneIndex": 3, "pivotX": 18, "pivotY": 4, "zOrder": 4},
+    {"partId": "armR", "boneIndex": 4, "pivotX": 18, "pivotY": 4, "zOrder": 5},
+    {"partId": "head", "boneIndex": 2, "pivotX": 70, "pivotY": 128, "zOrder": 6},
+    {"partId": "mouth", "boneIndex": 2, "pivotX": 25, "pivotY": 40, "zOrder": 7},
 ]
 _MOUTH_SHAPES = [{"shapeId": "closed", "partId": "mouth"}, {"shapeId": "open", "partId": "mouth"}]
 
