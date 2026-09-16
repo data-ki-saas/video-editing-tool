@@ -34,8 +34,15 @@ _DEFAULT_NAME = "My Avatar"
 # zOrder layout, since that's what compile.ts validates against and what
 # actually lines up with the topology's DEFAULT_LOCAL_POSE (see library.ts's
 # own doc comment on why the two are authored together). Structural, not
-# palette-dependent -- a generated skin no more needs its own layout than a
-# hand-drawn recolor does.
+# palette-dependent for the parametric (build_atlas_png) path -- a generated
+# skin no more needs its own layout than a hand-drawn recolor does THERE.
+# The fal.ai photo path is the one exception: its "mouth" pivot below is
+# only correct for the procedurally-drawn parametric head, where the mouth
+# is guaranteed by construction to sit at this fixed fraction of the head
+# crop. A real photo's mouth position within its own head crop varies with
+# that person's proportions/framing, so _parts_for -- not this constant
+# directly -- is what actually gets stored per avatar; see its own doc
+# comment and build_atlas_png_from_photo's `mouth_pivot` return value.
 _PARTS = [
     {"partId": "legL", "boneIndex": 5, "pivotX": 21, "pivotY": 4, "zOrder": 0},
     {"partId": "legR", "boneIndex": 6, "pivotX": 21, "pivotY": 4, "zOrder": 1},
@@ -46,6 +53,18 @@ _PARTS = [
     {"partId": "mouth", "boneIndex": 2, "pivotX": 25, "pivotY": 40, "zOrder": 6},
 ]
 _MOUTH_SHAPES = [{"shapeId": "closed", "partId": "mouth"}, {"shapeId": "open", "partId": "mouth"}]
+
+
+def _parts_for(mouth_pivot: tuple[float, float] | None) -> list[dict]:
+    """`_PARTS`, with the "mouth" entry's pivot overridden when
+    `mouth_pivot` is given (the fal.ai photo path -- see
+    build_atlas_png_from_photo's own doc comment). `None` for the
+    parametric path, where `_PARTS`' own fixed mouth pivot is already
+    correct by construction."""
+    if mouth_pivot is None:
+        return _PARTS
+    pivot_x, pivot_y = mouth_pivot
+    return [{**part, "pivotX": pivot_x, "pivotY": pivot_y} if part["partId"] == "mouth" else part for part in _PARTS]
 
 # Phase 7 -- mirrors frontend/src/lib/video/avatar/library.ts's own
 # colorSlotsForPalette exactly: shirt/pants are each a single flat fill with
@@ -88,7 +107,9 @@ def _resolve(record: repository.AvatarDesignRecord) -> GeneratedAvatarDetail:
     return GeneratedAvatarDetail(id=record.id, name=record.name, skin=skin, design=design, created_at=record.created_at)
 
 
-async def _cartoonify_and_crop(*, user_id: str, photo_bytes: bytes, original_palette: FacePalette) -> tuple[bytes, dict[str, dict]] | None:
+async def _cartoonify_and_crop(
+    *, user_id: str, photo_bytes: bytes, original_palette: FacePalette
+) -> tuple[bytes, dict[str, dict], tuple[float, float]] | None:
     """The fal.ai path: stage the real photo in R2 (fal needs a fetchable
     URL, not raw bytes -- same reason matting/service.py presigns a URL
     before calling fal's rembg), cartoonify it, then re-run face analysis on
@@ -164,9 +185,10 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
     # photo with none would just waste the call. detected=False keeps the
     # existing free, zero-cost parametric-drawing fallback exactly as before.
     used_fal = False
+    mouth_pivot: tuple[float, float] | None = None
     fal_result = await _cartoonify_and_crop(user_id=user.id, photo_bytes=photo_bytes, original_palette=palette) if palette.detected else None
     if fal_result is not None:
-        atlas_png, part_rects = fal_result
+        atlas_png, part_rects, mouth_pivot = fal_result
         used_fal = True
     else:
         atlas_png, part_rects = build_atlas_png(palette)
@@ -193,7 +215,7 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
         "skinId": design_id,
         "topologyId": _TOPOLOGY_ID,
         "atlas": {"imageRef": "", "partRects": part_rects},
-        "parts": _PARTS,
+        "parts": _parts_for(mouth_pivot),
         "mouthShapes": _MOUTH_SHAPES,
         "colorSlots": _COLOR_SLOTS,
         "garmentShapes": _GARMENT_SHAPES,

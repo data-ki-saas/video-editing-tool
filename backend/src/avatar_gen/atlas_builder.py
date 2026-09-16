@@ -38,6 +38,14 @@ MOUTH_OPEN_RECT = {
     "sHeight": 28,
 }
 
+# Mirrors avatar_gen/service.py's own `_PARTS` "head"/"mouth" entries
+# (pivotX/pivotY, boneIndex=HEAD for both) -- needed here too so
+# `_compute_photo_mouth_pivot` below can reason about where the "mouth"
+# part's rect actually lands relative to "head"'s own rect once both are
+# drawn against the SAME bone, without importing service.py (which imports
+# this module, not the other way around).
+_HEAD_PART_PIVOT = (70, 128)
+
 _ROW2_Y = HEAD_RECT["sy"] + HEAD_RECT["sHeight"] + GAP
 TORSO_RECT = {"sx": GAP, "sy": _ROW2_Y, "sWidth": 120, "sHeight": 140}
 ARM_L_RECT = {"sx": TORSO_RECT["sx"] + TORSO_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 36, "sHeight": 130}
@@ -111,6 +119,36 @@ def _average_color(image: Image.Image, box: tuple[float, float, float, float]) -
         return (0x7A, 0x2F, 0x2F)
     r, g, b = ImageStat.Stat(region).mean[:3]
     return (round(r), round(g), round(b))
+
+
+def _compute_photo_mouth_pivot(
+    head_crop_box: tuple[float, float, float, float], mouth_crop_box: tuple[float, float, float, float]
+) -> tuple[float, float]:
+    """Where the "mouth" part's pivot needs to be so its rect lands exactly
+    over THIS photo's real mouth, instead of service.py's `_PARTS`/this
+    frontend mirror's fixed (25, 40) -- which assumes the mouth sits at a
+    constant fraction down the head crop, true only for the procedurally-
+    drawn parametric head (`build_atlas_png` above), not a real photo (a
+    real face's mouth position within its own square, hair-margin-padded
+    head crop varies with that person's proportions and framing).
+
+    Derivation: renderer.ts draws a part's rect at bone-local offset
+    (-pivotX, -pivotY), and both "head" and "mouth" share the SAME bone, so
+    a point at rect-local (px, py) in a part's own image lands at head-image
+    pixel `_HEAD_PART_PIVOT + (px - pivotX, py - pivotY)` (since "head"'s
+    own rect is drawn at bone-local offset -_HEAD_PART_PIVOT, i.e. head-image
+    pixel 0 IS bone-local -_HEAD_PART_PIVOT). Solving for the pivot that puts
+    the mouth rect's CENTER at the real mouth's fractional position
+    (fracX, fracY) within the head crop:
+        pivot = _HEAD_PART_PIVOT + (rectSize / 2) - frac * HEAD_RECT_size
+    """
+    hx0, hy0, hx1, hy1 = head_crop_box
+    mx0, my0, mx1, my1 = mouth_crop_box
+    frac_x = ((mx0 + mx1) / 2 - hx0) / max(1.0, hx1 - hx0)
+    frac_y = ((my0 + my1) / 2 - hy0) / max(1.0, hy1 - hy0)
+    pivot_x = _HEAD_PART_PIVOT[0] + MOUTH_CLOSED_RECT["sWidth"] / 2 - frac_x * HEAD_RECT["sWidth"]
+    pivot_y = _HEAD_PART_PIVOT[1] + MOUTH_CLOSED_RECT["sHeight"] / 2 - frac_y * HEAD_RECT["sHeight"]
+    return pivot_x, pivot_y
 
 
 def _box(rect: dict) -> tuple[float, float, float, float]:
@@ -413,7 +451,9 @@ def _background_removal_mask(image: Image.Image, background_rgb: tuple[int, int,
     return diff.point(lambda v: 255 if v > threshold else 0)
 
 
-def build_atlas_png_from_photo(cartoon_image_bytes: bytes, palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
+def build_atlas_png_from_photo(
+    cartoon_image_bytes: bytes, palette: FacePalette
+) -> tuple[bytes, dict[str, dict], tuple[float, float]]:
     """The fal.ai-cartoonify path: crops the head and mouth directly out of
     `cartoon_image_bytes` (a real, if AI-stylized, photo -- see
     avatar_gen/cartoonify_provider.py) using `palette.head_crop_box`/
@@ -421,6 +461,15 @@ def build_atlas_png_from_photo(cartoon_image_bytes: bytes, palette: FacePalette)
     bytes, computed by photo_analysis.py's `_compute_crop_regions` against
     the SAME image), rather than drawing a parametric cartoon head the way
     `build_atlas_png` above does. Requires `palette.detected` -- the caller
+
+    Returns `(atlas_png_bytes, part_rects, mouth_pivot)` -- the extra
+    `mouth_pivot` (absent from `build_atlas_png`'s return above, since that
+    path's mouth position is fixed by construction) is this specific
+    avatar's own corrected "mouth" part pivot from
+    `_compute_photo_mouth_pivot`; the caller (service.py) must use it to
+    override `_PARTS`' fixed mouth pivot for this avatar's stored skin, or
+    the swappable mouth rect renders in the wrong place on this real photo's
+    head.
     (avatar_gen/service.py) only reaches this function once a clear face was
     already confirmed on the original upload, which is also what gates the
     fal.ai spend in the first place.
@@ -492,6 +541,7 @@ def build_atlas_png_from_photo(cartoon_image_bytes: bytes, palette: FacePalette)
     image.paste(head_crop.convert("RGBA"), (HEAD_RECT["sx"], HEAD_RECT["sy"]), head_mask)
     image.paste(mouth_closed.convert("RGBA"), (MOUTH_CLOSED_RECT["sx"], MOUTH_CLOSED_RECT["sy"]))
     image.paste(mouth_open.convert("RGBA"), (MOUTH_OPEN_RECT["sx"], MOUTH_OPEN_RECT["sy"]))
+    mouth_pivot = _compute_photo_mouth_pivot(palette.head_crop_box, palette.mouth_crop_box)
     _torso_body(draw, TORSO_RECT)
     _rounded_rect(draw, ARM_L_RECT, inset=4, radius=14, fill=palette.skin_tone)
     _rounded_rect(draw, ARM_R_RECT, inset=4, radius=14, fill=palette.skin_tone)
@@ -518,4 +568,4 @@ def build_atlas_png_from_photo(cartoon_image_bytes: bytes, palette: FacePalette)
         "blazer": BLAZER_RECT,
         "suit": SUIT_RECT,
     }
-    return buffer.getvalue(), part_rects
+    return buffer.getvalue(), part_rects, mouth_pivot
