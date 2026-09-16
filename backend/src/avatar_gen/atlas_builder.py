@@ -67,6 +67,7 @@ CANVAS_HEIGHT = SUIT_RECT["sy"] + SUIT_RECT["sHeight"] + GAP
 _SHIRT_COLOR = "#3f6fb0"
 _PANTS_COLOR = "#2b2b3d"
 _MOUTH_COLOR = "#7a2f2f"
+_TEETH_COLOR = "#f2e9df"
 _EYE_COLOR = "#2a2a2a"
 _DEFAULT_BROW_COLOR = "#3a2a1f"
 _OUTLINE_COLOR = (0, 0, 0, 46)  # rgba(0,0,0,0.18) baked to RGBA
@@ -474,8 +475,17 @@ def build_atlas_png_from_photo(cartoon_image_bytes: bytes, palette: FacePalette)
     mouth_closed = mouth_base.copy()
     ImageDraw.Draw(mouth_closed).ellipse((cx - 15, cy - 3, cx + 15, cy + 3), fill=gap_color)
 
+    # "open" reused the exact same gap_color as "closed", just stretched over
+    # a 3x taller ellipse -- a flat dark oval that big reads as a solid dark
+    # smudge (much more noticeable than the thin closed-mouth line, even
+    # though the fill color is identical). Real open mouths show teeth, not
+    # a uniform cavity, so break the fill up: darker cavity ellipse first,
+    # then a fixed off-white teeth band across the upper half -- same idea as
+    # _MOUTH_COLOR being a fixed, skin-independent constant.
     mouth_open = mouth_base.copy()
-    ImageDraw.Draw(mouth_open).ellipse((cx - 11, cy - 9, cx + 11, cy + 9), fill=gap_color)
+    open_draw = ImageDraw.Draw(mouth_open)
+    open_draw.ellipse((cx - 11, cy - 9, cx + 11, cy + 9), fill=gap_color)
+    open_draw.ellipse((cx - 9, cy - 8, cx + 9, cy - 2), fill=_TEETH_COLOR)
 
     image = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)

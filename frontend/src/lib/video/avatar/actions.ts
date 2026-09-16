@@ -303,10 +303,24 @@ function countVowelSegments(word: string): number {
  * MUCH a given word is likely to move the mouth. `progress01` is clamped
  * defensively to [0,1] in case a caller's own boundary math lands a hair
  * outside it from floating-point rounding right at a word's start/end.
+ *
+ * Divides into `2 * vowelSegments + 1` slots, alternating closed/open/
+ * closed/open/.../closed -- so every word both STARTS and ENDS "closed"
+ * (a leading/trailing consonant), with "open" only in between. An earlier
+ * version alternated `vowelSegments` slots directly starting from "open"
+ * (segment 0 = open) -- which meant any single-vowel word (the overwhelming
+ * majority of short English function words: "the", "a", "to", "on", "is",
+ * "we"...) stayed "open" for its ENTIRE span, since a 1-segment word never
+ * reached a second, "closed" segment. Across a real sentence, that reads as
+ * the mouth being stuck open almost continuously rather than flapping --
+ * this bookended version guarantees a visible close on every word,
+ * regardless of vowel count, while still giving vowel-heavier words more
+ * flaps than short ones.
  */
 export function computeMouthShapeIdForWord(word: string, progress01: number): string {
   const clampedProgress01 = Math.min(Math.max(progress01, 0), 1);
   const vowelSegments = countVowelSegments(word);
-  const segmentIndex = Math.min(Math.floor(clampedProgress01 * vowelSegments), vowelSegments - 1);
-  return segmentIndex % 2 === 0 ? "open" : "closed";
+  const slotCount = 2 * vowelSegments + 1;
+  const slotIndex = Math.min(Math.floor(clampedProgress01 * slotCount), slotCount - 1);
+  return slotIndex % 2 === 0 ? "closed" : "open";
 }

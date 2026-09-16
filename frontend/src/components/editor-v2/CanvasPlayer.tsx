@@ -235,7 +235,19 @@ function resolveAvatarTalkState(
   }
 
   if (!narration) {
-    return { actionId: clip.defaultAction, mouthShapeId: computeMouthShapeId(clip.defaultAction, localElapsed) };
+    // The generic fixed-cadence flap is only appropriate when this project
+    // has NO TTS narration at all (the scenario the comment on
+    // MOUTH_FLAP_INTERVAL_SECONDS describes: "no per-word timing available
+    // to it at all") -- e.g. a "talk" pose used as a silent demo gesture.
+    // Once ttsOverlays is non-empty, `!narration` just means "outside any
+    // narration's own window right now" (before the first word, or after
+    // the last one on a clip that runs longer than its narration) -- in
+    // that case the mouth should go idle/closed like real silence, not keep
+    // flapping generically forever once the actual speech has finished.
+    if (ttsOverlays.length === 0) {
+      return { actionId: clip.defaultAction, mouthShapeId: computeMouthShapeId(clip.defaultAction, localElapsed) };
+    }
+    return { actionId: "idle", mouthShapeId: computeMouthShapeId("idle", localElapsed) };
   }
   if (wordIndex < 0) {
     return { actionId: "idle", mouthShapeId: computeMouthShapeId("idle", localElapsed) };
