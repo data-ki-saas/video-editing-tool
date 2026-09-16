@@ -620,7 +620,19 @@ def build_atlas_png_from_photo(
     # path uses, which read as an odd, mismatched color against some skin/lip
     # tones since it never varied per photo. Sampled from `mouth_base` (the
     # untouched photo crop) before either copy below gets a gap drawn onto it.
-    cx, cy = mouth_base.width / 2, mouth_base.height * 0.55
+    #
+    # cy MUST be the crop's true vertical center (0.5), not an offset value --
+    # photo_analysis.py's `_compute_crop_regions` pads `mouth_crop_box`
+    # symmetrically above/below the real outer-lips bbox
+    # (`_MOUTH_CROP_PAD_Y_FACTOR`), so the real lips sit centered in
+    # `mouth_base` by construction. This used to read `* 0.55` (carried
+    # forward from a pre-`mouth_crop_box` version of this function that
+    # cropped asymmetrically), which drew the gap/teeth decal a few percent
+    # below the crop's actual center -- invisible on its own, but compounding
+    # with `_compute_photo_mouth_pivot`'s pivot (which centers the WHOLE
+    # mouth rect on the real lips) into the whole flapping-mouth graphic
+    # sitting visibly below the avatar's real lips.
+    cx, cy = mouth_base.width / 2, mouth_base.height / 2
     sampled_lip_rgb = _average_color(mouth_base, (cx - 15, cy - 4, cx + 15, cy + 4))
     gap_color = _darken("#{:02x}{:02x}{:02x}".format(*sampled_lip_rgb), 0.5)
 
