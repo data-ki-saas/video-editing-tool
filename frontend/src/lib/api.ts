@@ -350,25 +350,73 @@ export interface AvatarActionBeat {
   params?: Record<string, number>;
 }
 
+// Layered motion -- structural mirrors of video_math.ts's own
+// AvatarGestureBeat/AvatarGazeBeat/AvatarMoodBeat, same "api.ts keeps its own
+// local copy rather than importing" posture as AvatarActionBeat above (which
+// mirrors AvatarAction). Passing these straight into an AvatarOverlayClip's
+// own gestureTimeline/gazeTimeline/moodTimeline typechecks via plain
+// structural assignability, same as actionTimeline already does today.
+export interface AvatarGestureBeat {
+  gestureId: string;
+  startMs: number;
+  endMs: number;
+}
+
+export interface AvatarGazeBeat {
+  gazeId: string;
+  startMs: number;
+  endMs: number;
+}
+
+export interface AvatarMoodBeat {
+  moodId: string;
+  startMs: number;
+  endMs: number;
+}
+
+/** A tag-derived beat already committed on the narration script (avatar/tags.ts)
+ * -- told to the "direct" endpoint so its LLM director never proposes an
+ * overlapping beat in the same layer (backend/src/avatar/schemas.py's
+ * LockedBeat). `beatId` is only for the LLM's own reference in its response,
+ * unused by parsing. */
+export interface AvatarLockedBeat {
+  layer: "gesture" | "gaze" | "mood";
+  beatId: string;
+  startMs: number;
+  endMs: number;
+}
+
 export interface DirectAvatarResult {
   actionTimeline: AvatarActionBeat[];
+  gestureTimeline: AvatarGestureBeat[];
+  gazeTimeline: AvatarGazeBeat[];
+  moodTimeline: AvatarMoodBeat[];
   directorNote: string | null;
 }
 
-/** POST /api/avatar/direct (Phase 4) -- asks the LLM director to turn
- * `script` (the narration overlapping this avatar clip -- see video_math.ts's
- * findOverlappingTtsOverlay) into a timed sequence of beats spanning
- * `narrationDurationSeconds`, picking only from `actionIds` (the SPECIFIC
- * avatar's own resolved topology actions -- AvatarFramingDialog's
- * actionIdsForAvatar, not a hardcoded list). The wire response is snake_case
- * (action_timeline/start_ms/end_ms/director_note) -- converted to camelCase
- * here, same boundary convention as synthesizeTts above, since the result
- * flows straight into AvatarOverlayClip.actionTimeline (video_math.ts),
- * which is already camelCase throughout. */
+/** POST /api/avatar/direct (Phase 4, generalized to layered motion) -- asks
+ * the LLM director to turn `script` (the narration overlapping this avatar
+ * clip -- see video_math.ts's findOverlappingTtsOverlay) into a timed
+ * sequence of posture beats spanning `narrationDurationSeconds`, picking
+ * only from `actionIds` (the SPECIFIC avatar's own resolved topology actions
+ * -- AvatarFramingDialog's actionIdsForAvatar, not a hardcoded list), PLUS
+ * gesture/gaze/mood beats for whichever of `gestureIds`/`gazeIds`/`moodIds`
+ * this avatar's own topology declares (each optional, default empty --
+ * an avatar with no gesture vocabulary at all simply never gets gesture
+ * beats). `lockedBeats` (tag-derived, already committed on the script) are
+ * ranges the director must not propose an overlapping same-layer beat over.
+ * The wire response is snake_case -- converted to camelCase here, same
+ * boundary convention as synthesizeTts above, since the result flows
+ * straight into AvatarOverlayClip's own timeline fields (video_math.ts),
+ * already camelCase throughout. */
 export async function directAvatarActions(
   script: string,
   narrationDurationSeconds: number,
-  actionIds: string[]
+  actionIds: string[],
+  gestureIds: string[] = [],
+  gazeIds: string[] = [],
+  moodIds: string[] = [],
+  lockedBeats: AvatarLockedBeat[] = []
 ): Promise<DirectAvatarResult> {
   const response = await apiFetch(`${API_BASE_URL}/api/avatar/direct`, {
     method: "POST",
@@ -377,10 +425,17 @@ export async function directAvatarActions(
       script,
       narration_duration_seconds: narrationDurationSeconds,
       action_ids: actionIds,
+      gesture_ids: gestureIds,
+      gaze_ids: gazeIds,
+      mood_ids: moodIds,
+      locked_beats: lockedBeats.map((beat) => ({ layer: beat.layer, beat_id: beat.beatId, start_ms: beat.startMs, end_ms: beat.endMs })),
     }),
   });
   const body = await handleResponse<{
     action_timeline: { action: string; start_ms: number; end_ms: number; params?: Record<string, number> | null }[];
+    gesture_timeline: { gesture_id: string; start_ms: number; end_ms: number }[];
+    gaze_timeline: { gaze_id: string; start_ms: number; end_ms: number }[];
+    mood_timeline: { mood_id: string; start_ms: number; end_ms: number }[];
     director_note: string | null;
   }>(response);
   return {
@@ -390,6 +445,9 @@ export async function directAvatarActions(
       endMs: beat.end_ms,
       ...(beat.params ? { params: beat.params } : {}),
     })),
+    gestureTimeline: body.gesture_timeline.map((beat) => ({ gestureId: beat.gesture_id, startMs: beat.start_ms, endMs: beat.end_ms })),
+    gazeTimeline: body.gaze_timeline.map((beat) => ({ gazeId: beat.gaze_id, startMs: beat.start_ms, endMs: beat.end_ms })),
+    moodTimeline: body.mood_timeline.map((beat) => ({ moodId: beat.mood_id, startMs: beat.start_ms, endMs: beat.end_ms })),
     directorNote: body.director_note,
   };
 }
@@ -641,6 +699,39 @@ export async function editAvatarDesign(prompt: string, capabilities: AvatarEditC
     }
   }
   return ops;
+}
+
+export interface AvatarTagCapabilities {
+  gestureIds: string[];
+  gazeIds: string[];
+  moodIds: string[];
+}
+
+export interface ResolvedAvatarTag {
+  layer: "gesture" | "gaze" | "mood";
+  id: string;
+}
+
+/** POST /api/avatar/resolve-tag -- maps a script tag (e.g. "{sarcastic}")
+ * that didn't match this avatar's own closed gesture/gaze/mood vocabulary
+ * (avatar/tags.ts's parseScriptTags) to the closest known id, same
+ * calling/validation convention as editAvatarDesign. Returns null when the
+ * model finds nothing close enough -- the caller then just drops the tag
+ * rather than guessing. */
+export async function resolveAvatarTag(freeText: string, capabilities: AvatarTagCapabilities): Promise<ResolvedAvatarTag | null> {
+  const response = await apiFetch(`${API_BASE_URL}/api/avatar/resolve-tag`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({
+      free_text: freeText,
+      gesture_ids: capabilities.gestureIds,
+      gaze_ids: capabilities.gazeIds,
+      mood_ids: capabilities.moodIds,
+    }),
+  });
+  const body = await handleResponse<{ layer: string | null; id: string | null }>(response);
+  if ((body.layer !== "gesture" && body.layer !== "gaze" && body.layer !== "mood") || !body.id) return null;
+  return { layer: body.layer, id: body.id };
 }
 
 export type BackgroundRemovalStatus = "waiting" | "completed" | "failed";

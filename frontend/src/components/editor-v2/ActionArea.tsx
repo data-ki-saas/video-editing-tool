@@ -34,7 +34,7 @@ import { StockMediaDialog } from "./StockMediaDialog";
 import { UserActions } from "./UserActions";
 import { TextOverlayDialog } from "./TextOverlayDialog";
 import { TtsOverlayDialog } from "./TtsOverlayDialog";
-import { AvatarFramingDialog } from "./AvatarFramingDialog";
+import { AvatarFramingDialog, type AvatarDirectedLayers } from "./AvatarFramingDialog";
 import { getAvatarLibraryEntry } from "@/lib/video/avatar/library";
 import { CutawayDialog } from "./CutawayDialog";
 import { TextSlideDialog } from "./TextSlideDialog";
@@ -448,10 +448,11 @@ export function ActionArea({
   // comment for why this is index-aware (keeps editingAvatarOverlay pointed
   // at the same overlay through a deletion earlier in the array).
   onDeleteAvatarOverlay: (overlayIndex: number) => void;
-  // AvatarFramingDialog's "Direct with AI" (Phase 4) -- same index-aware
-  // shape as onDeleteAvatarOverlay above, for the same reason (persists onto
-  // avatarOverlays[overlayIndex] via applyDirectAvatarOverlay).
-  onDirectAvatarOverlay: (overlayIndex: number, actionTimeline: AvatarAction[]) => void;
+  // AvatarFramingDialog's "Direct with AI" (Phase 4, generalized to layered
+  // motion) -- same index-aware shape as onDeleteAvatarOverlay above, for the
+  // same reason (persists onto avatarOverlays[overlayIndex] via
+  // applyDirectAvatarLayers).
+  onDirectAvatarOverlay: (overlayIndex: number, layers: AvatarDirectedLayers) => void;
   onOpenCutawayDialog: () => void;
   isCutawayDialogOpen: boolean;
   // Non-null when CutawayDialog was reopened from the Cutaways rail to edit
@@ -767,13 +768,13 @@ export function ActionArea({
           onClose={onCloseAvatarDialog}
           // Same "resolve the index via the object's own stable id" idiom as
           // onDelete below -- editingAvatarOverlay is the resolved OBJECT,
-          // not the index applyDirectAvatarOverlay needs.
+          // not the index applyDirectAvatarLayers needs.
           onDirect={
             editingAvatarOverlay
-              ? (actionTimeline) =>
+              ? (layers) =>
                   onDirectAvatarOverlay(
                     avatarOverlays.findIndex((overlay) => overlay.id === editingAvatarOverlay.id),
-                    actionTimeline
+                    layers
                   )
               : undefined
           }

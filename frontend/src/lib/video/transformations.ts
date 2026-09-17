@@ -33,6 +33,9 @@ import {
   DEFAULT_SPLIT_SCREEN_RATIO,
   MIN_VIDEO_OVERLAY_DURATION_SECONDS,
   type AvatarAction,
+  type AvatarGazeBeat,
+  type AvatarGestureBeat,
+  type AvatarMoodBeat,
   type AvatarOverlayClip,
   type BackgroundRemovalState,
   type CropRect,
@@ -1656,22 +1659,28 @@ export function applyEditAvatarOverlay(
   return { label: "Edited avatar", state: { ...selections, avatarOverlays: nextOverlays } };
 }
 
-/** Sets (or replaces) an avatar overlay's actionTimeline -- from
- * AvatarFramingDialog's "Direct with AI" (Phase 4), which asks the backend's
- * script -> action-timeline director for a beat sequence and stores the
- * result here. Everything else about the overlay (avatarId/defaultAction/
- * rect/time range) is untouched -- direction is its own concern, same
- * one-apply-function-per-concern split as applyAvatarOverlayRangeChange/
- * applyAvatarOverlayPositionChange below. */
-export function applyDirectAvatarOverlay(
+/** Sets (or replaces) an avatar overlay's actionTimeline/gestureTimeline/
+ * gazeTimeline/moodTimeline -- from AvatarFramingDialog's "Direct with AI"
+ * (Phase 4, generalized to the layered-motion redesign), which asks the
+ * backend's script -> multi-layer director for a beat sequence per layer and
+ * stores the result here. Everything else about the overlay (avatarId/
+ * defaultAction/rect/time range) is untouched -- direction is its own
+ * concern, same one-apply-function-per-concern split as
+ * applyAvatarOverlayRangeChange/applyAvatarOverlayPositionChange below. */
+export function applyDirectAvatarLayers(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
-  actionTimeline: AvatarAction[]
+  layers: {
+    actionTimeline: AvatarAction[];
+    gestureTimeline: AvatarGestureBeat[];
+    gazeTimeline: AvatarGazeBeat[];
+    moodTimeline: AvatarMoodBeat[];
+  }
 ): TransformationResult {
   const overlay = selections.avatarOverlays[overlayIndex];
   if (!overlay) return { label: "Directed avatar", state: selections };
   const nextOverlays = [...selections.avatarOverlays];
-  nextOverlays[overlayIndex] = { ...overlay, actionTimeline };
+  nextOverlays[overlayIndex] = { ...overlay, ...layers };
   return { label: "Directed avatar", state: { ...selections, avatarOverlays: nextOverlays } };
 }
 

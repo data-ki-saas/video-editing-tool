@@ -62,6 +62,13 @@ export interface CompiledTopology {
   // any topology declaring no bust framing at all (see AvatarBustFraming's
   // own doc comment on the "bust" == "full" fallback that then applies).
   bustFraming?: AvatarBustFraming;
+  // Layered motion -- carried straight through from AvatarTopology, consumed
+  // by actions.ts's computeLayeredAvatarPose/computeActiveMoodBias. Absent
+  // for any topology declaring no gesture/gaze/mood vocabulary at all -- see
+  // AvatarTopology's own doc comments on the resulting fallback behavior.
+  gestures?: Record<string, ActionCurveSpec>;
+  gazes?: Record<string, ActionCurveSpec>;
+  moodPresets?: Record<string, Record<string, number>>;
 }
 
 /** The atlas image plus every resolved part/mouth-shape draw entry. */
@@ -153,6 +160,16 @@ function compileTopology(topology: AvatarTopology): CompiledTopology {
     }
   }
 
+  // Gesture/gaze specs must only move bones their own layer actually owns
+  // (arms / head) -- enforced only when the topology bothers to declare that
+  // group at all, so a topology that never adopts boneGroups.arms/head (every
+  // seed topology before this redesign) is completely unaffected. Same
+  // "fail loudly at the boundary" posture as the parentIndex check above --
+  // a gesture that reaches into e.g. the torso bone would silently fight the
+  // posture layer for that bone with no visual explanation of why.
+  assertLayerOwnsOnlyItsOwnBones(topology, "gestures", topology.gestures, topology.boneGroups.arms);
+  assertLayerOwnsOnlyItsOwnBones(topology, "gazes", topology.gazes, topology.boneGroups.head);
+
   return {
     topologyId: topology.topologyId,
     boneCount,
@@ -163,7 +180,31 @@ function compileTopology(topology: AvatarTopology): CompiledTopology {
     rigHeight: topology.rigHeight,
     expressionParams: topology.expressionParams,
     bustFraming: topology.bustFraming,
+    gestures: topology.gestures,
+    gazes: topology.gazes,
+    moodPresets: topology.moodPresets,
   };
+}
+
+function assertLayerOwnsOnlyItsOwnBones(
+  topology: AvatarTopology,
+  layerName: string,
+  specs: Record<string, ActionCurveSpec> | undefined,
+  ownedBoneIndices: number[] | undefined
+): void {
+  if (!specs || !ownedBoneIndices) return;
+  const owned = new Set(ownedBoneIndices);
+  for (const [specId, spec] of Object.entries(specs)) {
+    for (const keyframe of spec.keyframes) {
+      if (!owned.has(keyframe.boneIndex)) {
+        const boneName = topology.boneNames[keyframe.boneIndex] ?? `#${keyframe.boneIndex}`;
+        throw new Error(
+          `compileAvatar: topology "${topology.topologyId}" ${layerName}."${specId}" keyframes bone "${boneName}" ` +
+            `(index ${keyframe.boneIndex}), which isn't in this topology's own boneGroups for that layer.`
+        );
+      }
+    }
+  }
 }
 
 // Phase 7 -- same sane-bound rationale as edits.ts's own MIN/MAX_BONE_SCALE

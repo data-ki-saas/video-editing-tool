@@ -76,13 +76,16 @@ const DEFAULT_LOCAL_POSE: BoneTransform[] = [
   { x: 28, y: 0, rotation: 0, scaleX: 1, scaleY: 1 }, // legR
 ];
 
-// Not consumed by anything in this phase (see topology.ts's own doc comment)
-// -- "torso" groups the body's core (hip + torso) for a future uniform
-// scale edit ("make it fatter"), "limbs" groups all four limbs so the same
-// kind of edit could separately target those.
+// "torso"/"limbs" are not consumed by anything in this phase (see
+// topology.ts's own doc comment) -- reserved for a future uniform-scale edit.
+// "arms"/"head" ARE consumed today: compile.ts's assertLayerOwnsOnlyItsOwnBones
+// validates every GESTURES/GAZES keyframe below against these two groups, so
+// a gesture/gaze can never reach into a bone its own layer doesn't own.
 const BONE_GROUPS: Record<string, number[]> = {
   torso: [ROOT, TORSO],
   limbs: [ARM_L, ARM_R, LEG_L, LEG_R],
+  arms: [ARM_L, ARM_R],
+  head: [HEAD],
 };
 
 // Not consumed by anything in this phase (see AvatarAnchor's own doc comment
@@ -305,6 +308,175 @@ const ACTIONS: AvatarTopology["actions"] = {
   talkEmphasize: TALK_EMPHASIZE,
 };
 
+// Layered motion -- gestures (arm-only, layered on top of whichever posture
+// action is already playing) and gazes (head-only) below are all `loop:
+// false` one-shots: each starts AND ends its own keyframe list back near
+// identity/a held target, so computeLayeredAvatarPose's mergeBoneOverride can
+// cleanly hand those bones back once the beat driving them ends. Every
+// rotation delta reuses ARM_POINT_ROTATION_RADIANS-scale magnitudes (this
+// same rig's own existing "how far can an arm rotate and still read as a
+// natural gesture, not a broken joint" calibration) rather than inventing a
+// new scale per gesture.
+
+const GESTURE_PERIOD_SECONDS = {
+  wave: 1.8,
+  point: 1.6,
+  shrug: 1.4,
+  openArms: 1.6,
+  fistThump: 1.0,
+  facepalm: 1.6,
+} as const;
+
+// A friendly side-to-side hand wave -- armR raises to about shoulder-raised
+// height then wiggles twice before lowering back to rest.
+const WAVE: ActionCurveSpec = {
+  periodSeconds: GESTURE_PERIOD_SECONDS.wave,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.15, boneIndex: ARM_R, delta: { rotation: 2.0 } },
+    { t: 0.35, boneIndex: ARM_R, delta: { rotation: 1.7 } },
+    { t: 0.5, boneIndex: ARM_R, delta: { rotation: 2.0 } },
+    { t: 0.65, boneIndex: ARM_R, delta: { rotation: 1.7 } },
+    { t: 0.85, boneIndex: ARM_R, delta: { rotation: 2.0 } },
+    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
+// Raise and hold armR pointing (same rotation TALK_EMPHASIZE's own periodic
+// gesture uses), for a deliberate one-shot "look/go there" beat rather than a
+// repeating presenter tic.
+const POINT: ActionCurveSpec = {
+  periodSeconds: GESTURE_PERIOD_SECONDS.point,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.25, boneIndex: ARM_R, delta: { rotation: ARM_POINT_ROTATION_RADIANS } },
+    { t: 0.75, boneIndex: ARM_R, delta: { rotation: ARM_POINT_ROTATION_RADIANS } },
+    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
+// Both arms lift slightly and briefly, opposite-signed so they read as
+// shoulders shrugging rather than both swinging the same direction.
+const SHRUG: ActionCurveSpec = {
+  periodSeconds: GESTURE_PERIOD_SECONDS.shrug,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0.35, boneIndex: ARM_L, delta: { rotation: -0.8 } },
+    { t: 0.65, boneIndex: ARM_L, delta: { rotation: -0.8 } },
+    { t: 1, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.35, boneIndex: ARM_R, delta: { rotation: 0.8 } },
+    { t: 0.65, boneIndex: ARM_R, delta: { rotation: 0.8 } },
+    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
+// A big "ta-da"/welcoming spread -- both arms swing wide and up, opposite
+// signs so they open outward rather than both sweeping the same way.
+const OPEN_ARMS: ActionCurveSpec = {
+  periodSeconds: GESTURE_PERIOD_SECONDS.openArms,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0.3, boneIndex: ARM_L, delta: { rotation: -2.4 } },
+    { t: 0.7, boneIndex: ARM_L, delta: { rotation: -2.4 } },
+    { t: 1, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.3, boneIndex: ARM_R, delta: { rotation: 2.4 } },
+    { t: 0.7, boneIndex: ARM_R, delta: { rotation: 2.4 } },
+    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
+// A quick, sharp forward punch-like beat -- fast up, brief hold, fast back,
+// noticeably quicker than the other gestures' own eases (short period + a
+// tight t=0.15-0.35 peak window) so it reads as an emphatic thump, not a slow
+// wave.
+const FIST_THUMP: ActionCurveSpec = {
+  periodSeconds: GESTURE_PERIOD_SECONDS.fistThump,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.15, boneIndex: ARM_R, delta: { rotation: 2.6 } },
+    { t: 0.35, boneIndex: ARM_R, delta: { rotation: 2.6 } },
+    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
+// armR raises nearly all the way up and in, toward the face -- this rig has
+// no separate hand/finger bone to actually touch the head with, so a full
+// raise reads as "hand at the face" well enough at this simple 2D fidelity.
+const FACEPALM: ActionCurveSpec = {
+  periodSeconds: GESTURE_PERIOD_SECONDS.facepalm,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.3, boneIndex: ARM_R, delta: { rotation: 2.9 } },
+    { t: 0.75, boneIndex: ARM_R, delta: { rotation: 2.9 } },
+    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
+const GESTURES: AvatarTopology["gestures"] = {
+  wave: WAVE,
+  point: POINT,
+  shrug: SHRUG,
+  openArms: OPEN_ARMS,
+  fistThump: FIST_THUMP,
+  facepalm: FACEPALM,
+};
+
+// Gazes all drive HEAD's own rotation -- the same single bone lookAround's
+// randomized glancing and SLEEP's "nodding off" droop already animate, just
+// as a deliberate, named one-shot turn instead of a random tic or a fixed
+// sleep pose. This flat 2D rig has no separate yaw/pitch axis, so
+// "left"/"right"/"down" are each just a different sign/magnitude of the same
+// rotation -- an accepted simplification at this rig's fidelity (see
+// EXPRESSION_PARAMS.browAngle's own head-rotation reuse for the same
+// convention). Each eases from t=0 to t=1 then holds (loop:false) for as long
+// as this gaze stays the active one.
+const GAZE_PERIOD_SECONDS = 0.7;
+function gazeSpec(targetRotation: number): ActionCurveSpec {
+  return {
+    periodSeconds: GAZE_PERIOD_SECONDS,
+    loop: false,
+    keyframes: [
+      { t: 0, boneIndex: HEAD, delta: { rotation: 0 } },
+      { t: 1, boneIndex: HEAD, delta: { rotation: targetRotation } },
+    ],
+  };
+}
+
+const GAZES: AvatarTopology["gazes"] = {
+  lookLeft: gazeSpec(-0.4),
+  lookRight: gazeSpec(0.4),
+  lookDown: gazeSpec(0.5),
+  // An explicit recenter -- a creator directing "look at camera" after a
+  // lookLeft/lookRight/lookDown beat gets a deliberate turn back to dead
+  // center, not just however the posture layer happens to leave HEAD.
+  lookAtCamera: gazeSpec(0),
+};
+
+// Named mood presets over browAngle/energy ONLY (both have boneDeltas, so
+// both actually animate per-frame -- see actions.ts's computeActiveMoodBias
+// and AvatarTopology.moodPresets' own doc comment on why a colorDeltas-only
+// param like colorMood is deliberately left out here). Values are chosen
+// relative to EXPRESSION_PARAMS' own [-1, 1] bipolar range, not maxed out
+// across the board, so a mood reads as a clear nudge rather than every
+// preset slamming both sliders to their extremes.
+const MOOD_PRESETS: AvatarTopology["moodPresets"] = {
+  angry: { browAngle: 0.9, energy: 0.5 },
+  happy: { browAngle: -0.5, energy: 0.6 },
+  sad: { browAngle: -0.2, energy: -0.8 },
+  evil: { browAngle: 1.0, energy: 0.3 },
+  calm: { browAngle: -0.1, energy: -0.3 },
+  excited: { browAngle: -0.3, energy: 1.0 },
+  scared: { browAngle: -0.7, energy: -0.4 },
+};
+
 // Phase 8 ("Portrait mode") -- the hip joint (ROOT, see DEFAULT_LOCAL_POSE's
 // own comment: "root (hip) = (100, 258)") is exactly where the legs attach,
 // so hiding LEG_L/LEG_R and fitting-by-height to just past that y (rather
@@ -338,6 +510,9 @@ export const BIPED_SIMPLE_TOPOLOGY: AvatarTopology = {
   actions: ACTIONS,
   expressionParams: EXPRESSION_PARAMS,
   bustFraming: BUST_FRAMING,
+  gestures: GESTURES,
+  gazes: GAZES,
+  moodPresets: MOOD_PRESETS,
 };
 
 const MOUTH_SHAPES: AvatarSkinMouthShape[] = [

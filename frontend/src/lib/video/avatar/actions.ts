@@ -9,7 +9,7 @@
  * elapsedSeconds, any number of times, in any order, and always get back
  * byte-identical results.
  */
-import type { ActionCurveSpec, ActionKeyframe, BoneTransform } from "./topology";
+import type { ActionCurveSpec, ActionKeyframe, BoneTransform, ExpressionParamSpec } from "./topology";
 import type { CompiledTopology } from "./compile";
 import { ambientEffectSeed, mulberry32 } from "../ambientEffects";
 
@@ -194,6 +194,46 @@ function applyExpressionBoneDeltas(topology: CompiledTopology, pose: BoneTransfo
   return next;
 }
 
+/** `spec`'s own loop phase (0..1) at `elapsedSeconds` -- wraps modulo
+ * `periodSeconds` for an ordinary looping spec (`loop` omitted or true, every
+ * spec authored before the layered-motion redesign), or clamps to [0,1]
+ * without wrapping for a `loop: false` one-shot (a gesture/gaze spec),
+ * so it plays through once from its own t=0 and then holds at t=1 rather
+ * than restarting. */
+function phaseForSpec(spec: ActionCurveSpec, elapsedSeconds: number): number {
+  if (spec.periodSeconds <= 0) return 0;
+  if (spec.loop === false) {
+    return Math.min(Math.max(elapsedSeconds / spec.periodSeconds, 0), 1);
+  }
+  return (((elapsedSeconds % spec.periodSeconds) + spec.periodSeconds) % spec.periodSeconds) / spec.periodSeconds;
+}
+
+/** The full, index-ordered local pose for every bone at `elapsedSeconds`
+ * under one ordinary (non-seeded) keyframe spec -- the per-bone
+ * interpolation loop every plain action curve shares, factored out so
+ * computeLayeredAvatarPose's gesture/gaze layers can reuse it against their
+ * OWN spec/elapsedSeconds without going through a whole-topology actionId
+ * lookup. */
+function poseFromSpec(topology: CompiledTopology, spec: ActionCurveSpec, elapsedSeconds: number): BoneTransform[] {
+  const phase = phaseForSpec(spec, elapsedSeconds);
+  return topology.defaultLocalPose.map((defaultPose, boneIndex) => {
+    const keyframesForBone = spec.keyframes.filter((keyframe) => keyframe.boneIndex === boneIndex);
+    return applyDelta(defaultPose, deltaAtPhase(keyframesForBone, phase));
+  });
+}
+
+/** The posture layer's own pose -- everything computeAvatarPose used to do,
+ * minus the expressionBias step, so computeLayeredAvatarPose can merge
+ * gesture/gaze overrides in BEFORE bias is applied once, last, over the
+ * fully-merged pose (same order plain computeAvatarPose already used: action
+ * pose, then bias). */
+function computePosturePose(topology: CompiledTopology, actionId: string, elapsedSeconds: number, seed: number): BoneTransform[] {
+  const spec = topology.actions[actionId];
+  if (!spec) return topology.defaultLocalPose.map((pose) => ({ ...pose }));
+  if (spec.usesSeed) return computeSeededPose(topology, spec, elapsedSeconds, seed);
+  return poseFromSpec(topology, spec, elapsedSeconds);
+}
+
 /**
  * The full, index-ordered local pose (length `topology.boneCount`) for every
  * bone at `elapsedSeconds` under `actionId`. Falls back to the plain rest
@@ -212,6 +252,12 @@ function applyExpressionBoneDeltas(topology: CompiledTopology, pose: BoneTransfo
  * off a CompiledAvatar, which already carries any per-clip override merged
  * in) -- applied via applyExpressionBoneDeltas above, on top of whatever
  * pose the active action already produced.
+ *
+ * Kept as a single-action, single-layer function (unchanged signature and
+ * behavior) for the call sites that only ever need one posture pose in
+ * isolation -- gallery thumbnails, AvatarFramingDialog's own live preview
+ * canvas. See computeLayeredAvatarPose below for the multi-layer version
+ * CanvasPlayer/exportTimeline's real playback uses.
  */
 export function computeAvatarPose(
   topology: CompiledTopology,
@@ -220,24 +266,141 @@ export function computeAvatarPose(
   seed: number,
   expressionBias?: Record<string, number>
 ): BoneTransform[] {
-  const spec = topology.actions[actionId];
-  if (!spec) {
-    const restPose = topology.defaultLocalPose.map((pose) => ({ ...pose }));
-    return applyExpressionBoneDeltas(topology, restPose, expressionBias);
+  return applyExpressionBoneDeltas(topology, computePosturePose(topology, actionId, elapsedSeconds, seed), expressionBias);
+}
+
+/** Which gesture/gaze (if any) is layered on top of the posture action right
+ * now, plus each one's own elapsedSeconds -- relative to that BEAT's own
+ * start, not the clip's global clock, so a `loop: false` gesture/gaze spec
+ * always plays from its own t=0 regardless of when in the clip it started.
+ * See resolveAvatarRenderState.ts (CanvasPlayer.tsx/exportTimeline.ts's
+ * shared resolver) for how this gets built from a clip's gestureTimeline/
+ * gazeTimeline plus any tag-derived beats. */
+export interface AvatarLayerActivation {
+  postureActionId: string;
+  gesture?: { gestureId: string; elapsedSeconds: number };
+  gaze?: { gazeId: string; elapsedSeconds: number };
+}
+
+/** For every bone `overrideSpec` has at least one keyframe for, REPLACES
+ * `base`'s own value with `overridePose`'s -- never sums the two. This is the
+ * "highest-priority layer owning a bone wins outright" merge rule: a
+ * gesture/gaze scoped to arms/head should fully take over those specific
+ * bones (an additive stack would double-displace an arm the posture layer
+ * already moved, e.g. during "walk"), while every bone the override spec
+ * doesn't mention is left exactly as the layer underneath produced it. */
+function mergeBoneOverride(base: BoneTransform[], overridePose: BoneTransform[], overrideSpec: ActionCurveSpec): BoneTransform[] {
+  const overriddenBoneIndices = new Set(overrideSpec.keyframes.map((keyframe) => keyframe.boneIndex));
+  if (overriddenBoneIndices.size === 0) return base;
+  return base.map((bone, boneIndex) => (overriddenBoneIndices.has(boneIndex) ? overridePose[boneIndex] : bone));
+}
+
+/**
+ * The layered-motion redesign's real pose function -- posture (whichever
+ * action `activation.postureActionId` names, exactly as computeAvatarPose
+ * would resolve it) computed first, then gesture's own arm bones and gaze's
+ * own head bone (whichever are active) REPLACE that pose's values for just
+ * those bones (mergeBoneOverride), and finally `expressionBias` is applied
+ * once over the fully-merged result -- same relative order computeAvatarPose
+ * always used (action pose, then bias), just with an extra merge step
+ * in between. With no gesture/gaze active this produces the exact same
+ * result as computeAvatarPose (both funnel through computePosturePose +
+ * applyExpressionBoneDeltas), so a clip with no gesture/gaze timelines at
+ * all renders byte-identically to before this redesign. */
+export function computeLayeredAvatarPose(
+  topology: CompiledTopology,
+  activation: AvatarLayerActivation,
+  elapsedSeconds: number,
+  seed: number,
+  expressionBias?: Record<string, number>
+): BoneTransform[] {
+  let pose = computePosturePose(topology, activation.postureActionId, elapsedSeconds, seed);
+
+  const gestureSpec = activation.gesture ? topology.gestures?.[activation.gesture.gestureId] : undefined;
+  if (gestureSpec && activation.gesture) {
+    pose = mergeBoneOverride(pose, poseFromSpec(topology, gestureSpec, activation.gesture.elapsedSeconds), gestureSpec);
   }
 
-  if (spec.usesSeed) {
-    return applyExpressionBoneDeltas(topology, computeSeededPose(topology, spec, elapsedSeconds, seed), expressionBias);
+  const gazeSpec = activation.gaze ? topology.gazes?.[activation.gaze.gazeId] : undefined;
+  if (gazeSpec && activation.gaze) {
+    pose = mergeBoneOverride(pose, poseFromSpec(topology, gazeSpec, activation.gaze.elapsedSeconds), gazeSpec);
   }
 
-  const phase =
-    spec.periodSeconds > 0 ? (((elapsedSeconds % spec.periodSeconds) + spec.periodSeconds) % spec.periodSeconds) / spec.periodSeconds : 0;
-
-  const pose = topology.defaultLocalPose.map((defaultPose, boneIndex) => {
-    const keyframesForBone = spec.keyframes.filter((keyframe) => keyframe.boneIndex === boneIndex);
-    return applyDelta(defaultPose, deltaAtPhase(keyframesForBone, phase));
-  });
   return applyExpressionBoneDeltas(topology, pose, expressionBias);
+}
+
+// Mood beats ease in/out rather than snapping, matching this product's own
+// "eases back to normal automatically" bias elsewhere (e.g. the Ken Burns
+// zoom epicenter) -- symmetric in/out durations, short enough to read as
+// responsive to a tag, long enough not to look like a hard cut.
+const MOOD_EASE_IN_SECONDS = 0.4;
+const MOOD_EASE_OUT_SECONDS = 0.4;
+
+/** Scales every paramId in `preset` by `strength` (0..1), dropping any
+ * paramId this topology's own expressionParams has no `boneDeltas` for --
+ * see AvatarTopology.moodPresets's own doc comment on why a colorDeltas-only
+ * param (e.g. "colorMood") can't be animated per-frame in this phase. */
+function scaleMoodPreset(
+  preset: Record<string, number>,
+  expressionParams: Record<string, ExpressionParamSpec>,
+  strength: number
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const [paramId, targetValue] of Object.entries(preset)) {
+    if (!expressionParams[paramId]?.boneDeltas) continue;
+    result[paramId] = targetValue * strength;
+  }
+  return result;
+}
+
+/**
+ * The effective expressionBias contribution from a clip's own moodTimeline
+ * at `localElapsedMs`, or `undefined` when nothing is active (in which case
+ * the caller should just keep using the Design's own static expressionBias
+ * unchanged, exactly as before this redesign). Pure function of its inputs --
+ * no stored "last mood" state -- same discipline as computeLookAroundRotation
+ * above, so live preview and export agree byte-for-byte at any instant.
+ *
+ * A currently-active beat eases IN over MOOD_EASE_IN_SECONDS from its own
+ * startMs (full strength once that ramp completes, held for the rest of the
+ * beat). Once a beat's own endMs passes with no NEXT beat yet covering this
+ * instant, its preset eases back OUT toward neutral over MOOD_EASE_OUT_SECONDS
+ * rather than vanishing on the exact frame the beat ends -- a short window
+ * during which computeActiveMoodBias keeps returning a fading contribution
+ * from the most recently ended beat.
+ */
+export function computeActiveMoodBias(
+  moodPresets: Record<string, Record<string, number>> | undefined,
+  expressionParams: Record<string, ExpressionParamSpec> | undefined,
+  moodTimeline: { moodId: string; startMs: number; endMs: number }[] | undefined,
+  localElapsedMs: number
+): Record<string, number> | undefined {
+  if (!moodPresets || !expressionParams || !moodTimeline || moodTimeline.length === 0) return undefined;
+
+  const sorted = [...moodTimeline].sort((a, b) => a.startMs - b.startMs);
+  const active = sorted.find((beat) => localElapsedMs >= beat.startMs && localElapsedMs < beat.endMs);
+  if (active) {
+    const preset = moodPresets[active.moodId];
+    if (!preset) return undefined;
+    const easeInMs = MOOD_EASE_IN_SECONDS * 1000;
+    const strength = easeInMs > 0 ? Math.min((localElapsedMs - active.startMs) / easeInMs, 1) : 1;
+    return scaleMoodPreset(preset, expressionParams, strength);
+  }
+
+  // No beat covers this instant -- ease the most recently ENDED beat's own
+  // preset back toward neutral for a short window afterward.
+  let justEnded: { moodId: string; startMs: number; endMs: number } | undefined;
+  for (const beat of sorted) {
+    if (beat.endMs <= localElapsedMs) justEnded = beat;
+  }
+  if (!justEnded) return undefined;
+
+  const preset = moodPresets[justEnded.moodId];
+  if (!preset) return undefined;
+  const easeOutMs = MOOD_EASE_OUT_SECONDS * 1000;
+  const msSinceEnd = localElapsedMs - justEnded.endMs;
+  if (easeOutMs <= 0 || msSinceEnd >= easeOutMs) return undefined;
+  return scaleMoodPreset(preset, expressionParams, 1 - msSinceEnd / easeOutMs);
 }
 
 // How often "talk"'s mouth flaps between open/closed -- a generic,

@@ -79,6 +79,7 @@ import {
 } from "@/lib/video/video_math";
 import type { AvatarActionId } from "@/lib/video/avatar/topology";
 import type { AvatarDesignOverrides } from "@/lib/video/avatar/design";
+import type { AvatarDirectedLayers } from "./AvatarFramingDialog";
 import {
   applySelectClipRect,
   applyCropRectCommit,
@@ -119,7 +120,7 @@ import {
   applyAvatarOverlayRangeChange,
   applyAvatarOverlayPositionChange,
   applyDeleteAvatarOverlay,
-  applyDirectAvatarOverlay,
+  applyDirectAvatarLayers,
   applyAddVideoOverlay,
   applyChangeVideoOverlayLayout,
   applyToggleSplitScreenOrientation,
@@ -2520,8 +2521,8 @@ export function ThreePaneEditor({
   // direction doesn't touch avatarId/defaultAction/rect). Unlike
   // handleSaveAvatarOverlay, this never closes the dialog -- the creator can
   // keep adjusting other fields, or re-direct, right after.
-  function handleDirectAvatarOverlay(overlayIndex: number, actionTimeline: AvatarAction[]) {
-    const { label, state } = applyDirectAvatarOverlay(selections, overlayIndex, actionTimeline);
+  function handleDirectAvatarOverlay(overlayIndex: number, layers: AvatarDirectedLayers) {
+    const { label, state } = applyDirectAvatarLayers(selections, overlayIndex, layers);
     pushChange(label, state);
   }
 

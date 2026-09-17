@@ -47,8 +47,10 @@ import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
 import { AvatarThumbnailCanvas } from "@/components/AvatarThumbnailCanvas";
 import { getCompiledAvatarForClip, type CompiledAvatar } from "@/lib/video/avatar/compile";
 import { computeAvatarPose, computeMouthShapeId } from "@/lib/video/avatar/actions";
+import { tagAnchorsToBeats } from "@/lib/video/avatar/resolveAvatarRenderState";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { AVATAR_LIBRARY, BIPED_SIMPLE_TOPOLOGY, getAvatarLibraryEntry } from "@/lib/video/avatar/library";
+import { AVATAR_TAG_CATALOG, parseScriptTags } from "@/lib/video/avatar/tags";
 import {
   deleteGeneratedAvatar,
   fetchGeneratedAvatarEntry,
@@ -68,11 +70,14 @@ import {
   DEFAULT_AVATAR_OVERLAY_RECT,
   findOverlappingTtsOverlay,
   type AvatarAction,
+  type AvatarGazeBeat,
+  type AvatarGestureBeat,
+  type AvatarMoodBeat,
   type AvatarOverlayClip,
   type CropRect,
   type TtsOverlay,
 } from "@/lib/video/video_math";
-import { directAvatarActions, editAvatarDesign, FeatureLockedError } from "@/lib/api";
+import { directAvatarActions, editAvatarDesign, FeatureLockedError, type AvatarLockedBeat } from "@/lib/api";
 import { usePermissions } from "@/lib/usePermissions";
 
 // A Phase-6 generated avatarId always has this prefix (see
@@ -290,6 +295,17 @@ function AvatarPreviewCanvas({
   return <canvas ref={canvasRef} className={className} />;
 }
 
+/** What "Direct with AI" now produces -- the original posture-only
+ * actionTimeline plus the layered-motion redesign's gesture/gaze/mood
+ * timelines (each may be empty, e.g. an avatar whose topology declares no
+ * gesture vocabulary at all just gets an empty gestureTimeline back). */
+export interface AvatarDirectedLayers {
+  actionTimeline: AvatarAction[];
+  gestureTimeline: AvatarGestureBeat[];
+  gazeTimeline: AvatarGazeBeat[];
+  moodTimeline: AvatarMoodBeat[];
+}
+
 export function AvatarFramingDialog({
   editingOverlay,
   previewFrameUrl,
@@ -332,13 +348,14 @@ export function AvatarFramingDialog({
   // delete yet. Same optional, edit-only "Remove" affordance as
   // TextSlideDialog's own onDelete.
   onDelete?: () => void;
-  // "Direct with AI" (Phase 4) -- persists the returned actionTimeline onto
-  // THIS overlay via its own dedicated transformation (applyDirectAvatarOverlay),
-  // never folded into onSave since direction doesn't touch avatarId/
-  // defaultAction/rect at all. Same "only when editing an already-added
-  // overlay" gating as onDelete -- a brand-new, not-yet-saved overlay has no
-  // committed time range yet for findOverlappingTtsOverlay to match against.
-  onDirect?: (actionTimeline: AvatarAction[]) => void;
+  // "Direct with AI" (Phase 4, generalized to layered motion) -- persists the
+  // returned timelines onto THIS overlay via its own dedicated transformation
+  // (applyDirectAvatarLayers), never folded into onSave since direction
+  // doesn't touch avatarId/defaultAction/rect at all. Same "only when editing
+  // an already-added overlay" gating as onDelete -- a brand-new, not-yet-
+  // saved overlay has no committed time range yet for findOverlappingTtsOverlay
+  // to match against.
+  onDirect?: (layers: AvatarDirectedLayers) => void;
 }) {
   const [avatarId, setAvatarId] = useState(editingOverlay?.avatarId ?? AVATAR_LIBRARY[0]?.design.designId ?? "");
   // Widened to plain `string` (rather than AvatarActionId) because the
@@ -547,8 +564,51 @@ export function AvatarFramingDialog({
     setIsDirecting(true);
     setDirectError(null);
     try {
-      const result = await directAvatarActions(overlappingNarration.text, overlappingNarration.durationSeconds, actionOptions);
-      onDirect(result.actionTimeline);
+      // Same per-Topology-capability derivation as actionOptions/garmentOptions
+      // elsewhere in this dialog -- an avatar whose topology declares no
+      // gesture/gaze/mood vocabulary at all just offers the LLM none of those
+      // ops (empty lists), rather than a hardcoded global vocabulary.
+      const topology = resolvedEntry?.topology;
+      const gestureIds = Object.keys(topology?.gestures ?? {});
+      const gazeIds = Object.keys(topology?.gazes ?? {});
+      const moodIds = Object.keys(topology?.moodPresets ?? {});
+
+      // The creator's own script tags are already-committed beats -- told to
+      // the LLM as ranges it must never propose an overlapping same-layer
+      // beat over (see tagAnchorsToBeats' own doc comment for the duration
+      // heuristic, shared with resolveAvatarRenderState's live rendering so
+      // the two never disagree on "how long does this tag's effect last").
+      const lockedBeats: AvatarLockedBeat[] = topology
+        ? (["gesture", "gaze", "mood"] as const).flatMap((layer) =>
+            tagAnchorsToBeats(overlappingNarration.tagAnchors, layer, 0, topology).map((beat) => ({
+              layer,
+              beatId: beat.id,
+              startMs: beat.startMs,
+              endMs: beat.endMs,
+            }))
+          )
+        : [];
+
+      // Tags are stripped from the script content the director reasons
+      // about too -- it has no notion of tag syntax, and a literal
+      // "{angry}" in the "words being spoken" would just be noise to it.
+      const script = parseScriptTags(overlappingNarration.text, AVATAR_TAG_CATALOG).strippedText;
+
+      const result = await directAvatarActions(
+        script,
+        overlappingNarration.durationSeconds,
+        actionOptions,
+        gestureIds,
+        gazeIds,
+        moodIds,
+        lockedBeats
+      );
+      onDirect({
+        actionTimeline: result.actionTimeline,
+        gestureTimeline: result.gestureTimeline,
+        gazeTimeline: result.gazeTimeline,
+        moodTimeline: result.moodTimeline,
+      });
       setDirectorNote(result.directorNote);
     } catch (err) {
       if (err instanceof FeatureLockedError) setLockedError(err);

@@ -1127,6 +1127,21 @@ export interface TtsOverlay {
   templateId: string;
   // 0..1, default 1 -- see CanvasPlayer.tsx's own per-overlay gain node.
   volume: number;
+  // Script tags (avatar/tags.ts's parseScriptTags/resolveTagAnchorsToTimings)
+  // -- e.g. typing "{angry}" into `text` above resolves to one entry here and
+  // is stripped from the text actually sent to TTS synthesis. `triggerMs` is
+  // relative to THIS overlay's own startTimeSeconds, same convention
+  // wordTimings[].startMs already uses. Absent for any overlay authored
+  // before this feature, or one with no tags at all -- avatar/
+  // resolveAvatarRenderState.ts treats a missing/empty list as "no tag-
+  // derived beats for whichever avatar clip(s) overlap this narration."
+  tagAnchors?: ResolvedTagAnchor[];
+}
+
+export interface ResolvedTagAnchor {
+  layer: "gesture" | "gaze" | "mood";
+  id: string;
+  triggerMs: number;
 }
 
 // Same bottom-third caption-safe default as text overlays.
@@ -1241,6 +1256,39 @@ export interface AvatarOverlayClip {
   // `defaultAction`/`actionTimeline` (picking the "sit" action is a
   // different animation, not this framing).
   framing?: "full" | "bust";
+  // Layered motion -- gesture/gaze/mood beats, same startMs/endMs-relative-
+  // to-clip-start convention as `actionTimeline` above, but each on its OWN
+  // independent timeline: unlike actionTimeline (one whole-body posture at a
+  // time), a gesture/gaze/mood beat plays ON TOP of the posture layer,
+  // scoped to its own bone group (avatar/actions.ts's computeLayeredAvatarPose)
+  // or, for mood, avatar/design.ts's expressionBias mechanism
+  // (computeActiveMoodBias). Populated by the generalized "Direct with AI"
+  // (AvatarFramingDialog) AND, live at render time, merged with tag-derived
+  // beats reconstructed from whichever TTS overlay overlaps this clip (see
+  // avatar/resolveAvatarRenderState.ts) -- never persisted redundantly with
+  // those tag-derived beats, which are recomputed fresh from the TTS
+  // overlay's own tagAnchors every time, not baked in here.
+  gestureTimeline?: AvatarGestureBeat[];
+  gazeTimeline?: AvatarGazeBeat[];
+  moodTimeline?: AvatarMoodBeat[];
+}
+
+export interface AvatarGestureBeat {
+  gestureId: string;
+  startMs: number;
+  endMs: number;
+}
+
+export interface AvatarGazeBeat {
+  gazeId: string;
+  startMs: number;
+  endMs: number;
+}
+
+export interface AvatarMoodBeat {
+  moodId: string;
+  startMs: number;
+  endMs: number;
 }
 
 // Bottom-right, bust-framed -- clear of the center content a reel's main
@@ -1270,6 +1318,18 @@ export function findOverlappingTtsOverlay(overlays: TtsOverlay[], clip: AvatarOv
     (overlay) => overlay.startTimeSeconds < clip.endTimeSeconds && ttsOverlayEndTimeSeconds(overlay) > clip.startTimeSeconds
   );
   return candidates.length > 0 ? candidates[0] : null;
+}
+
+/** The reverse query -- every avatar overlay clip whose time range overlaps
+ * `ttsOverlay`'s own, same overlap (not containment) semantics as
+ * findOverlappingTtsOverlay above. Used by avatar/resolveAvatarRenderState.ts
+ * (given an avatar clip, which narration's own tagAnchors should drive it --
+ * the inverse direction) and by AvatarFramingDialog's "Direct with AI" (given
+ * a narration, which avatar clip(s) it's actually directing). */
+export function findOverlappingAvatarOverlays(overlays: AvatarOverlayClip[], ttsOverlay: TtsOverlay): AvatarOverlayClip[] {
+  return overlays.filter(
+    (clip) => clip.startTimeSeconds < ttsOverlayEndTimeSeconds(ttsOverlay) && clip.endTimeSeconds > ttsOverlay.startTimeSeconds
+  );
 }
 
 /**

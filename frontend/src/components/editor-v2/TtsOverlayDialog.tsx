@@ -42,8 +42,10 @@ import { TEXT_TEMPLATE_OPTIONS, type TextTemplateId } from "@/lib/video/textTemp
 import { TextOverlayCanvas } from "./TextOverlayCanvas";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
 import { CropRectOverlay } from "./CropRectOverlay";
-import { DEFAULT_TTS_OVERLAY_RECT, type CropRect, type TtsOverlay, type TtsWordTiming } from "@/lib/video/video_math";
-import { FeatureLockedError, listTtsVoices, synthesizeTts, type TtsVoiceOption } from "@/lib/api";
+import { TagAutocompleteOverlay } from "./TagAutocompleteOverlay";
+import { DEFAULT_TTS_OVERLAY_RECT, type CropRect, type ResolvedTagAnchor, type TtsOverlay, type TtsWordTiming } from "@/lib/video/video_math";
+import { FeatureLockedError, listTtsVoices, resolveAvatarTag, synthesizeTts, type AvatarTagCapabilities, type TtsVoiceOption } from "@/lib/api";
+import { AVATAR_TAG_CATALOG, parseScriptTags, resolveTagAnchorsToTimings, type ParsedTagAnchor } from "@/lib/video/avatar/tags";
 import { getAudioDuration } from "@/lib/video/audio";
 import { usePermissions } from "@/lib/usePermissions";
 import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
@@ -53,11 +55,23 @@ import { NICHE_LANGUAGES, localeForNicheLanguage, nicheLanguageForVoiceLocale } 
 const PREVIEW_PROGRESS = 0.6;
 const DEFAULT_PREVIEW_TEXT = "Your narration here";
 
+// Derived once from the module-level AVATAR_TAG_CATALOG -- passed to
+// resolveAvatarTag for whichever "{freeword}" tags don't match it exactly.
+const AVATAR_TAG_CAPABILITIES: AvatarTagCapabilities = {
+  gestureIds: AVATAR_TAG_CATALOG.filter((entry) => entry.layer === "gesture").map((entry) => entry.id),
+  gazeIds: AVATAR_TAG_CATALOG.filter((entry) => entry.layer === "gaze").map((entry) => entry.id),
+  moodIds: AVATAR_TAG_CATALOG.filter((entry) => entry.layer === "mood").map((entry) => entry.id),
+};
+
 interface SynthesisResult {
   assetId: string;
   url: string;
   durationSeconds: number;
   wordTimings: TtsWordTiming[];
+  // Script tags (avatar/tags.ts) resolved against THIS synthesis' own real
+  // per-word timing -- see handleGenerateSpeech's own comment. Empty when
+  // the script had none.
+  tagAnchors: ResolvedTagAnchor[];
 }
 
 export function TtsOverlayDialog({
@@ -138,6 +152,7 @@ export function TtsOverlayDialog({
           url: editingOverlayAssetUrl,
           durationSeconds: editingOverlay.durationSeconds,
           wordTimings: editingOverlay.wordTimings,
+          tagAnchors: editingOverlay.tagAnchors ?? [],
         }
       : null
   );
@@ -175,6 +190,7 @@ export function TtsOverlayDialog({
             url: editingOverlayAssetUrl,
             durationSeconds: editingOverlay.durationSeconds,
             wordTimings: editingOverlay.wordTimings,
+          tagAnchors: editingOverlay.tagAnchors ?? [],
           }
         : null
     );
@@ -228,7 +244,21 @@ export function TtsOverlayDialog({
     setIsSynthesizing(true);
     setSynthesisError(null);
     try {
-      const result = await synthesizeTts(projectId, trimmed, voice);
+      // Script tags ("{angry}", "{wave}", ...) are stripped BEFORE synthesis
+      // (see avatar/tags.ts's own module comment) -- the TTS engine never
+      // sees them, so they're never spoken or mispronounced. A "{freeword}"
+      // that doesn't match the closed vocabulary gets one shot at resolving
+      // to the nearest known id via a small LLM call, same button-press-
+      // triggered (not on keystroke) posture as every other LLM call in this
+      // dialog -- still dropped silently if that also finds no good match.
+      const parsed = parseScriptTags(trimmed, AVATAR_TAG_CATALOG);
+      const extraAnchors: ParsedTagAnchor[] = [];
+      for (const tag of parsed.unresolved) {
+        const resolved = await resolveAvatarTag(tag.freeText, AVATAR_TAG_CAPABILITIES).catch(() => null);
+        if (resolved) extraAnchors.push({ raw: tag.raw, layer: resolved.layer, id: resolved.id, beforeWordIndex: tag.beforeWordIndex });
+      }
+
+      const result = await synthesizeTts(projectId, parsed.strippedText, voice);
       // The backend's own durationSeconds is a last-word-boundary-plus-padding
       // ESTIMATE (see edge_provider.py's own comment -- it deliberately has
       // no audio-decoding dependency), which can drift from the real mp3's
@@ -238,7 +268,8 @@ export function TtsOverlayDialog({
       // (same getAudioDuration() the background-track strip already uses)
       // gets the actual length instead of trusting the estimate.
       const realDurationSeconds = await getAudioDuration(result.url).catch(() => result.durationSeconds);
-      setSynthesis({ ...result, durationSeconds: realDurationSeconds });
+      const tagAnchors = resolveTagAnchorsToTimings([...parsed.anchors, ...extraAnchors], result.wordTimings);
+      setSynthesis({ ...result, durationSeconds: realDurationSeconds, tagAnchors });
       setSynthesizedText(trimmed);
     } catch (err) {
       if (err instanceof FeatureLockedError) setLockedError(err);
@@ -270,6 +301,7 @@ export function TtsOverlayDialog({
       rect,
       templateId,
       volume: editingOverlay?.volume ?? 1,
+      tagAnchors: synthesis.tagAnchors,
     };
     onSave(overlay);
   }
@@ -360,14 +392,16 @@ export function TtsOverlayDialog({
 
           {/* Right half: script + voice + mode + template gallery. */}
           <div className="flex min-h-0 flex-1 flex-col sm:w-1/2">
-            <TransliterateTextarea
-              value={text}
-              onChange={setText}
-              locale={localeForNicheLanguage(language)}
-              placeholder="Type what the narrator should say…"
-              rows={3}
-              className="mb-2 w-full resize-none rounded-md border border-border bg-background px-2 py-1 text-sm"
-            />
+            <TagAutocompleteOverlay text={text} onChangeText={setText}>
+              <TransliterateTextarea
+                value={text}
+                onChange={setText}
+                locale={localeForNicheLanguage(language)}
+                placeholder="Type what the narrator should say… (try typing { for gesture/gaze/mood tags)"
+                rows={3}
+                className="mb-2 w-full resize-none rounded-md border border-border bg-background px-2 py-1 text-sm"
+              />
+            </TagAutocompleteOverlay>
 
             <label className="mb-2 flex flex-col gap-1 text-xs text-muted">
               Language

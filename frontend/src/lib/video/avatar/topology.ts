@@ -30,6 +30,21 @@
 export type AvatarActionId = "idle" | "talk" | "walk" | "sit" | "sleep" | "lookAround";
 
 /**
+ * The layered-motion redesign's own closed vocabularies -- unlike
+ * `AvatarActionId` (a whole-body posture, one at a time), a gesture/gaze
+ * plays on top of whichever posture action is already active, scoped to a
+ * narrow bone group (arms / head respectively -- see `AvatarTopology.gestures`/
+ * `gazes` below), and a mood is a named preset over this topology's own
+ * `expressionParams` rather than a bone curve at all (see `moodPresets`).
+ * Each is an open string index PLUS this union for the same reason
+ * `AvatarActionId` is: a richer topology may declare extras beyond the
+ * baseline set.
+ */
+export type AvatarGestureId = "wave" | "point" | "shrug" | "openArms" | "fistThump" | "facepalm";
+export type AvatarGazeId = "lookLeft" | "lookRight" | "lookAtCamera" | "lookDown";
+export type AvatarMoodId = "angry" | "happy" | "sad" | "evil" | "calm" | "excited" | "scared";
+
+/**
  * A bone's local transform relative to its PARENT bone (or, for the root
  * bone, relative to the rig's own origin) -- x/y are translation, not
  * pixels, but rig-space units (see AvatarTopology.rigWidth/rigHeight): the
@@ -84,11 +99,21 @@ export interface ActionKeyframe {
  * `lookAround` evaluator (true for that action only) -- see this file's own
  * `AvatarTopology.actions` doc for the unusual convention `lookAround`'s own
  * single keyframe is used for.
+ *
+ * `loop` (default true, i.e. every spec authored before the layered-motion
+ * redesign is unaffected) -- `false` means "play through ONCE": the evaluator
+ * clamps `elapsedSeconds / periodSeconds` to [0,1] instead of wrapping it, so
+ * the curve holds at its own t=1 keyframe once played rather than restarting.
+ * Every gesture/gaze spec (`AvatarTopology.gestures`/`gazes`) should set this
+ * false and author its own t=0/t=1 keyframes back at identity, so a one-shot
+ * gesture always returns cleanly to rest (or to whatever the posture layer
+ * underneath it is doing) once its own short duration elapses.
  */
 export interface ActionCurveSpec {
   periodSeconds: number;
   keyframes: ActionKeyframe[];
   usesSeed?: boolean;
+  loop?: boolean;
 }
 
 /**
@@ -243,4 +268,30 @@ export interface AvatarTopology {
 
   // Phase 8 -- see AvatarBustFraming's own doc comment above.
   bustFraming?: AvatarBustFraming;
+
+  // Layered motion -- a gesture/gaze plays ON TOP of whichever posture action
+  // (`actions` above) is currently active: actions.ts's computeLayeredAvatarPose
+  // computes the posture pose first, then, for whichever of these is
+  // currently active, REPLACES (never adds to) that pose's own value for
+  // every bone the active spec's keyframes name -- so a gesture's arm
+  // keyframes should scope to `boneGroups.arms`' bone indices only, and a
+  // gaze's to `boneGroups.head`'s (compile.ts enforces this when those groups
+  // are declared). Optional/absent entirely means "this topology has no
+  // gesture/gaze vocabulary yet" -- computeLayeredAvatarPose degrades to
+  // plain posture-only behavior, byte-identical to computeAvatarPose, when
+  // no gesture/gaze is active regardless of whether this topology declares
+  // any.
+  gestures?: Partial<Record<AvatarGestureId, ActionCurveSpec>> & Record<string, ActionCurveSpec>;
+  gazes?: Partial<Record<AvatarGazeId, ActionCurveSpec>> & Record<string, ActionCurveSpec>;
+
+  // Named mood presets -- moodId -> a partial map of THIS topology's own
+  // `expressionParams` ids to a target bias value "at full mood strength"
+  // (not necessarily that param's own min/max). Only params that declare
+  // `boneDeltas` have any live, per-frame effect (see actions.ts's
+  // computeActiveMoodBias) -- a preset naming a colorDeltas-only param (e.g.
+  // library.ts's "colorMood") is harmless but inert in this phase, since
+  // colorDeltas are baked into the atlas once at compile time
+  // (compile.ts's computeEffectiveSlotColors/recolorAtlas), not re-evaluable
+  // per frame.
+  moodPresets?: Partial<Record<AvatarMoodId, Record<string, number>>> & Record<string, Record<string, number>>;
 }

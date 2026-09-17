@@ -1,6 +1,20 @@
 from pydantic import BaseModel
 
 
+class LockedBeat(BaseModel):
+    """One tag-derived beat (avatar/tags.ts on the frontend) the "direct"
+    LLM must not propose an overlapping beat over, in the SAME layer --
+    an explicit `{angry}`/`{wave}` in the script is a more direct
+    instruction than whatever the LLM would otherwise fill that stretch
+    with. `beat_id` is just for the LLM's own reference in its response
+    (unused by parsing) -- the ranges themselves are what's enforced."""
+
+    layer: str  # "gesture" | "gaze" | "mood"
+    beat_id: str
+    start_ms: int
+    end_ms: int
+
+
 class DirectAvatarRequest(BaseModel):
     script: str
     narration_duration_seconds: float
@@ -11,6 +25,16 @@ class DirectAvatarRequest(BaseModel):
     # can actually do (see the Avatar Design plan's "per-Topology
     # capability, not one global enum" note).
     action_ids: list[str]
+    # Layered motion -- same per-Topology-capability principle as action_ids
+    # above, for this avatar's own gesture/gaze/mood vocabulary (topology.ts's
+    # gestures/gazes/moodPresets). Empty lists (the default) mean this avatar
+    # has none -- the LLM is simply never offered those ops.
+    gesture_ids: list[str] = []
+    gaze_ids: list[str] = []
+    mood_ids: list[str] = []
+    # Tag-derived beats already committed on the narration script -- see
+    # LockedBeat's own doc comment.
+    locked_beats: list[LockedBeat] = []
 
 
 class AvatarActionBeat(BaseModel):
@@ -20,8 +44,33 @@ class AvatarActionBeat(BaseModel):
     params: dict[str, float] | None = None
 
 
+class GestureBeat(BaseModel):
+    gesture_id: str
+    start_ms: int
+    end_ms: int
+
+
+class GazeBeat(BaseModel):
+    gaze_id: str
+    start_ms: int
+    end_ms: int
+
+
+class MoodBeat(BaseModel):
+    mood_id: str
+    start_ms: int
+    end_ms: int
+
+
 class DirectAvatarResponse(BaseModel):
     action_timeline: list[AvatarActionBeat]
+    # Layered motion -- filled in ONLY for stretches of the script the
+    # locked_beats above don't already cover (see service.py's own
+    # _edit_system_prompt-style instruction to the LLM). Empty when this
+    # avatar has no gesture/gaze/mood vocabulary at all.
+    gesture_timeline: list[GestureBeat] = []
+    gaze_timeline: list[GazeBeat] = []
+    mood_timeline: list[MoodBeat] = []
     # One short, plain-language line explaining the overall direction chosen
     # -- surfaced in AvatarFramingDialog so the choice isn't a black box (see
     # the plan's "Director's notes" idea). Never persisted on the clip;
@@ -92,3 +141,21 @@ class AvatarEditOp(BaseModel):
 
 class EditAvatarResponse(BaseModel):
     ops: list[AvatarEditOp]
+
+
+class ResolveAvatarTagRequest(BaseModel):
+    """A `{freeword}` script tag (avatar/tags.ts) that didn't match this
+    avatar's own closed gesture/gaze/mood vocabulary -- asks the LLM to map
+    it to the single closest known id, or say nothing's close enough."""
+
+    free_text: str
+    gesture_ids: list[str]
+    gaze_ids: list[str]
+    mood_ids: list[str]
+
+
+class ResolveAvatarTagResponse(BaseModel):
+    # Both null together means "no good match" -- the frontend then just
+    # drops the tag rather than guessing.
+    layer: str | None = None  # "gesture" | "gaze" | "mood"
+    id: str | None = None
