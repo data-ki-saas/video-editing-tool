@@ -27,6 +27,8 @@ async def edit_avatar(
         request.color_slot_ids,
         request.accessories,
         request.expression_params,
+        request.action_ids,
+        request.garment_ids,
         user.id,
         get_llm_provider(),
     )

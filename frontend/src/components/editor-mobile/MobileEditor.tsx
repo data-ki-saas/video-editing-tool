@@ -795,6 +795,11 @@ export function MobileEditor({
           editingOverlayAssetUrl={null}
           previewFrameUrl={generalPreviewFrameUrl}
           frameAspectRatio={frameAspectRatio}
+          // Just the project's own base crop, no zoom-effect interpolation --
+          // this editor's own preview is already "not scrubbing-accurate"
+          // (see previewFrameUrlForEntry's doc comment above), so the guide
+          // only needs to be roughly right, not frame-exact.
+          cropRect={selections.cropRect}
           currentTimeSeconds={currentTimeSeconds}
           onSave={handleSaveTtsOverlay}
           onClose={() => setIsTtsDialogOpen(false)}

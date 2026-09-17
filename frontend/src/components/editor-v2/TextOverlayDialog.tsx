@@ -38,6 +38,7 @@ import { useEffect, useState } from "react";
 import { TEXT_TEMPLATE_OPTIONS, type TextTemplateId } from "@/lib/video/textTemplates";
 import { TextOverlayCanvas } from "./TextOverlayCanvas";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
+import { CropRectOverlay } from "./CropRectOverlay";
 import { DEFAULT_TEXT_OVERLAY_RECT, formatTimeRange, type CropRect, type TextOverlay } from "@/lib/video/video_math";
 
 const PREVIEW_PROGRESS = 0.6;
@@ -48,6 +49,7 @@ export function TextOverlayDialog({
   textOverlays,
   previewFrameUrl,
   frameAspectRatio,
+  cropRect,
   onSave,
   onSelectExisting,
   onDeleteExisting,
@@ -59,6 +61,13 @@ export function TextOverlayDialog({
   textOverlays: TextOverlay[];
   previewFrameUrl: string | null;
   frameAspectRatio: number | null;
+  // The reel's own output crop (ClipRectangleDialog's own concept), already
+  // resolved to the exact instant previewFrameUrl was captured -- drawn
+  // read-only (no onChange/onCommit passed to CropRectOverlay) so a creator
+  // places the caption's rect against what will actually survive into the
+  // exported reel, not previewFrameUrl's full, uncropped frame. Null (no
+  // clip rectangle chosen yet) simply skips the guide.
+  cropRect: CropRect | null;
   onSave: (text: string, templateId: TextTemplateId, rect: CropRect) => void;
   // A row's own click, in the "Already on this reel" list -- jumps the
   // live preview there and re-points this same dialog at that overlay.
@@ -124,6 +133,11 @@ export function TextOverlayDialog({
                   No frame preview yet -- add a video first
                 </p>
               )}
+              {/* Read-only (no onChange/onCommit) -- a placement reference,
+                  not something this dialog lets a creator retouch; that's
+                  ClipRectangleDialog's own job. Drawn before the caption's
+                  own rect below so its drag handles stay on top. */}
+              {cropRect && <CropRectOverlay cropRect={cropRect} />}
               <OverlayRectOverlay
                 rect={rect}
                 onChange={setRect}

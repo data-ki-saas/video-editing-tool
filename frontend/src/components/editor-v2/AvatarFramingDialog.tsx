@@ -41,6 +41,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
+import { CropRectOverlay } from "./CropRectOverlay";
 import { InlineEditableText } from "@/components/InlineEditableText";
 import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
 import { AvatarThumbnailCanvas } from "@/components/AvatarThumbnailCanvas";
@@ -108,6 +109,20 @@ const GARMENT_LABELS: Record<string, string> = {
   suit: "Suit",
   blazer: "Blazer",
 };
+
+// One short example per op family "Customize with AI" actually supports
+// (setBoneScale/addAccessory/setGarment/setAction/setFraming/setExpression,
+// edits.ts's AvatarEditOp) -- rendered as click-to-try chips right under the
+// prompt input so a creator can discover the feature's real range instead of
+// guessing it from one placeholder string.
+const AVATAR_EDIT_SAMPLE_PROMPTS = [
+  "Make him fatter",
+  "Add sunglasses",
+  "Put him in a suit",
+  "Have her sit down",
+  "Portrait close-up",
+  "More evil look",
+];
 
 // Defensive fallback ONLY -- used if getAvatarLibraryEntry can't resolve the
 // currently-picked avatarId at all (see actionIdsForAvatar below). Every
@@ -279,6 +294,7 @@ export function AvatarFramingDialog({
   editingOverlay,
   previewFrameUrl,
   frameAspectRatio,
+  cropRect,
   ttsOverlays,
   onSave,
   onClose,
@@ -288,6 +304,13 @@ export function AvatarFramingDialog({
   editingOverlay: AvatarOverlayClip | null;
   previewFrameUrl: string | null;
   frameAspectRatio: number | null;
+  // The reel's own output crop (ClipRectangleDialog's own concept), already
+  // resolved to the exact instant previewFrameUrl was captured -- drawn
+  // read-only (no onChange/onCommit passed to CropRectOverlay) so a creator
+  // places the avatar's own rect against what will actually survive into the
+  // exported reel, not previewFrameUrl's full, uncropped frame. Null (no
+  // clip rectangle chosen yet) simply skips the guide.
+  cropRect: CropRect | null;
   // Needed only for "Direct with AI" below (findOverlappingTtsOverlay) --
   // every other prop here is unrelated to narration.
   ttsOverlays: TtsOverlay[];
@@ -547,8 +570,8 @@ export function AvatarFramingDialog({
   const [editDesignError, setEditDesignError] = useState<string | null>(null);
   const canEditDesign = isLoadingPermissions || hasFeature("avatar_edit");
 
-  async function handleApplyEdit() {
-    const prompt = editPrompt.trim();
+  async function handleApplyEdit(promptOverride?: string) {
+    const prompt = (promptOverride ?? editPrompt).trim();
     if (!prompt || !resolvedEntry || isEditingDesign) return;
     setIsEditingDesign(true);
     setEditDesignError(null);
@@ -567,8 +590,26 @@ export function AvatarFramingDialog({
         expressionParams: Object.fromEntries(
           Object.entries(topology.expressionParams ?? {}).map(([paramId, spec]) => [paramId, { min: spec.min, max: spec.max }])
         ),
+        // Same ids the Action/Outfit pickers themselves offer for this avatar
+        // (actionOptions/garmentOptions below) -- "shirt" stands in for the
+        // base torso (garmentId undefined), the one garmentOptions entry with
+        // no real shapeId.
+        actionIds: actionOptions,
+        garmentIds: garmentOptions.map((option) => option.id ?? "shirt"),
       });
-      setPendingOverrides((prev) => applyAvatarEditOps(prev, ops, topology, skin));
+      // Functional update (not the `pendingOverrides` closed over above) so a
+      // pick made on the manual Outfit/Framing buttons while this request was
+      // still in flight isn't clobbered by a stale snapshot -- action/framing
+      // directives are pulled out of the updater via this outer variable
+      // since setDefaultAction/setFraming can't themselves run inside it.
+      let sideEffects: { action?: string; framing?: "full" | "bust" } = {};
+      setPendingOverrides((prev) => {
+        const result = applyAvatarEditOps(prev, ops, topology, skin, actionOptions);
+        sideEffects = { action: result.action, framing: result.framing };
+        return result.overrides;
+      });
+      if (sideEffects.action) setDefaultAction(sideEffects.action);
+      if (sideEffects.framing) setFraming(sideEffects.framing);
       setEditPrompt("");
     } catch (err) {
       if (err instanceof FeatureLockedError) setLockedError(err);
@@ -642,6 +683,11 @@ export function AvatarFramingDialog({
                   No frame preview yet -- add a video first
                 </p>
               )}
+              {/* Read-only (no onChange/onCommit) -- this is a placement
+                  reference, not something this dialog lets a creator retouch;
+                  that's ClipRectangleDialog's own job. Drawn before the
+                  avatar's own rect below so its drag handles stay on top. */}
+              {cropRect && <CropRectOverlay cropRect={cropRect} />}
               <OverlayRectOverlay
                 rect={rect}
                 onChange={setRect}
@@ -665,7 +711,11 @@ export function AvatarFramingDialog({
                 applied onto pendingOverrides (previewed instantly above)
                 rather than a form full of sliders/color pickers, per this
                 product's own bias toward simple direct-manipulation/
-                conversational controls over exposing every knob. */}
+                conversational controls over exposing every knob. Now also
+                covers outfit/action/framing (setGarment/setAction/
+                setFraming, edits.ts), not just look -- the sample-prompt
+                chips below exist so a creator discovers that range without
+                needing to guess it from a single placeholder string. */}
             <div className="mt-2 flex flex-col gap-1">
               <label htmlFor="avatar-edit-prompt" className="text-xs font-medium text-foreground">
                 Customize with AI
@@ -682,19 +732,32 @@ export function AvatarFramingDialog({
                       handleApplyEdit();
                     }
                   }}
-                  placeholder="e.g. make it fatter, add sunglasses, more evil"
+                  placeholder="e.g. make it fatter, add sunglasses, put him in a suit"
                   disabled={!resolvedEntry || isEditingDesign}
                   className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground disabled:opacity-50"
                 />
                 <button
                   type="button"
-                  onClick={handleApplyEdit}
+                  onClick={() => handleApplyEdit()}
                   disabled={!resolvedEntry || !editPrompt.trim() || isEditingDesign}
                   className="flex items-center gap-1.5 whitespace-nowrap rounded-md bg-violet-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
                 >
                   {isEditingDesign ? "Applying…" : "Apply"}
                   {!canEditDesign && <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase">Pro</span>}
                 </button>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {AVATAR_EDIT_SAMPLE_PROMPTS.map((sample) => (
+                  <button
+                    key={sample}
+                    type="button"
+                    onClick={() => handleApplyEdit(sample)}
+                    disabled={!resolvedEntry || isEditingDesign}
+                    className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted hover:bg-background disabled:opacity-50"
+                  >
+                    {sample}
+                  </button>
+                ))}
               </div>
               {editDesignError && <p className="text-[11px] text-red-600">{editDesignError}</p>}
               {canResetDesignOverrides && (
@@ -809,7 +872,20 @@ export function AvatarFramingDialog({
                 className="flex flex-col items-center justify-center gap-1 rounded-md border-2 border-dashed border-border p-1.5 text-xs text-muted hover:bg-background disabled:opacity-50"
               >
                 <div className="flex aspect-square w-full items-center justify-center rounded bg-background text-2xl">
-                  {isGenerating ? "…" : "+"}
+                  {isGenerating ? (
+                    // Same spin icon as ReelLoader.tsx (this dialog needs just the
+                    // icon, not that component's own stage-label wrapper -- the
+                    // "Generating…" label below already plays that role here).
+                    <svg viewBox="0 0 24 24" className="h-6 w-6 animate-spin text-accent" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                      <circle cx="12" cy="12" r="9" />
+                      <circle cx="12" cy="12" r="2.2" />
+                      <circle cx="12" cy="6.5" r="1.4" fill="currentColor" stroke="none" />
+                      <circle cx="16.8" cy="14.8" r="1.4" fill="currentColor" stroke="none" />
+                      <circle cx="7.2" cy="14.8" r="1.4" fill="currentColor" stroke="none" />
+                    </svg>
+                  ) : (
+                    "+"
+                  )}
                 </div>
                 <span>{isGenerating ? "Generating…" : "From a photo"}</span>
               </button>
@@ -823,80 +899,93 @@ export function AvatarFramingDialog({
             </div>
             {generateError && <p className="-mt-2 mb-3 text-[11px] text-red-600">{generateError}</p>}
 
-            <h3 className="mb-1.5 text-xs font-medium text-foreground">Action</h3>
-            <div className="mb-3 grid grid-cols-2 gap-1.5">
-              {actionOptions.map((actionId) => (
-                <button
-                  key={actionId}
-                  type="button"
-                  onClick={() => setDefaultAction(actionId)}
-                  className={
-                    "rounded-md border py-1.5 text-xs font-medium " +
-                    (defaultAction === actionId
-                      ? "border-accent bg-accent text-accent-foreground"
-                      : "border-border text-foreground hover:bg-background")
-                  }
-                >
-                  {actionLabel(actionId)}
-                </button>
-              ))}
-            </div>
+            {/* Action / Framing / Outfit spread horizontally as three columns
+                (rather than three full-width stacked sections) so all three
+                picks are visible together at a glance -- each column keeps its
+                own options in a single vertical stack since the column itself
+                is now narrow. */}
+            <div className="mb-3 flex gap-3">
+              <div className="flex-1">
+                <h3 className="mb-1.5 text-xs font-medium text-foreground">Action</h3>
+                <div className="flex flex-col gap-1.5">
+                  {actionOptions.map((actionId) => (
+                    <button
+                      key={actionId}
+                      type="button"
+                      onClick={() => setDefaultAction(actionId)}
+                      className={
+                        "rounded-md border py-1.5 text-xs font-medium " +
+                        (defaultAction === actionId
+                          ? "border-accent bg-accent text-accent-foreground"
+                          : "border-border text-foreground hover:bg-background")
+                      }
+                    >
+                      {actionLabel(actionId)}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-            {/* Phase 8 -- "Portrait mode": crops the legs so just
-                hands+torso+head fill the rect, like a seated close-up shot.
-                A plain two-way toggle (not a dropdown/checkbox) per this
-                product's own bias toward simple, obvious direct-manipulation
-                controls over form-y widgets. */}
-            <h3 className="mb-1.5 text-xs font-medium text-foreground">Framing</h3>
-            <div className="mb-3 grid grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                onClick={() => setFraming("full")}
-                className={
-                  "rounded-md border py-1.5 text-xs font-medium " +
-                  (framing === "full" ? "border-accent bg-accent text-accent-foreground" : "border-border text-foreground hover:bg-background")
-                }
-              >
-                Full body
-              </button>
-              <button
-                type="button"
-                onClick={() => setFraming("bust")}
-                title="Hands and torso only, legs cropped out"
-                className={
-                  "rounded-md border py-1.5 text-xs font-medium " +
-                  (framing === "bust" ? "border-accent bg-accent text-accent-foreground" : "border-border text-foreground hover:bg-background")
-                }
-              >
-                Portrait
-              </button>
-            </div>
-
-            {/* Phase 8 -- "Outfit": swaps the torso's own silhouette
-                (shirt/polo/suit/blazer, avatar/skin.ts's
-                AvatarSkinGarmentShape) via `pendingOverrides.garmentId` --
-                the SAME per-clip override object "Customize with AI"/
-                "Reset customization" already manage, so this composes with
-                that flow (and with the shirtColor slot, which keeps
-                recoloring whichever outfit is picked) for free. */}
-            <h3 className="mb-1.5 text-xs font-medium text-foreground">Outfit</h3>
-            <div className="mb-3 grid grid-cols-2 gap-1.5">
-              {garmentOptions.map((option) => {
-                const isActive = (pendingOverrides.garmentId ?? undefined) === option.id;
-                return (
+              {/* Phase 8 -- "Portrait mode": crops the legs so just
+                  hands+torso+head fill the rect, like a seated close-up shot.
+                  A plain two-way toggle (not a dropdown/checkbox) per this
+                  product's own bias toward simple, obvious direct-manipulation
+                  controls over form-y widgets. */}
+              <div className="flex-1">
+                <h3 className="mb-1.5 text-xs font-medium text-foreground">Framing</h3>
+                <div className="flex flex-col gap-1.5">
                   <button
-                    key={option.label}
                     type="button"
-                    onClick={() => setPendingOverrides((prev) => ({ ...prev, garmentId: option.id }))}
+                    onClick={() => setFraming("full")}
                     className={
                       "rounded-md border py-1.5 text-xs font-medium " +
-                      (isActive ? "border-accent bg-accent text-accent-foreground" : "border-border text-foreground hover:bg-background")
+                      (framing === "full" ? "border-accent bg-accent text-accent-foreground" : "border-border text-foreground hover:bg-background")
                     }
                   >
-                    {option.label}
+                    Full body
                   </button>
-                );
-              })}
+                  <button
+                    type="button"
+                    onClick={() => setFraming("bust")}
+                    title="Hands and torso only, legs cropped out"
+                    className={
+                      "rounded-md border py-1.5 text-xs font-medium " +
+                      (framing === "bust" ? "border-accent bg-accent text-accent-foreground" : "border-border text-foreground hover:bg-background")
+                    }
+                  >
+                    Portrait
+                  </button>
+                </div>
+              </div>
+
+              {/* Phase 8 -- "Outfit": swaps the torso's own silhouette
+                  (shirt/polo/suit/blazer, avatar/skin.ts's
+                  AvatarSkinGarmentShape) via `pendingOverrides.garmentId` --
+                  the SAME per-clip override object "Customize with AI"/
+                  "Reset customization" already manage, so this composes with
+                  that flow (and with the shirtColor slot, which keeps
+                  recoloring whichever outfit is picked) for free. */}
+              <div className="flex-1">
+                <h3 className="mb-1.5 text-xs font-medium text-foreground">Outfit</h3>
+                <div className="flex flex-col gap-1.5">
+                  {garmentOptions.map((option) => {
+                    const isActive = (pendingOverrides.garmentId ?? undefined) === option.id;
+                    return (
+                      <button
+                        key={option.label}
+                        type="button"
+                        onClick={() => setPendingOverrides((prev) => ({ ...prev, garmentId: option.id }))}
+                        className={
+                          "rounded-md border py-1.5 text-xs font-medium " +
+                          (isActive ? "border-accent bg-accent text-accent-foreground" : "border-border text-foreground hover:bg-background")
+                        }
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
             {editingOverlay && onDirect && (

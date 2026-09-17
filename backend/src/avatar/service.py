@@ -141,7 +141,17 @@ async def direct_avatar_actions(
 _MIN_BONE_SCALE = 0.4
 _MAX_BONE_SCALE = 2.2
 _HEX_COLOR_RE = re.compile(r"^#([0-9a-f]{3}|[0-9a-f]{6})$", re.IGNORECASE)
-_KNOWN_EDIT_OPS = {"setBoneScale", "setColorSlot", "addAccessory", "removeAccessory", "setExpression"}
+_KNOWN_EDIT_OPS = {
+    "setBoneScale",
+    "setColorSlot",
+    "addAccessory",
+    "removeAccessory",
+    "setExpression",
+    "setGarment",
+    "setAction",
+    "setFraming",
+}
+_FRAMING_IDS = {"full", "bust"}
 
 
 def _edit_system_prompt(
@@ -149,6 +159,8 @@ def _edit_system_prompt(
     color_slot_ids: list[str],
     accessories: list[AvatarEditAccessoryOption],
     expression_params: dict[str, list[float]],
+    action_ids: list[str],
+    garment_ids: list[str],
 ) -> str:
     accessory_lines = ", ".join(f'"{a.accessory_asset_id}" (anchor "{a.anchor_id}")' for a in accessories) or "none available"
     expression_lines = (
@@ -172,6 +184,13 @@ def _edit_system_prompt(
         '("more evil", "friendlier", "tired", "energetic"): push the closest-matching param(s) toward whichever '
         "end of their own range reads as that mood, and optionally also nudge a clothing color slot toward a "
         "darker/cooler shade for a harsher mood or a warmer shade for a friendlier one.\n"
+        f'{{"op": "setGarment", "garment_id": <one of: {", ".join(garment_ids) or "none available"}>}} -- for an '
+        'outfit/clothing-style request ("put him in a suit", "just a plain shirt"); "shirt" means the plain base '
+        "torso with no outfit shape.\n"
+        f'{{"op": "setAction", "action_id": <one of: {", ".join(action_ids) or "none available"}>}} -- for a request '
+        'about what the avatar is DOING right now ("have her sit down", "make him walk").\n'
+        '{"op": "setFraming", "framing": <"full" or "bust">} -- for a shot-framing request ("close-up on his face", '
+        '"portrait shot", "show his whole body"); "bust" crops to hands+torso+head, "full" shows the whole rig.\n'
         "Only use ids from the lists above -- never invent one. If the request doesn't correspond to anything "
         "achievable with these ops, return an empty ops list rather than guessing. No markdown fences, no commentary."
     )
@@ -183,6 +202,8 @@ def _parse_edit_ops(
     color_slot_ids: set[str],
     accessories_by_id: dict[str, AvatarEditAccessoryOption],
     expression_params: dict[str, list[float]],
+    action_ids: set[str],
+    garment_ids: set[str],
 ) -> list[AvatarEditOp]:
     if not isinstance(raw, list):
         return []
@@ -235,6 +256,24 @@ def _parse_edit_ops(
             low, high = min(bounds), max(bounds)
             ops.append(AvatarEditOp(op=op, param_id=param_id, value=max(low, min(float(value), high))))
 
+        elif op == "setGarment":
+            garment_id = entry.get("garment_id")
+            if garment_id not in garment_ids:
+                continue
+            ops.append(AvatarEditOp(op=op, garment_id=garment_id))
+
+        elif op == "setAction":
+            action_id = entry.get("action_id")
+            if action_id not in action_ids:
+                continue
+            ops.append(AvatarEditOp(op=op, action_id=action_id))
+
+        elif op == "setFraming":
+            framing = entry.get("framing")
+            if framing not in _FRAMING_IDS:
+                continue
+            ops.append(AvatarEditOp(op=op, framing=framing))
+
     return ops
 
 
@@ -244,6 +283,8 @@ async def edit_avatar_design(
     color_slot_ids: list[str],
     accessories: list[AvatarEditAccessoryOption],
     expression_params: dict[str, list[float]],
+    action_ids: list[str],
+    garment_ids: list[str],
     user_id: str,
     provider: LLMProvider,
 ) -> EditAvatarResponse:
@@ -265,7 +306,7 @@ async def edit_avatar_design(
     try:
         completion = await provider.complete(
             prompt.strip(),
-            system=_edit_system_prompt(bone_group_ids, color_slot_ids, accessories, expression_params),
+            system=_edit_system_prompt(bone_group_ids, color_slot_ids, accessories, expression_params, action_ids, garment_ids),
             max_tokens=600,
         )
         response = completion.text
@@ -293,6 +334,8 @@ async def edit_avatar_design(
         set(color_slot_ids),
         accessories_by_id,
         expression_params,
+        set(action_ids),
+        set(garment_ids),
     )
     # An empty (but well-formed) ops list is a legitimate response -- the
     # prompt may genuinely not correspond to anything achievable, and the

@@ -57,16 +57,24 @@ class EditAvatarRequest(BaseModel):
     # (topology.ts) carries a `default` too, but only the bounds matter for
     # clamping a proposed value here.
     expression_params: dict[str, list[float]]
+    # This avatar's own resolved action ids (actionIdsForAvatar) and garment
+    # shape ids (skin.garmentShapes, "shirt" standing in for the base torso
+    # with no garmentId -- see AvatarFramingDialog's garmentOptions) -- folded
+    # in so a single prompt can also direct the clip's action/framing/outfit,
+    # same per-Topology-capability principle as every other list here.
+    action_ids: list[str]
+    garment_ids: list[str]
 
 
 class AvatarEditOp(BaseModel):
     """One primitive edit op -- a flat, all-fields-optional shape covering
-    all five ops in the closed vocabulary (setBoneScale/setColorSlot/
-    addAccessory/removeAccessory/setExpression), same untyped-per-op-shape
-    posture as AvatarActionBeat.params above (avatar/edits.ts on the frontend
-    is the single source of truth for which fields a given `op` actually
-    needs; this model only needs to ferry them across the wire, and re-parses/
-    re-validates every field defensively there too)."""
+    all eight ops in the closed vocabulary (setBoneScale/setColorSlot/
+    addAccessory/removeAccessory/setExpression/setGarment/setAction/
+    setFraming), same untyped-per-op-shape posture as AvatarActionBeat.params
+    above (avatar/edits.ts on the frontend is the single source of truth for
+    which fields a given `op` actually needs; this model only needs to ferry
+    them across the wire, and re-parses/re-validates every field defensively
+    there too)."""
 
     op: str
     group_id: str | None = None
@@ -77,6 +85,9 @@ class AvatarEditOp(BaseModel):
     color_override: str | None = None
     param_id: str | None = None
     value: float | None = None
+    garment_id: str | None = None
+    action_id: str | None = None
+    framing: str | None = None
 
 
 class EditAvatarResponse(BaseModel):

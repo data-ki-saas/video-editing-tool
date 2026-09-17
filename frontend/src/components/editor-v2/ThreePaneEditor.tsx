@@ -57,6 +57,7 @@ import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import {
   generateSampleTimestamps,
   findClosestTimestampIndex,
+  computeEffectiveCropRect,
   computeOutputDimensions,
   DEFAULT_OVERLAY_FRAMING,
   DEFAULT_SPLIT_SCREEN_RATIO,
@@ -2580,6 +2581,27 @@ export function ThreePaneEditor({
   const previewFrameIndex = findClosestTimestampIndex(thumbnailTimestampsSeconds, currentTimeSeconds);
   const previewFrameUrl = previewFrameIndex >= 0 ? thumbnails[previewFrameIndex] : null;
 
+  // The reel's own output crop -- exactly the region ClipRectangleDialog's
+  // ratio picker and CanvasPlayer/FrameStrip actually keep, at the SAME
+  // instant previewFrameUrl above was captured (its own thumbnail timestamp,
+  // not currentTimeSeconds itself, so an in-progress zoom/pan effect's
+  // interpolated rect -- computeEffectiveCropRect -- matches the exact frame
+  // shown, not a slightly different moment in the animation). Shared by
+  // every dialog that positions a rect against previewFrameUrl -- Text/Tts/
+  // AvatarFramingDialog -- which each draw it as a read-only dimmed guide
+  // (CropRectOverlay, no onChange/onCommit) so a creator can see which part
+  // of previewFrameUrl's own full, uncropped frame will actually make it
+  // into the exported reel before placing their own rect on top of it --
+  // null (no clip rectangle chosen yet) simply skips that guide, same as
+  // FrameStrip's own per-tile crop rect.
+  const overlayPreviewCropRect = selections.cropRect
+    ? computeEffectiveCropRect(
+        selections.cropRect,
+        displayedZoomEffects,
+        previewFrameIndex >= 0 ? thumbnailTimestampsSeconds[previewFrameIndex] : currentTimeSeconds
+      )
+    : null;
+
   // FilterPresetDialog's own preview frame, per target -- unlike
   // previewFrameUrl above (always the base track's frame at the CURRENT
   // PLAYHEAD, wherever that happens to be), each of these shows a frame
@@ -3050,6 +3072,7 @@ export function ThreePaneEditor({
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
           baseCropRect={selections.cropRect}
+          overlayPreviewCropRect={overlayPreviewCropRect}
           zoomEffects={displayedZoomEffects}
           liveCropRectOverride={liveCropRect}
           flipHorizontalToggles={selections.flipHorizontalToggles}

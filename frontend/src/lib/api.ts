@@ -542,6 +542,13 @@ export interface AvatarEditCapabilities {
   colorSlotIds: string[];
   accessories: AvatarEditAccessoryOption[];
   expressionParams: Record<string, { min: number; max: number }>;
+  // This avatar's own resolved action ids (AvatarFramingDialog's
+  // actionIdsForAvatar) and garment ids ("shirt" standing in for the base
+  // torso with no garmentId, same sentinel AvatarFramingDialog's
+  // garmentOptions/edits.ts use) -- folded into the same capability set so
+  // one prompt can also direct action/outfit alongside look edits.
+  actionIds: string[];
+  garmentIds: string[];
 }
 
 /** Shaped to match (structurally) lib/video/avatar/edits.ts's own
@@ -556,7 +563,10 @@ export type AvatarEditOpResult =
   | { op: "setColorSlot"; slotId: string; color: string }
   | { op: "addAccessory"; anchorId: string; accessoryAssetId: string; colorOverride?: string }
   | { op: "removeAccessory"; anchorId: string }
-  | { op: "setExpression"; paramId: string; value: number };
+  | { op: "setExpression"; paramId: string; value: number }
+  | { op: "setGarment"; garmentId: string }
+  | { op: "setAction"; actionId: string }
+  | { op: "setFraming"; framing: "full" | "bust" };
 
 interface AvatarEditOpWire {
   op: string;
@@ -568,6 +578,9 @@ interface AvatarEditOpWire {
   color_override?: string | null;
   param_id?: string | null;
   value?: number | null;
+  garment_id?: string | null;
+  action_id?: string | null;
+  framing?: string | null;
 }
 
 /** POST /api/avatar/edit (Phase 7) -- turns a free-text prompt ("make it
@@ -596,6 +609,8 @@ export async function editAvatarDesign(prompt: string, capabilities: AvatarEditC
       expression_params: Object.fromEntries(
         Object.entries(capabilities.expressionParams).map(([paramId, range]) => [paramId, [range.min, range.max]])
       ),
+      action_ids: capabilities.actionIds,
+      garment_ids: capabilities.garmentIds,
     }),
   });
   const body = await handleResponse<{ ops: AvatarEditOpWire[] }>(response);
@@ -617,6 +632,12 @@ export async function editAvatarDesign(prompt: string, capabilities: AvatarEditC
       ops.push({ op: "removeAccessory", anchorId: wire.anchor_id });
     } else if (wire.op === "setExpression" && wire.param_id && typeof wire.value === "number") {
       ops.push({ op: "setExpression", paramId: wire.param_id, value: wire.value });
+    } else if (wire.op === "setGarment" && wire.garment_id) {
+      ops.push({ op: "setGarment", garmentId: wire.garment_id });
+    } else if (wire.op === "setAction" && wire.action_id) {
+      ops.push({ op: "setAction", actionId: wire.action_id });
+    } else if (wire.op === "setFraming" && (wire.framing === "full" || wire.framing === "bust")) {
+      ops.push({ op: "setFraming", framing: wire.framing });
     }
   }
   return ops;

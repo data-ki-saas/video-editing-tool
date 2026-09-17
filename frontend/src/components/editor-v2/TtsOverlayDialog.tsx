@@ -41,6 +41,7 @@ import { useEffect, useState } from "react";
 import { TEXT_TEMPLATE_OPTIONS, type TextTemplateId } from "@/lib/video/textTemplates";
 import { TextOverlayCanvas } from "./TextOverlayCanvas";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
+import { CropRectOverlay } from "./CropRectOverlay";
 import { DEFAULT_TTS_OVERLAY_RECT, type CropRect, type TtsOverlay, type TtsWordTiming } from "@/lib/video/video_math";
 import { FeatureLockedError, listTtsVoices, synthesizeTts, type TtsVoiceOption } from "@/lib/api";
 import { getAudioDuration } from "@/lib/video/audio";
@@ -65,6 +66,7 @@ export function TtsOverlayDialog({
   editingOverlayAssetUrl,
   previewFrameUrl,
   frameAspectRatio,
+  cropRect,
   currentTimeSeconds,
   onSave,
   onClose,
@@ -81,6 +83,13 @@ export function TtsOverlayDialog({
   editingOverlayAssetUrl: string | null;
   previewFrameUrl: string | null;
   frameAspectRatio: number | null;
+  // The reel's own output crop (ClipRectangleDialog's own concept), already
+  // resolved to the exact instant previewFrameUrl was captured -- drawn
+  // read-only (no onChange/onCommit passed to CropRectOverlay) so a creator
+  // places the caption's rect against what will actually survive into the
+  // exported reel, not previewFrameUrl's full, uncropped frame. Null (no
+  // clip rectangle chosen yet) simply skips the guide.
+  cropRect: CropRect | null;
   // Used as a freshly-added overlay's startTimeSeconds -- an existing
   // overlay keeps its own (see handleSave).
   currentTimeSeconds: number;
@@ -299,6 +308,11 @@ export function TtsOverlayDialog({
                   No frame preview yet -- add a video first
                 </p>
               )}
+              {/* Read-only (no onChange/onCommit) -- a placement reference,
+                  not something this dialog lets a creator retouch; that's
+                  ClipRectangleDialog's own job. Drawn before the caption's
+                  own rect below so its drag handles stay on top. */}
+              {cropRect && <CropRectOverlay cropRect={cropRect} />}
               {/* "None" has no caption to position, so no draggable rect
                   either -- just the frame itself with a small notice, rather
                   than a rect handle that would drag nothing. */}

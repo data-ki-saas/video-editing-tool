@@ -298,6 +298,7 @@ export function ActionArea({
   previewFrameUrl,
   frameAspectRatio,
   baseCropRect,
+  overlayPreviewCropRect,
   zoomEffects,
   liveCropRectOverride,
   flipHorizontalToggles,
@@ -504,6 +505,12 @@ export function ActionArea({
   previewFrameUrl: string | null;
   frameAspectRatio: number | null;
   baseCropRect: CropRect | null;
+  // The reel's own output crop, already resolved to the exact instant
+  // previewFrameUrl was captured (in-progress zoom/pan effect included) --
+  // Text/Tts/AvatarFramingDialog each draw this as a read-only dimmed guide
+  // so a creator places their own rect against what will actually be visible
+  // in the exported reel, not previewFrameUrl's full, uncropped frame.
+  overlayPreviewCropRect: CropRect | null;
   zoomEffects: ZoomEffect[];
   liveCropRectOverride: CropRect | null;
   flipHorizontalToggles: number[];
@@ -723,6 +730,7 @@ export function ActionArea({
           textOverlays={selections.textOverlays}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
+          cropRect={overlayPreviewCropRect}
           onSave={(text, templateId: TextTemplateId, rect) => onSaveTextOverlay(text, templateId, rect)}
           onSelectExisting={(overlayIndex) => {
             const overlay = selections.textOverlays[overlayIndex];
@@ -741,6 +749,7 @@ export function ActionArea({
           editingOverlayAssetUrl={editingTtsOverlay ? (assetUrlById[editingTtsOverlay.assetId] ?? null) : null}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
+          cropRect={overlayPreviewCropRect}
           currentTimeSeconds={currentTimeSeconds}
           onSave={onSaveTtsOverlay}
           onClose={onCloseTtsDialog}
@@ -752,6 +761,7 @@ export function ActionArea({
           editingOverlay={editingAvatarOverlay}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}
+          cropRect={overlayPreviewCropRect}
           ttsOverlays={ttsOverlays}
           onSave={onSaveAvatarOverlay}
           onClose={onCloseAvatarDialog}
