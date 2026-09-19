@@ -74,7 +74,7 @@ import { extractPreviewFrames, getVideoDuration, drawImageFlipped, drawImageFlip
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
 import { avatarCompileCacheKey, getCompiledAvatarForClip, type CompiledAvatar } from "@/lib/video/avatar/compile";
-import { computeLayeredAvatarPose } from "@/lib/video/avatar/actions";
+import { computeEyeShapeId, computeLayeredAvatarPose } from "@/lib/video/avatar/actions";
 import { resolveAvatarRenderState } from "@/lib/video/avatar/resolveAvatarRenderState";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { detectFaceGeometry, type FaceGeometry } from "@/lib/video/faceLandmarks";
@@ -1569,7 +1569,7 @@ export const CanvasPlayer = forwardRef<
       // own timelines merged with tag-derived beats from whichever TTS
       // overlay overlaps it), and mood-adjusted expressionBias -- see
       // resolveAvatarRenderState's own doc comment for the full precedence.
-      const { activation, mouthShapeId, expressionBias } = resolveAvatarRenderState(
+      const { activation, mouthShapeId, expressionBias, expressionShapeIds } = resolveAvatarRenderState(
         clip,
         ttsOverlays,
         compiled.design.expressionBias,
@@ -1583,7 +1583,16 @@ export const CanvasPlayer = forwardRef<
       const destY = clip.rect.y * canvas.height;
       const destWidth = clip.rect.width * canvas.width;
       const destHeight = clip.rect.height * canvas.height;
-      drawAvatar(ctx, compiled, pose, { x: destX, y: destY, width: destWidth, height: destHeight }, mouthShapeId, clip.framing ?? "full");
+      const eyeShapeId = computeEyeShapeId(activation.postureActionId, localElapsed, seed);
+      drawAvatar(
+        ctx,
+        compiled,
+        pose,
+        { x: destX, y: destY, width: destWidth, height: destHeight },
+        mouthShapeId,
+        clip.framing ?? "full",
+        { ...expressionShapeIds, eyes: eyeShapeId }
+      );
     }
 
     // Text overlays draw last, always on top of every overlay above.

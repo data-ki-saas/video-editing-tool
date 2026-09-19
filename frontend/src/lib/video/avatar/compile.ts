@@ -69,6 +69,10 @@ export interface CompiledTopology {
   gestures?: Record<string, ActionCurveSpec>;
   gazes?: Record<string, ActionCurveSpec>;
   moodPresets?: Record<string, Record<string, number>>;
+  // Carried straight through from AvatarTopology, consumed by
+  // resolveAvatarRenderState.ts's mood->eyebrow/eye shape resolution. Absent
+  // for any topology declaring no mood-driven facial expression at all.
+  moodExpressionShapes?: Record<string, Record<string, string>>;
 }
 
 /** The atlas image plus every resolved part/mouth-shape draw entry. */
@@ -84,6 +88,16 @@ export interface CompiledSkin {
   // See renderer.ts's own doc comment for how a CompiledPart is recognized
   // as "the mouth slot" at draw time.
   mouthShapes: Record<string, CompiledPart>;
+  // Facial expression (eyebrows/eyes) -- structurally the SAME per-frame
+  // whole-rect-substitution idea as mouthShapes above, generalized over
+  // every partId a skin's own `expressionShapes` declares (not hardcoded to
+  // one part the way mouthShapes is), and deliberately kept as its own
+  // field/map rather than merged into mouthShapes -- see
+  // AvatarSkinExpressionShape's own doc comment (skin.ts) for why. Outer key
+  // is the part slot's own partId ("eyebrows"/"eyes"); inner key is that
+  // part's shapeId. A skin declaring none has an empty object here, and
+  // renderer.ts's drawAvatar simply draws that part's own base rect.
+  expressionShapes: Record<string, Record<string, CompiledPart>>;
 }
 
 /** One resolved, ready-to-draw accessory (Phase 7) -- structurally almost
@@ -183,6 +197,7 @@ function compileTopology(topology: AvatarTopology): CompiledTopology {
     gestures: topology.gestures,
     gazes: topology.gazes,
     moodPresets: topology.moodPresets,
+    moodExpressionShapes: topology.moodExpressionShapes,
   };
 }
 
@@ -405,13 +420,31 @@ async function compileSkin(
     mouthShapes[mouthShape.shapeId] = { partId: slotPart.partId, boneIndex: slotPart.boneIndex, pivotX: slotPart.pivotX, pivotY: slotPart.pivotY, atlasRect };
   }
 
+  // Facial expression (eyebrows/eyes) -- same slot-resolution shape as
+  // mouthShapes above, generalized over every distinct partId `expressionShapes`
+  // declares (a skin not yet updated with eyebrows/eyes simply has none, and
+  // the loop below is a no-op).
+  const expressionShapes: Record<string, Record<string, CompiledPart>> = {};
+  for (const shape of skin.expressionShapes ?? []) {
+    const slotPart = compiledParts.find((part) => part.partId === shape.partId);
+    if (!slotPart) {
+      throw new Error(`compileAvatar: skin "${skin.skinId}" expression shape "${shape.shapeId}" references unknown part slot "${shape.partId}"`);
+    }
+    const atlasRect = skin.atlas.partRects[shape.shapeId];
+    if (!atlasRect) {
+      throw new Error(`compileAvatar: skin "${skin.skinId}" expression shape "${shape.shapeId}" has no matching atlas rect`);
+    }
+    const byShapeId = expressionShapes[shape.partId] ?? (expressionShapes[shape.partId] = {});
+    byShapeId[shape.shapeId] = { partId: slotPart.partId, boneIndex: slotPart.boneIndex, pivotX: slotPart.pivotX, pivotY: slotPart.pivotY, atlasRect };
+  }
+
   let resolvedAtlasImage: CanvasImageSource = atlasImage;
   if (effectiveColors && skin.colorSlots && skin.colorSlots.length > 0) {
     const needsRecolor = skin.colorSlots.some((slot) => effectiveColors[slot.slotId] !== slot.defaultColor);
     if (needsRecolor) resolvedAtlasImage = recolorAtlas(atlasImage, skin.colorSlots, compiledParts, effectiveColors);
   }
 
-  return { skinId: skin.skinId, atlasImage: resolvedAtlasImage, parts: compiledParts, mouthShapes };
+  return { skinId: skin.skinId, atlasImage: resolvedAtlasImage, parts: compiledParts, mouthShapes, expressionShapes };
 }
 
 /** Resolves `design.attachedAccessories` (Phase 7) against `topology.anchors`

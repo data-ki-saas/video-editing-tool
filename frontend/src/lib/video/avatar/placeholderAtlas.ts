@@ -26,6 +26,33 @@ const HEAD_RECT: AtlasRect = { sx: GAP, sy: GAP, sWidth: 140, sHeight: 140 };
 const MOUTH_CLOSED_RECT: AtlasRect = { sx: HEAD_RECT.sx + HEAD_RECT.sWidth + GAP, sy: GAP, sWidth: 50, sHeight: 28 };
 const MOUTH_OPEN_RECT: AtlasRect = { sx: MOUTH_CLOSED_RECT.sx, sy: MOUTH_CLOSED_RECT.sy + MOUTH_CLOSED_RECT.sHeight + GAP, sWidth: 50, sHeight: 28 };
 
+// A fourth column, to the right of the mouth-shape column -- the 4 curated
+// mood-driven eyebrow shapes (see skin.ts's AvatarSkinExpressionShape and
+// library.ts's MOOD_EXPRESSION_SHAPES), stacked vertically the same way the
+// two mouth shapes are. All 4 shapes share one rect size so library.ts's
+// single "eyebrows" part pivot keeps them aligned to each other regardless
+// of which is active (same convention the mouth shapes already use).
+// Positioned/sized well short of HEAD_RECT's own height, so this column
+// (like the mouth column) has no effect on ROW2_Y below.
+const EYEBROWS_COLUMN_X = MOUTH_CLOSED_RECT.sx + MOUTH_CLOSED_RECT.sWidth + GAP;
+const EYEBROWS_WIDTH = 60;
+const EYEBROWS_HEIGHT = 16;
+const EYEBROWS_NEUTRAL_RECT: AtlasRect = { sx: EYEBROWS_COLUMN_X, sy: GAP, sWidth: EYEBROWS_WIDTH, sHeight: EYEBROWS_HEIGHT };
+const EYEBROWS_ANGRY_RECT: AtlasRect = { sx: EYEBROWS_COLUMN_X, sy: EYEBROWS_NEUTRAL_RECT.sy + EYEBROWS_HEIGHT + GAP, sWidth: EYEBROWS_WIDTH, sHeight: EYEBROWS_HEIGHT };
+const EYEBROWS_HAPPY_RECT: AtlasRect = { sx: EYEBROWS_COLUMN_X, sy: EYEBROWS_ANGRY_RECT.sy + EYEBROWS_HEIGHT + GAP, sWidth: EYEBROWS_WIDTH, sHeight: EYEBROWS_HEIGHT };
+const EYEBROWS_SAD_RECT: AtlasRect = { sx: EYEBROWS_COLUMN_X, sy: EYEBROWS_HAPPY_RECT.sy + EYEBROWS_HEIGHT + GAP, sWidth: EYEBROWS_WIDTH, sHeight: EYEBROWS_HEIGHT };
+
+// A fifth column, to the right of the eyebrows column -- the two blink
+// states (see actions.ts's computeEyeShapeId), previously baked directly
+// into HEAD_RECT (see drawHead's own doc comment below) and now their own
+// swappable rect for the same reason mouth/eyebrows are: something needs to
+// animate them independently, every frame.
+const EYES_COLUMN_X = EYEBROWS_COLUMN_X + EYEBROWS_WIDTH + GAP;
+const EYES_WIDTH = 60;
+const EYES_HEIGHT = 20;
+const EYES_OPEN_RECT: AtlasRect = { sx: EYES_COLUMN_X, sy: GAP, sWidth: EYES_WIDTH, sHeight: EYES_HEIGHT };
+const EYES_CLOSED_RECT: AtlasRect = { sx: EYES_COLUMN_X, sy: EYES_OPEN_RECT.sy + EYES_HEIGHT + GAP, sWidth: EYES_WIDTH, sHeight: EYES_HEIGHT };
+
 // Row 2 -- torso, then both arms, then both legs, left to right. Row starts
 // below the tallest thing in row 1 (the head).
 const ROW2_Y = HEAD_RECT.sy + HEAD_RECT.sHeight + GAP;
@@ -67,7 +94,8 @@ const SUIT_RECT: AtlasRect = { sx: BLAZER_RECT.sx + BLAZER_RECT.sWidth + GAP, sy
 const ROW4_Y = SUIT_RECT.sy + SUIT_RECT.sHeight + GAP;
 const NECK_RECT: AtlasRect = { sx: GAP, sy: ROW4_Y, sWidth: 64, sHeight: 50 };
 
-const CANVAS_WIDTH = Math.max(LEG_R_RECT.sx + LEG_R_RECT.sWidth, SUIT_RECT.sx + SUIT_RECT.sWidth) + GAP;
+const CANVAS_WIDTH =
+  Math.max(LEG_R_RECT.sx + LEG_R_RECT.sWidth, SUIT_RECT.sx + SUIT_RECT.sWidth, EYES_OPEN_RECT.sx + EYES_OPEN_RECT.sWidth) + GAP;
 const CANVAS_HEIGHT = NECK_RECT.sy + NECK_RECT.sHeight + GAP;
 
 // Flat, pleasant placeholder colors -- this is explicitly not meant to look
@@ -77,6 +105,7 @@ const SKIN_TONE = "#e8b48c";
 const SHIRT_COLOR = "#3f6fb0";
 const PANTS_COLOR = "#2b2b3d";
 const EYE_COLOR = "#2a2a2a";
+const EYEBROW_COLOR = "#3a2a1f";
 const MOUTH_COLOR = "#7a2f2f";
 const OUTLINE_COLOR = "rgba(0,0,0,0.18)";
 
@@ -322,20 +351,89 @@ function drawHead(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: Place
     ctx.fill();
     ctx.restore();
   }
+}
 
-  // Two simple dot eyes, baked directly into the head part (per this
-  // feature's spec -- eyes are never a separate swappable part the way the
-  // mouth is, since nothing needs to animate them independently in this
-  // phase).
-  const eyeOffsetX = 20;
-  const eyeOffsetY = 8;
-  const eyeRadius = 7;
+// Eye dot geometry, shared between drawEyesOpen/drawEyesClosed below so both
+// shapes stay aligned to each other (same convention drawMouthClosed/Open's
+// own shared centerX/centerY already use) -- these are the exact offsets the
+// eyes used to be baked into HEAD_RECT with, now reproduced inside their own
+// small rect instead (see library.ts's "eyes" part pivot for how that rect
+// is repositioned back onto the same on-screen spot).
+const EYE_DOT_OFFSET_X = 20;
+const EYE_DOT_RADIUS = 7;
+
+function drawEyesOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+  const centerX = rect.sx + rect.sWidth / 2;
+  const centerY = rect.sy + rect.sHeight / 2;
   for (const sign of [-1, 1]) {
     ctx.beginPath();
-    ctx.arc(centerX + sign * eyeOffsetX, centerY - eyeOffsetY, eyeRadius, 0, Math.PI * 2);
+    ctx.arc(centerX + sign * EYE_DOT_OFFSET_X, centerY, EYE_DOT_RADIUS, 0, Math.PI * 2);
     ctx.fillStyle = EYE_COLOR;
     ctx.fill();
   }
+}
+
+function drawEyesClosed(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+  const centerX = rect.sx + rect.sWidth / 2;
+  const centerY = rect.sy + rect.sHeight / 2;
+  ctx.strokeStyle = EYE_COLOR;
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  for (const sign of [-1, 1]) {
+    const midX = centerX + sign * EYE_DOT_OFFSET_X;
+    ctx.beginPath();
+    ctx.moveTo(midX - EYE_DOT_RADIUS, centerY);
+    ctx.quadraticCurveTo(midX, centerY + 2, midX + EYE_DOT_RADIUS, centerY);
+    ctx.stroke();
+  }
+}
+
+/** Draws one mirrored pair of eyebrow strokes into `rect` -- shared by all 4
+ * curated shapes below, which differ only in `innerY`/`outerY` (the two
+ * strokes' own left/right ANGLED endpoints, before mirroring): `innerY` is
+ * the end nearer the nose-bridge (center), `outerY` the end nearer the
+ * temple. Both are offsets from the rect's own vertical center -- negative
+ * is UP (canvas convention), so e.g. angry's innerY > outerY droops the
+ * inner corners down and pulls them together, the classic furrowed look.
+ * Mirrors the same `for (const sign of [-1, 1])` convention drawHead's own
+ * (baked) eye dots already use, so left/right symmetry is never hand-typed
+ * twice. */
+function drawEyebrowPair(ctx: CanvasRenderingContext2D, rect: AtlasRect, innerY: number, outerY: number, midY: number): void {
+  const centerX = rect.sx + rect.sWidth / 2;
+  const centerY = rect.sy + rect.sHeight / 2;
+  const browSpan = 18; // half-width of one eyebrow stroke
+  const browOffsetX = 20; // distance from center to each eyebrow's own midpoint -- matches EYES_RECT's own eye spacing
+  ctx.lineCap = "round";
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = EYEBROW_COLOR;
+  for (const sign of [-1, 1]) {
+    const midX = centerX + sign * browOffsetX;
+    const innerX = midX - sign * browSpan; // nearer the nose bridge
+    const outerX = midX + sign * browSpan; // nearer the temple
+    ctx.beginPath();
+    ctx.moveTo(innerX, centerY + innerY);
+    ctx.quadraticCurveTo(midX, centerY + midY, outerX, centerY + outerY);
+    ctx.stroke();
+  }
+}
+
+function drawEyebrowsNeutral(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+  drawEyebrowPair(ctx, rect, 0, 0, -1);
+}
+
+function drawEyebrowsAngry(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+  // Inner corners pulled down and together, outer ends raised -- furrowed.
+  drawEyebrowPair(ctx, rect, 4, -4, 1);
+}
+
+function drawEyebrowsHappy(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+  // A gentle upward arch across the whole brow -- raised/open look.
+  drawEyebrowPair(ctx, rect, 1, 1, -5);
+}
+
+function drawEyebrowsSad(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+  // Opposite of angry -- inner corners raised, outer ends drooping.
+  drawEyebrowPair(ctx, rect, -4, 4, -1);
 }
 
 function drawMouthClosed(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
@@ -382,6 +480,22 @@ export function buildPlaceholderAtlas(
     mouth: MOUTH_CLOSED_RECT,
     closed: MOUTH_CLOSED_RECT,
     open: MOUTH_OPEN_RECT,
+    // The "eyebrows" slot's own base rect is "neutral" -- see
+    // EXPRESSION_SHAPES's own doc comment in library.ts for why that's a
+    // deliberate choice, not an arbitrary default.
+    eyebrows: EYEBROWS_NEUTRAL_RECT,
+    neutral: EYEBROWS_NEUTRAL_RECT,
+    angry: EYEBROWS_ANGRY_RECT,
+    happy: EYEBROWS_HAPPY_RECT,
+    sad: EYEBROWS_SAD_RECT,
+    // The "eyes" slot's own base rect is "eyeOpen" -- same "base rect IS the
+    // default shape" convention as "eyebrows"/"neutral" above. Named
+    // "eyeOpen"/"eyeClosed" rather than plain "open"/"closed" -- this atlas's
+    // `partRects` is ONE flat namespace shared by every part's shapes
+    // (skin.ts's own doc comment), and "mouth" already owns those two ids.
+    eyes: EYES_OPEN_RECT,
+    eyeOpen: EYES_OPEN_RECT,
+    eyeClosed: EYES_CLOSED_RECT,
     torso: TORSO_RECT,
     armL: ARM_L_RECT,
     armR: ARM_R_RECT,
@@ -423,6 +537,12 @@ export function buildPlaceholderAtlas(
   drawHead(ctx, HEAD_RECT, palette);
   drawMouthClosed(ctx, MOUTH_CLOSED_RECT, palette);
   drawMouthOpen(ctx, MOUTH_OPEN_RECT, palette);
+  drawEyebrowsNeutral(ctx, EYEBROWS_NEUTRAL_RECT);
+  drawEyebrowsAngry(ctx, EYEBROWS_ANGRY_RECT);
+  drawEyebrowsHappy(ctx, EYEBROWS_HAPPY_RECT);
+  drawEyebrowsSad(ctx, EYEBROWS_SAD_RECT);
+  drawEyesOpen(ctx, EYES_OPEN_RECT);
+  drawEyesClosed(ctx, EYES_CLOSED_RECT);
   drawTorsoBody(ctx, TORSO_RECT, palette);
   drawRoundedRect(ctx, ARM_L_RECT.sx + 4, ARM_L_RECT.sy + 4, ARM_L_RECT.sWidth - 8, ARM_L_RECT.sHeight - 8, 14, palette.skinTone);
   drawRoundedRect(ctx, ARM_R_RECT.sx + 4, ARM_R_RECT.sy + 4, ARM_R_RECT.sWidth - 8, ARM_R_RECT.sHeight - 8, 14, palette.skinTone);

@@ -49,6 +49,17 @@ export interface AvatarRenderState {
   activation: AvatarLayerActivation;
   mouthShapeId: string;
   expressionBias: Record<string, number> | undefined;
+  // Mood-driven discrete facial expression (eyebrows/eyes) -- keyed by
+  // skin.ts expressionShapes partId, straight into renderer.ts's drawAvatar
+  // `activeExpressionShapeIds` param. `undefined` (no mood active, or this
+  // topology declares no moodExpressionShapes at all) means every such part
+  // falls back to its own base atlas rect -- see
+  // AvatarTopology.moodExpressionShapes's own doc comment for why that's
+  // already the correct "neutral" default, not a gap needing a fallback
+  // value here. Callers that also want blink (Phase 4's eye shape, driven by
+  // elapsed time/action rather than mood) merge that in separately before
+  // calling drawAvatar.
+  expressionShapeIds: Record<string, string> | undefined;
 }
 
 /** One resolved beat, normalized to a common shape regardless of whether it
@@ -213,5 +224,13 @@ export function resolveAvatarRenderState(
   const moodBias = computeActiveMoodBias(topology.moodPresets, topology.expressionParams, moodBiasInput, localElapsedMs);
   const expressionBias = moodBias ? { ...compiledDesignExpressionBias, ...moodBias } : compiledDesignExpressionBias;
 
-  return { activation, mouthShapeId, expressionBias };
+  // Discrete facial-expression shape pick -- unlike moodBias above, this
+  // snaps (no ease-in/out): whichever mood beat covers THIS instant, if any,
+  // directly names the active shape per part. No active beat -> undefined,
+  // which renderer.ts's drawAvatar already treats as "use each part's own
+  // base rect" (biped-simple's "eyebrows" base rect IS "neutral").
+  const activeMoodBeat = moodBiasInput.find((beat) => localElapsedMs >= beat.startMs && localElapsedMs < beat.endMs);
+  const expressionShapeIds = activeMoodBeat ? topology.moodExpressionShapes?.[activeMoodBeat.moodId] : undefined;
+
+  return { activation, mouthShapeId, expressionBias, expressionShapeIds };
 }

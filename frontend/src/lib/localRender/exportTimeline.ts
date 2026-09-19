@@ -48,7 +48,7 @@ import { loadVideoElement, seekVideoTo, drawImageFlipped, drawImageFlippedMasked
 import { Camera3DRenderer, computeCamera3DPoseForZoomEffect, computeCamera3DPoseForOverlay, NEUTRAL_POSE } from "@/lib/video/camera3D";
 import { drawAmbientEffect, ambientEffectSeed } from "@/lib/video/ambientEffects";
 import { avatarCompileCacheKey, getCompiledAvatarForClip, type CompiledAvatar } from "@/lib/video/avatar/compile";
-import { computeLayeredAvatarPose } from "@/lib/video/avatar/actions";
+import { computeEyeShapeId, computeLayeredAvatarPose } from "@/lib/video/avatar/actions";
 import { resolveAvatarRenderState } from "@/lib/video/avatar/resolveAvatarRenderState";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
@@ -1764,7 +1764,7 @@ export async function exportVideoLocally(
         // own doc comment for the full precedence. Same call shape as
         // CanvasPlayer.tsx's live-preview loop, so export and preview never
         // disagree on which action/mouth shape is active at a given instant.
-        const { activation, mouthShapeId, expressionBias } = resolveAvatarRenderState(
+        const { activation, mouthShapeId, expressionBias, expressionShapeIds } = resolveAvatarRenderState(
           clip,
           selections.ttsOverlays,
           compiled.design.expressionBias,
@@ -1778,7 +1778,16 @@ export async function exportVideoLocally(
         const destY = clip.rect.y * canvas.height;
         const destWidth = clip.rect.width * canvas.width;
         const destHeight = clip.rect.height * canvas.height;
-        drawAvatar(ctx, compiled, pose, { x: destX, y: destY, width: destWidth, height: destHeight }, mouthShapeId, clip.framing ?? "full");
+        const eyeShapeId = computeEyeShapeId(activation.postureActionId, localElapsed, seed);
+        drawAvatar(
+          ctx,
+          compiled,
+          pose,
+          { x: destX, y: destY, width: destWidth, height: destHeight },
+          mouthShapeId,
+          clip.framing ?? "full",
+          { ...expressionShapeIds, eyes: eyeShapeId }
+        );
       }
 
       for (const overlay of findActiveTextOverlays(selections.textOverlays, sourceTimeSeconds)) {

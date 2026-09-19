@@ -13,7 +13,7 @@
  * engine.
  */
 import type { ActionCurveSpec, AvatarAnchor, AvatarBustFraming, AvatarTopology, BoneTransform, ExpressionParamSpec } from "./topology";
-import type { AvatarSkin, AvatarSkinColorSlot, AvatarSkinPart, AvatarSkinMouthShape, AvatarSkinGarmentShape } from "./skin";
+import type { AvatarSkin, AvatarSkinColorSlot, AvatarSkinPart, AvatarSkinMouthShape, AvatarSkinGarmentShape, AvatarSkinExpressionShape } from "./skin";
 import type { AvatarDesign } from "./design";
 import { buildPlaceholderAtlas, type PlaceholderAtlasPalette } from "./placeholderAtlas";
 
@@ -321,10 +321,13 @@ const ACTIONS: AvatarTopology["actions"] = {
 const GESTURE_PERIOD_SECONDS = {
   wave: 1.8,
   point: 1.6,
+  pointLeft: 1.6,
   shrug: 1.4,
   openArms: 1.6,
   fistThump: 1.0,
   facepalm: 1.6,
+  hitLeft: 1.0,
+  hitRight: 1.0,
 } as const;
 
 // A friendly side-to-side hand wave -- armR raises to about shoulder-raised
@@ -354,6 +357,24 @@ const POINT: ActionCurveSpec = {
     { t: 0.25, boneIndex: ARM_R, delta: { rotation: ARM_POINT_ROTATION_RADIANS } },
     { t: 0.75, boneIndex: ARM_R, delta: { rotation: ARM_POINT_ROTATION_RADIANS } },
     { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
+// pointRight is POINT under a directional name -- kept as a distinct key
+// (rather than replacing "point") so any already-persisted gestureTimeline/
+// tag anchor referencing plain "point" keeps working unchanged.
+const POINT_RIGHT: ActionCurveSpec = POINT;
+
+// Mirror of POINT_RIGHT onto armL with the opposite sign -- same raise/hold/
+// lower shape, pointing off the character's other side.
+const POINT_LEFT: ActionCurveSpec = {
+  periodSeconds: GESTURE_PERIOD_SECONDS.pointLeft,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0.25, boneIndex: ARM_L, delta: { rotation: -ARM_POINT_ROTATION_RADIANS } },
+    { t: 0.75, boneIndex: ARM_L, delta: { rotation: -ARM_POINT_ROTATION_RADIANS } },
+    { t: 1, boneIndex: ARM_L, delta: { rotation: 0 } },
   ],
 };
 
@@ -406,6 +427,42 @@ const FIST_THUMP: ActionCurveSpec = {
   ],
 };
 
+// A two-armed strike toward one side -- both arms swing with the SAME sign
+// (unlike SHRUG/OPEN_ARMS' opposite-sign spread) so they read as slamming
+// together in one direction, not opening apart. Reuses FIST_THUMP's sharp
+// timing/magnitude (fast rise, brief hold, fast release) rather than the
+// gentler gestures' easing, since a hit should read as an impact.
+const HIT_RIGHT: ActionCurveSpec = {
+  periodSeconds: GESTURE_PERIOD_SECONDS.hitRight,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0.15, boneIndex: ARM_L, delta: { rotation: 2.6 } },
+    { t: 0.35, boneIndex: ARM_L, delta: { rotation: 2.6 } },
+    { t: 1, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.15, boneIndex: ARM_R, delta: { rotation: 2.6 } },
+    { t: 0.35, boneIndex: ARM_R, delta: { rotation: 2.6 } },
+    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
+// Mirror of HIT_RIGHT -- both arms swing the same negative sign instead.
+const HIT_LEFT: ActionCurveSpec = {
+  periodSeconds: GESTURE_PERIOD_SECONDS.hitLeft,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0.15, boneIndex: ARM_L, delta: { rotation: -2.6 } },
+    { t: 0.35, boneIndex: ARM_L, delta: { rotation: -2.6 } },
+    { t: 1, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.15, boneIndex: ARM_R, delta: { rotation: -2.6 } },
+    { t: 0.35, boneIndex: ARM_R, delta: { rotation: -2.6 } },
+    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
 // armR raises nearly all the way up and in, toward the face -- this rig has
 // no separate hand/finger bone to actually touch the head with, so a full
 // raise reads as "hand at the face" well enough at this simple 2D fidelity.
@@ -423,10 +480,14 @@ const FACEPALM: ActionCurveSpec = {
 const GESTURES: AvatarTopology["gestures"] = {
   wave: WAVE,
   point: POINT,
+  pointLeft: POINT_LEFT,
+  pointRight: POINT_RIGHT,
   shrug: SHRUG,
   openArms: OPEN_ARMS,
   fistThump: FIST_THUMP,
   facepalm: FACEPALM,
+  hitLeft: HIT_LEFT,
+  hitRight: HIT_RIGHT,
 };
 
 // Gazes all drive HEAD's own rotation -- the same single bone lookAround's
@@ -477,6 +538,24 @@ const MOOD_PRESETS: AvatarTopology["moodPresets"] = {
   scared: { browAngle: -0.7, energy: -0.4 },
 };
 
+// Each of the 7 moods above ALSO snaps the "eyebrows" part (see
+// PLACEHOLDER_SKIN_PARTS/EXPRESSION_SHAPES below) to one of 4 curated shapes
+// -- a discrete facial tell, layered on top of MOOD_PRESETS' own continuous
+// head-tilt/posture nudge, since browAngle/energy alone read too subtly at
+// reel scale. Moods without a clearly distinct face just borrow the closest
+// of the 4 (evil->angry, excited->happy, scared->sad, calm->neutral) rather
+// than commissioning a 5th-7th shape for a difference this small a sprite
+// wouldn't read anyway.
+const MOOD_EXPRESSION_SHAPES: AvatarTopology["moodExpressionShapes"] = {
+  angry: { eyebrows: "angry" },
+  evil: { eyebrows: "angry" },
+  happy: { eyebrows: "happy" },
+  excited: { eyebrows: "happy" },
+  sad: { eyebrows: "sad" },
+  scared: { eyebrows: "sad" },
+  calm: { eyebrows: "neutral" },
+};
+
 // Phase 8 ("Portrait mode") -- the hip joint (ROOT, see DEFAULT_LOCAL_POSE's
 // own comment: "root (hip) = (100, 258)") is exactly where the legs attach,
 // so hiding LEG_L/LEG_R and fitting-by-height to just past that y (rather
@@ -513,11 +592,32 @@ export const BIPED_SIMPLE_TOPOLOGY: AvatarTopology = {
   gestures: GESTURES,
   gazes: GAZES,
   moodPresets: MOOD_PRESETS,
+  moodExpressionShapes: MOOD_EXPRESSION_SHAPES,
 };
 
 const MOUTH_SHAPES: AvatarSkinMouthShape[] = [
   { shapeId: "closed", partId: "mouth" },
   { shapeId: "open", partId: "mouth" },
+];
+
+// Mood-driven eyebrow shapes (see MOOD_EXPRESSION_SHAPES above) -- "neutral"
+// is deliberately not just "the absence of a shape": it's also the
+// "eyebrows" part's own BASE atlas rect (placeholderAtlas.ts's partRects),
+// so "no mood active" and "calm" render pixel-identical with no extra
+// fallback logic in compile.ts/renderer.ts.
+const EXPRESSION_SHAPES: AvatarSkinExpressionShape[] = [
+  { shapeId: "neutral", partId: "eyebrows" },
+  { shapeId: "angry", partId: "eyebrows" },
+  { shapeId: "happy", partId: "eyebrows" },
+  { shapeId: "sad", partId: "eyebrows" },
+  // Blink (actions.ts's computeEyeShapeId) -- named "eyeOpen"/"eyeClosed"
+  // rather than plain "open"/"closed" since the atlas's partRects is one
+  // flat namespace shared by every part's shapes, and "mouth" already owns
+  // those two ids. "eyeOpen" is also the "eyes" part's own base atlas rect,
+  // same "base rect IS the default shape" convention as eyebrows/"neutral"
+  // above.
+  { shapeId: "eyeOpen", partId: "eyes" },
+  { shapeId: "eyeClosed", partId: "eyes" },
 ];
 
 // Phase 8 ("selectable torsos") -- "plainShirt" (the base "torso" rect every
@@ -574,9 +674,20 @@ const PLACEHOLDER_SKIN_PARTS: AvatarSkinPart[] = [
   { partId: "armL", boneIndex: ARM_L, pivotX: 18, pivotY: 4, zOrder: 4 },
   { partId: "armR", boneIndex: ARM_R, pivotX: 18, pivotY: 4, zOrder: 5 },
   { partId: "head", boneIndex: HEAD, pivotX: 70, pivotY: 128, zOrder: 6 },
+  // The eyes "slot" -- previously baked directly into "head" (two fixed
+  // dots, never animated); now its own `parts` entry so blink
+  // (actions.ts's computeEyeShapeId) can swap it independently every frame.
+  // Pivot reproduces the exact same world position the old baked dots sat
+  // at: 66px above HEAD's own joint (the chin), centered on it.
+  { partId: "eyes", boneIndex: HEAD, pivotX: 30, pivotY: 76, zOrder: 7 },
+  // The eyebrows "slot" -- see AvatarSkinExpressionShape's own doc comment
+  // (skin.ts) for why this is its own `parts` entry. Sits 14px above the
+  // "eyes" part above -- see placeholderAtlas.ts's EYEBROWS_RECT/EYES_RECT
+  // for the exact geometry both were authored against together.
+  { partId: "eyebrows", boneIndex: HEAD, pivotX: 30, pivotY: 88, zOrder: 8 },
   // The mouth "slot" -- see AvatarSkinMouthShape's own doc comment (skin.ts)
   // for why this is its own `parts` entry rather than baked into "head".
-  { partId: "mouth", boneIndex: HEAD, pivotX: 25, pivotY: 40, zOrder: 7 },
+  { partId: "mouth", boneIndex: HEAD, pivotX: 25, pivotY: 40, zOrder: 9 },
 ];
 
 /** Phase 7's two recolorable slots -- shirt (targets "torso" alone) and
@@ -617,6 +728,7 @@ function buildSeedSkin(skinId: string, palette: Partial<PlaceholderAtlasPalette>
     mouthShapes: MOUTH_SHAPES,
     colorSlots: colorSlotsForPalette(atlas.resolvedPalette),
     garmentShapes: GARMENT_SHAPES,
+    expressionShapes: EXPRESSION_SHAPES,
   };
 }
 

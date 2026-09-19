@@ -40,7 +40,17 @@ export type AvatarActionId = "idle" | "talk" | "walk" | "sit" | "sleep" | "lookA
  * `AvatarActionId` is: a richer topology may declare extras beyond the
  * baseline set.
  */
-export type AvatarGestureId = "wave" | "point" | "shrug" | "openArms" | "fistThump" | "facepalm";
+export type AvatarGestureId =
+  | "wave"
+  | "point"
+  | "pointLeft"
+  | "pointRight"
+  | "shrug"
+  | "openArms"
+  | "fistThump"
+  | "facepalm"
+  | "hitLeft"
+  | "hitRight";
 export type AvatarGazeId = "lookLeft" | "lookRight" | "lookAtCamera" | "lookDown";
 export type AvatarMoodId = "angry" | "happy" | "sad" | "evil" | "calm" | "excited" | "scared";
 
@@ -294,4 +304,18 @@ export interface AvatarTopology {
   // (compile.ts's computeEffectiveSlotColors/recolorAtlas), not re-evaluable
   // per frame.
   moodPresets?: Partial<Record<AvatarMoodId, Record<string, number>>> & Record<string, Record<string, number>>;
+
+  // Mood-driven discrete facial expression shapes (eyebrows/eyes) -- moodId
+  // -> a partial map of skin.ts's expressionShapes partIds to the shapeId
+  // that mood should show for that part. Deliberately SEPARATE from
+  // moodPresets above (which is numeric-only and fed through
+  // computeActiveMoodBias's per-frame arithmetic) -- a shape pick is a
+  // discrete snap, never eased/scaled by mood strength. Optional/absent
+  // entirely means "this topology has no mood-driven facial expression" --
+  // resolveAvatarRenderState.ts then resolves no expressionShapeIds for any
+  // mood, and renderer.ts's drawAvatar falls back to each part's own base
+  // atlas rect (biped-simple's "eyebrows" part's own base rect IS its
+  // "neutral" shape, so "no mood active" and "neutral" render identically
+  // with no special-casing needed).
+  moodExpressionShapes?: Partial<Record<AvatarMoodId, Record<string, string>>> & Record<string, Record<string, string>>;
 }

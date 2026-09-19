@@ -6,12 +6,23 @@ alongside the hand-authored seed characters (the avatar plan doc's own
 "shared house style" tenet). `palette` (from photo_analysis.py) is the only
 input that varies -- part rect position/size is fixed layout math either way.
 
-The head is now drawn from `palette.face_oval`/`left_eye`/`right_eye`/
-`left_eyebrow`/`right_eyebrow` -- real per-person contours traced from
-mediapipe's own landmark groups (see photo_analysis.py's module doc comment)
--- instead of a 3-bucket outline choice and two fixed dot eyes. The
-face_width_scale/face_shape bucket fields still drive a fallback drawing
-whenever no contour is available (detected=False; e.g. no face found).
+The head is now drawn from `palette.face_oval` -- a real per-person contour
+traced from mediapipe's own landmark groups (see photo_analysis.py's module
+doc comment) -- instead of a 3-bucket outline choice. The face_width_scale/
+face_shape bucket fields still drive a fallback drawing whenever no contour
+is available (detected=False; e.g. no face found).
+
+Eyebrows and eyes are their OWN swappable rects (mirrors
+placeholderAtlas.ts's "eyebrows"/"eyes" parts), not baked into the head --
+`_draw_face_features_layer` draws real per-person eyebrow/eye contours
+(`palette.left_eye`/`right_eye`/`left_eyebrow`/`right_eyebrow`, falling back
+to two dots for eyes / nothing for eyebrows when undetected) onto their own
+transparent layers at the same head-relative position they used to be baked
+at, and `_paste_cropped_bbox` crops+relocates each into its own small rect.
+Only "neutral" eyebrows and "eyeOpen" are ever real per-person art; the
+angry/happy/sad/eyeClosed variants are synthesized by `_draw_mood_eyebrow`/
+`_draw_closed_eye` (shared by both generators below), since neither has an
+actual photo of this avatar making those expressions to draw from instead.
 """
 
 from __future__ import annotations
@@ -81,7 +92,28 @@ SUIT_RECT = {"sx": BLAZER_RECT["sx"] + BLAZER_RECT["sWidth"] + GAP, "sy": _ROW3_
 _ROW4_Y = SUIT_RECT["sy"] + SUIT_RECT["sHeight"] + GAP
 NECK_RECT = {"sx": GAP, "sy": _ROW4_Y, "sWidth": 64, "sHeight": 50}
 
-CANVAS_WIDTH = max(LEG_R_RECT["sx"] + LEG_R_RECT["sWidth"], SUIT_RECT["sx"] + SUIT_RECT["sWidth"]) + GAP
+# A fourth/fifth column, to the right of the mouth-shape column -- mirrors
+# frontend/src/lib/video/avatar/placeholderAtlas.ts's own EYEBROWS_*/EYES_*
+# rects exactly (same sizes/shapeIds -- "neutral"/"angry"/"happy"/"sad" for
+# eyebrows, "eyeOpen"/"eyeClosed" for eyes, distinct from "mouth"'s own
+# "open"/"closed" since partRects is one flat namespace shared by every
+# part's shapes). Both columns are shorter than HEAD_RECT's own height, so
+# neither affects _ROW2_Y above.
+_EYEBROWS_COLUMN_X = MOUTH_CLOSED_RECT["sx"] + MOUTH_CLOSED_RECT["sWidth"] + GAP
+_EYEBROWS_WIDTH = 60
+_EYEBROWS_HEIGHT = 16
+EYEBROWS_NEUTRAL_RECT = {"sx": _EYEBROWS_COLUMN_X, "sy": GAP, "sWidth": _EYEBROWS_WIDTH, "sHeight": _EYEBROWS_HEIGHT}
+EYEBROWS_ANGRY_RECT = {"sx": _EYEBROWS_COLUMN_X, "sy": EYEBROWS_NEUTRAL_RECT["sy"] + _EYEBROWS_HEIGHT + GAP, "sWidth": _EYEBROWS_WIDTH, "sHeight": _EYEBROWS_HEIGHT}
+EYEBROWS_HAPPY_RECT = {"sx": _EYEBROWS_COLUMN_X, "sy": EYEBROWS_ANGRY_RECT["sy"] + _EYEBROWS_HEIGHT + GAP, "sWidth": _EYEBROWS_WIDTH, "sHeight": _EYEBROWS_HEIGHT}
+EYEBROWS_SAD_RECT = {"sx": _EYEBROWS_COLUMN_X, "sy": EYEBROWS_HAPPY_RECT["sy"] + _EYEBROWS_HEIGHT + GAP, "sWidth": _EYEBROWS_WIDTH, "sHeight": _EYEBROWS_HEIGHT}
+
+_EYES_COLUMN_X = _EYEBROWS_COLUMN_X + _EYEBROWS_WIDTH + GAP
+_EYES_WIDTH = 60
+_EYES_HEIGHT = 20
+EYES_OPEN_RECT = {"sx": _EYES_COLUMN_X, "sy": GAP, "sWidth": _EYES_WIDTH, "sHeight": _EYES_HEIGHT}
+EYES_CLOSED_RECT = {"sx": _EYES_COLUMN_X, "sy": EYES_OPEN_RECT["sy"] + _EYES_HEIGHT + GAP, "sWidth": _EYES_WIDTH, "sHeight": _EYES_HEIGHT}
+
+CANVAS_WIDTH = max(LEG_R_RECT["sx"] + LEG_R_RECT["sWidth"], SUIT_RECT["sx"] + SUIT_RECT["sWidth"], EYES_OPEN_RECT["sx"] + EYES_OPEN_RECT["sWidth"]) + GAP
 CANVAS_HEIGHT = NECK_RECT["sy"] + NECK_RECT["sHeight"] + GAP
 
 # Kept fixed (not photo-derived) -- only skin/hair tone vary per generated
@@ -335,10 +367,6 @@ def _draw_head(
     face_shape: FaceShape,
     hair_length: HairLength,
     face_oval: list[Point],
-    left_eye: list[Point],
-    right_eye: list[Point],
-    left_eyebrow: list[Point],
-    right_eyebrow: list[Point],
     nose_center: Point,
     nose_width_scale: float,
 ) -> None:
@@ -372,24 +400,112 @@ def _draw_head(
     if nose_center != (0.0, 0.0):
         _draw_nose(draw, nose_center, nose_width_scale, skin_tone)
 
-    brow_color = hair_tone or _DEFAULT_BROW_COLOR
-    if left_eyebrow:
-        _draw_eyebrow(draw, left_eyebrow, brow_color)
-    if right_eyebrow:
-        _draw_eyebrow(draw, right_eyebrow, brow_color)
 
-    # Eyes drawn LAST so they always stay visible even under generous hair
-    # coverage. Real per-eye shapes when available; two simple dots
-    # (placeholderAtlas.ts's original look) otherwise.
+def _draw_face_features_layer(
+    image_size: tuple[int, int],
+    left_eye: list[Point],
+    right_eye: list[Point],
+    left_eyebrow: list[Point],
+    right_eyebrow: list[Point],
+    width_scale: float,
+    brow_color: str,
+) -> tuple[Image.Image, Image.Image]:
+    """Draws eyebrows and eyes onto their OWN transparent layers, at the same
+    head-relative coordinates `_draw_head` used to bake them directly into
+    HEAD_RECT before eyebrows/eyes became their own swappable parts (mirrors
+    frontend/src/lib/video/avatar/library.ts's "eyebrows"/"eyes" parts) --
+    real per-person geometry when available (mediapipe-detected contours),
+    else the original two-dot fallback for eyes and no eyebrows at all (same
+    "skip when absent" behavior `_draw_head` always had). The caller crops
+    each returned layer's own bounding box into its own small rect (see
+    `_paste_cropped_bbox`) rather than this function needing to know
+    anything about the destination rects itself."""
+    eyebrows_layer = Image.new("RGBA", image_size, (0, 0, 0, 0))
+    eyes_layer = Image.new("RGBA", image_size, (0, 0, 0, 0))
+    eyebrows_draw = ImageDraw.Draw(eyebrows_layer)
+    eyes_draw = ImageDraw.Draw(eyes_layer)
+
+    if left_eyebrow:
+        _draw_eyebrow(eyebrows_draw, left_eyebrow, brow_color)
+    if right_eyebrow:
+        _draw_eyebrow(eyebrows_draw, right_eyebrow, brow_color)
+
     if left_eye and right_eye:
-        _draw_eye(draw, left_eye)
-        _draw_eye(draw, right_eye)
+        _draw_eye(eyes_draw, left_eye)
+        _draw_eye(eyes_draw, right_eye)
     else:
         cx, cy = _HEAD_CENTER
         eye_offset_x, eye_offset_y, eye_radius = 20 * width_scale, 8, 7
         for sign in (-1, 1):
             ex, ey = cx + sign * eye_offset_x, cy - eye_offset_y
-            draw.ellipse((ex - eye_radius, ey - eye_radius, ex + eye_radius, ey + eye_radius), fill=_EYE_COLOR)
+            eyes_draw.ellipse((ex - eye_radius, ey - eye_radius, ex + eye_radius, ey + eye_radius), fill=_EYE_COLOR)
+
+    return eyebrows_layer, eyes_layer
+
+
+_FACE_FEATURE_CROP_PAD = 6
+
+
+def _paste_cropped_bbox(dest_image: Image.Image, layer: Image.Image, dest_rect: dict) -> None:
+    """Crops `layer` to its own drawn content's tight bounding box (padded a
+    few px) and resizes that crop to fill `dest_rect` exactly, pasting it
+    into `dest_image` -- the actual mechanism behind moving eyebrows/eyes out
+    of the baked head rect and into their own small swappable ones. A
+    completely blank layer (`getbbox()` returns None -- e.g. no eyebrows
+    detected at all) leaves `dest_rect` untouched/transparent, same
+    "nothing to draw" behavior `_draw_head` always had for a missing
+    eyebrow."""
+    bbox = layer.getbbox()
+    if bbox is None:
+        return
+    x0, y0, x1, y1 = bbox
+    x0, y0 = max(0, x0 - _FACE_FEATURE_CROP_PAD), max(0, y0 - _FACE_FEATURE_CROP_PAD)
+    x1, y1 = min(layer.width, x1 + _FACE_FEATURE_CROP_PAD), min(layer.height, y1 + _FACE_FEATURE_CROP_PAD)
+    cropped = layer.crop((x0, y0, x1, y1)).resize((dest_rect["sWidth"], dest_rect["sHeight"]), Image.LANCZOS)
+    dest_image.paste(cropped, (dest_rect["sx"], dest_rect["sy"]), cropped)
+
+
+# Synthetic mood-eyebrow variants -- shared by both generators below, since
+# neither has a real photo of this specific avatar making that expression to
+# crop instead (only "neutral" is ever real/cropped). Offsets mirror
+# placeholderAtlas.ts's own drawEyebrowPair exactly (inner_y, outer_y, mid_y
+# relative to the rect's own vertical center) so a generated avatar's mood
+# brows read the same as the seed skins'.
+_MOOD_EYEBROW_STYLES: dict[str, tuple[float, float, float]] = {
+    "angry": (4, -4, 1),
+    "happy": (1, 1, -5),
+    "sad": (-4, 4, -1),
+}
+
+
+def _draw_mood_eyebrow(draw: ImageDraw.ImageDraw, rect: dict, style: str, color: str) -> None:
+    inner_y, outer_y, mid_y = _MOOD_EYEBROW_STYLES[style]
+    center_x = rect["sx"] + rect["sWidth"] / 2
+    center_y = rect["sy"] + rect["sHeight"] / 2
+    span = 18
+    offset_x = 20
+    for sign in (-1, 1):
+        mid_x = center_x + sign * offset_x
+        inner_x = mid_x - sign * span
+        outer_x = mid_x + sign * span
+        # PIL's ImageDraw has no quadratic-bezier primitive -- a 3-point
+        # polyline through the same mid control point placeholderAtlas.ts's
+        # quadraticCurveTo uses is close enough at this stroke width/size to
+        # read identically.
+        draw.line([(inner_x, center_y + inner_y), (mid_x, center_y + mid_y), (outer_x, center_y + outer_y)], fill=color, width=3, joint="curve")
+
+
+def _draw_closed_eye(draw: ImageDraw.ImageDraw, rect: dict) -> None:
+    """Mirrors placeholderAtlas.ts's own drawEyesClosed -- a short curved
+    eyelid line in place of the open dot, always `_EYE_COLOR` (eyes are
+    never palette-recolored, same as the seed skins)."""
+    center_x = rect["sx"] + rect["sWidth"] / 2
+    center_y = rect["sy"] + rect["sHeight"] / 2
+    offset_x = 20
+    radius = 7
+    for sign in (-1, 1):
+        mid_x = center_x + sign * offset_x
+        draw.line([(mid_x - radius, center_y), (mid_x, center_y + 2), (mid_x + radius, center_y)], fill=_EYE_COLOR, width=2, joint="curve")
 
 
 def _draw_mouth_closed(draw: ImageDraw.ImageDraw, rect: dict, width_scale: float) -> None:
@@ -422,13 +538,19 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
         palette.face_shape,
         palette.hair_length,
         palette.face_oval,
-        palette.left_eye,
-        palette.right_eye,
-        palette.left_eyebrow,
-        palette.right_eyebrow,
         palette.nose_center,
         palette.nose_width_scale,
     )
+    brow_color = palette.hair_tone or _DEFAULT_BROW_COLOR
+    eyebrows_layer, eyes_layer = _draw_face_features_layer(
+        image.size, palette.left_eye, palette.right_eye, palette.left_eyebrow, palette.right_eyebrow, palette.face_width_scale, brow_color
+    )
+    _paste_cropped_bbox(image, eyebrows_layer, EYEBROWS_NEUTRAL_RECT)
+    _paste_cropped_bbox(image, eyes_layer, EYES_OPEN_RECT)
+    _draw_mood_eyebrow(draw, EYEBROWS_ANGRY_RECT, "angry", brow_color)
+    _draw_mood_eyebrow(draw, EYEBROWS_HAPPY_RECT, "happy", brow_color)
+    _draw_mood_eyebrow(draw, EYEBROWS_SAD_RECT, "sad", brow_color)
+    _draw_closed_eye(draw, EYES_CLOSED_RECT)
     _draw_mouth_closed(draw, MOUTH_CLOSED_RECT, palette.mouth_width_scale)
     _draw_mouth_open(draw, MOUTH_OPEN_RECT, palette.mouth_width_scale)
     _torso_body(draw, TORSO_RECT)
@@ -449,6 +571,14 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
         "mouth": MOUTH_CLOSED_RECT,
         "closed": MOUTH_CLOSED_RECT,
         "open": MOUTH_OPEN_RECT,
+        "eyebrows": EYEBROWS_NEUTRAL_RECT,
+        "neutral": EYEBROWS_NEUTRAL_RECT,
+        "angry": EYEBROWS_ANGRY_RECT,
+        "happy": EYEBROWS_HAPPY_RECT,
+        "sad": EYEBROWS_SAD_RECT,
+        "eyes": EYES_OPEN_RECT,
+        "eyeOpen": EYES_OPEN_RECT,
+        "eyeClosed": EYES_CLOSED_RECT,
         "torso": TORSO_RECT,
         "armL": ARM_L_RECT,
         "armR": ARM_R_RECT,
@@ -657,6 +787,29 @@ def build_atlas_png_from_photo(
     image.paste(mouth_closed.convert("RGBA"), (MOUTH_CLOSED_RECT["sx"], MOUTH_CLOSED_RECT["sy"]))
     image.paste(mouth_open.convert("RGBA"), (MOUTH_OPEN_RECT["sx"], MOUTH_OPEN_RECT["sy"]))
     mouth_pivot = _compute_photo_mouth_pivot(palette.head_crop_box, palette.mouth_crop_box)
+
+    # `palette` here was computed by re-running face analysis on THIS SAME
+    # cartoonified image (see service.py's `_cartoonify_and_crop`: `analyze_photo(cartoon_bytes)`),
+    # so its left_eye/right_eye/left_eyebrow/right_eyebrow are real per-person
+    # contours detected on the actual generated head, in the exact same
+    # `_remap`-relative coordinate space build_atlas_png's own parametric
+    # path uses -- the same `_draw_face_features_layer`/`_paste_cropped_bbox`
+    # pipeline applies unchanged, no separate photo-specific eyebrow/eye
+    # logic needed. Only the "neutral"/"eyeOpen" shapes are ever real crops;
+    # there's no actual photo of this avatar looking angry/happy/sad, so
+    # those three (and "eyeClosed") are synthesized exactly like the
+    # parametric path's own.
+    brow_color = palette.hair_tone or _DEFAULT_BROW_COLOR
+    eyebrows_layer, eyes_layer = _draw_face_features_layer(
+        image.size, palette.left_eye, palette.right_eye, palette.left_eyebrow, palette.right_eyebrow, palette.face_width_scale, brow_color
+    )
+    _paste_cropped_bbox(image, eyebrows_layer, EYEBROWS_NEUTRAL_RECT)
+    _paste_cropped_bbox(image, eyes_layer, EYES_OPEN_RECT)
+    _draw_mood_eyebrow(draw, EYEBROWS_ANGRY_RECT, "angry", brow_color)
+    _draw_mood_eyebrow(draw, EYEBROWS_HAPPY_RECT, "happy", brow_color)
+    _draw_mood_eyebrow(draw, EYEBROWS_SAD_RECT, "sad", brow_color)
+    _draw_closed_eye(draw, EYES_CLOSED_RECT)
+
     _torso_body(draw, TORSO_RECT)
     _rounded_rect(draw, ARM_L_RECT, inset=4, radius=14, fill=palette.skin_tone)
     _rounded_rect(draw, ARM_R_RECT, inset=4, radius=14, fill=palette.skin_tone)
@@ -675,6 +828,14 @@ def build_atlas_png_from_photo(
         "mouth": MOUTH_CLOSED_RECT,
         "closed": MOUTH_CLOSED_RECT,
         "open": MOUTH_OPEN_RECT,
+        "eyebrows": EYEBROWS_NEUTRAL_RECT,
+        "neutral": EYEBROWS_NEUTRAL_RECT,
+        "angry": EYEBROWS_ANGRY_RECT,
+        "happy": EYEBROWS_HAPPY_RECT,
+        "sad": EYEBROWS_SAD_RECT,
+        "eyes": EYES_OPEN_RECT,
+        "eyeOpen": EYES_OPEN_RECT,
+        "eyeClosed": EYES_CLOSED_RECT,
         "torso": TORSO_RECT,
         "armL": ARM_L_RECT,
         "armR": ARM_R_RECT,

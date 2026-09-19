@@ -61,9 +61,28 @@ _PARTS = [
     {"partId": "armL", "boneIndex": 3, "pivotX": 18, "pivotY": 4, "zOrder": 4},
     {"partId": "armR", "boneIndex": 4, "pivotX": 18, "pivotY": 4, "zOrder": 5},
     {"partId": "head", "boneIndex": 2, "pivotX": 70, "pivotY": 128, "zOrder": 6},
-    {"partId": "mouth", "boneIndex": 2, "pivotX": 25, "pivotY": 40, "zOrder": 7},
+    # "eyes"/"eyebrows" -- mirrors library.ts's own biped-simple pivots
+    # exactly (same shared topology/rig, so the SAME bone-local offsets place
+    # them correctly regardless of which generator's atlas backs a skin).
+    {"partId": "eyes", "boneIndex": 2, "pivotX": 30, "pivotY": 76, "zOrder": 7},
+    {"partId": "eyebrows", "boneIndex": 2, "pivotX": 30, "pivotY": 88, "zOrder": 8},
+    {"partId": "mouth", "boneIndex": 2, "pivotX": 25, "pivotY": 40, "zOrder": 9},
 ]
 _MOUTH_SHAPES = [{"shapeId": "closed", "partId": "mouth"}, {"shapeId": "open", "partId": "mouth"}]
+
+# Mirrors library.ts's own EXPRESSION_SHAPES exactly -- "neutral"/"eyeOpen"
+# are also "eyebrows"/"eyes"' own base atlas rects (atlas_builder.py's
+# part_rects), so "no mood active" renders identically to "neutral" with no
+# extra fallback logic, same convention MOUTH_SHAPES' own "mouth"->closed
+# base rect already uses.
+_EXPRESSION_SHAPES = [
+    {"shapeId": "neutral", "partId": "eyebrows"},
+    {"shapeId": "angry", "partId": "eyebrows"},
+    {"shapeId": "happy", "partId": "eyebrows"},
+    {"shapeId": "sad", "partId": "eyebrows"},
+    {"shapeId": "eyeOpen", "partId": "eyes"},
+    {"shapeId": "eyeClosed", "partId": "eyes"},
+]
 
 
 def _parts_for(mouth_pivot: tuple[float, float] | None) -> list[dict]:
@@ -230,6 +249,7 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
         "mouthShapes": _MOUTH_SHAPES,
         "colorSlots": _COLOR_SLOTS,
         "garmentShapes": _GARMENT_SHAPES,
+        "expressionShapes": _EXPRESSION_SHAPES,
     }
     design = {
         "schemaVersion": 1,

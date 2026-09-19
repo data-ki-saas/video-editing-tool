@@ -487,3 +487,43 @@ export function computeMouthShapeIdForWord(word: string, progress01: number): st
   const slotIndex = Math.min(Math.floor(clampedProgress01 * slotCount), slotCount - 1);
   return slotIndex % 2 === 0 ? "closed" : "open";
 }
+
+// How long one "blink cycle" lasts, and how much of it is actually spent
+// with the eyes closed -- mirrors lookAround's own fixed-duration-segment +
+// seeded-random-decision pattern above (computeLookAroundRotation) rather
+// than a genuinely variable inter-blink gap, which wouldn't be a pure O(1)
+// function of elapsed time the way every other seeded animation in this
+// engine is. Exactly one blink happens per segment, at a jittered onset --
+// never zero, so this reads as a steady, mildly varied blink rate rather
+// than a fixed metronome tick.
+const BLINK_SEGMENT_DURATION_SECONDS = 4.5;
+const BLINK_DURATION_SECONDS = 0.12;
+
+/** The fraction (0..1) into one blink segment where THAT segment's blink
+ * starts -- a pure function of (seed, segmentIndex), same
+ * hash-then-PRNG pair as lookAroundTargetRotation. Capped to leave room for
+ * the blink's own short duration to complete before the segment ends. */
+function blinkOnsetFraction(seed: number, segmentIndex: number): number {
+  const random = mulberry32(ambientEffectSeed(`${seed}:blink:${segmentIndex}`));
+  return random() * (1 - BLINK_DURATION_SECONDS / BLINK_SEGMENT_DURATION_SECONDS);
+}
+
+/**
+ * Which "eyes" shape ("eyeOpen"/"eyeClosed" -- named to avoid colliding with
+ * "mouth"'s own "open"/"closed" shapeIds in the same flat atlas namespace,
+ * see skin.ts's own doc comment) should be drawn right now -- a steady idle
+ * blink, independent of mood/mouth/gesture. Forced fully closed throughout
+ * the "sleep" action (no randomized blinking while asleep); every other
+ * action blinks on the fixed segment schedule above regardless of posture.
+ */
+export function computeEyeShapeId(actionId: string, elapsedSeconds: number, seed: number): string {
+  if (actionId === "sleep") return "eyeClosed";
+
+  const clampedElapsed = Math.max(0, elapsedSeconds);
+  const segmentIndex = Math.floor(clampedElapsed / BLINK_SEGMENT_DURATION_SECONDS);
+  const segmentPhase = clampedElapsed / BLINK_SEGMENT_DURATION_SECONDS - segmentIndex;
+  const onsetFraction = blinkOnsetFraction(seed, segmentIndex);
+  const blinkDurationFraction = BLINK_DURATION_SECONDS / BLINK_SEGMENT_DURATION_SECONDS;
+  const isBlinking = segmentPhase >= onsetFraction && segmentPhase < onsetFraction + blinkDurationFraction;
+  return isBlinking ? "eyeClosed" : "eyeOpen";
+}

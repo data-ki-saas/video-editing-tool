@@ -78,6 +78,26 @@ export interface AvatarSkinGarmentShape {
 }
 
 /**
+ * One swappable atlas rect for a facial-expression part slot (eyebrows,
+ * eyes) -- the same per-frame whole-rect-substitution idea as
+ * AvatarSkinMouthShape (re-picked every frame, not resolved once like
+ * AvatarSkinGarmentShape), kept as its OWN type/field deliberately separate
+ * from mouthShapes rather than folding eyebrows/eyes into that mechanism --
+ * the mouth path is lip-sync-critical and this avoids any chance of
+ * regressing it. `partId` names which `AvatarSkin.parts` entry this shape
+ * substitutes for ("eyebrows" or "eyes"); `shapeId` is picked per-frame by
+ * actions.ts/resolveAvatarRenderState.ts and threaded into renderer.ts's
+ * `drawAvatar`. A skin need not declare any expression shapes at all -- an
+ * older/not-yet-regenerated skin with no "eyebrows"/"eyes" parts simply
+ * renders its old baked-in-head look, since compile.ts only validates
+ * entries a skin actually declares.
+ */
+export interface AvatarSkinExpressionShape {
+  shapeId: string;
+  partId: string;
+}
+
+/**
  * One recolorable region of the atlas (Phase 7 -- conversational Design
  * edits, e.g. "make the shirt red"). Deliberately scoped to parts whose
  * ENTIRE drawn rect is a single flat fill color (a skin's shirt/pants, never
@@ -132,4 +152,8 @@ export interface AvatarSkin {
   // `AvatarDesign.garmentId` (compile.ts's own resolution just falls back to
   // the base "torso" rect either way).
   garmentShapes?: AvatarSkinGarmentShape[];
+  // Facial expression (eyebrows/eyes) -- optional, possibly entirely absent:
+  // a skin with none simply keeps its old baked-in-head look, no mood-brow
+  // swap or blink (see AvatarSkinExpressionShape's own doc comment).
+  expressionShapes?: AvatarSkinExpressionShape[];
 }

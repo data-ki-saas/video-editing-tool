@@ -61,7 +61,17 @@ export function drawAvatar(
   // fill the destRect the same way a full body does in "full" framing. A
   // topology with no `bustFraming` at all falls back to full-rig behavior
   // even when "bust" is requested, rather than this function ever erroring.
-  framing: "full" | "bust" = "full"
+  framing: "full" | "bust" = "full",
+  // Facial expression (eyebrows/eyes) -- keyed by partId ("eyebrows"/"eyes"),
+  // each value the shapeId active for that part this frame (e.g.
+  // resolveAvatarRenderState.ts's eyebrowShapeId, actions.ts's
+  // computeEyeShapeId's eyeShapeId). Deliberately a SEPARATE param from
+  // mouthShapeId, not merged into one map -- see CompiledSkin.expressionShapes's
+  // own doc comment. Absent, or naming a shapeId this skin doesn't declare,
+  // just falls back to that part's own base rect (same graceful-fallback
+  // posture as garmentId) -- an older/not-yet-regenerated skin with no
+  // "eyebrows"/"eyes" parts is completely unaffected.
+  activeExpressionShapeIds?: Record<string, string>
 ): void {
   if (destRect.width <= 0 || destRect.height <= 0) return;
 
@@ -107,9 +117,18 @@ export function drawAvatar(
     // unaffected by mouthShapeId entirely.
     const activeMouthShape = skin.mouthShapes[mouthShapeId];
     const isMouthSlot = activeMouthShape !== undefined && activeMouthShape.partId === part.partId;
-    const atlasRect = isMouthSlot ? activeMouthShape.atlasRect : part.atlasRect;
-    const pivotX = isMouthSlot ? activeMouthShape.pivotX : part.pivotX;
-    const pivotY = isMouthSlot ? activeMouthShape.pivotY : part.pivotY;
+
+    // Same idea as the mouth substitution above, generalized over whichever
+    // partId this skin's own `expressionShapes` declares shapes for (see
+    // CompiledSkin.expressionShapes's own doc comment) -- never consulted for
+    // the mouth's own part, since a skin never declares expressionShapes for
+    // partId "mouth".
+    const activeExpressionShapeId = activeExpressionShapeIds?.[part.partId];
+    const activeExpressionShape = activeExpressionShapeId ? skin.expressionShapes[part.partId]?.[activeExpressionShapeId] : undefined;
+
+    const atlasRect = isMouthSlot ? activeMouthShape.atlasRect : activeExpressionShape ? activeExpressionShape.atlasRect : part.atlasRect;
+    const pivotX = isMouthSlot ? activeMouthShape.pivotX : activeExpressionShape ? activeExpressionShape.pivotX : part.pivotX;
+    const pivotY = isMouthSlot ? activeMouthShape.pivotY : activeExpressionShape ? activeExpressionShape.pivotY : part.pivotY;
 
     const m = worldMatrices[part.boneIndex];
     ctx.save();

@@ -26,18 +26,16 @@
  * Right half: a character gallery (AVATAR_LIBRARY, avatar/library.ts) --
  * built as a real grid rather than a single hardcoded card, so a later
  * phase's larger library (user-generated avatars) drops in with no
- * structural change here -- and an action grid derived from the CURRENTLY
- * SELECTED avatar's own resolved topology (human-readable labels, see
- * AVATAR_ACTION_LABELS below), not a fixed six-button layout: a Topology
- * may declare extra actions beyond the six-id baseline (topology.ts's own
- * `AvatarTopology.actions` doc comment), and this picker needs to offer
- * whichever set the picked character's own rig actually has. No free-typed
- * content field at all (unlike TextOverlayDialog's textarea): everything
- * this overlay carries is a pick from a fixed set, per this feature's own
- * spec -- EXCEPT the Phase 7 "Customize with AI" prompt below the left-pane
- * preview, this dialog's one free-text input, which edits pendingOverrides
- * (avatar/edits.ts's applyAvatarEditOps) rather than avatarId/defaultAction/
- * rect themselves.
+ * structural change here -- plus Framing/Outfit pickers. No manual "Action"
+ * picker: the layered-motion redesign drives body action automatically
+ * ("Direct with AI" reasons about the overlapping narration's own content;
+ * `defaultAction` is a fixed, hidden "idle" fallback for a clip with no
+ * narration overlapping it at all, never a creator-facing choice) -- see
+ * avatar/resolveAvatarRenderState.ts's own module comment for the full
+ * precedence. The Phase 7 "Customize with AI" prompt below the left-pane
+ * preview is this dialog's one free-text input, which edits pendingOverrides
+ * (avatar/edits.ts's applyAvatarEditOps) rather than avatarId/rect
+ * themselves.
  */
 import { useEffect, useRef, useState } from "react";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
@@ -46,7 +44,7 @@ import { InlineEditableText } from "@/components/InlineEditableText";
 import { UpgradeRequiredDialog } from "@/components/UpgradeRequiredDialog";
 import { AvatarThumbnailCanvas } from "@/components/AvatarThumbnailCanvas";
 import { getCompiledAvatarForClip, type CompiledAvatar } from "@/lib/video/avatar/compile";
-import { computeAvatarPose, computeMouthShapeId } from "@/lib/video/avatar/actions";
+import { computeAvatarPose, computeEyeShapeId, computeMouthShapeId } from "@/lib/video/avatar/actions";
 import { tagAnchorsToBeats } from "@/lib/video/avatar/resolveAvatarRenderState";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
 import { AVATAR_LIBRARY, BIPED_SIMPLE_TOPOLOGY, getAvatarLibraryEntry } from "@/lib/video/avatar/library";
@@ -87,23 +85,6 @@ import { usePermissions } from "@/lib/usePermissions";
 // an async fetch (see actionIdsForAvatar below).
 const GENERATED_AVATAR_ID_PREFIX = "gen-";
 
-// Human-readable labels for the six baseline actions (topology.ts's
-// AvatarActionId) plus this feature's own first non-baseline extra
-// ("talkEmphasize" -- see library.ts's own doc comment on "biped-simple"'s
-// action map). A Topology may declare further extras beyond even this map,
-// which is exactly why this is a plain lookup with a humanizing fallback
-// (see humanizeActionId/actionLabel below) rather than a closed set this
-// component would need another patch to extend.
-const AVATAR_ACTION_LABELS: Record<string, string> = {
-  idle: "Idle",
-  talk: "Talking",
-  walk: "Walking",
-  sit: "Sitting",
-  sleep: "Sleeping",
-  lookAround: "Looking around",
-  talkEmphasize: "Talking + Pointing",
-};
-
 // Phase 8 ("selectable torsos") -- human-readable labels for the garment
 // shapeIds library.ts's GARMENT_SHAPES/avatar_gen's own _GARMENT_SHAPES
 // declare. "Shirt" (id `undefined`) isn't in here -- see garmentOptions
@@ -135,18 +116,13 @@ const AVATAR_EDIT_SAMPLE_PROMPTS = [
 // comment), so this path isn't expected to matter in practice.
 const BASELINE_ACTION_IDS: AvatarActionId[] = ["idle", "talk", "walk", "sit", "sleep", "lookAround"];
 
-// "someNewAction" -> "Some New Action" -- last-resort label for any action
-// id AVATAR_ACTION_LABELS doesn't know about yet, so a future Topology's
-// extra action (topology.ts's own "actions" doc comment) shows up looking
-// reasonable in this picker without another round of UI changes here.
+// "someNewAction" -> "Some New Action" -- shared humanizing fallback for any
+// id (garment shape, or -- before the layered-motion redesign removed the
+// manual Action picker -- an action id) with no explicit label above.
 function humanizeActionId(actionId: string): string {
   const spaced = actionId.replace(/([a-z0-9])([A-Z])/g, "$1 $2").trim();
   if (spaced === "") return actionId;
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
-
-function actionLabel(actionId: string): string {
-  return AVATAR_ACTION_LABELS[actionId] ?? humanizeActionId(actionId);
 }
 
 function garmentLabel(shapeId: string): string {
@@ -283,7 +259,15 @@ function AvatarPreviewCanvas({
         if (compiled) {
           const pose = computeAvatarPose(compiled.topology, action, elapsedSeconds, seedRef.current, compiled.design.expressionBias);
           const mouthShapeId = computeMouthShapeId(action, elapsedSeconds);
-          drawAvatar(ctx, compiled, pose, { x: 0, y: 0, width: canvas.width, height: canvas.height }, mouthShapeId, framingRef.current);
+          // No moodTimeline exists in this dialog's own preview (it drives one
+          // fixed `action` directly, not a resolved clip) -- eyebrows fall
+          // back to their own base "neutral" rect (no entry passed for that
+          // partId), same graceful-absence behavior as everywhere else in
+          // this engine. Blink still animates, same as the real overlay.
+          const eyeShapeId = computeEyeShapeId(action, elapsedSeconds, seedRef.current);
+          drawAvatar(ctx, compiled, pose, { x: 0, y: 0, width: canvas.width, height: canvas.height }, mouthShapeId, framingRef.current, {
+            eyes: eyeShapeId,
+          });
         }
       }
       rafId = requestAnimationFrame(draw);
@@ -959,33 +943,18 @@ export function AvatarFramingDialog({
             </div>
             {generateError && <p className="-mt-2 mb-3 text-[11px] text-red-600">{generateError}</p>}
 
-            {/* Action / Framing / Outfit spread horizontally as three columns
-                (rather than three full-width stacked sections) so all three
-                picks are visible together at a glance -- each column keeps its
-                own options in a single vertical stack since the column itself
-                is now narrow. */}
+            {/* Framing / Outfit spread horizontally as two columns (rather
+                than full-width stacked sections) so both picks are visible
+                together at a glance -- each column keeps its own options in
+                a single vertical stack since the column itself is narrow.
+                No more manual "Action" picker here: body action is now
+                driven automatically -- "Direct with AI" (script-content-
+                driven posture beats) for an overlay overlapping a narration,
+                plain `defaultAction` (fixed at "idle") as the silent
+                fallback otherwise -- rather than a fixed one-time pick a
+                creator has to babysit. See this dialog's own module comment
+                on the layered-motion redesign. */}
             <div className="mb-3 flex gap-3">
-              <div className="flex-1">
-                <h3 className="mb-1.5 text-xs font-medium text-foreground">Action</h3>
-                <div className="flex flex-col gap-1.5">
-                  {actionOptions.map((actionId) => (
-                    <button
-                      key={actionId}
-                      type="button"
-                      onClick={() => setDefaultAction(actionId)}
-                      className={
-                        "rounded-md border py-1.5 text-xs font-medium " +
-                        (defaultAction === actionId
-                          ? "border-accent bg-accent text-accent-foreground"
-                          : "border-border text-foreground hover:bg-background")
-                      }
-                    >
-                      {actionLabel(actionId)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* Phase 8 -- "Portrait mode": crops the legs so just
                   hands+torso+head fill the rect, like a seated close-up shot.
                   A plain two-way toggle (not a dropdown/checkbox) per this
