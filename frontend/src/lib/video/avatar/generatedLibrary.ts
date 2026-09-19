@@ -14,6 +14,7 @@ import {
   duplicateGeneratedAvatar as apiDuplicateGeneratedAvatar,
   generateAvatarFromPhoto as apiGenerateAvatarFromPhoto,
   getGeneratedAvatar as apiGetGeneratedAvatar,
+  importLibraryAvatar as apiImportLibraryAvatar,
   listGeneratedAvatars,
   renameGeneratedAvatar as apiRenameGeneratedAvatar,
   type GeneratedAvatarCreateResult,
@@ -86,6 +87,16 @@ export async function saveCustomizedAvatar(
   name?: string
 ): Promise<GeneratedAvatarSummary> {
   const detail = await apiDuplicateGeneratedAvatar(avatarId, { name, overrides });
+  const entry = toEntry(detail);
+  return { id: detail.id, name: entry.design.meta.name, thumbnailUrl: null, createdAt: detail.createdAt };
+}
+
+/** Copies a promoted global-library avatar into this creator's own "My
+ * avatars" -- a brand-new independent avatar_designs row, same shape
+ * generateAvatarFromPhoto/saveCustomizedAvatar already return, ready to
+ * prepend to a "My avatars" list. */
+export async function importLibraryAvatarToMine(libraryAssetId: string): Promise<GeneratedAvatarSummary> {
+  const detail = await apiImportLibraryAvatar(libraryAssetId);
   const entry = toEntry(detail);
   return { id: detail.id, name: entry.design.meta.name, thumbnailUrl: null, createdAt: detail.createdAt };
 }

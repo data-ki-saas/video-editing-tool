@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from src.asset_library.router import router as asset_library_router
 from src.assets.router import router as assets_router
 from src.avatar.router import router as avatar_router
 from src.avatar_gen.router import router as avatar_generated_router
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
             response.headers["Access-Control-Allow-Credentials"] = "true"
         return response
 
+    app.include_router(asset_library_router)
     app.include_router(assets_router)
     app.include_router(avatar_router)
     app.include_router(avatar_generated_router)

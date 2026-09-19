@@ -31,6 +31,7 @@ import { ProjectList } from "./ProjectList";
 import { AssetGallery } from "./AssetGallery";
 import { UploadDialog } from "./UploadDialog";
 import { StockMediaDialog } from "./StockMediaDialog";
+import { LibraryAssetDialog } from "./LibraryAssetDialog";
 import { UserActions } from "./UserActions";
 import { TextOverlayDialog } from "./TextOverlayDialog";
 import { TtsOverlayDialog } from "./TtsOverlayDialog";
@@ -205,7 +206,6 @@ export function ActionArea({
   onUploaded,
   onUploadingChange,
   onAssetDeleted,
-  onRecord,
   onAddImageOverlay,
   onAddToSequence,
   onAddVideoOverlay,
@@ -333,7 +333,6 @@ export function ActionArea({
   onUploaded: (asset: Asset) => void;
   onUploadingChange?: (isUploading: boolean) => void;
   onAssetDeleted: (assetId: string) => void;
-  onRecord: () => void;
   onAddImageOverlay: (asset: Asset) => void;
   onAddToSequence: (asset: Asset) => void;
   onAddVideoOverlay: (asset: Asset, options?: { removeBackground?: boolean; chromaKeyColor?: string }) => void;
@@ -564,6 +563,7 @@ export function ActionArea({
 }) {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
+  const [isLibraryDialogOpen, setIsLibraryDialogOpen] = useState(false);
   // Local, unlike the other three dialogs' open/close state -- selecting a
   // ratio applies it (via onSelectClipRect, already a ThreePaneEditor-level
   // handler) and closes itself in the same click, so nothing outside this
@@ -607,7 +607,7 @@ export function ActionArea({
           onSelect={onSelectAsset}
           onAddAsset={() => setIsUploadDialogOpen(true)}
           onBrowseStock={() => setIsStockDialogOpen(true)}
-          onRecord={onRecord}
+          onOpenLibrary={() => setIsLibraryDialogOpen(true)}
           onDeleted={onAssetDeleted}
           onAddImageOverlay={onAddImageOverlay}
           onAddToSequence={onAddToSequence}
@@ -722,6 +722,16 @@ export function ActionArea({
           onImported={onUploaded}
           onImportingChange={onUploadingChange}
           onClose={() => setIsStockDialogOpen(false)}
+        />
+      )}
+
+      {isLibraryDialogOpen && (
+        <LibraryAssetDialog
+          projectId={projectId}
+          onImported={onUploaded}
+          onImportedAvatar={(name) => window.alert(`Added "${name}" to your avatars`)}
+          onImportingChange={onUploadingChange}
+          onClose={() => setIsLibraryDialogOpen(false)}
         />
       )}
 

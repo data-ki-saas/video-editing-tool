@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AvatarThumbnailCanvas } from "@/components/AvatarThumbnailCanvas";
 import { InlineEditableText } from "@/components/InlineEditableText";
+import { PromoteAvatarDialog } from "@/components/PromoteAvatarDialog";
 import {
   deleteGeneratedAvatar,
   generateAvatarFromPhoto,
@@ -32,10 +33,12 @@ function AvatarCard({
   avatar,
   onRename,
   onDelete,
+  onPromote,
 }: {
   avatar: GeneratedAvatarSummary;
   onRename: (id: string, name: string) => void;
   onDelete: (avatar: GeneratedAvatarSummary) => void;
+  onPromote: (avatar: GeneratedAvatarSummary) => void;
 }) {
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border p-2">
@@ -58,6 +61,13 @@ function AvatarCard({
         className="w-full truncate text-center text-xs font-medium text-foreground"
         inputClassName="block w-full truncate rounded border border-border bg-background px-1 text-center text-xs text-foreground outline-none"
       />
+      <button
+        type="button"
+        onClick={() => onPromote(avatar)}
+        className="w-full rounded-md border border-border py-1 text-[11px] text-muted hover:bg-surface hover:text-foreground"
+      >
+        Add to library
+      </button>
     </div>
   );
 }
@@ -68,6 +78,7 @@ export default function AvatarsPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [lockedError, setLockedError] = useState<FeatureLockedError | null>(null);
+  const [promotingAvatar, setPromotingAvatar] = useState<GeneratedAvatarSummary | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -146,7 +157,7 @@ export default function AvatarsPage() {
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
         {avatars?.map((avatar) => (
-          <AvatarCard key={avatar.id} avatar={avatar} onRename={handleRename} onDelete={handleDelete} />
+          <AvatarCard key={avatar.id} avatar={avatar} onRename={handleRename} onDelete={handleDelete} onPromote={setPromotingAvatar} />
         ))}
 
         <button
@@ -162,6 +173,17 @@ export default function AvatarsPage() {
       </div>
       {generateError && <p className="text-[11px] text-red-600">{generateError}</p>}
       {lockedError && <UpgradeRequiredDialog error={lockedError} onClose={() => setLockedError(null)} />}
+      {promotingAvatar && (
+        <PromoteAvatarDialog
+          avatarId={promotingAvatar.id}
+          defaultTitle={promotingAvatar.name}
+          onPromoted={() => {
+            setPromotingAvatar(null);
+            window.alert(`"${promotingAvatar.name}" was added to the global library.`);
+          }}
+          onClose={() => setPromotingAvatar(null)}
+        />
+      )}
     </main>
   );
 }

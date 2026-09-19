@@ -82,7 +82,7 @@ export function AssetGallery({
   onSelect,
   onAddAsset,
   onBrowseStock,
-  onRecord,
+  onOpenLibrary,
   onDeleted,
   onAddImageOverlay,
   onAddToSequence,
@@ -101,10 +101,10 @@ export function AssetGallery({
   onSelect: (asset: Asset) => void;
   onAddAsset: () => void;
   onBrowseStock: () => void;
-  // Opens the camera Record page (dashboard/[projectId]/record) -- a
-  // navigation, not a dialog like onAddAsset/onBrowseStock, since capturing
-  // footage needs a full-screen live camera view.
-  onRecord: () => void;
+  // Opens LibraryAssetDialog -- the global, cross-user asset library
+  // (replaces the old "+ Record" navigation to dashboard/[projectId]/record;
+  // that page still exists, just isn't linked from here anymore).
+  onOpenLibrary: () => void;
   onDeleted: (assetId: string) => void;
   onAddImageOverlay: (asset: Asset) => void;
   onAddToSequence: (asset: Asset) => void;
@@ -350,8 +350,8 @@ export function AssetGallery({
           <button type="button" onClick={onAddAsset} className="text-xs text-accent hover:underline">
             + Asset
           </button>
-          <button type="button" onClick={onRecord} className="text-xs text-accent hover:underline">
-            + Record
+          <button type="button" onClick={onOpenLibrary} className="text-xs text-accent hover:underline">
+            + Library
           </button>
         </div>
       </div>

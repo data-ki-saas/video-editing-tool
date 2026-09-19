@@ -122,7 +122,7 @@ _GARMENT_SHAPES = [
 _ALLOWED_PHOTO_TYPES = {"image/jpeg", "image/png"}
 
 
-def _resolve(record: repository.AvatarDesignRecord) -> GeneratedAvatarDetail:
+def resolve_avatar_record(record: repository.AvatarDesignRecord) -> GeneratedAvatarDetail:
     """Swaps a fresh presigned R2 URL into the stored Skin/Design's
     `atlas.imageRef`/`meta.thumbnail` placeholders -- never the other way
     around. The DB row itself never holds a resolved URL (those expire), only
@@ -130,7 +130,9 @@ def _resolve(record: repository.AvatarDesignRecord) -> GeneratedAvatarDetail:
     frontend/src/lib/timeline/resolve.ts's own `_appMeta[id].assetId`
     pattern, just enforced on the backend since this table (unlike a
     project's timeline) is never round-tripped back through the frontend for
-    saving."""
+    saving. Public (not `_resolve`) because asset_library/service.py's
+    import_avatar reuses it too -- importing a library avatar creates a
+    brand-new avatar_designs row the exact same shape generate/duplicate do."""
     url = r2_client.presigned_get_url(record.atlas_key)
     skin = {**record.skin, "atlas": {**record.skin["atlas"], "imageRef": url}}
     design = {**record.design, "meta": {**record.design["meta"], "thumbnail": url}}
@@ -238,8 +240,9 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
         tmp_path.unlink(missing_ok=True)
 
     avatar_name = (name or "").strip() or _DEFAULT_NAME
-    # `imageRef`/`thumbnail` are left blank in storage -- see _resolve's own
-    # doc comment for why a resolved URL is never persisted here.
+    # `imageRef`/`thumbnail` are left blank in storage -- see
+    # resolve_avatar_record's own doc comment for why a resolved URL is
+    # never persisted here.
     skin = {
         "schemaVersion": 1,
         "skinId": design_id,
@@ -282,7 +285,7 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
         cost_estimate_cents=settings.cartoonify_cost_cents_per_image if used_fal else 0,
     )
 
-    detail = _resolve(record)
+    detail = resolve_avatar_record(record)
     return GeneratedAvatarCreateResponse(**detail.model_dump(), face_detected=palette.detected)
 
 
@@ -302,7 +305,7 @@ def get_generated_avatar(design_id: str, user: CurrentUser) -> GeneratedAvatarDe
     record = repository.get(design_id, user.id)
     if record is None:
         raise HTTPException(status_code=404, detail="Avatar not found")
-    return _resolve(record)
+    return resolve_avatar_record(record)
 
 
 def rename_generated_avatar(design_id: str, user: CurrentUser, name: str) -> GeneratedAvatarDetail:
@@ -321,7 +324,7 @@ def rename_generated_avatar(design_id: str, user: CurrentUser, name: str) -> Gen
     renamed = repository.rename(design_id, user.id, trimmed, design)
     if renamed is None:
         raise HTTPException(status_code=404, detail="Avatar not found")
-    return _resolve(renamed)
+    return resolve_avatar_record(renamed)
 
 
 _OVERRIDE_FIELDS = ("boneScaleOverrides", "colorSlotOverrides", "attachedAccessories", "expressionBias", "garmentId")
@@ -380,7 +383,7 @@ def duplicate_generated_avatar(design_id: str, user: CurrentUser, name: str | No
             logger.exception("failed to clean up orphaned avatar atlas copy %r", new_atlas_key)
         raise HTTPException(status_code=502, detail="Couldn't save this avatar -- try again") from exc
 
-    return _resolve(new_record)
+    return resolve_avatar_record(new_record)
 
 
 def delete_generated_avatar(design_id: str, user: CurrentUser) -> None:

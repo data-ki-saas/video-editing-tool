@@ -582,6 +582,115 @@ export async function deleteGeneratedAvatar(avatarId: string): Promise<void> {
   await throwIfNotOk(response);
 }
 
+// The global asset library -- a browsable, cross-user catalog someone opts
+// an avatar (today) or a media asset (reserved for later, see the backend
+// migration's own comment) into by "promoting" it, distinct from both
+// avatar_designs (private, per-user) and library_videos/"/api/library"
+// (finished-render share links). "+ Library" in AssetGallery's button row
+// opens LibraryAssetDialog, which lists these.
+export type LibraryAssetType = "avatar" | "video" | "image" | "audio";
+
+export interface LibraryAssetSummary {
+  id: string;
+  assetType: LibraryAssetType;
+  title: string;
+  description: string | null;
+  thumbnailUrl: string | null;
+  // Set for video/image/audio entries -- the actual public file to
+  // play/view/hear before importing. Null for "avatar" entries, whose
+  // playable content IS thumbnailUrl (the atlas image).
+  mediaUrl: string | null;
+  mediaMimeType: string | null;
+  mediaDurationSeconds: number | null;
+  createdAt: string;
+}
+
+interface LibraryAssetSummaryWire {
+  id: string;
+  asset_type: LibraryAssetType;
+  title: string;
+  description: string | null;
+  thumbnail_url: string | null;
+  media_url: string | null;
+  media_mime_type: string | null;
+  media_duration_seconds: number | null;
+  created_at: string;
+}
+
+function toLibraryAssetSummary(wire: LibraryAssetSummaryWire): LibraryAssetSummary {
+  return {
+    id: wire.id,
+    assetType: wire.asset_type,
+    title: wire.title,
+    description: wire.description,
+    thumbnailUrl: wire.thumbnail_url,
+    mediaUrl: wire.media_url,
+    mediaMimeType: wire.media_mime_type,
+    mediaDurationSeconds: wire.media_duration_seconds,
+    createdAt: wire.created_at,
+  };
+}
+
+/** GET /api/asset-library -- the public catalog, optionally filtered to one
+ * kind (LibraryAssetDialog's own kind tabs). Only "avatar" ever returns
+ * results today -- see LibraryAssetType's own comment. */
+export async function listLibraryAssets(assetType?: LibraryAssetType): Promise<LibraryAssetSummary[]> {
+  const url = new URL(`${API_BASE_URL}/api/asset-library`);
+  if (assetType) url.searchParams.set("asset_type", assetType);
+
+  const response = await apiFetch(url.toString(), { headers: await authHeader() });
+  const wire = await handleResponse<LibraryAssetSummaryWire[]>(response);
+  return wire.map(toLibraryAssetSummary);
+}
+
+/** POST /api/asset-library/avatars/{id}/promote -- copies one of this user's
+ * own generated avatars into the public library, permanently and for anyone
+ * to use, gated on the caller having checked the liability-waiver box
+ * (`liabilityWaiverAccepted`, re-validated server-side -- see
+ * asset_library/service.py's _validate_promotion_fields). */
+export async function promoteAvatarToLibrary(
+  avatarId: string,
+  title: string,
+  description: string,
+  liabilityWaiverAccepted: boolean
+): Promise<LibraryAssetSummary> {
+  const response = await apiFetch(`${API_BASE_URL}/api/asset-library/avatars/${encodeURIComponent(avatarId)}/promote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ title, description, liability_waiver_accepted: liabilityWaiverAccepted }),
+  });
+  return toLibraryAssetSummary(await handleResponse<LibraryAssetSummaryWire>(response));
+}
+
+/** POST /api/asset-library/{id}/import -- copies a promoted library avatar
+ * into the CALLER's own "My avatars" as a brand-new, independent
+ * avatar_designs row (same wire shape generate/duplicate return), rather
+ * than adding it to the current project's `assets` list -- avatars aren't
+ * project assets at all (see AvatarFramingDialog's own "My avatars"
+ * gallery). */
+export async function importLibraryAvatar(libraryAssetId: string): Promise<GeneratedAvatarDetail> {
+  const response = await apiFetch(`${API_BASE_URL}/api/asset-library/${encodeURIComponent(libraryAssetId)}/import`, {
+    method: "POST",
+    headers: await authHeader(),
+  });
+  return toGeneratedAvatarDetail(await handleResponse<GeneratedAvatarDetailWire>(response));
+}
+
+/** POST /api/asset-library/{id}/import-to-project -- pulls a promoted
+ * video/image/audio library entry into this project's own `assets`, same
+ * "browse, preview, then pull it into your reel" flow importStockAsset
+ * already gives "+ Stock" results. */
+export async function importLibraryAssetToProject(libraryAssetId: string, projectId: string): Promise<Asset> {
+  const url = new URL(`${API_BASE_URL}/api/asset-library/${encodeURIComponent(libraryAssetId)}/import-to-project`);
+  url.searchParams.set("project_id", projectId);
+
+  const response = await apiFetch(url.toString(), {
+    method: "POST",
+    headers: await authHeader(),
+  });
+  return handleResponse<Asset>(response);
+}
+
 /** Phase 7 (conversational Design edits) -- the SPECIFIC avatar's own
  * resolved capability set (bone group ids, color slot ids, which
  * accessories can attach to which of its anchors, and its expression params'

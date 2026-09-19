@@ -54,6 +54,17 @@ def delete_object(key: str) -> None:
     get_r2_client().delete_object(Bucket=settings.r2_bucket_name, Key=key)
 
 
+def download_object(key: str) -> bytes:
+    """Reads an object's bytes back out of the private uploads bucket --
+    boto3 has no built-in cross-bucket, cross-credential copy, so this is
+    used (instead of copy_object) whenever a private object needs to land in
+    the PUBLIC renders bucket too, e.g. asset_library/service.py copying a
+    promoted avatar's atlas out of the private bucket before
+    upload_public_object writes it to the public one."""
+    response = get_r2_client().get_object(Bucket=settings.r2_bucket_name, Key=key)
+    return response["Body"].read()
+
+
 def copy_object(source_key: str, dest_key: str) -> None:
     """Server-side copy within the private uploads bucket -- used by
     avatar_gen/service.py's duplicate_generated_avatar to give a saved
