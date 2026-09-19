@@ -73,6 +73,13 @@ export interface CompiledTopology {
   // resolveAvatarRenderState.ts's mood->eyebrow/eye shape resolution. Absent
   // for any topology declaring no mood-driven facial expression at all.
   moodExpressionShapes?: Record<string, Record<string, string>>;
+  // `AvatarTopology.boneGroups.arms`, carried straight through -- consumed by
+  // renderer.ts's drawAvatar to decide when a gesture/talk-emphasize has
+  // rotated an arm bone far enough to need drawing in front of the head
+  // instead of the static zOrder's rest-pose position (see its own doc
+  // comment). Absent/empty for any topology declaring no "arms" bone group at
+  // all, in which case drawAvatar just never defers any part.
+  armBoneIndices?: number[];
 }
 
 /** The atlas image plus every resolved part/mouth-shape draw entry. */
@@ -198,6 +205,7 @@ function compileTopology(topology: AvatarTopology): CompiledTopology {
     gazes: topology.gazes,
     moodPresets: topology.moodPresets,
     moodExpressionShapes: topology.moodExpressionShapes,
+    armBoneIndices: topology.boneGroups.arms,
   };
 }
 

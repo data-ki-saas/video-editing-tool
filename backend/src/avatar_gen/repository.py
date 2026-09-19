@@ -86,12 +86,14 @@ def rename(design_id: str, user_id: str, name: str, design: dict) -> AvatarDesig
 
 
 def update_baked(design_id: str, user_id: str, skin: dict, design: dict) -> AvatarDesignRecord | None:
-    """Rebake path (service.py's rebake_generated_avatar / rebake_record):
-    overwrites the stored Skin/Design's baked fields (atlas.partRects,
-    parts' mouth pivot) in place after re-running build_atlas_png_from_photo
-    against the cached source_cartoon_key. `atlas_key` itself never changes
-    here -- the PNG at that key was overwritten, not replaced, so no other
-    row/reference needs updating."""
+    """Rebake path (service.py's rebake_generated_avatar / _rebake_record):
+    overwrites the stored Skin/Design's baked fields (atlas.partRects, parts'
+    mouth pivot, and every other baked-in-code schema field --
+    mouthShapes/colorSlots/garmentShapes/expressionShapes) in place after
+    re-running build_atlas_png_from_photo against the cached
+    source_cartoon_key. `atlas_key` itself never changes here -- the PNG at
+    that key was overwritten, not replaced, so no other row/reference needs
+    updating."""
     result = (
         get_supabase_client()
         .table(_TABLE)

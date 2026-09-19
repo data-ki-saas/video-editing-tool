@@ -218,7 +218,24 @@ def _rebake_record(record: repository.AvatarDesignRecord) -> repository.AvatarDe
     finally:
         tmp_path.unlink(missing_ok=True)
 
-    new_skin = {**record.skin, "atlas": {**record.skin["atlas"], "partRects": part_rects}, "parts": _parts_for(mouth_pivot)}
+    # Overwrite every baked-in-CODE field (not just atlas/parts) with today's
+    # definitions -- these four are static per this module's own constants,
+    # never per-user data, so re-baking is exactly the right time to backfill
+    # ones a pre-existing record's skin JSON predates entirely (e.g.
+    # expressionShapes, added for mood-driven eyebrows/blink -- without this,
+    # a rebake regenerates correct eyeOpen/eyeClosed atlas pixels but the old
+    # skin still has no expressionShapes entry granting permission to use
+    # them, so blink silently never shows). Matches this function's own
+    # "re-applies the current atlas-baking code ... in place" docstring.
+    new_skin = {
+        **record.skin,
+        "atlas": {**record.skin["atlas"], "partRects": part_rects},
+        "parts": _parts_for(mouth_pivot),
+        "mouthShapes": _MOUTH_SHAPES,
+        "colorSlots": _COLOR_SLOTS,
+        "garmentShapes": _GARMENT_SHAPES,
+        "expressionShapes": _EXPRESSION_SHAPES,
+    }
     updated = repository.update_baked(record.id, record.user_id, new_skin, record.design)
     if updated is None:
         raise HTTPException(status_code=404, detail="Avatar not found")

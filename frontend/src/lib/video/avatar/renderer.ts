@@ -107,8 +107,7 @@ export function drawAvatar(
     worldMatrices[boneIndex] = parentMatrix.translate(local.x, local.y).rotate((local.rotation * 180) / Math.PI).scale(local.scaleX, local.scaleY);
   }
 
-  for (const part of skin.parts) {
-    if (hiddenBoneIndices.includes(part.boneIndex)) continue;
+  const drawPart = (part: (typeof skin.parts)[number]): void => {
     // A mouth shape swaps in for whichever `parts` entry is its own slot --
     // recognized here by partId equality against the active mouthShapeId's
     // resolved entry (compile.ts builds every mouthShapes[] entry sharing
@@ -150,6 +149,37 @@ export function drawAvatar(
       atlasRect.sHeight
     );
     ctx.restore();
+  };
+
+  // Bones in the topology's "arms" group rotate large amounts during
+  // gestures (wave/point/hit/facepalm/openArms -- see library.ts's GESTURES,
+  // and TALK_EMPHASIZE's own periodic arm raise) that swing the hand up past
+  // shoulder height, into the same screen region the head occupies. The
+  // static, compile-time zOrder (compile.ts's sortedParts, e.g. library.ts's
+  // PLACEHOLDER_SKIN_PARTS) is authored for the REST pose, where arms hang at
+  // the sides and never reach the head -- so armL/armR are ordered BELOW head/
+  // eyes/eyebrows/mouth there. Once a gesture rotates an arm bone past this
+  // threshold, drawing it in that same static position puts the raised
+  // hand/arm visibly BEHIND the head instead of in front of it. Deferring
+  // those parts to draw last (after every other part, this frame only) fixes
+  // that without touching the static zOrder used by every other pose.
+  // Below the threshold (e.g. SHRUG's small raise) the arm still doesn't
+  // reach the head, so the static zOrder is left alone -- nothing about
+  // idle/talk/walk's existing look changes.
+  const ARM_RAISED_ROTATION_THRESHOLD_RADIANS = 1.2;
+  const armBoneIndices = new Set(topology.armBoneIndices ?? []);
+  const deferredRaisedArmParts: (typeof skin.parts)[number][] = [];
+
+  for (const part of skin.parts) {
+    if (hiddenBoneIndices.includes(part.boneIndex)) continue;
+    if (armBoneIndices.has(part.boneIndex) && Math.abs(pose[part.boneIndex].rotation) > ARM_RAISED_ROTATION_THRESHOLD_RADIANS) {
+      deferredRaisedArmParts.push(part);
+      continue;
+    }
+    drawPart(part);
+  }
+  for (const part of deferredRaisedArmParts) {
+    drawPart(part);
   }
 
   // Phase 7 -- accessories always draw AFTER every skin part (a hat sits on
