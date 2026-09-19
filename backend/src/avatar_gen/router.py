@@ -52,6 +52,15 @@ async def duplicate_generated(
     return service.duplicate_generated_avatar(design_id, user, body.name, body.overrides)
 
 
+@router.post("/{design_id}/rebake", response_model=GeneratedAvatarDetail)
+async def rebake_generated(design_id: str, user: CurrentUser = Depends(get_current_user)) -> GeneratedAvatarDetail:
+    """Re-applies the current atlas-baking code to this avatar's cached
+    fal.ai source in place -- no new row, no fal.ai spend. Meant to be
+    called (by us, e.g. via a support/admin action) after a baking bug fix
+    ships, not surfaced as a routine self-service button."""
+    return service.rebake_generated_avatar(design_id, user)
+
+
 @router.delete("/{design_id}", status_code=204)
 async def delete_generated(design_id: str, user: CurrentUser = Depends(get_current_user)) -> None:
     service.delete_generated_avatar(design_id, user)

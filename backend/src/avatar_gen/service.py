@@ -141,7 +141,7 @@ def resolve_avatar_record(record: repository.AvatarDesignRecord) -> GeneratedAva
 
 async def _cartoonify_and_crop(
     *, user_id: str, photo_bytes: bytes, original_palette: FacePalette
-) -> tuple[bytes, dict[str, dict], tuple[float, float]] | None:
+) -> tuple[bytes, bytes, dict[str, dict], tuple[float, float]] | None:
     """The fal.ai path: stage the real photo in R2 (fal needs a fetchable
     URL, not raw bytes -- same reason matting/service.py presigns a URL
     before calling fal's rembg), cartoonify it, then re-run face analysis on
@@ -152,7 +152,13 @@ async def _cartoonify_and_crop(
     posture every other optional integration in this codebase takes.
     Only ever called after `original_palette.detected` is already True
     (see generate_avatar_from_photo) -- this is what gates the real fal.ai
-    spend on "we know there's a clear face", per this feature's own design."""
+    spend on "we know there's a clear face", per this feature's own design.
+
+    Returns `cartoon_bytes` as the first element alongside the usual
+    build_atlas_png_from_photo result -- the caller persists it as
+    `source_cartoon_key` so a LATER baking-code fix can be re-applied via
+    rebake_generated_avatar without paying for another fal.ai call or asking
+    the user to re-upload their photo."""
     temp_key = f"avatars-tmp/{user_id}/{uuid.uuid4().hex}.jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         tmp.write(photo_bytes)
@@ -172,7 +178,7 @@ async def _cartoonify_and_crop(
             logger.warning("fal.ai cartoonify output had no detectable face for user=%s; falling back", user_id)
             return None
 
-        return build_atlas_png_from_photo(cartoon_bytes, cartoon_palette)
+        return (cartoon_bytes, *build_atlas_png_from_photo(cartoon_bytes, cartoon_palette))
     except Exception:
         logger.exception("fal.ai cartoonify path failed for user=%s; falling back to parametric drawing", user_id)
         return None
@@ -182,6 +188,56 @@ async def _cartoonify_and_crop(
             r2_client.delete_object(temp_key)
         except Exception:
             logger.exception("failed to clean up temp cartoonify source %r", temp_key)
+
+
+def _rebake_record(record: repository.AvatarDesignRecord) -> repository.AvatarDesignRecord:
+    """Shared core of rebake_generated_avatar and scripts/rebake_avatars.py:
+    re-runs build_atlas_png_from_photo against `record`'s cached
+    source_cartoon_key and overwrites its atlas object + baked skin fields in
+    place. Raises HTTPException on failure (caller decides what that means --
+    a 4xx/5xx for the user-facing endpoint, a logged skip for the bulk
+    script)."""
+    if not record.source_cartoon_key:
+        raise HTTPException(status_code=400, detail="This avatar has no cached source photo to rebake from")
+
+    cartoon_bytes = r2_client.download_object(record.source_cartoon_key)
+    palette = analyze_photo(cartoon_bytes)
+    if not palette.detected:
+        raise HTTPException(status_code=502, detail="Couldn't re-detect a face in this avatar's cached source photo")
+
+    atlas_png, part_rects, mouth_pivot = build_atlas_png_from_photo(cartoon_bytes, palette)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        tmp.write(atlas_png)
+        tmp_path = Path(tmp.name)
+    try:
+        r2_client.upload_file(tmp_path, record.atlas_key, "image/png")
+    except Exception as exc:
+        logger.exception("avatar atlas rebake upload failed for design=%s", record.id)
+        raise HTTPException(status_code=502, detail="Couldn't rebake this avatar -- try again") from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    new_skin = {**record.skin, "atlas": {**record.skin["atlas"], "partRects": part_rects}, "parts": _parts_for(mouth_pivot)}
+    updated = repository.update_baked(record.id, record.user_id, new_skin, record.design)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Avatar not found")
+    return updated
+
+
+def rebake_generated_avatar(design_id: str, user: CurrentUser) -> GeneratedAvatarDetail:
+    """User-facing entry point for _rebake_record: re-applies the current
+    atlas-baking code (build_atlas_png_from_photo) to this avatar's cached
+    fal.ai output, in place -- same design_id/atlas_key, no fal.ai spend, no
+    "please re-upload and generate a new avatar" round trip. Meant to be
+    called after a baking bug fix ships (see scripts/rebake_avatars.py for
+    doing this for every affected avatar at once); calling it with nothing
+    actually changed in atlas_builder.py just re-produces the same atlas."""
+    record = repository.get(design_id, user.id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Avatar not found")
+    updated = _rebake_record(record)
+    return resolve_avatar_record(updated)
 
 
 async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, file_content_type: str | None, photo_bytes: bytes) -> GeneratedAvatarCreateResponse:
@@ -218,15 +274,31 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
     # existing free, zero-cost parametric-drawing fallback exactly as before.
     used_fal = False
     mouth_pivot: tuple[float, float] | None = None
+    source_cartoon_key: str | None = None
     fal_result = await _cartoonify_and_crop(user_id=user.id, photo_bytes=photo_bytes, original_palette=palette) if palette.detected else None
-    if fal_result is not None:
-        atlas_png, part_rects, mouth_pivot = fal_result
-        used_fal = True
-    else:
-        atlas_png, part_rects = build_atlas_png(palette)
 
     design_id = f"gen-{uuid.uuid4().hex}"
     atlas_key = f"avatars/{user.id}/{design_id}/atlas.png"
+
+    if fal_result is not None:
+        cartoon_bytes, atlas_png, part_rects, mouth_pivot = fal_result
+        used_fal = True
+        # Best-effort: if this upload fails, generation still succeeds --
+        # it just means a future baking-code fix can't rebake THIS avatar in
+        # place and would need the old "generate a new one" path instead.
+        candidate_source_key = f"avatars/{user.id}/{design_id}/source_cartoon.png"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+            tmp.write(cartoon_bytes)
+            tmp_path = Path(tmp.name)
+        try:
+            r2_client.upload_file(tmp_path, candidate_source_key, "image/png")
+            source_cartoon_key = candidate_source_key
+        except Exception:
+            logger.exception("failed to persist source cartoon image for user=%s design=%s -- rebake won't be available for it", user.id, design_id)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    else:
+        atlas_png, part_rects = build_atlas_png(palette)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
         tmp.write(atlas_png)
@@ -262,11 +334,21 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
     }
 
     try:
-        record = repository.create(id=design_id, user_id=user.id, name=avatar_name, skin=skin, design=design, atlas_key=atlas_key)
+        record = repository.create(
+            id=design_id,
+            user_id=user.id,
+            name=avatar_name,
+            skin=skin,
+            design=design,
+            atlas_key=atlas_key,
+            source_cartoon_key=source_cartoon_key,
+        )
     except Exception as exc:
         logger.exception("avatar design insert failed for user=%s", user.id)
         try:
             r2_client.delete_object(atlas_key)
+            if source_cartoon_key:
+                r2_client.delete_object(source_cartoon_key)
         except Exception:
             logger.exception("failed to clean up orphaned avatar atlas %r", atlas_key)
         raise HTTPException(status_code=502, detail="Couldn't save the generated avatar -- try again") from exc
@@ -365,6 +447,21 @@ def duplicate_generated_avatar(design_id: str, user: CurrentUser, name: str | No
         logger.exception("avatar atlas copy failed for user=%s design=%s", user.id, design_id)
         raise HTTPException(status_code=502, detail="Couldn't save this avatar -- try again") from exc
 
+    # Copy the cached fal.ai source too (not just the atlas), so this
+    # duplicate stays rebakeable by a future atlas_builder.py fix the same
+    # way its source avatar is -- see _rebake_record. Best-effort: an older
+    # source avatar predating this cache, or a copy failure, just leaves the
+    # duplicate in the same "no cached source" state every avatar was in
+    # before rebaking existed.
+    new_source_cartoon_key: str | None = None
+    if record.source_cartoon_key:
+        candidate_key = f"avatars/{user.id}/{new_design_id}/source_cartoon.png"
+        try:
+            r2_client.copy_object(record.source_cartoon_key, candidate_key)
+            new_source_cartoon_key = candidate_key
+        except Exception:
+            logger.exception("source cartoon copy failed for user=%s design=%s -- duplicate won't be rebakeable", user.id, design_id)
+
     new_name = (name or "").strip() or f"{record.name} (customized)"
     new_skin = {**record.skin, "skinId": new_design_id}
     new_design = {**record.design, "designId": new_design_id, "skinId": new_design_id, "meta": {**record.design["meta"], "name": new_name}}
@@ -374,11 +471,21 @@ def duplicate_generated_avatar(design_id: str, user: CurrentUser, name: str | No
                 new_design[field] = overrides[field]
 
     try:
-        new_record = repository.create(id=new_design_id, user_id=user.id, name=new_name, skin=new_skin, design=new_design, atlas_key=new_atlas_key)
+        new_record = repository.create(
+            id=new_design_id,
+            user_id=user.id,
+            name=new_name,
+            skin=new_skin,
+            design=new_design,
+            atlas_key=new_atlas_key,
+            source_cartoon_key=new_source_cartoon_key,
+        )
     except Exception as exc:
         logger.exception("avatar design duplicate insert failed for user=%s design=%s", user.id, design_id)
         try:
             r2_client.delete_object(new_atlas_key)
+            if new_source_cartoon_key:
+                r2_client.delete_object(new_source_cartoon_key)
         except Exception:
             logger.exception("failed to clean up orphaned avatar atlas copy %r", new_atlas_key)
         raise HTTPException(status_code=502, detail="Couldn't save this avatar -- try again") from exc
@@ -392,5 +499,7 @@ def delete_generated_avatar(design_id: str, user: CurrentUser) -> None:
         raise HTTPException(status_code=404, detail="Avatar not found")
     try:
         r2_client.delete_object(record.atlas_key)
+        if record.source_cartoon_key:
+            r2_client.delete_object(record.source_cartoon_key)
     except Exception:
         logger.exception("failed to delete R2 object %r for deleted avatar %s", record.atlas_key, design_id)
