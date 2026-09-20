@@ -125,6 +125,11 @@ _PANTS_COLOR = "#2b2b3d"
 _MOUTH_COLOR = "#7a2f2f"
 _TEETH_COLOR = "#f2e9df"
 _EYE_COLOR = "#2a2a2a"
+_EYE_SCLERA_COLOR = "#f5f0e8"
+# Fraction of the eye contour's own bbox height -- how big a dark iris/pupil
+# circle to draw centered inside the sclera fill (see _draw_eye's own doc
+# comment for why a plain flat fill isn't enough here).
+_EYE_IRIS_RADIUS_FRACTION = 0.34
 _DEFAULT_BROW_COLOR = "#3a2a1f"
 _OUTLINE_COLOR = (0, 0, 0, 46)  # rgba(0,0,0,0.18) baked to RGBA
 
@@ -342,17 +347,38 @@ def _head_outline_mask(image_size: tuple[int, int], face_oval: list[Point], fall
 
 
 def _draw_eye(draw: ImageDraw.ImageDraw, points: list[Point]) -> None:
-    draw.polygon(_remap_all(points), fill=_EYE_COLOR)
+    """Fills the real per-person eye contour (mediapipe's palpebral-fissure
+    outline -- the eye OPENING's boundary, not an iris/pupil shape) with a
+    light sclera color, then draws a dark iris/pupil circle centered inside
+    it. Filling the whole contour with `_EYE_COLOR` (this function's
+    previous behavior) painted the entire eye -- whites included -- as one
+    flat dark shape: harmless for the hand-drawn seed skins' own fixed-size
+    eye dot (placeholderAtlas.ts's drawEyesOpen, which never claimed to be a
+    whole eye, just a small dot), but a real per-person contour is bigger
+    and more irregular, so the same flat-fill treatment reads as a solid
+    black blob instead of a natural eye."""
+    pixel_points = _remap_all(points)
+    draw.polygon(pixel_points, fill=_EYE_SCLERA_COLOR)
+    xs = [x for x, _ in pixel_points]
+    ys = [y for _, y in pixel_points]
+    cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+    radius = (max(ys) - min(ys)) * _EYE_IRIS_RADIUS_FRACTION
+    draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=_EYE_COLOR)
 
 
 def _draw_eyebrow(draw: ImageDraw.ImageDraw, points: list[Point], color: str) -> None:
     pixel_points = _remap_all(points)
     if len(pixel_points) < 2:
         return
-    draw.line(pixel_points, fill=color, width=4, joint="curve")
+    # width=7 (was 4) -- a real eyebrow is a hair BAND with visible thickness,
+    # not a hairline; a thin stroke read as noticeably thinner than the real
+    # brow already visible underneath in the photo-avatar path (the head
+    # crop is a real photo/cartoon that already shows the person's actual
+    # eyebrows), making this synthetic overlay look like it "misses" them.
+    draw.line(pixel_points, fill=color, width=7, joint="curve")
     # Round caps -- draw.line's joints round inner corners but not the two
     # open ends, which otherwise look like a chopped-off stroke.
-    radius = 2
+    radius = 3.5
     for x, y in (pixel_points[0], pixel_points[-1]):
         draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
 

@@ -63,6 +63,7 @@ import {
   type VideoOverlayClip,
 } from "@/lib/video/video_math";
 import { getTextTemplateFontFraction, getStrokeWidthFontSizeFraction } from "@/lib/video/textTemplates";
+import { stripScriptTagsForDisplay } from "@/lib/video/avatar/tags";
 import {
   BRAND_WATERMARK_TEXT,
   BRAND_WATERMARK_DURATION_SECONDS,
@@ -1275,7 +1276,7 @@ function buildTtsOverlayElements(
             track: captionTrack,
             time: range.outputStartSeconds,
             duration: durationSeconds,
-            text: overlay.text,
+            text: stripScriptTagsForDisplay(overlay.text),
             textWrap: true,
             fontSizeMinimum: "2vh",
             fontSizeMaximum: `${fontFraction * 100}vh`,

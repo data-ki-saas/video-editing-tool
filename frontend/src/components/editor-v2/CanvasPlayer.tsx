@@ -77,6 +77,7 @@ import { avatarCompileCacheKey, getCompiledAvatarForClip, type CompiledAvatar } 
 import { computeEyeShapeId, computeLayeredAvatarPose } from "@/lib/video/avatar/actions";
 import { resolveAvatarRenderState } from "@/lib/video/avatar/resolveAvatarRenderState";
 import { drawAvatar } from "@/lib/video/avatar/renderer";
+import { stripScriptTagsForDisplay } from "@/lib/video/avatar/tags";
 import { detectFaceGeometry, type FaceGeometry } from "@/lib/video/faceLandmarks";
 import { computeAudioEnvelope, sampleMusicClipsEnvelopeAt, audioReactiveScale, type AudioEnvelope } from "@/lib/video/audioReactive";
 import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
@@ -1630,7 +1631,7 @@ export const CanvasPlayer = forwardRef<
       if (!renderer) continue;
       renderer({
         ctx,
-        text: overlay.text,
+        text: stripScriptTagsForDisplay(overlay.text),
         rectPx,
         progress: computeProgress(overlay.startTimeSeconds, ttsOverlayEndTimeSeconds(overlay), elapsedSeconds),
       });

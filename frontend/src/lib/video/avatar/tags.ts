@@ -56,6 +56,27 @@ export const AVATAR_TAG_CATALOG: AvatarTagCatalogEntry[] = buildAvatarTagCatalog
 
 const TAG_RE = /\{([a-zA-Z][a-zA-Z0-9]*)\}/g;
 
+// Separate regex instance from TAG_RE -- that one's `lastIndex` is manually
+// managed by parseScriptTags' own exec loop below, and sharing a stateful
+// global regex between that loop and this one-shot `.replace` would corrupt
+// whichever ran second.
+const DISPLAY_STRIP_RE = /\{[a-zA-Z][a-zA-Z0-9]*\}/g;
+
+/** Strips "{tag}" markup out of a TTS overlay's persisted `text` for ON-SCREEN
+ * display only (the "background" static-caption render path) -- unlike
+ * parseScriptTags above, this doesn't need the tag catalog or word-index
+ * bookkeeping, since nothing here turns into a gesture/gaze/mood anchor;
+ * `TtsOverlay.text` itself deliberately keeps the raw, tagged text (so
+ * re-opening TtsOverlayDialog to edit a script doesn't lose the tags the
+ * user typed), so every renderer that burns that text onto the video
+ * (CanvasPlayer's live preview, exportTimeline's local render,
+ * compileCreatomateTimeline's Creatomate path) needs to call this first,
+ * the same way synthesis itself already only ever sees parseScriptTags'
+ * own `strippedText`. */
+export function stripScriptTagsForDisplay(text: string): string {
+  return text.replace(DISPLAY_STRIP_RE, "").replace(/[ \t]{2,}/g, " ").trim();
+}
+
 export interface ParsedTagAnchor {
   raw: string;
   layer: TagLayer;
