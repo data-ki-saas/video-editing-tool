@@ -13,16 +13,23 @@ face_shape bucket fields still drive a fallback drawing whenever no contour
 is available (detected=False; e.g. no face found).
 
 Eyebrows and eyes are their OWN swappable rects (mirrors
-placeholderAtlas.ts's "eyebrows"/"eyes" parts), not baked into the head --
-`_draw_face_features_layer` draws real per-person eyebrow/eye contours
-(`palette.left_eye`/`right_eye`/`left_eyebrow`/`right_eyebrow`, falling back
-to two dots for eyes / nothing for eyebrows when undetected) onto their own
-transparent layers at the same head-relative position they used to be baked
-at, and `_paste_cropped_bbox` crops+relocates each into its own small rect.
-Only "neutral" eyebrows and "eyeOpen" are ever real per-person art; the
-angry/happy/sad/eyeClosed variants are synthesized by `_draw_mood_eyebrow`/
-`_draw_closed_eye` (shared by both generators below), since neither has an
-actual photo of this avatar making those expressions to draw from instead.
+placeholderAtlas.ts's "eyebrows"/"eyes" parts), not baked into the head.
+build_atlas_png's head is entirely drawn (no real feature already sitting
+under these rects), so `_draw_face_features_layer` draws real per-person
+eyebrow/eye contours (`palette.left_eye`/`right_eye`/`left_eyebrow`/
+`right_eyebrow`, falling back to two dots for eyes / nothing for eyebrows
+when undetected) onto their own transparent layers, and `_paste_cropped_bbox`
+crops+relocates each into its own small rect -- "neutral" eyebrows and
+"eyeOpen" get this real per-person art; angry/happy/sad/eyeClosed (no actual
+photo of this avatar making those expressions to draw from instead) are
+synthesized by `_draw_mood_eyebrow`/`_draw_closed_eye`.
+build_atlas_png_from_photo's head, by contrast, IS a real (cartoonified)
+photo crop that already shows this exact person's real eyebrows/eyes --
+"neutral"/"eyeOpen" are left fully transparent there instead so those real
+features show through untouched, and every OTHER shape (angry/happy/sad,
+eyeClosed) is synthesized with its own opaque skin-tone backing (an optional
+`skin_tone` arg to `_draw_mood_eyebrow`/`_draw_closed_eye`) so it actually
+replaces the real feature instead of drawing across it.
 """
 
 from __future__ import annotations
@@ -366,6 +373,41 @@ def _draw_eye(draw: ImageDraw.ImageDraw, points: list[Point]) -> None:
     draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), fill=_EYE_COLOR)
 
 
+def _smooth_curve_points(points: list[tuple[float, float]], samples_per_segment: int = 8) -> list[tuple[float, float]]:
+    """Upsamples a sparse polyline into a smooth Catmull-Rom spline through
+    EVERY one of its original points -- PIL's ImageDraw has no bezier/spline
+    primitive, and connecting the raw points directly with straight
+    `draw.line` segments (`joint="curve"` only rounds the corner, it doesn't
+    smooth the path itself) reads as a jagged zigzag rather than a natural
+    brow arc, especially at mediapipe's sparse 5-point eyebrow resolution or
+    the synthetic mood-eyebrow curve's own 3 points. Falls back to the input
+    unchanged below 3 points, where "a curve" isn't a meaningful concept."""
+    if len(points) < 3:
+        return points
+    padded = [points[0], *points, points[-1]]
+    result: list[tuple[float, float]] = []
+    for i in range(1, len(padded) - 2):
+        p0, p1, p2, p3 = padded[i - 1], padded[i], padded[i + 1], padded[i + 2]
+        for s in range(samples_per_segment):
+            t = s / samples_per_segment
+            t2, t3 = t * t, t * t * t
+            x = 0.5 * (
+                2 * p1[0]
+                + (p2[0] - p0[0]) * t
+                + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2
+                + (3 * p1[0] - p0[0] - 3 * p2[0] + p3[0]) * t3
+            )
+            y = 0.5 * (
+                2 * p1[1]
+                + (p2[1] - p0[1]) * t
+                + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2
+                + (3 * p1[1] - p0[1] - 3 * p2[1] + p3[1]) * t3
+            )
+            result.append((x, y))
+    result.append(points[-1])
+    return result
+
+
 def _draw_eyebrow(draw: ImageDraw.ImageDraw, points: list[Point], color: str) -> None:
     pixel_points = _remap_all(points)
     if len(pixel_points) < 2:
@@ -375,7 +417,7 @@ def _draw_eyebrow(draw: ImageDraw.ImageDraw, points: list[Point], color: str) ->
     # brow already visible underneath in the photo-avatar path (the head
     # crop is a real photo/cartoon that already shows the person's actual
     # eyebrows), making this synthetic overlay look like it "misses" them.
-    draw.line(pixel_points, fill=color, width=7, joint="curve")
+    draw.line(_smooth_curve_points(pixel_points), fill=color, width=7, joint="curve")
     # Round caps -- draw.line's joints round inner corners but not the two
     # open ends, which otherwise look like a chopped-off stroke.
     radius = 3.5
@@ -526,7 +568,17 @@ _MOOD_EYEBROW_STYLES: dict[str, tuple[float, float, float]] = {
 }
 
 
-def _draw_mood_eyebrow(draw: ImageDraw.ImageDraw, rect: dict, style: str, color: str) -> None:
+def _draw_mood_eyebrow(draw: ImageDraw.ImageDraw, rect: dict, style: str, color: str, skin_tone: str | None = None) -> None:
+    """`skin_tone`, when given, first strokes the SAME curve much wider in
+    that color before drawing the real line -- an opaque backing so this
+    shape actually REPLACES a real photo eyebrow already sitting under this
+    rect (build_atlas_png_from_photo) rather than drawing across it. This
+    intentionally follows the curve's own footprint rather than filling the
+    whole `rect`: an earlier version flood-filled the entire rect, which
+    covers glasses-frame pixels that reach into this same rect but sit above
+    or below the eyebrow itself -- see [[project_avatar_photo_eyes_transparency_fix]]
+    for the real avatar this silently broke (the top rim of a pair of
+    glasses got erased whenever a mood beat fired)."""
     inner_y, outer_y, mid_y = _MOOD_EYEBROW_STYLES[style]
     center_x = rect["sx"] + rect["sWidth"] / 2
     center_y = rect["sy"] + rect["sHeight"] / 2
@@ -536,21 +588,42 @@ def _draw_mood_eyebrow(draw: ImageDraw.ImageDraw, rect: dict, style: str, color:
         mid_x = center_x + sign * offset_x
         inner_x = mid_x - sign * span
         outer_x = mid_x + sign * span
-        # PIL's ImageDraw has no quadratic-bezier primitive -- a 3-point
-        # polyline through the same mid control point placeholderAtlas.ts's
-        # quadraticCurveTo uses is close enough at this stroke width/size to
-        # read identically.
-        draw.line([(inner_x, center_y + inner_y), (mid_x, center_y + mid_y), (outer_x, center_y + outer_y)], fill=color, width=3, joint="curve")
+        # A plain 3-point polyline through (inner, mid, outer) draws a sharp
+        # angular corner AT mid, not the smooth arc placeholderAtlas.ts's own
+        # real `quadraticCurveTo` draws through the same 3 points -- PIL has
+        # no bezier primitive, so `_smooth_curve_points` approximates one by
+        # upsampling a Catmull-Rom spline through these same points instead.
+        curve = _smooth_curve_points([(inner_x, center_y + inner_y), (mid_x, center_y + mid_y), (outer_x, center_y + outer_y)])
+        if skin_tone:
+            draw.line(curve, fill=skin_tone, width=12, joint="curve")
+        draw.line(curve, fill=color, width=3, joint="curve")
 
 
-def _draw_closed_eye(draw: ImageDraw.ImageDraw, rect: dict) -> None:
+def _draw_closed_eye(draw: ImageDraw.ImageDraw, rect: dict, skin_tone: str | None = None) -> None:
     """Mirrors placeholderAtlas.ts's own drawEyesClosed -- a short curved
     eyelid line in place of the open dot, always `_EYE_COLOR` (eyes are
-    never palette-recolored, same as the seed skins)."""
+    never palette-recolored, same as the seed skins). `skin_tone`, when
+    given, first fills the WHOLE `rect` -- an opaque backing so this shape
+    actually REPLACES a real (still open, per the underlying photo) eye
+    already sitting under this rect (build_atlas_png_from_photo) rather than
+    drawing a line across it. A full rect, not an inset shape: `eye_crop_box`
+    is a tight, unpadded bbox around the real detected contour, so tried an
+    inset ellipse first, sized to leave a glasses frame's rim uncovered --
+    that left a visible sliver of the real (open) eye's white sclera peeking
+    out past the ellipse instead, which reads as far more broken than a
+    glasses frame losing a small piece of its rim near the eye. Empirically,
+    that risk is much smaller here than for `_draw_mood_eyebrow`'s own
+    backing: a lens's glass opening is usually bigger than the eye's own
+    tight bbox, so a full-rect eye patch tends to land inside the lens,
+    nowhere near the frame's rim -- see [[project_avatar_photo_eyes_transparency_fix]]
+    for the real avatar this was checked against."""
     center_x = rect["sx"] + rect["sWidth"] / 2
     center_y = rect["sy"] + rect["sHeight"] / 2
     offset_x = 20
     radius = 7
+    if skin_tone:
+        x0, y0, x1, y1 = _box(rect)
+        draw.rectangle((x0, y0, x1, y1), fill=skin_tone)
     for sign in (-1, 1):
         mid_x = center_x + sign * offset_x
         draw.line([(mid_x - radius, center_y), (mid_x, center_y + 2), (mid_x + radius, center_y)], fill=_EYE_COLOR, width=2, joint="curve")
@@ -842,27 +915,42 @@ def build_atlas_png_from_photo(
     image.paste(mouth_open.convert("RGBA"), (MOUTH_OPEN_RECT["sx"], MOUTH_OPEN_RECT["sy"]))
     mouth_pivot = _compute_photo_part_pivot(palette.head_crop_box, palette.mouth_crop_box, MOUTH_CLOSED_RECT)
 
-    # `palette` here was computed by re-running face analysis on THIS SAME
-    # cartoonified image (see service.py's `_cartoonify_and_crop`: `analyze_photo(cartoon_bytes)`),
-    # so its left_eye/right_eye/left_eyebrow/right_eyebrow are real per-person
-    # contours detected on the actual generated head, in the exact same
-    # `_remap`-relative coordinate space build_atlas_png's own parametric
-    # path uses -- the same `_draw_face_features_layer`/`_paste_cropped_bbox`
-    # pipeline applies unchanged, no separate photo-specific eyebrow/eye
-    # logic needed. Only the "neutral"/"eyeOpen" shapes are ever real crops;
-    # there's no actual photo of this avatar looking angry/happy/sad, so
-    # those three (and "eyeClosed") are synthesized exactly like the
-    # parametric path's own.
+    # UNLIKE build_atlas_png's fully-synthetic path above, this "head" IS a
+    # real (cartoonified) photo crop that already shows this exact person's
+    # own real eyebrows/eyes baked into its pixels. EYEBROWS_NEUTRAL_RECT and
+    # EYES_OPEN_RECT are therefore left FULLY TRANSPARENT below whenever a
+    # real contour was detected (the normal case) -- painting a synthetic
+    # redraw on top of them (this function's old behavior, still correct for
+    # build_atlas_png's plain drawn head, which has no real feature to defer
+    # to) covered a correct, real feature with a cruder approximation that
+    # never quite matched its real position/size/color, so the real one kept
+    # visibly peeking out from behind it. That mismatch is worst exactly when
+    # the eye "blinks": `_draw_closed_eye`'s bare line drew on top of an
+    # otherwise-transparent layer, which never actually covered the
+    # still-open real eye underneath -- so blinking looked like a stray dark
+    # line crossing an eye that never closed. Passing `skin_tone` below fixes
+    # that half by backing the same line/curve with an opaque patch (see
+    # `_draw_closed_eye`/`_draw_mood_eyebrow`'s own doc comments -- this
+    # patch deliberately follows each shape's own footprint rather than
+    # flood-filling the whole rect, since a real pair of glasses can extend
+    # into these same rects beyond the eye/eyebrow itself).
+    # `_draw_face_features_layer`'s fallback (two dots for eyes, nothing for
+    # eyebrows) only fires below on the rarer partially-obscured-face case
+    # where mediapipe couldn't trace a contour at all -- there's no real
+    # feature already visible then, so a generic synthetic one is better
+    # than nothing.
     brow_color = palette.hair_tone or _DEFAULT_BROW_COLOR
     eyebrows_layer, eyes_layer = _draw_face_features_layer(
         image.size, palette.left_eye, palette.right_eye, palette.left_eyebrow, palette.right_eyebrow, palette.face_width_scale, brow_color
     )
-    _paste_cropped_bbox(image, eyebrows_layer, EYEBROWS_NEUTRAL_RECT)
-    _paste_cropped_bbox(image, eyes_layer, EYES_OPEN_RECT)
-    _draw_mood_eyebrow(draw, EYEBROWS_ANGRY_RECT, "angry", brow_color)
-    _draw_mood_eyebrow(draw, EYEBROWS_HAPPY_RECT, "happy", brow_color)
-    _draw_mood_eyebrow(draw, EYEBROWS_SAD_RECT, "sad", brow_color)
-    _draw_closed_eye(draw, EYES_CLOSED_RECT)
+    if not palette.eyebrow_crop_box:
+        _paste_cropped_bbox(image, eyebrows_layer, EYEBROWS_NEUTRAL_RECT)
+    if not palette.eye_crop_box:
+        _paste_cropped_bbox(image, eyes_layer, EYES_OPEN_RECT)
+    _draw_mood_eyebrow(draw, EYEBROWS_ANGRY_RECT, "angry", brow_color, skin_tone=palette.skin_tone)
+    _draw_mood_eyebrow(draw, EYEBROWS_HAPPY_RECT, "happy", brow_color, skin_tone=palette.skin_tone)
+    _draw_mood_eyebrow(draw, EYEBROWS_SAD_RECT, "sad", brow_color, skin_tone=palette.skin_tone)
+    _draw_closed_eye(draw, EYES_CLOSED_RECT, skin_tone=palette.skin_tone)
     eyebrows_pivot = (
         _compute_photo_part_pivot(palette.head_crop_box, palette.eyebrow_crop_box, EYEBROWS_NEUTRAL_RECT)
         if palette.eyebrow_crop_box
