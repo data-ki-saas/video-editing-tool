@@ -457,11 +457,19 @@ _FACE_FEATURE_CROP_PAD = 6
 
 def _paste_cropped_bbox(dest_image: Image.Image, layer: Image.Image, dest_rect: dict) -> None:
     """Crops `layer` to its own drawn content's tight bounding box (padded a
-    few px) and resizes that crop to fill `dest_rect` exactly, pasting it
-    into `dest_image` -- the actual mechanism behind moving eyebrows/eyes out
-    of the baked head rect and into their own small swappable ones. A
-    completely blank layer (`getbbox()` returns None -- e.g. no eyebrows
-    detected at all) leaves `dest_rect` untouched/transparent, same
+    few px) and pastes it, CENTERED, into `dest_image` at `dest_rect` -- the
+    actual mechanism behind moving eyebrows/eyes out of the baked head rect
+    and into their own small swappable ones. Scales uniformly (by whichever
+    axis is more constrained) rather than resizing to `dest_rect`'s exact
+    width AND height, which would stretch/squash the crop whenever its own
+    aspect ratio doesn't happen to match `dest_rect`'s fixed one -- a real
+    per-person eye/eyebrow contour's bbox aspect ratio varies per photo, so a
+    non-uniform resize was warping eyes into a visibly wrong (stretched or
+    squashed) shape. Centering (rather than anchoring to `dest_rect`'s
+    corner) keeps this consistent with `_compute_photo_part_pivot`, which
+    already assumes the pasted content's center sits at `dest_rect`'s own
+    center. A completely blank layer (`getbbox()` returns None -- e.g. no
+    eyebrows detected at all) leaves `dest_rect` untouched/transparent, same
     "nothing to draw" behavior `_draw_head` always had for a missing
     eyebrow."""
     bbox = layer.getbbox()
@@ -470,8 +478,13 @@ def _paste_cropped_bbox(dest_image: Image.Image, layer: Image.Image, dest_rect: 
     x0, y0, x1, y1 = bbox
     x0, y0 = max(0, x0 - _FACE_FEATURE_CROP_PAD), max(0, y0 - _FACE_FEATURE_CROP_PAD)
     x1, y1 = min(layer.width, x1 + _FACE_FEATURE_CROP_PAD), min(layer.height, y1 + _FACE_FEATURE_CROP_PAD)
-    cropped = layer.crop((x0, y0, x1, y1)).resize((dest_rect["sWidth"], dest_rect["sHeight"]), Image.LANCZOS)
-    dest_image.paste(cropped, (dest_rect["sx"], dest_rect["sy"]), cropped)
+    cropped = layer.crop((x0, y0, x1, y1))
+    scale = min(dest_rect["sWidth"] / cropped.width, dest_rect["sHeight"] / cropped.height)
+    scaled_width, scaled_height = max(1, round(cropped.width * scale)), max(1, round(cropped.height * scale))
+    scaled = cropped.resize((scaled_width, scaled_height), Image.LANCZOS)
+    paste_x = dest_rect["sx"] + (dest_rect["sWidth"] - scaled_width) // 2
+    paste_y = dest_rect["sy"] + (dest_rect["sHeight"] - scaled_height) // 2
+    dest_image.paste(scaled, (paste_x, paste_y), scaled)
 
 
 # Synthetic mood-eyebrow variants -- shared by both generators below, since
