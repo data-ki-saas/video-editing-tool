@@ -663,6 +663,19 @@ export function ThreePaneEditor({
     [rawSelections]
   );
 
+  // Backfills a stable id for a project saved before TtsOverlay carried one
+  // (see that field's own doc comment in video_math.ts) -- needed now that
+  // AvatarOverlayClip.ttsOverlayId ties an avatar to one specific narration
+  // BY id rather than by array position. Same "settle into history on the
+  // next edit" convention as videoOverlays/overlayImages' own id backfill
+  // above -- memoized on rawSelections so re-renders (e.g. every playhead
+  // tick) don't mint a fresh id that a live-edit index (editingTtsOverlayIndex,
+  // liveTtsOverlayPositionEdit, ...) would then silently stop matching.
+  const ttsOverlays: TtsOverlay[] = useMemo(
+    () => (rawSelections.ttsOverlays ?? []).map((overlay) => (overlay.id ? overlay : { ...overlay, id: crypto.randomUUID() })),
+    [rawSelections]
+  );
+
   const selections: EditSelectionsSnapshot = {
     clipRectId: rawSelections.clipRectId ?? null,
     cropRect: rawSelections.cropRect ?? null,
@@ -672,7 +685,7 @@ export function ThreePaneEditor({
     trimRanges: rawSelections.trimRanges ?? [],
     overlayImages,
     textOverlays: rawSelections.textOverlays ?? [],
-    ttsOverlays: rawSelections.ttsOverlays ?? [],
+    ttsOverlays,
     // No ThreePaneEditor editing UI for these yet (no drag/resize handles,
     // no picker dialog) -- round-tripped unchanged, same "carry it through,
     // never touch it" treatment musicClips' own comment below describes.
@@ -2501,12 +2514,23 @@ export function ThreePaneEditor({
     defaultAction: AvatarActionId | (string & {}),
     rect: CropRect,
     designOverrides?: AvatarDesignOverrides,
-    framing?: "full" | "bust"
+    framing?: "full" | "bust",
+    ttsOverlayId?: string | null
   ) {
     const { label, state } =
       editingAvatarOverlayIndex !== null
-        ? applyEditAvatarOverlay(selections, editingAvatarOverlayIndex, avatarId, defaultAction, rect, designOverrides, framing)
-        : applyAddAvatarOverlay(selections, avatarId, defaultAction, currentTimeSeconds, videoDurationSeconds, rect, designOverrides, framing);
+        ? applyEditAvatarOverlay(selections, editingAvatarOverlayIndex, avatarId, defaultAction, rect, designOverrides, framing, ttsOverlayId)
+        : applyAddAvatarOverlay(
+            selections,
+            avatarId,
+            defaultAction,
+            currentTimeSeconds,
+            videoDurationSeconds,
+            rect,
+            designOverrides,
+            framing,
+            ttsOverlayId
+          );
     pushChange(label, state);
     setIsAvatarDialogOpen(false);
     setEditingAvatarOverlayIndex(null);

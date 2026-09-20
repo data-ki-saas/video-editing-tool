@@ -355,6 +355,7 @@ export default function NewReelPage() {
             // backend's own estimate can drift from the actual mp3 length.
             const durationSeconds = await getAudioDuration(synthesis.url).catch(() => synthesis.durationSeconds);
             narration = {
+              id: crypto.randomUUID(),
               text: narrationText,
               voice: narrationVoice,
               assetId: synthesis.assetId,

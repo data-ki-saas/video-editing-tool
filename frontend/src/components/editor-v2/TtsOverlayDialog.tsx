@@ -291,6 +291,7 @@ export function TtsOverlayDialog({
   function handleSave() {
     if (!canSave || !synthesis) return;
     const overlay: TtsOverlay = {
+      id: editingOverlay?.id ?? crypto.randomUUID(),
       text: trimmedText,
       voice,
       assetId: synthesis.assetId,

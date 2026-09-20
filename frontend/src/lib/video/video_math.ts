@@ -1113,6 +1113,15 @@ export interface TtsWordTiming {
  * made optional so every TtsOverlay still has one consistent shape).
  */
 export interface TtsOverlay {
+  // Lets an AvatarOverlayClip tie itself to THIS exact narration
+  // (AvatarOverlayClip.ttsOverlayId below) rather than the old "whichever
+  // narration happens to overlap in time" heuristic -- needed once a reel
+  // can have more than one avatar and more than one narration at once (two
+  // characters each speaking their own script, or a third just hanging
+  // around with none). Backfilled for any overlay authored before this
+  // field existed (see ThreePaneEditor.tsx's ttsOverlays useMemo, same
+  // pattern as VideoOverlayClip/ImageOverlayClip's own id backfill).
+  id: string;
   text: string;
   voice: string;
   assetId: string;
@@ -1271,6 +1280,22 @@ export interface AvatarOverlayClip {
   gestureTimeline?: AvatarGestureBeat[];
   gazeTimeline?: AvatarGazeBeat[];
   moodTimeline?: AvatarMoodBeat[];
+  // Which single TtsOverlay (by its own `id` above) this avatar lip-syncs
+  // to -- lets a reel place several avatars that each speak a DIFFERENT
+  // script, or one that speaks none at all, without the old ambiguity of
+  // "whichever narration happens to overlap this clip's time range" (see
+  // resolveTiedNarration below). Three distinct states, not just set/unset:
+  //  - `undefined` (every clip persisted before this field existed, or a
+  //    newly-added one that hasn't been pointed at a script yet) -- "Auto":
+  //    falls back to the legacy time-overlap heuristic
+  //    (findOverlappingTtsOverlay), which is unambiguous for the common
+  //    single-avatar/single-narration case.
+  //  - a real TtsOverlay id -- tied explicitly to that one narration,
+  //    regardless of which OTHER narrations happen to overlap in time.
+  //  - `null` -- explicitly untied ("just hang around"): never lip-syncs to
+  //    any narration, even one that time-overlaps it; plays its own
+  //    `defaultAction`/timelines only.
+  ttsOverlayId?: string | null;
 }
 
 export interface AvatarGestureBeat {
@@ -1318,6 +1343,20 @@ export function findOverlappingTtsOverlay(overlays: TtsOverlay[], clip: AvatarOv
     (overlay) => overlay.startTimeSeconds < clip.endTimeSeconds && ttsOverlayEndTimeSeconds(overlay) > clip.startTimeSeconds
   );
   return candidates.length > 0 ? candidates[0] : null;
+}
+
+/** The ONE narration `clip` should lip-sync to, honoring its own
+ * `ttsOverlayId` tie (see that field's own doc comment) -- the single place
+ * that three-state resolution happens, so avatar/resolveAvatarRenderState.ts
+ * (live mouth-sync) and AvatarFramingDialog.tsx ("Direct with AI") never
+ * disagree on which script directs a given avatar. Returns null for both
+ * "explicitly untied" and "tied to an id that no longer resolves" (e.g. the
+ * narration it pointed at was since deleted) -- either way, this avatar has
+ * no narration right now, same as never having been tied at all. */
+export function resolveTiedNarration(clip: AvatarOverlayClip, ttsOverlays: TtsOverlay[]): TtsOverlay | null {
+  if (clip.ttsOverlayId === null) return null;
+  if (clip.ttsOverlayId) return ttsOverlays.find((overlay) => overlay.id === clip.ttsOverlayId) ?? null;
+  return findOverlappingTtsOverlay(ttsOverlays, clip);
 }
 
 /** The reverse query -- every avatar overlay clip whose time range overlaps

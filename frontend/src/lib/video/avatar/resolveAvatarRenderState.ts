@@ -13,10 +13,12 @@
  *  - the clip's OWN persisted gestureTimeline/gazeTimeline/moodTimeline
  *    (AvatarFramingDialog's generalized "Direct with AI").
  *  - tag-derived beats reconstructed fresh, every call, from whichever TTS
- *    overlay overlaps this clip (findOverlappingTtsOverlay) reading that
- *    overlay's own tagAnchors (avatar/tags.ts) -- never persisted onto the
- *    clip itself, so editing the narration's tags always changes what plays
- *    with no separate re-sync step.
+ *    overlay this clip is TIED to (resolveTiedNarration -- an explicit
+ *    ttsOverlayId, or the legacy time-overlap heuristic for "Auto", see
+ *    that field's own doc comment in video_math.ts) reading that overlay's
+ *    own tagAnchors (avatar/tags.ts) -- never persisted onto the clip
+ *    itself, so editing the narration's tags always changes what plays with
+ *    no separate re-sync step.
  * Tag-derived beats win outright on overlap with a persisted beat in the
  * same layer -- an explicit `{angry}` in the script is a more direct
  * instruction than whatever the LLM director proposed for that stretch.
@@ -30,9 +32,9 @@ import {
 import type { CompiledTopology } from "./compile";
 import type { ActionCurveSpec } from "./topology";
 import {
-  findActiveTtsOverlays,
   findActiveWordIndex,
-  findOverlappingTtsOverlay,
+  resolveTiedNarration,
+  ttsOverlayEndTimeSeconds,
   type AvatarOverlayClip,
   type ResolvedTagAnchor,
   type TtsOverlay,
@@ -134,21 +136,33 @@ export function tagAnchorsToBeats(
   });
 }
 
-/** Everything resolveAvatarTalkState used to compute, verbatim -- the
- * clip's own actionTimeline beat (if any covers this instant) wins outright
- * for the posture action; mouth shape stays independently word-driven
- * whenever a narration word is actively playing, regardless of which
- * posture/gesture/gaze/mood ends up active. See this module's own doc
- * comment above for the full precedence (unchanged from before this
- * redesign). */
+/** Everything resolveAvatarTalkState used to compute -- the clip's own
+ * actionTimeline beat (if any covers this instant) wins outright for the
+ * posture action; mouth shape stays independently word-driven whenever a
+ * narration word is actively playing, regardless of which posture/gesture/
+ * gaze/mood ends up active. See this module's own doc comment above for the
+ * full precedence.
+ *
+ * Unlike before the multi-avatar tie (`AvatarOverlayClip.ttsOverlayId`,
+ * video_math.ts), "is there a narration at all" is now resolved PER CLIP
+ * (resolveTiedNarration) rather than by scanning every TtsOverlay in the
+ * project for whichever happens to be active at this instant -- two avatars
+ * on screen together, each tied to their own script, no longer fight over
+ * `candidates[0]` of the same global list. A clip with no tie at all (an
+ * explicit `ttsOverlayId: null`, or "Auto" finding nothing overlapping it)
+ * just plays its own `defaultAction`, regardless of what any OTHER avatar's
+ * narration is doing elsewhere in the timeline -- this is the "hang around"
+ * case.
+ */
 function resolvePostureAndMouth(
   clip: AvatarOverlayClip,
   ttsOverlays: TtsOverlay[],
   sequenceTimeSeconds: number,
   localElapsed: number
 ): { postureActionId: string; mouthShapeId: string } {
-  const candidates = findActiveTtsOverlays(ttsOverlays, sequenceTimeSeconds);
-  const narration = candidates.length > 0 ? candidates[0] : null;
+  const tied = resolveTiedNarration(clip, ttsOverlays);
+  const narration =
+    tied && sequenceTimeSeconds >= tied.startTimeSeconds && sequenceTimeSeconds < ttsOverlayEndTimeSeconds(tied) ? tied : null;
   const wordIndex = narration ? findActiveWordIndex(narration, sequenceTimeSeconds) : -1;
 
   function wordMouthShapeId(): string | null {
@@ -166,7 +180,7 @@ function resolvePostureAndMouth(
   }
 
   if (!narration) {
-    if (ttsOverlays.length === 0) {
+    if (!tied) {
       return { postureActionId: clip.defaultAction, mouthShapeId: computeMouthShapeId(clip.defaultAction, localElapsed) };
     }
     return { postureActionId: "idle", mouthShapeId: computeMouthShapeId("idle", localElapsed) };
@@ -188,7 +202,7 @@ export function resolveAvatarRenderState(
 ): AvatarRenderState {
   const { postureActionId, mouthShapeId } = resolvePostureAndMouth(clip, ttsOverlays, sequenceTimeSeconds, localElapsed);
 
-  const overlappingNarration = findOverlappingTtsOverlay(ttsOverlays, clip);
+  const overlappingNarration = resolveTiedNarration(clip, ttsOverlays);
   // Tag anchors are authored relative to the NARRATION's own start
   // (ResolvedTagAnchor.triggerMs); every beat this resolver works with is
   // relative to the CLIP's own start (same convention actionTimeline already

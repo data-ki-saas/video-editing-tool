@@ -66,7 +66,7 @@ import { ACCESSORY_CATALOG } from "@/lib/video/avatar/accessories";
 import { ambientEffectSeed } from "@/lib/video/ambientEffects";
 import {
   DEFAULT_AVATAR_OVERLAY_RECT,
-  findOverlappingTtsOverlay,
+  resolveTiedNarration,
   type AvatarAction,
   type AvatarGazeBeat,
   type AvatarGestureBeat,
@@ -128,6 +128,26 @@ function humanizeActionId(actionId: string): string {
 function garmentLabel(shapeId: string): string {
   return GARMENT_LABELS[shapeId] ?? humanizeActionId(shapeId);
 }
+
+// "Speaks" picker option label -- start time (mm:ss, same clock every other
+// timeline control in this editor uses) plus a short preview of the actual
+// script, so a reel with several narrations reads as "which one" at a
+// glance rather than a list of interchangeable "Narration" entries.
+function ttsOverlayOptionLabel(overlay: TtsOverlay): string {
+  const minutes = Math.floor(overlay.startTimeSeconds / 60);
+  const seconds = Math.floor(overlay.startTimeSeconds % 60)
+    .toString()
+    .padStart(2, "0");
+  const preview = overlay.text.trim();
+  const truncated = preview.length > 40 ? `${preview.slice(0, 40)}…` : preview;
+  return `${minutes}:${seconds} — "${truncated || "(empty)"}"`;
+}
+
+// Sentinel option values -- a plain <select> can't carry `undefined`/`null`
+// as a real option value, so these stand in for ttsOverlayId's own "Auto"
+// and "hang around" states (see that field's own doc comment).
+const SPEAKS_AUTO_VALUE = "__auto__";
+const SPEAKS_NONE_VALUE = "__none__";
 
 // The actual pickable action ids for whichever avatar is CURRENTLY
 // selected -- derived from that avatar's own resolved topology (Object.keys
@@ -311,8 +331,9 @@ export function AvatarFramingDialog({
   // exported reel, not previewFrameUrl's full, uncropped frame. Null (no
   // clip rectangle chosen yet) simply skips the guide.
   cropRect: CropRect | null;
-  // Needed only for "Direct with AI" below (findOverlappingTtsOverlay) --
-  // every other prop here is unrelated to narration.
+  // Populates the "Speaks" picker below (which narration this avatar ties
+  // itself to) and, via resolveTiedNarration, "Direct with AI" -- every
+  // other prop here is unrelated to narration.
   ttsOverlays: TtsOverlay[];
   // `designOverrides` (Phase 7) is only ever passed when this dialog's own
   // "Edit with AI" panel actually produced at least one real override --
@@ -324,7 +345,8 @@ export function AvatarFramingDialog({
     defaultAction: AvatarActionId | (string & {}),
     rect: CropRect,
     designOverrides?: AvatarDesignOverrides,
-    framing?: "full" | "bust"
+    framing?: "full" | "bust",
+    ttsOverlayId?: string | null
   ) => void;
   onClose: () => void;
   // Only ever passed (and only ever rendered, see the button row below) when
@@ -337,8 +359,8 @@ export function AvatarFramingDialog({
   // (applyDirectAvatarLayers), never folded into onSave since direction
   // doesn't touch avatarId/defaultAction/rect at all. Same "only when editing
   // an already-added overlay" gating as onDelete -- a brand-new, not-yet-
-  // saved overlay has no committed time range yet for findOverlappingTtsOverlay
-  // to match against.
+  // saved overlay has no committed time range yet for resolveTiedNarration's
+  // own "Auto" fallback to match against.
   onDirect?: (layers: AvatarDirectedLayers) => void;
 }) {
   const [avatarId, setAvatarId] = useState(editingOverlay?.avatarId ?? AVATAR_LIBRARY[0]?.design.designId ?? "");
@@ -360,6 +382,12 @@ export function AvatarFramingDialog({
   // (AvatarPreviewCanvas below) before ever being committed to the clip on
   // Save. Starts from whatever the overlay being edited already carries.
   const [pendingOverrides, setPendingOverrides] = useState<AvatarDesignOverrides>(editingOverlay?.designOverrides ?? {});
+  // Which narration this avatar speaks -- `undefined` ("Auto", the default
+  // for a brand-new overlay too) means fall back to the legacy time-overlap
+  // heuristic, `null` means "doesn't speak, just hangs around", a string is
+  // an explicit tie to one of `ttsOverlays` by its own id. See
+  // AvatarOverlayClip.ttsOverlayId's own doc comment (video_math.ts).
+  const [ttsOverlayId, setTtsOverlayId] = useState<string | null | undefined>(editingOverlay?.ttsOverlayId);
 
   // Re-syncs if a different overlay is opened for editing (or the dialog is
   // reopened fresh for "Add") while already mounted -- same convention as
@@ -371,6 +399,7 @@ export function AvatarFramingDialog({
     setRect(editingOverlay?.rect ?? DEFAULT_AVATAR_OVERLAY_RECT);
     setPendingOverrides(editingOverlay?.designOverrides ?? {});
     setFraming(editingOverlay?.framing ?? "full");
+    setTtsOverlayId(editingOverlay?.ttsOverlayId);
   }, [editingOverlay]);
 
   // Switching to a DIFFERENT character mid-dialog clears any pending
@@ -527,14 +556,20 @@ export function AvatarFramingDialog({
 
   function handleSave() {
     if (!canSave) return;
-    onSave(avatarId, defaultAction, rect, hasAnyDesignOverride(pendingOverrides) ? pendingOverrides : undefined, framing);
+    onSave(avatarId, defaultAction, rect, hasAnyDesignOverride(pendingOverrides) ? pendingOverrides : undefined, framing, ttsOverlayId);
   }
 
-  // "Direct with AI" (Phase 4) -- the narration this clip's own committed
-  // time range overlaps, if any (see findOverlappingTtsOverlay's own doc
-  // comment). Only meaningful for an already-added overlay (editingOverlay),
-  // same as onDirect itself.
-  const overlappingNarration = editingOverlay ? findOverlappingTtsOverlay(ttsOverlays, editingOverlay) : null;
+  // "Direct with AI" (Phase 4) -- the narration this clip is tied to, if any
+  // (see resolveTiedNarration's own doc comment: honors the explicit
+  // "Speaks" pick above, falling back to the legacy time-overlap heuristic
+  // for "Auto"). Only meaningful for an already-added overlay
+  // (editingOverlay), same as onDirect itself -- a brand-new, not-yet-saved
+  // overlay has no committed time range for the "Auto" fallback to match
+  // against, and resolveTiedNarration needs a real clip to check `rect`/time
+  // range against either way.
+  const overlappingNarration = editingOverlay
+    ? resolveTiedNarration({ ...editingOverlay, ttsOverlayId }, ttsOverlays)
+    : null;
 
   const [isDirecting, setIsDirecting] = useState(false);
   const [directError, setDirectError] = useState<string | null>(null);
@@ -1016,6 +1051,34 @@ export function AvatarFramingDialog({
                 </div>
               </div>
             </div>
+
+            {/* Which narration (if any) this avatar lip-syncs to -- lets a
+                reel place several avatars that each speak a DIFFERENT
+                script, or one that speaks none at all ("just hangs
+                around"), instead of the old implicit "whichever narration
+                happens to overlap in time" guess. A <select> rather than a
+                button row (like Framing/Outfit above) since the option list
+                is dynamic-length and can get long with several narrations
+                on the timeline. */}
+            <label className="mb-3 flex flex-col gap-1 text-xs text-muted">
+              <span className="font-medium text-foreground">Speaks</span>
+              <select
+                value={ttsOverlayId === null ? SPEAKS_NONE_VALUE : (ttsOverlayId ?? SPEAKS_AUTO_VALUE)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setTtsOverlayId(value === SPEAKS_AUTO_VALUE ? undefined : value === SPEAKS_NONE_VALUE ? null : value);
+                }}
+                className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+              >
+                <option value={SPEAKS_AUTO_VALUE}>Auto (whichever narration overlaps in time)</option>
+                {ttsOverlays.map((overlay) => (
+                  <option key={overlay.id} value={overlay.id}>
+                    {ttsOverlayOptionLabel(overlay)}
+                  </option>
+                ))}
+                <option value={SPEAKS_NONE_VALUE}>Doesn&rsquo;t speak — just hangs around</option>
+              </select>
+            </label>
 
             {editingOverlay && onDirect && (
               <div className="mb-3">

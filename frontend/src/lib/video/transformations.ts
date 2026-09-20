@@ -1596,7 +1596,12 @@ export function applyAddAvatarOverlay(
   // Phase 8 ("Portrait mode") -- omitted (undefined) means "full", same as
   // every clip persisted before this phase (video_math.ts's own doc comment
   // on AvatarOverlayClip.framing).
-  framing?: "full" | "bust"
+  framing?: "full" | "bust",
+  // Which narration this avatar speaks -- undefined ("Auto") is
+  // AvatarFramingDialog's own default for a brand-new overlay, same
+  // legacy-heuristic meaning as any pre-existing clip that never set this
+  // field (see AvatarOverlayClip.ttsOverlayId's own doc comment).
+  ttsOverlayId?: string | null
 ): TransformationResult {
   const startTimeSeconds = currentTimeSeconds;
   const endTimeSeconds = Math.min(
@@ -1612,6 +1617,7 @@ export function applyAddAvatarOverlay(
     defaultAction,
     designOverrides,
     framing,
+    ttsOverlayId,
   };
   return {
     label: "Added avatar",
@@ -1643,7 +1649,12 @@ export function applyEditAvatarOverlay(
   // Phase 8 -- same "always replaces, including back to undefined/full" rule
   // as designOverrides above (AvatarFramingDialog is this field's only
   // writer too, and always passes its own current framing state).
-  framing?: "full" | "bust"
+  framing?: "full" | "bust",
+  // Same "always replaces" rule as designOverrides/framing above -- the
+  // dialog's picker always passes its own current pick, including back to
+  // `undefined` ("Auto") or `null` ("hang around") if that's what the
+  // creator chose, not just a real id.
+  ttsOverlayId?: string | null
 ): TransformationResult {
   const overlay = selections.avatarOverlays[overlayIndex];
   if (!overlay) return { label: "Edited avatar", state: selections };
@@ -1655,6 +1666,7 @@ export function applyEditAvatarOverlay(
     ...(rect ? { rect } : {}),
     designOverrides,
     framing,
+    ttsOverlayId,
   };
   return { label: "Edited avatar", state: { ...selections, avatarOverlays: nextOverlays } };
 }
