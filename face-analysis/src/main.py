@@ -32,6 +32,8 @@ class FacePaletteResponse(BaseModel):
     nose_center: Point
     head_crop_box: _Box | None
     mouth_crop_box: _Box | None
+    eyebrow_crop_box: _Box | None
+    eye_crop_box: _Box | None
     background_rgb: tuple[int, int, int] | None
 
 
@@ -67,5 +69,7 @@ async def analyze(file: UploadFile = File(...)) -> FacePaletteResponse:
         nose_center=palette.nose_center,
         head_crop_box=palette.head_crop_box,
         mouth_crop_box=palette.mouth_crop_box,
+        eyebrow_crop_box=palette.eyebrow_crop_box,
+        eye_crop_box=palette.eye_crop_box,
         background_rgb=palette.background_rgb,
     )

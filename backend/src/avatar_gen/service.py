@@ -85,16 +85,27 @@ _EXPRESSION_SHAPES = [
 ]
 
 
-def _parts_for(mouth_pivot: tuple[float, float] | None) -> list[dict]:
-    """`_PARTS`, with the "mouth" entry's pivot overridden when
-    `mouth_pivot` is given (the fal.ai photo path -- see
-    build_atlas_png_from_photo's own doc comment). `None` for the
-    parametric path, where `_PARTS`' own fixed mouth pivot is already
-    correct by construction."""
-    if mouth_pivot is None:
+def _parts_for(
+    mouth_pivot: tuple[float, float] | None,
+    eyebrows_pivot: tuple[float, float] | None = None,
+    eyes_pivot: tuple[float, float] | None = None,
+) -> list[dict]:
+    """`_PARTS`, with the "mouth"/"eyebrows"/"eyes" entries' pivots
+    overridden when given (the fal.ai photo path -- see
+    build_atlas_png_from_photo's own doc comment). Each left `None` (the
+    parametric path, or a photo where that particular feature wasn't
+    detected) keeps `_PARTS`' own fixed pivot for that part, which is already
+    correct by construction for the parametric path."""
+    overrides = {"mouth": mouth_pivot, "eyebrows": eyebrows_pivot, "eyes": eyes_pivot}
+    if not any(overrides.values()):
         return _PARTS
-    pivot_x, pivot_y = mouth_pivot
-    return [{**part, "pivotX": pivot_x, "pivotY": pivot_y} if part["partId"] == "mouth" else part for part in _PARTS]
+
+    def _apply(part: dict) -> dict:
+        pivot = overrides.get(part["partId"])
+        return {**part, "pivotX": pivot[0], "pivotY": pivot[1]} if pivot else part
+
+    return [_apply(part) for part in _PARTS]
+
 
 # Phase 7 -- mirrors frontend/src/lib/video/avatar/library.ts's own
 # colorSlotsForPalette exactly: shirt/pants are each a single flat fill with
@@ -141,7 +152,7 @@ def resolve_avatar_record(record: repository.AvatarDesignRecord) -> GeneratedAva
 
 async def _cartoonify_and_crop(
     *, user_id: str, photo_bytes: bytes, original_palette: FacePalette
-) -> tuple[bytes, bytes, dict[str, dict], tuple[float, float]] | None:
+) -> tuple[bytes, bytes, dict[str, dict], tuple[float, float], tuple[float, float] | None, tuple[float, float] | None] | None:
     """The fal.ai path: stage the real photo in R2 (fal needs a fetchable
     URL, not raw bytes -- same reason matting/service.py presigns a URL
     before calling fal's rembg), cartoonify it, then re-run face analysis on
@@ -205,7 +216,7 @@ def _rebake_record(record: repository.AvatarDesignRecord) -> repository.AvatarDe
     if not palette.detected:
         raise HTTPException(status_code=502, detail="Couldn't re-detect a face in this avatar's cached source photo")
 
-    atlas_png, part_rects, mouth_pivot = build_atlas_png_from_photo(cartoon_bytes, palette)
+    atlas_png, part_rects, mouth_pivot, eyebrows_pivot, eyes_pivot = build_atlas_png_from_photo(cartoon_bytes, palette)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
         tmp.write(atlas_png)
@@ -230,7 +241,7 @@ def _rebake_record(record: repository.AvatarDesignRecord) -> repository.AvatarDe
     new_skin = {
         **record.skin,
         "atlas": {**record.skin["atlas"], "partRects": part_rects},
-        "parts": _parts_for(mouth_pivot),
+        "parts": _parts_for(mouth_pivot, eyebrows_pivot, eyes_pivot),
         "mouthShapes": _MOUTH_SHAPES,
         "colorSlots": _COLOR_SLOTS,
         "garmentShapes": _GARMENT_SHAPES,
@@ -291,6 +302,8 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
     # existing free, zero-cost parametric-drawing fallback exactly as before.
     used_fal = False
     mouth_pivot: tuple[float, float] | None = None
+    eyebrows_pivot: tuple[float, float] | None = None
+    eyes_pivot: tuple[float, float] | None = None
     source_cartoon_key: str | None = None
     fal_result = await _cartoonify_and_crop(user_id=user.id, photo_bytes=photo_bytes, original_palette=palette) if palette.detected else None
 
@@ -298,7 +311,7 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
     atlas_key = f"avatars/{user.id}/{design_id}/atlas.png"
 
     if fal_result is not None:
-        cartoon_bytes, atlas_png, part_rects, mouth_pivot = fal_result
+        cartoon_bytes, atlas_png, part_rects, mouth_pivot, eyebrows_pivot, eyes_pivot = fal_result
         used_fal = True
         # Best-effort: if this upload fails, generation still succeeds --
         # it just means a future baking-code fix can't rebake THIS avatar in
@@ -337,7 +350,7 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
         "skinId": design_id,
         "topologyId": _TOPOLOGY_ID,
         "atlas": {"imageRef": "", "partRects": part_rects},
-        "parts": _parts_for(mouth_pivot),
+        "parts": _parts_for(mouth_pivot, eyebrows_pivot, eyes_pivot),
         "mouthShapes": _MOUTH_SHAPES,
         "colorSlots": _COLOR_SLOTS,
         "garmentShapes": _GARMENT_SHAPES,

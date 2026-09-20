@@ -139,6 +139,19 @@ class FacePalette:
     # way they are.
     head_crop_box: tuple[float, float, float, float] | None = None
     mouth_crop_box: tuple[float, float, float, float] | None = None
+    # Raw pixel-space bounding boxes of the eyebrow/eye contours (both sides
+    # combined) -- same idea as mouth_crop_box, just a plain min/max bbox with
+    # no padding (unlike mouth_crop_box's asymmetric pad factors), since
+    # atlas_builder.py only ever reads their CENTER to compute a pivot, never
+    # their extent. Exist specifically so atlas_builder.py can position the
+    # separately-drawn (normalized-landmark-remapped) eyebrows/eyes overlay
+    # to land on top of where THIS photo's real eyebrows/eyes actually are,
+    # instead of assuming they sit at the same fixed fraction of head_crop_box
+    # the parametric template's own remap constants assume -- see
+    # atlas_builder.py's `_compute_photo_part_pivot` for why that assumption
+    # breaks on a real photo. None whenever detected=False.
+    eyebrow_crop_box: tuple[float, float, float, float] | None = None
+    eye_crop_box: tuple[float, float, float, float] | None = None
     background_rgb: tuple[int, int, int] | None = None
 
 
@@ -155,6 +168,14 @@ def _ensure_model() -> Path:
         response.raise_for_status()
     _MODEL_CACHE_PATH.write_bytes(response.content)
     return _MODEL_CACHE_PATH
+
+
+def _raw_bbox(points: list[Point]) -> tuple[float, float, float, float] | None:
+    if not points:
+        return None
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    return min(xs), min(ys), max(xs), max(ys)
 
 
 def _to_hex(rgb: tuple[float, float, float]) -> str:
@@ -477,10 +498,16 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
         groups = _face_landmark_groups()
         face_oval_raw = [point(i) for i in groups["face_oval"]]
         face_oval = [normalize(i) for i in groups["face_oval"]]
+        left_eye_raw = [point(i) for i in groups["left_eye"]]
+        right_eye_raw = [point(i) for i in groups["right_eye"]]
+        left_eyebrow_raw = [point(i) for i in groups["left_eyebrow"]]
+        right_eyebrow_raw = [point(i) for i in groups["right_eyebrow"]]
         left_eye = [normalize(i) for i in groups["left_eye"]]
         right_eye = [normalize(i) for i in groups["right_eye"]]
         left_eyebrow = [normalize(i) for i in groups["left_eyebrow"]]
         right_eyebrow = [normalize(i) for i in groups["right_eyebrow"]]
+        eyebrow_crop_box = _raw_bbox(left_eyebrow_raw + right_eyebrow_raw)
+        eye_crop_box = _raw_bbox(left_eye_raw + right_eye_raw)
 
         outer_lips_raw = [point(i) for i in groups["outer_lips"]]
         lips_xs = [p[0] for p in outer_lips_raw]
@@ -517,6 +544,8 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             nose_center=nose_center,
             head_crop_box=head_crop_box,
             mouth_crop_box=mouth_crop_box,
+            eyebrow_crop_box=eyebrow_crop_box,
+            eye_crop_box=eye_crop_box,
             background_rgb=background_rgb,
         )
 

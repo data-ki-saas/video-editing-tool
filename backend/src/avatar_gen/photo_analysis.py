@@ -51,6 +51,8 @@ class FacePalette:
     # None whenever detected=False.
     head_crop_box: Box | None = None
     mouth_crop_box: Box | None = None
+    eyebrow_crop_box: Box | None = None
+    eye_crop_box: Box | None = None
     background_rgb: tuple[int, int, int] | None = None
 
 
@@ -93,6 +95,8 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             nose_center=tuple(body["nose_center"]),
             head_crop_box=tuple(body["head_crop_box"]) if body.get("head_crop_box") else None,
             mouth_crop_box=tuple(body["mouth_crop_box"]) if body.get("mouth_crop_box") else None,
+            eyebrow_crop_box=tuple(body["eyebrow_crop_box"]) if body.get("eyebrow_crop_box") else None,
+            eye_crop_box=tuple(body["eye_crop_box"]) if body.get("eye_crop_box") else None,
             background_rgb=tuple(body["background_rgb"]) if body.get("background_rgb") else None,
         )
     except Exception:
