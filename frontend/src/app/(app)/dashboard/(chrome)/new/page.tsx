@@ -360,6 +360,9 @@ export default function NewReelPage() {
               voice: narrationVoice,
               assetId: synthesis.assetId,
               durationSeconds,
+              // Real synthesized length at generation time -- see
+              // TtsOverlayDialog's own handleSave for what this ceiling is for.
+              sourceDurationSeconds: durationSeconds,
               wordTimings: synthesis.wordTimings,
               startTimeSeconds: 0,
               // No on-screen caption by default -- the hook/contact/CTA

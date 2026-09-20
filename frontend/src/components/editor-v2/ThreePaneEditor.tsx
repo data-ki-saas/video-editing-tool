@@ -113,6 +113,7 @@ import {
   applyEditTtsOverlay,
   applyDeleteTtsOverlay,
   applyTtsOverlayPositionChange,
+  applyTtsOverlayDurationChange,
   applyTtsOverlayVolumeChange,
   applyAddAvatarOverlay,
   applyEditAvatarOverlay,
@@ -301,10 +302,11 @@ export function ThreePaneEditor({
   // VideoOverlayTrack's own per-segment volume slider, same live-edit split again.
   const [liveOverlayAudioBalanceEdit, setLiveOverlayAudioBalanceEdit] = useState<{ index: number; balance: number } | null>(null);
 
-  // TtsOverlayTrack's own body drag (move, duration is fixed -- see that
-  // file's own module comment) and per-segment volume badge, same live-edit
-  // split as every other overlay type above.
+  // TtsOverlayTrack's own body drag (move), end-edge drag (trim duration),
+  // and per-segment volume badge, same live-edit split as every other
+  // overlay type above.
   const [liveTtsOverlayPositionEdit, setLiveTtsOverlayPositionEdit] = useState<{ index: number; startTimeSeconds: number } | null>(null);
+  const [liveTtsOverlayDurationEdit, setLiveTtsOverlayDurationEdit] = useState<{ index: number; durationSeconds: number } | null>(null);
   const [liveTtsOverlayVolumeEdit, setLiveTtsOverlayVolumeEdit] = useState<{ index: number; volume: number } | null>(null);
 
   // AvatarOverlayTrack's own edge drag (trim) and body drag (move without
@@ -1772,6 +1774,17 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  // TtsOverlayTrack's own end-edge drag (trim duration).
+  function handleChangeTtsOverlayDuration(overlayIndex: number, durationSeconds: number) {
+    setLiveTtsOverlayDurationEdit({ index: overlayIndex, durationSeconds });
+  }
+
+  function handleCommitTtsOverlayDuration(overlayIndex: number, durationSeconds: number) {
+    setLiveTtsOverlayDurationEdit(null);
+    const { label, state } = applyTtsOverlayDurationChange(selections, overlayIndex, durationSeconds);
+    pushChange(label, state);
+  }
+
   function handleChangeTtsOverlayVolume(overlayIndex: number, volume: number) {
     setLiveTtsOverlayVolumeEdit({ index: overlayIndex, volume });
   }
@@ -2482,6 +2495,7 @@ export function ThreePaneEditor({
       setEditingTtsOverlayIndex(null);
     }
     setLiveTtsOverlayPositionEdit((prev) => (prev?.index === overlayIndex ? null : prev));
+    setLiveTtsOverlayDurationEdit((prev) => (prev?.index === overlayIndex ? null : prev));
     setLiveTtsOverlayVolumeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
     const { label, state } = applyDeleteTtsOverlay(selections, overlayIndex);
     pushChange(label, state);
@@ -2780,6 +2794,9 @@ export function ThreePaneEditor({
   const displayedTtsOverlays: TtsOverlay[] = selections.ttsOverlays.map((overlay, index) => {
     if (liveTtsOverlayPositionEdit?.index === index) {
       return { ...overlay, startTimeSeconds: liveTtsOverlayPositionEdit.startTimeSeconds };
+    }
+    if (liveTtsOverlayDurationEdit?.index === index) {
+      return { ...overlay, durationSeconds: liveTtsOverlayDurationEdit.durationSeconds };
     }
     if (liveTtsOverlayVolumeEdit?.index === index) {
       return { ...overlay, volume: liveTtsOverlayVolumeEdit.volume };
@@ -3204,6 +3221,8 @@ export function ThreePaneEditor({
           ttsOverlays={displayedTtsOverlays}
           onChangeTtsOverlayPosition={handleChangeTtsOverlayPosition}
           onCommitTtsOverlayPosition={handleCommitTtsOverlayPosition}
+          onChangeTtsOverlayDuration={handleChangeTtsOverlayDuration}
+          onCommitTtsOverlayDuration={handleCommitTtsOverlayDuration}
           onChangeTtsOverlayVolume={handleChangeTtsOverlayVolume}
           onCommitTtsOverlayVolume={handleCommitTtsOverlayVolume}
           onEditTtsOverlay={handleRequestEditTtsOverlay}

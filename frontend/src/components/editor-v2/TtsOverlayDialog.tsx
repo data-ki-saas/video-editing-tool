@@ -296,6 +296,10 @@ export function TtsOverlayDialog({
       voice,
       assetId: synthesis.assetId,
       durationSeconds: synthesis.durationSeconds,
+      // The real synthesized length at generation time -- TtsOverlayTrack's
+      // end-edge drag trims durationSeconds above, but never past this
+      // ceiling (see video_math.ts's TtsOverlay.sourceDurationSeconds).
+      sourceDurationSeconds: synthesis.durationSeconds,
       wordTimings: synthesis.wordTimings,
       startTimeSeconds: Math.max(startTimeSeconds, 0),
       displayMode,

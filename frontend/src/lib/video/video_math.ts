@@ -1125,7 +1125,25 @@ export interface TtsOverlay {
   text: string;
   voice: string;
   assetId: string;
+  // The CURRENT effective duration -- what every consumer (CanvasPlayer's
+  // audio scheduling, ttsOverlayEndTimeSeconds, compileCreatomateTimeline,
+  // exportTimeline) actually plays/renders. Starts out equal to
+  // sourceDurationSeconds right after generation, but TtsOverlayTrack's own
+  // end-edge drag can shrink (or grow back) this value to trim the
+  // narration's tail without re-synthesizing -- same "durationSeconds IS the
+  // playable length" convention those consumers already relied on before
+  // trimming existed, so none of them needed to change.
   durationSeconds: number;
+  // The real synthesized mp3's full length (client-probed via
+  // getAudioDuration() at generation time -- see TtsOverlayDialog's
+  // handleGenerateSpeech), fixed until the script is regenerated. This is
+  // the ceiling durationSeconds can be dragged back out to; trimming can
+  // never fabricate audio that was never synthesized. Optional only because
+  // an overlay saved before this field existed has none -- every read site
+  // (TtsOverlayTrack's own end-edge drag) falls back to `durationSeconds`
+  // itself in that case, which just pins the ceiling to wherever it already
+  // is until the script is regenerated.
+  sourceDurationSeconds?: number;
   wordTimings: TtsWordTiming[];
   startTimeSeconds: number;
   displayMode: "background" | "karaoke" | "none";
@@ -1156,12 +1174,18 @@ export interface ResolvedTagAnchor {
 // Same bottom-third caption-safe default as text overlays.
 export const DEFAULT_TTS_OVERLAY_RECT: CropRect = { x: 0.1, y: 0.7, width: 0.8, height: 0.2 };
 
+// Shortest a narration is ever allowed to be trimmed to -- same role as
+// MIN_MUSIC_CLIP_DURATION_SECONDS, just for TtsOverlayTrack's own end-edge
+// drag. Tighter than the music clip's 0.5s since a single spoken word can
+// be shorter than that.
+export const MIN_TTS_OVERLAY_DURATION_SECONDS = 0.3;
+
 // Deliberately NOT a stored field (unlike TextOverlay.endTimeSeconds) --
-// derived from startTimeSeconds + durationSeconds, since duration comes
-// from the real generated audio (durationSeconds, from the synthesis
-// response), not free authoring. Only startTimeSeconds is ever
-// user-editable (drag to reposition in time); the overlay's rect is still
-// drag/resize-able in space same as a text overlay.
+// derived from startTimeSeconds + durationSeconds. durationSeconds itself
+// IS user-editable now (TtsOverlayTrack's end-edge drag trims it, capped at
+// sourceDurationSeconds -- see that field's own comment above), but
+// endTimeSeconds is still never a separately stored/draggable field the way
+// TextOverlay's is.
 export function ttsOverlayEndTimeSeconds(overlay: TtsOverlay): number {
   return overlay.startTimeSeconds + overlay.durationSeconds;
 }

@@ -518,6 +518,8 @@ export function FrameStrip({
   ttsOverlays,
   onChangeTtsOverlayPosition,
   onCommitTtsOverlayPosition,
+  onChangeTtsOverlayDuration,
+  onCommitTtsOverlayDuration,
   onChangeTtsOverlayVolume,
   onCommitTtsOverlayVolume,
   onEditTtsOverlay,
@@ -656,6 +658,8 @@ export function FrameStrip({
   ttsOverlays: TtsOverlay[];
   onChangeTtsOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
   onCommitTtsOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onChangeTtsOverlayDuration: (overlayIndex: number, durationSeconds: number) => void;
+  onCommitTtsOverlayDuration: (overlayIndex: number, durationSeconds: number) => void;
   onChangeTtsOverlayVolume: (overlayIndex: number, level: number) => void;
   onCommitTtsOverlayVolume: (overlayIndex: number, level: number) => void;
   onEditTtsOverlay: (overlayIndex: number) => void;
@@ -1188,6 +1192,8 @@ export function FrameStrip({
           videoDurationSeconds={durationSeconds}
           onChangePosition={onChangeTtsOverlayPosition}
           onCommitPosition={onCommitTtsOverlayPosition}
+          onChangeDuration={onChangeTtsOverlayDuration}
+          onCommitDuration={onCommitTtsOverlayDuration}
           onChangeVolume={onChangeTtsOverlayVolume}
           onCommitVolume={onCommitTtsOverlayVolume}
           onEdit={onEditTtsOverlay}

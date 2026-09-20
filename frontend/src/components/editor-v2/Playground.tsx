@@ -201,6 +201,8 @@ export function Playground({
   ttsOverlays,
   onChangeTtsOverlayPosition,
   onCommitTtsOverlayPosition,
+  onChangeTtsOverlayDuration,
+  onCommitTtsOverlayDuration,
   onChangeTtsOverlayVolume,
   onCommitTtsOverlayVolume,
   onEditTtsOverlay,
@@ -325,6 +327,8 @@ export function Playground({
   ttsOverlays: TtsOverlay[];
   onChangeTtsOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
   onCommitTtsOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
+  onChangeTtsOverlayDuration: (overlayIndex: number, durationSeconds: number) => void;
+  onCommitTtsOverlayDuration: (overlayIndex: number, durationSeconds: number) => void;
   onChangeTtsOverlayVolume: (overlayIndex: number, level: number) => void;
   onCommitTtsOverlayVolume: (overlayIndex: number, level: number) => void;
   onEditTtsOverlay: (overlayIndex: number) => void;
@@ -468,6 +472,8 @@ export function Playground({
             ttsOverlays={ttsOverlays}
             onChangeTtsOverlayPosition={onChangeTtsOverlayPosition}
             onCommitTtsOverlayPosition={onCommitTtsOverlayPosition}
+            onChangeTtsOverlayDuration={onChangeTtsOverlayDuration}
+            onCommitTtsOverlayDuration={onCommitTtsOverlayDuration}
             onChangeTtsOverlayVolume={onChangeTtsOverlayVolume}
             onCommitTtsOverlayVolume={onCommitTtsOverlayVolume}
             onEditTtsOverlay={onEditTtsOverlay}

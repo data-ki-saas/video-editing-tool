@@ -1532,10 +1532,9 @@ export function applyTtsOverlayRectCommit(
   return { label: "Moved narration", state: { ...selections, ttsOverlays: nextOverlays } };
 }
 
-/** Dragging a TTS overlay to reposition it in time -- unlike
- * applyTextOverlayRangeChange, only startTimeSeconds ever moves: duration
- * comes from the real generated audio (video_math.ts's
- * ttsOverlayEndTimeSeconds), not a freely stretchable end edge. */
+/** Dragging a TTS overlay to reposition it in time -- body-drag only ever
+ * moves startTimeSeconds; trimming durationSeconds is a separate end-edge
+ * drag (applyTtsOverlayDurationChange below). */
 export function applyTtsOverlayPositionChange(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
@@ -1546,6 +1545,23 @@ export function applyTtsOverlayPositionChange(
   const nextOverlays = [...selections.ttsOverlays];
   nextOverlays[overlayIndex] = { ...overlay, startTimeSeconds };
   return { label: "Moved narration", state: { ...selections, ttsOverlays: nextOverlays } };
+}
+
+/** TtsOverlayTrack's own end-edge drag -- trims (or grows back) the
+ * narration's tail. The clamp to [MIN_TTS_OVERLAY_DURATION_SECONDS,
+ * sourceDurationSeconds] happens in the drag handler itself (same division
+ * of labor as applyMusicClipRangeChange/BackgroundTrackStrip's own
+ * startEdgeDrag), so this just writes through whatever it's given. */
+export function applyTtsOverlayDurationChange(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  durationSeconds: number
+): TransformationResult {
+  const overlay = selections.ttsOverlays[overlayIndex];
+  if (!overlay) return { label: "Trimmed narration", state: selections };
+  const nextOverlays = [...selections.ttsOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, durationSeconds };
+  return { label: "Trimmed narration", state: { ...selections, ttsOverlays: nextOverlays } };
 }
 
 /** TtsOverlayTrack's own per-segment volume badge -- mirrors
