@@ -25,7 +25,7 @@ import type { AvatarDesign, AvatarDesignOverrides } from "./design";
 import { hasAnyDesignOverride, mergeDesignOverrides } from "./design";
 import { getAvatarLibraryEntry } from "./library";
 import { fetchGeneratedAvatarEntry } from "./generatedLibrary";
-import { getAccessoryCatalogEntry, loadAccessoryImage } from "./accessories";
+import { accessoryAcceptsAnchor, getAccessoryCatalogEntry, loadAccessoryImage } from "./accessories";
 
 /** One resolved, ready-to-draw part -- `zOrder` itself is dropped once it's
  * done its one job (deciding this entry's position in the already-sorted
@@ -126,6 +126,10 @@ export interface CompiledAccessory {
   pivotY: number;
   width: number;
   height: number;
+  // Degrees, clockwise -- AccessoryCatalogEntry's own rest-angle field
+  // (accessories.ts), applied around the pivot on top of the anchor bone's
+  // own current rotation. 0 for accessories that don't set one.
+  rotationDegrees: number;
 }
 
 export interface CompiledAvatar {
@@ -479,7 +483,7 @@ async function compileAccessories(
   for (const attached of attachedAccessories) {
     const anchor = topology.anchors.find((a) => a.anchorId === attached.anchorId);
     const catalogEntry = getAccessoryCatalogEntry(attached.accessoryAssetId);
-    if (!anchor || !catalogEntry || catalogEntry.anchorId !== attached.anchorId) {
+    if (!anchor || !catalogEntry || !accessoryAcceptsAnchor(catalogEntry, attached.anchorId)) {
       throw new Error(
         `compileAvatar: attachedAccessories entry references an unresolvable anchor "${attached.anchorId}"/accessory "${attached.accessoryAssetId}" pair`
       );
@@ -494,6 +498,7 @@ async function compileAccessories(
       pivotY: catalogEntry.pivotY,
       width: catalogEntry.width,
       height: catalogEntry.height,
+      rotationDegrees: catalogEntry.rotationDegrees ?? 0,
     });
   }
   return compiled;

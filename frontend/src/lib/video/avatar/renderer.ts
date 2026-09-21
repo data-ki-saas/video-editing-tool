@@ -194,7 +194,7 @@ export function drawAvatar(
     if (hiddenBoneIndices.includes(accessory.boneIndex)) continue;
     const boneMatrix = worldMatrices[accessory.boneIndex];
     if (!boneMatrix) continue;
-    const anchorMatrix = boneMatrix.translate(accessory.offsetX, accessory.offsetY);
+    const anchorMatrix = boneMatrix.translate(accessory.offsetX, accessory.offsetY).rotate(accessory.rotationDegrees);
     ctx.save();
     ctx.transform(anchorMatrix.a, anchorMatrix.b, anchorMatrix.c, anchorMatrix.d, anchorMatrix.e, anchorMatrix.f);
     ctx.drawImage(accessory.image, -accessory.pivotX, -accessory.pivotY, accessory.width, accessory.height);

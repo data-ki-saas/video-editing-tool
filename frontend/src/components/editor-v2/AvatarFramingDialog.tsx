@@ -61,8 +61,8 @@ import {
 import type { AvatarActionId, AvatarTopology } from "@/lib/video/avatar/topology";
 import type { AvatarSkin } from "@/lib/video/avatar/skin";
 import { hasAnyDesignOverride, type AvatarDesignOverrides } from "@/lib/video/avatar/design";
-import { applyAvatarEditOps } from "@/lib/video/avatar/edits";
-import { ACCESSORY_CATALOG } from "@/lib/video/avatar/accessories";
+import { applyAvatarEditOps, type AvatarEditOp } from "@/lib/video/avatar/edits";
+import { ACCESSORY_CATALOG, accessoryAcceptsAnchor } from "@/lib/video/avatar/accessories";
 import { ambientEffectSeed } from "@/lib/video/ambientEffects";
 import {
   DEFAULT_AVATAR_OVERLAY_RECT,
@@ -540,6 +540,36 @@ export function AvatarFramingDialog({
     { id: undefined, label: "Shirt" },
     ...(resolvedEntry?.skin.garmentShapes ?? []).map((shape) => ({ id: shape.shapeId, label: garmentLabel(shape.shapeId) })),
   ];
+
+  // "Held item" -- a manual, direct-manipulation picker for the same
+  // addAccessory/removeAccessory ops "Customize with AI" already supports
+  // (edits.ts's AvatarEditOp), for the common case a creator wants without
+  // typing a prompt: pick a hand, pick what's in it. `heldItemHand` is
+  // pure UI state (which anchor slot the buttons below are currently
+  // showing/editing) -- the actual attached item lives in
+  // pendingOverrides.attachedAccessories, keyed by anchorId, same as every
+  // other entry point onto that field.
+  const [heldItemHand, setHeldItemHand] = useState<"handL" | "handR">("handR");
+  // Only the catalog entries that can actually attach to a hand anchor on
+  // THIS topology -- same "read this avatar's real capability" principle
+  // actionOptions/garmentOptions/handleApplyEdit's own accessory list use.
+  const heldItemCatalog = ACCESSORY_CATALOG.filter((entry) =>
+    (["handL", "handR"] as const).some(
+      (handAnchorId) => accessoryAcceptsAnchor(entry, handAnchorId) && resolvedEntry?.topology.anchors.some((a) => a.anchorId === handAnchorId)
+    )
+  );
+  const heldItemAtSelectedHand = pendingOverrides.attachedAccessories?.find((a) => a.anchorId === heldItemHand)?.accessoryAssetId ?? null;
+
+  function handlePickHeldItem(accessoryAssetId: string | null) {
+    if (!resolvedEntry) return;
+    const { topology, skin } = resolvedEntry;
+    const op: AvatarEditOp = accessoryAssetId
+      ? { op: "addAccessory", anchorId: heldItemHand, accessoryAssetId }
+      : { op: "removeAccessory", anchorId: heldItemHand };
+    // Functional update, same reason as handleApplyEdit above -- avoids
+    // clobbering a pick made elsewhere between render and this handler.
+    setPendingOverrides((prev) => applyAvatarEditOps(prev, [op], topology, skin, actionOptions).overrides);
+  }
 
   // If the picked action isn't even IN that list -- e.g. the user just
   // switched to a different avatar card whose topology doesn't define
@@ -1055,6 +1085,60 @@ export function AvatarFramingDialog({
                 </div>
               </div>
             </div>
+
+            {/* "Held item" -- manual pick-a-hand, pick-a-prop, mirroring
+                addAccessory/removeAccessory (edits.ts) the same way the
+                Outfit picker above mirrors setGarment -- a direct-
+                manipulation shortcut for the same thing "Customize with AI"
+                already supports via a free-text prompt (only skipped here
+                if this avatar's topology has no hand anchors at all). */}
+            {heldItemCatalog.length > 0 && (
+              <div className="mb-3">
+                <h3 className="mb-1.5 text-xs font-medium text-foreground">Held item</h3>
+                <div className="mb-1.5 flex gap-1.5">
+                  {(["handR", "handL"] as const).map((hand) => (
+                    <button
+                      key={hand}
+                      type="button"
+                      onClick={() => setHeldItemHand(hand)}
+                      className={
+                        "flex-1 rounded-md border py-1.5 text-xs font-medium " +
+                        (heldItemHand === hand ? "border-accent bg-accent text-accent-foreground" : "border-border text-foreground hover:bg-background")
+                      }
+                    >
+                      {hand === "handR" ? "Right hand" : "Left hand"}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handlePickHeldItem(null)}
+                    className={
+                      "rounded-md border px-2.5 py-1.5 text-xs font-medium " +
+                      (heldItemAtSelectedHand === null ? "border-accent bg-accent text-accent-foreground" : "border-border text-foreground hover:bg-background")
+                    }
+                  >
+                    None
+                  </button>
+                  {heldItemCatalog.map((entry) => (
+                    <button
+                      key={entry.accessoryAssetId}
+                      type="button"
+                      onClick={() => handlePickHeldItem(entry.accessoryAssetId)}
+                      className={
+                        "rounded-md border px-2.5 py-1.5 text-xs font-medium " +
+                        (heldItemAtSelectedHand === entry.accessoryAssetId
+                          ? "border-accent bg-accent text-accent-foreground"
+                          : "border-border text-foreground hover:bg-background")
+                      }
+                    >
+                      {entry.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Which narration (if any) this avatar lip-syncs to -- lets a
                 reel place several avatars that each speak a DIFFERENT

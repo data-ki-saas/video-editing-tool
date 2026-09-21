@@ -22,7 +22,7 @@
 import type { AvatarDesignOverrides } from "./design";
 import type { AvatarTopology } from "./topology";
 import type { AvatarSkin } from "./skin";
-import { getAccessoryCatalogEntry } from "./accessories";
+import { accessoryAcceptsAnchor, getAccessoryCatalogEntry } from "./accessories";
 
 export type AvatarEditOp =
   | { op: "setBoneScale"; groupId: string; value: number }
@@ -142,7 +142,7 @@ export function applyAvatarEditOps(
       case "addAccessory": {
         const anchor = topology.anchors.find((a) => a.anchorId === op.anchorId);
         const catalogEntry = getAccessoryCatalogEntry(op.accessoryAssetId);
-        if (!anchor || !catalogEntry || catalogEntry.anchorId !== op.anchorId) {
+        if (!anchor || !catalogEntry || !accessoryAcceptsAnchor(catalogEntry, op.anchorId)) {
           console.warn(`applyAvatarEditOps: unresolvable accessory/anchor pair, dropping op`, op);
           break;
         }
