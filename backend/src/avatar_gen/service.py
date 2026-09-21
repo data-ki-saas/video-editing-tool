@@ -68,7 +68,13 @@ _PARTS = [
     {"partId": "eyebrows", "boneIndex": 2, "pivotX": 30, "pivotY": 88, "zOrder": 8},
     {"partId": "mouth", "boneIndex": 2, "pivotX": 25, "pivotY": 40, "zOrder": 9},
 ]
-_MOUTH_SHAPES = [{"shapeId": "closed", "partId": "mouth"}, {"shapeId": "open", "partId": "mouth"}]
+_MOUTH_SHAPES = [
+    {"shapeId": "closed", "partId": "mouth"},
+    {"shapeId": "open", "partId": "mouth"},
+    # Mood-driven "laugh" override (frontend's MOOD_MOUTH_SHAPES) -- never
+    # picked by word-driven lip-sync itself.
+    {"shapeId": "laughOpen", "partId": "mouth"},
+]
 
 # Mirrors library.ts's own EXPRESSION_SHAPES exactly -- "neutral"/"eyeOpen"
 # are also "eyebrows"/"eyes"' own base atlas rects (atlas_builder.py's

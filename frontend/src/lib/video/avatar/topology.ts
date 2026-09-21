@@ -52,7 +52,7 @@ export type AvatarGestureId =
   | "hitLeft"
   | "hitRight";
 export type AvatarGazeId = "lookLeft" | "lookRight" | "lookAtCamera" | "lookDown";
-export type AvatarMoodId = "angry" | "happy" | "sad" | "evil" | "calm" | "excited" | "scared";
+export type AvatarMoodId = "angry" | "happy" | "sad" | "evil" | "calm" | "excited" | "scared" | "laugh";
 
 /**
  * A bone's local transform relative to its PARENT bone (or, for the root
@@ -318,4 +318,17 @@ export interface AvatarTopology {
   // "neutral" shape, so "no mood active" and "neutral" render identically
   // with no special-casing needed).
   moodExpressionShapes?: Partial<Record<AvatarMoodId, Record<string, string>>> & Record<string, Record<string, string>>;
+
+  // Mood-driven MOUTH shape override -- moodId -> a mouthShapes shapeId (see
+  // skin.ts's AvatarSkinMouthShape) that mood should force the mouth to,
+  // while that mood's beat is active. Deliberately its OWN field rather than
+  // folded into moodExpressionShapes above: skin.ts's AvatarSkinExpressionShape
+  // doc comment is explicit that the mouth's own partId is never consulted
+  // via expressionShapes, specifically so lip-sync's word-driven mouthShapeId
+  // can never be silently clobbered by an unrelated mood pick. This map is
+  // consulted by exactly one call site (resolveAvatarRenderState.ts), which
+  // only overrides mouthShapeId for a mood that's actually listed here (e.g.
+  // "laugh" -> "laughOpen") -- every other mood leaves mouthShapeId
+  // untouched, still fully driven by narration word timing as before.
+  moodMouthShapeIds?: Partial<Record<AvatarMoodId, string>>;
 }

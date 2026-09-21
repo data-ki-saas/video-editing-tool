@@ -25,6 +25,11 @@ const GAP = 8; // spacing between adjacent packed rects, see this file's own doc
 const HEAD_RECT: AtlasRect = { sx: GAP, sy: GAP, sWidth: 140, sHeight: 140 };
 const MOUTH_CLOSED_RECT: AtlasRect = { sx: HEAD_RECT.sx + HEAD_RECT.sWidth + GAP, sy: GAP, sWidth: 50, sHeight: 28 };
 const MOUTH_OPEN_RECT: AtlasRect = { sx: MOUTH_CLOSED_RECT.sx, sy: MOUTH_CLOSED_RECT.sy + MOUTH_CLOSED_RECT.sHeight + GAP, sWidth: 50, sHeight: 28 };
+// A third mouth-shape rect, stacked below the two talk shapes -- the
+// mood-driven "laugh" override (library.ts's MOOD_MOUTH_SHAPES), never
+// picked by word-driven lip-sync itself. Same size as the talk shapes so it
+// shares their pivot without any special-casing in renderer.ts.
+const MOUTH_LAUGH_RECT: AtlasRect = { sx: MOUTH_CLOSED_RECT.sx, sy: MOUTH_OPEN_RECT.sy + MOUTH_OPEN_RECT.sHeight + GAP, sWidth: 50, sHeight: 28 };
 
 // A fourth column, to the right of the mouth-shape column -- the 4 curated
 // mood-driven eyebrow shapes (see skin.ts's AvatarSkinExpressionShape and
@@ -108,6 +113,10 @@ const EYE_COLOR = "#2a2a2a";
 const EYEBROW_COLOR = "#3a2a1f";
 const MOUTH_COLOR = "#7a2f2f";
 const OUTLINE_COLOR = "rgba(0,0,0,0.18)";
+// Matches backend/src/avatar_gen/atlas_builder.py's own _TEETH_COLOR, so the
+// synthetic/drawn avatar and the fal.ai photo-avatar path's baked teeth read
+// as the same shade.
+const TEETH_COLOR = "#f2e9df";
 
 /**
  * The subset of this file's colors that actually vary seed-character to
@@ -454,6 +463,42 @@ function drawMouthOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: 
   ctx.fill();
 }
 
+/** The mood-driven "laugh" mouth override (see library.ts's MOOD_MOUTH_SHAPES)
+ * -- wider and toothier than drawMouthOpen's plain talk-flap ellipse, with
+ * corners curling up to read as a laugh rather than a mid-word open mouth.
+ * Teeth sit in the MIDDLE of the cavity, not hugging its top edge -- the same
+ * positioning atlas_builder.py's fal.ai photo-avatar path uses for its own
+ * teeth ellipse, so both avatar paths agree on where a "toothy" mouth's teeth
+ * actually sit. */
+function drawMouthLaugh(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  const centerX = rect.sx + rect.sWidth / 2;
+  const centerY = rect.sy + rect.sHeight / 2;
+
+  ctx.beginPath();
+  ctx.ellipse(centerX, centerY, 15, 8, 0, 0, Math.PI * 2);
+  ctx.fillStyle = palette.mouthColor;
+  ctx.fill();
+
+  // Corners lifted -- two short strokes curling up and out from each end of
+  // the cavity, the crease at the corner of an open, smiling mouth.
+  ctx.lineCap = "round";
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = OUTLINE_COLOR;
+  for (const sign of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(centerX + sign * 14, centerY + 2);
+    ctx.quadraticCurveTo(centerX + sign * 18, centerY - 2, centerX + sign * 15, centerY - 6);
+    ctx.stroke();
+  }
+
+  // Upper teeth -- vertically centered within the cavity (roughly
+  // centerY-1 +/- 3.5), not top-aligned.
+  ctx.beginPath();
+  ctx.ellipse(centerX, centerY - 1, 11, 3.5, 0, 0, Math.PI * 2);
+  ctx.fillStyle = TEETH_COLOR;
+  ctx.fill();
+}
+
 /** Builds one packed placeholder atlas image plus every part/mouth-shape rect
  * drawn into it -- library.ts's seed skins are each built directly from one
  * call's return value. `paletteOverrides` lets a second/third seed skin
@@ -480,6 +525,7 @@ export function buildPlaceholderAtlas(
     mouth: MOUTH_CLOSED_RECT,
     closed: MOUTH_CLOSED_RECT,
     open: MOUTH_OPEN_RECT,
+    laughOpen: MOUTH_LAUGH_RECT,
     // The "eyebrows" slot's own base rect is "neutral" -- see
     // EXPRESSION_SHAPES's own doc comment in library.ts for why that's a
     // deliberate choice, not an arbitrary default.
@@ -537,6 +583,7 @@ export function buildPlaceholderAtlas(
   drawHead(ctx, HEAD_RECT, palette);
   drawMouthClosed(ctx, MOUTH_CLOSED_RECT, palette);
   drawMouthOpen(ctx, MOUTH_OPEN_RECT, palette);
+  drawMouthLaugh(ctx, MOUTH_LAUGH_RECT, palette);
   drawEyebrowsNeutral(ctx, EYEBROWS_NEUTRAL_RECT);
   drawEyebrowsAngry(ctx, EYEBROWS_ANGRY_RECT);
   drawEyebrowsHappy(ctx, EYEBROWS_HAPPY_RECT);

@@ -55,6 +55,15 @@ MOUTH_OPEN_RECT = {
     "sWidth": 50,
     "sHeight": 28,
 }
+# Mirrors placeholderAtlas.ts's own MOUTH_LAUGH_RECT -- the mood-driven
+# "laugh" mouth override (frontend/src/lib/video/avatar/library.ts's
+# MOOD_MOUTH_SHAPES), never picked by word-driven lip-sync itself.
+MOUTH_LAUGH_RECT = {
+    "sx": MOUTH_CLOSED_RECT["sx"],
+    "sy": MOUTH_OPEN_RECT["sy"] + MOUTH_OPEN_RECT["sHeight"] + GAP,
+    "sWidth": 50,
+    "sHeight": 28,
+}
 
 # Mirrors avatar_gen/service.py's own `_PARTS` "head"/"mouth"/"eyebrows"/
 # "eyes" entries (pivotX/pivotY, boneIndex=HEAD for all) -- needed here too so
@@ -641,6 +650,25 @@ def _draw_mouth_open(draw: ImageDraw.ImageDraw, rect: dict, width_scale: float) 
     draw.ellipse((cx - half_w, cy - 9, cx + half_w, cy + 9), fill=_MOUTH_COLOR)
 
 
+def _draw_mouth_laugh(draw: ImageDraw.ImageDraw, rect: dict, width_scale: float) -> None:
+    """Mirrors placeholderAtlas.ts's own drawMouthLaugh -- wider/toothier
+    than _draw_mouth_open's plain talk-flap ellipse, with corners curling up
+    to read as a laugh. Teeth sit in the MIDDLE of the cavity, not hugging
+    its top edge."""
+    cx, cy = rect["sx"] + rect["sWidth"] / 2, rect["sy"] + rect["sHeight"] / 2
+    half_w = 15 * width_scale
+    draw.ellipse((cx - half_w, cy - 8, cx + half_w, cy + 8), fill=_MOUTH_COLOR)
+    for sign in (-1, 1):
+        draw.line(
+            [(cx + sign * (half_w - 1), cy + 2), (cx + sign * (half_w + 3), cy - 2), (cx + sign * half_w, cy - 6)],
+            fill=_OUTLINE_COLOR,
+            width=2,
+            joint="curve",
+        )
+    teeth_half_w = 11 * width_scale
+    draw.ellipse((cx - teeth_half_w, cy - 3, cx + teeth_half_w, cy + 3), fill=_TEETH_COLOR)
+
+
 def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
     """Returns (png_bytes, part_rects) -- part_rects is identical across
     every call (packing is fixed layout math, not palette-dependent), keyed
@@ -674,6 +702,7 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
     _draw_closed_eye(draw, EYES_CLOSED_RECT)
     _draw_mouth_closed(draw, MOUTH_CLOSED_RECT, palette.mouth_width_scale)
     _draw_mouth_open(draw, MOUTH_OPEN_RECT, palette.mouth_width_scale)
+    _draw_mouth_laugh(draw, MOUTH_LAUGH_RECT, palette.mouth_width_scale)
     _torso_body(draw, TORSO_RECT)
     _rounded_rect(draw, ARM_L_RECT, inset=4, radius=14, fill=palette.skin_tone)
     _rounded_rect(draw, ARM_R_RECT, inset=4, radius=14, fill=palette.skin_tone)
@@ -692,6 +721,7 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
         "mouth": MOUTH_CLOSED_RECT,
         "closed": MOUTH_CLOSED_RECT,
         "open": MOUTH_OPEN_RECT,
+        "laughOpen": MOUTH_LAUGH_RECT,
         "eyebrows": EYEBROWS_NEUTRAL_RECT,
         "neutral": EYEBROWS_NEUTRAL_RECT,
         "angry": EYEBROWS_ANGRY_RECT,
@@ -906,13 +936,34 @@ def build_atlas_png_from_photo(
     mouth_open = mouth_base.copy()
     open_draw = ImageDraw.Draw(mouth_open)
     open_draw.ellipse((cx - 11, cy - 9, cx + 11, cy + 9), fill=gap_color)
-    open_draw.ellipse((cx - 9, cy - 8, cx + 9, cy - 2), fill=_TEETH_COLOR)
+    # Teeth centered in the cavity (cy +/- 9) rather than hugging its top
+    # edge -- the old (cy-8, cy-2) bbox sat almost flush against the
+    # cavity's own top edge, which read as "teeth floating at the top of
+    # the mouth" instead of a natural upper-teeth band.
+    open_draw.ellipse((cx - 9, cy - 3, cx + 9, cy + 3), fill=_TEETH_COLOR)
+
+    # "laugh" (mood override, never picked by word-driven lip-sync) -- wider
+    # cavity than "open", same centered teeth band, plus a same-color-as-gap
+    # crease stroke at each corner curling up, mirroring _draw_mouth_laugh's
+    # synthetic-path geometry.
+    mouth_laugh = mouth_base.copy()
+    laugh_draw = ImageDraw.Draw(mouth_laugh)
+    laugh_draw.ellipse((cx - 15, cy - 8, cx + 15, cy + 8), fill=gap_color)
+    for sign in (-1, 1):
+        laugh_draw.line(
+            [(cx + sign * 14, cy + 2), (cx + sign * 18, cy - 2), (cx + sign * 15, cy - 6)],
+            fill=_OUTLINE_COLOR,
+            width=2,
+            joint="curve",
+        )
+    laugh_draw.ellipse((cx - 11, cy - 3, cx + 11, cy + 3), fill=_TEETH_COLOR)
 
     image = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     image.paste(head_crop.convert("RGBA"), (HEAD_RECT["sx"], HEAD_RECT["sy"]), head_mask)
     image.paste(mouth_closed.convert("RGBA"), (MOUTH_CLOSED_RECT["sx"], MOUTH_CLOSED_RECT["sy"]))
     image.paste(mouth_open.convert("RGBA"), (MOUTH_OPEN_RECT["sx"], MOUTH_OPEN_RECT["sy"]))
+    image.paste(mouth_laugh.convert("RGBA"), (MOUTH_LAUGH_RECT["sx"], MOUTH_LAUGH_RECT["sy"]))
     mouth_pivot = _compute_photo_part_pivot(palette.head_crop_box, palette.mouth_crop_box, MOUTH_CLOSED_RECT)
 
     # UNLIKE build_atlas_png's fully-synthetic path above, this "head" IS a
@@ -978,6 +1029,7 @@ def build_atlas_png_from_photo(
         "mouth": MOUTH_CLOSED_RECT,
         "closed": MOUTH_CLOSED_RECT,
         "open": MOUTH_OPEN_RECT,
+        "laughOpen": MOUTH_LAUGH_RECT,
         "eyebrows": EYEBROWS_NEUTRAL_RECT,
         "neutral": EYEBROWS_NEUTRAL_RECT,
         "angry": EYEBROWS_ANGRY_RECT,

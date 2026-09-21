@@ -536,24 +536,37 @@ const MOOD_PRESETS: AvatarTopology["moodPresets"] = {
   calm: { browAngle: -0.1, energy: -0.3 },
   excited: { browAngle: -0.3, energy: 1.0 },
   scared: { browAngle: -0.7, energy: -0.4 },
+  laugh: { browAngle: -0.4, energy: 0.9 },
 };
 
-// Each of the 7 moods above ALSO snaps the "eyebrows" part (see
+// Each of the 8 moods above ALSO snaps the "eyebrows" part (see
 // PLACEHOLDER_SKIN_PARTS/EXPRESSION_SHAPES below) to one of 4 curated shapes
 // -- a discrete facial tell, layered on top of MOOD_PRESETS' own continuous
 // head-tilt/posture nudge, since browAngle/energy alone read too subtly at
 // reel scale. Moods without a clearly distinct face just borrow the closest
-// of the 4 (evil->angry, excited->happy, scared->sad, calm->neutral) rather
-// than commissioning a 5th-7th shape for a difference this small a sprite
-// wouldn't read anyway.
+// of the 4 (evil->angry, excited/laugh->happy, scared->sad, calm->neutral)
+// rather than commissioning a 5th shape for a brow difference this small a
+// sprite wouldn't read anyway -- "laugh" gets its own facial tell entirely
+// from the mouth override (MOOD_MOUTH_SHAPES below), not from a distinct brow.
 const MOOD_EXPRESSION_SHAPES: AvatarTopology["moodExpressionShapes"] = {
   angry: { eyebrows: "angry" },
   evil: { eyebrows: "angry" },
   happy: { eyebrows: "happy" },
   excited: { eyebrows: "happy" },
+  laugh: { eyebrows: "happy" },
   sad: { eyebrows: "sad" },
   scared: { eyebrows: "sad" },
   calm: { eyebrows: "neutral" },
+};
+
+// "laugh" is the one mood that also overrides the MOUTH (see topology.ts's
+// own doc comment on moodMouthShapeIds for why this is a separate field from
+// MOOD_EXPRESSION_SHAPES) -- while a "laugh" mood beat is active, the mouth
+// snaps to the dedicated wide-open/teeth/corners-up shape below regardless of
+// narration word timing. No other mood is listed here, so every other mood
+// leaves the mouth exactly as word-driven lip-sync computes it.
+const MOOD_MOUTH_SHAPES: AvatarTopology["moodMouthShapeIds"] = {
+  laugh: "laughOpen",
 };
 
 // Phase 8 ("Portrait mode") -- the hip joint (ROOT, see DEFAULT_LOCAL_POSE's
@@ -593,11 +606,13 @@ export const BIPED_SIMPLE_TOPOLOGY: AvatarTopology = {
   gazes: GAZES,
   moodPresets: MOOD_PRESETS,
   moodExpressionShapes: MOOD_EXPRESSION_SHAPES,
+  moodMouthShapeIds: MOOD_MOUTH_SHAPES,
 };
 
 const MOUTH_SHAPES: AvatarSkinMouthShape[] = [
   { shapeId: "closed", partId: "mouth" },
   { shapeId: "open", partId: "mouth" },
+  { shapeId: "laughOpen", partId: "mouth" },
 ];
 
 // Mood-driven eyebrow shapes (see MOOD_EXPRESSION_SHAPES above) -- "neutral"

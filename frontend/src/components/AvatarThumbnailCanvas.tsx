@@ -52,6 +52,10 @@ export function AvatarThumbnailCanvas({ avatarId, className }: { avatarId: strin
         canvas.width = Math.round(width * dpr);
         canvas.height = Math.round(height * dpr);
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        // Default "low" undoes the dpr bump above by blurring/aliasing the
+        // small eyebrow/eye atlas rects on the upscale (see CanvasPlayer.tsx's
+        // own identical fix) -- reads as jagged brow strokes otherwise.
+        ctx.imageSmoothingQuality = "high";
 
         const headPart = compiled.skin.parts.find((part) => part.partId === "head");
         if (!headPart) return;

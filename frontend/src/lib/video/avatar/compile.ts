@@ -73,6 +73,11 @@ export interface CompiledTopology {
   // resolveAvatarRenderState.ts's mood->eyebrow/eye shape resolution. Absent
   // for any topology declaring no mood-driven facial expression at all.
   moodExpressionShapes?: Record<string, Record<string, string>>;
+  // Carried straight through from AvatarTopology, consumed by
+  // resolveAvatarRenderState.ts's mood->mouth-shape override (e.g.
+  // "laugh" -> "laughOpen"). Absent for any topology declaring no mood-driven
+  // mouth override at all.
+  moodMouthShapeIds?: Record<string, string>;
   // `AvatarTopology.boneGroups.arms`, carried straight through -- consumed by
   // renderer.ts's drawAvatar to decide when a gesture/talk-emphasize has
   // rotated an arm bone far enough to need drawing in front of the head
@@ -205,6 +210,7 @@ function compileTopology(topology: AvatarTopology): CompiledTopology {
     gazes: topology.gazes,
     moodPresets: topology.moodPresets,
     moodExpressionShapes: topology.moodExpressionShapes,
+    moodMouthShapeIds: topology.moodMouthShapeIds,
     armBoneIndices: topology.boneGroups.arms,
   };
 }

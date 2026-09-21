@@ -274,6 +274,10 @@ function AvatarPreviewCanvas({
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext("2d");
       if (canvas && ctx) {
+        // Default "low" visibly softens/aliases the small eyebrow/eye atlas
+        // rects once scaled up into this preview (see CanvasPlayer.tsx's own
+        // identical fix) -- reads as jagged brow strokes otherwise.
+        ctx.imageSmoothingQuality = "high";
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         const compiled = compiledRef.current;
         if (compiled) {

@@ -246,5 +246,12 @@ export function resolveAvatarRenderState(
   const activeMoodBeat = moodBiasInput.find((beat) => localElapsedMs >= beat.startMs && localElapsedMs < beat.endMs);
   const expressionShapeIds = activeMoodBeat ? topology.moodExpressionShapes?.[activeMoodBeat.moodId] : undefined;
 
-  return { activation, mouthShapeId, expressionBias, expressionShapeIds };
+  // Mood beats that declare a mouth override (e.g. "laugh" -> "laughOpen")
+  // win over the word-driven mouthShapeId computed above -- same "snap, no
+  // lerp" convention as expressionShapeIds. Every mood NOT listed in
+  // moodMouthShapeIds (the vast majority) leaves mouthShapeId exactly as
+  // resolvePostureAndMouth computed it, so lip-sync is unaffected.
+  const moodMouthShapeId = activeMoodBeat ? topology.moodMouthShapeIds?.[activeMoodBeat.moodId] : undefined;
+
+  return { activation, mouthShapeId: moodMouthShapeId ?? mouthShapeId, expressionBias, expressionShapeIds };
 }
