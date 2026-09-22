@@ -2254,7 +2254,16 @@ export const CanvasPlayer = forwardRef<
               clipProgress[index] = totalFrames > 0 ? framesSoFar / totalFrames : 1;
               reportProgress();
             }),
-            decodeAudioBuffer(clip.url),
+            // Silent stock/source footage (no embedded audio track at all --
+            // common for Pexels-style b-roll) makes decodeAudioData throw
+            // "Unable to decode audio data" even though nothing is actually
+            // wrong; unlike every other decode in this file (background
+            // music, TTS, video-overlay audio, all caught+skipped further
+            // down), this one used to be a bare await, so that error blew up
+            // the WHOLE clip load instead of just leaving this clip silent.
+            decodeAudioBuffer(clip.url).catch(() =>
+              audioContext.createBuffer(1, Math.max(1, Math.round(duration * audioContext.sampleRate)), audioContext.sampleRate)
+            ),
           ]);
           clipProgress[index] = 1;
           reportProgress();
