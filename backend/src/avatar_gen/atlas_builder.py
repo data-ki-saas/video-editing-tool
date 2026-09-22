@@ -1177,7 +1177,24 @@ def build_atlas_png_from_photo(
     protected_mask = Image.new("L", (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), 0)
     protected_half_w = HEAD_RECT["sWidth"] * _FACE_PROTECTED_WIDTH_FRACTION / 2
     protected_cx = HEAD_RECT["sWidth"] / 2
-    protected_top = HEAD_RECT["sHeight"] * _FACE_PROTECTED_TOP_FRACTION
+    # `_FACE_PROTECTED_TOP_FRACTION` is a "typical" guess (see its own doc
+    # comment) that assumes the squared head crop needed no extra vertical
+    # padding -- true whenever the RAW pre-hair-margin box is at least as
+    # tall as it is wide, but a face proportion where that's not the case
+    # (an unusually short raw box relative to the hair margin) can push the
+    # real face top BELOW this guess, leaving a real forehead band outside
+    # the protected ellipse -- reported as a semi-circular transparent patch
+    # spanning the forehead, see [[project_avatar_face_top_protection_fix]].
+    # `palette.head_top_fraction` is this exact photo's own measured
+    # fraction (mirrors `head_chin_fraction`'s pattern below); take the
+    # smaller (= more protective, since a lower fraction only ever grows the
+    # protected region) of it and the fixed guess so a photo whose measured
+    # fraction happens to be null or larger never loses today's baseline
+    # protection.
+    protected_top_fraction = _FACE_PROTECTED_TOP_FRACTION
+    if palette.head_top_fraction is not None:
+        protected_top_fraction = min(_FACE_PROTECTED_TOP_FRACTION, palette.head_top_fraction)
+    protected_top = HEAD_RECT["sHeight"] * protected_top_fraction
     protected_bottom = HEAD_RECT["sHeight"] * _FACE_PROTECTED_BOTTOM_FRACTION
     ImageDraw.Draw(protected_mask).ellipse(
         (protected_cx - protected_half_w, protected_top, protected_cx + protected_half_w, protected_bottom), fill=255

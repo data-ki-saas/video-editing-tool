@@ -166,6 +166,15 @@ class FacePalette:
     # `_compute_photo_part_pivot` already applies to mouth/eyebrows/eyes.
     # None whenever detected=False.
     head_chin_fraction: float | None = None
+    # Same idea, the OTHER end: where the real face top (face_oval's own top,
+    # i.e. roughly the forehead/hairline boundary, not the hair volume above
+    # it) falls as a fraction of head_crop_box's own height. atlas_builder.py
+    # uses this to protect exactly down to the real forehead from the
+    # background chroma-key instead of assuming a fixed fraction -- see
+    # `_compute_crop_regions`'s own comment for why a fixed guess can leave a
+    # real forehead band unprotected on an unusual face proportion. None
+    # whenever detected=False.
+    head_top_fraction: float | None = None
 
 
 def _ensure_model() -> Path:
@@ -265,14 +274,14 @@ _MOUTH_CROP_PAD_Y_FACTOR = 0.6
 
 def _compute_crop_regions(
     face_oval_px: list[Point], outer_lips_px: list[Point], face_height: float, width: int, height: int, pixels
-) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float], tuple[int, int, int], float]:
+) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float], tuple[int, int, int], float, float]:
     """Returns (head_crop_box, mouth_crop_box, background_rgb,
-    head_chin_fraction) in raw pixel coordinates of the image just analyzed.
-    head_crop_box is a SQUARE box (so resizing it into the atlas's square
-    HEAD_RECT never distorts proportions), extended upward/outward from
-    face_oval's own bbox to include hair, then clamped to the image's own
-    bounds by SHIFTING (not shrinking) it -- shrinking would distort the
-    square-ness this atlas layout depends on."""
+    head_chin_fraction, head_top_fraction) in raw pixel coordinates of the
+    image just analyzed. head_crop_box is a SQUARE box (so resizing it into
+    the atlas's square HEAD_RECT never distorts proportions), extended
+    upward/outward from face_oval's own bbox to include hair, then clamped
+    to the image's own bounds by SHIFTING (not shrinking) it -- shrinking
+    would distort the square-ness this atlas layout depends on."""
     fx0 = min(p[0] for p in face_oval_px)
     fy0 = min(p[1] for p in face_oval_px)
     fx1 = max(p[0] for p in face_oval_px)
@@ -305,6 +314,18 @@ def _compute_crop_regions(
     # constant delta, changing fy1's fraction of the final box even though
     # fy1 itself -- a real landmark position -- never moves).
     head_chin_fraction = (fy1 - head_box[1]) / max(1.0, head_box[3] - head_box[1])
+    # Same idea, top edge: where the real face (fy0 -- face_oval's own top,
+    # NOT fy0_with_hair, which already has the hair margin baked in) lands as
+    # a fraction of the final square box. atlas_builder.py's fixed
+    # `_FACE_PROTECTED_TOP_FRACTION` guess (~0.24) assumes this box is at
+    # least as tall as it is wide (no extra vertical padding below), which
+    # only ever pushes this fraction UP (safe -- more hair/margin above the
+    # real face, never less); a face proportion where the RAW (pre-hair-
+    # margin) box is unusually short relative to hair_margin can still land
+    # below that guess, leaving a real forehead band outside the "protected"
+    # ellipse and vulnerable to the border-connected chroma-key removing it
+    # as a false-positive background hit -- see [[project_avatar_face_top_protection_fix]].
+    head_top_fraction = (fy0 - head_box[1]) / max(1.0, head_box[3] - head_box[1])
 
     lx0 = min(p[0] for p in outer_lips_px)
     ly0 = min(p[1] for p in outer_lips_px)
@@ -319,7 +340,7 @@ def _compute_crop_regions(
     # sampling), not a real segmentation model.
     background_rgb = pixels[5, 5]
 
-    return head_box, mouth_box, background_rgb, head_chin_fraction
+    return head_box, mouth_box, background_rgb, head_chin_fraction, head_top_fraction
 
 
 def _trace(connections) -> list[int]:
@@ -540,7 +561,7 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
         nose_center_raw = (sum(p[0] for p in nose_raw) / len(nose_raw), sum(p[1] for p in nose_raw) / len(nose_raw))
         nose_center = ((nose_center_raw[0] - origin[0]) / scale, (nose_center_raw[1] - origin[1]) / scale)
 
-        head_crop_box, mouth_crop_box, background_rgb, head_chin_fraction = _compute_crop_regions(
+        head_crop_box, mouth_crop_box, background_rgb, head_chin_fraction, head_top_fraction = _compute_crop_regions(
             face_oval_raw, outer_lips_raw, face_height, width, height, pixels
         )
 
@@ -565,6 +586,7 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             eye_crop_box=eye_crop_box,
             background_rgb=background_rgb,
             head_chin_fraction=head_chin_fraction,
+            head_top_fraction=head_top_fraction,
         )
 
         # TEMPORARY diagnostic -- the rendered output doesn't match what
