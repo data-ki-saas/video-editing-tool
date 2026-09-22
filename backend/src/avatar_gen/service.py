@@ -54,9 +54,12 @@ _PARTS = [
     # cutout (a deliberate fully-transparent cut, see atlas_builder.py's
     # `_cut_garment_notch` doc comment) -- that cutout has nothing else
     # drawn under it, so without "neck" underneath it reveals the raw video
-    # frame instead of skin. See NECK_RECT's own doc comment in
-    # atlas_builder.py/placeholderAtlas.ts for the exact pivot math.
-    {"partId": "neck", "boneIndex": 1, "pivotX": 32, "pivotY": 4, "zOrder": 2},
+    # frame instead of skin. pivotY=24 (not NECK_RECT's own sHeight/2=36) is
+    # deliberate -- see NECK_RECT's own doc comment in
+    # atlas_builder.py/placeholderAtlas.ts for the exact pivot math that
+    # closes the raw-video gap between "head"'s own drawn chin and "torso"'s
+    # opaque top, which the original 4/50 pivot/sHeight left wide open.
+    {"partId": "neck", "boneIndex": 1, "pivotX": 32, "pivotY": 24, "zOrder": 2},
     {"partId": "torso", "boneIndex": 1, "pivotX": 60, "pivotY": 8, "zOrder": 3},
     {"partId": "armL", "boneIndex": 3, "pivotX": 18, "pivotY": 4, "zOrder": 4},
     {"partId": "armR", "boneIndex": 4, "pivotX": 18, "pivotY": 4, "zOrder": 5},

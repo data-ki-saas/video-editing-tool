@@ -91,13 +91,32 @@ const SUIT_RECT: AtlasRect = { sx: BLAZER_RECT.sx + BLAZER_RECT.sWidth + GAP, sy
 // recolor never fills it back in -- see that function's own doc comment) --
 // without this, that cut has nothing opaque drawn under it, so the collar
 // "hole" shows the raw video frame straight through instead of reading as
-// an open collar. Sized/pivoted (library.ts's "neck" pivot) so it starts
-// just above the bone joint and reaches down past the suit's deepest cut
-// (topY+44, cx+-26 -- see drawTorsoSuit above); zOrder places it right
-// after "torso" and before "arms"/"head", the same layer a real neck bone
-// would occupy.
+// an open collar. Sized/pivoted (library.ts's "neck" pivot) so its OPAQUE
+// area (rect minus drawNeck's own 4px inset) starts above wherever
+// drawHead's own drawn chin can plausibly end and reaches a couple px past
+// the suit's deepest cut (topY+44, cx+-26 -- see drawTorsoSuit above).
+//
+// The original 50/4 sizing only closed the gap against the CUTOUT's own top
+// edge (world y 146, 6px below the torso joint) -- the wrong target:
+// drawHead's own drawn chin, not the cutout, is the real upper bound of the
+// gap, and it does not reliably reach that far down (mirrors
+// atlas_builder.py's own empirical measurement across every
+// FACE_SHAPE_RADIUS_MULT bucket -- "wide" ends its opaque chin at world y
+// 132, 14px above the cutout's own top edge). Below that, for ANY torso
+// variant (plain "torso" included, not just blazer/suit), nothing was
+// opaque until "torso"'s own inset-shrunk top at world y 146 -- a 14px band
+// showing the raw video frame straight through right at the collar,
+// regardless of which garment was picked. Re-derived to close THAT gap
+// instead: opaque top >= world y 128 (4px of margin past the "wide" worst
+// case) and opaque bottom >= world y 192 (2px past the suit's cutout tip at
+// 190) -- pivotY=24, sHeight=72 (inset=4 unchanged) gives exactly that. A
+// same-skin-tone patch overlapping the chin by a few px is invisible (head
+// is drawn on top, zOrder 6 > 2, and covers it wherever head itself is
+// opaque) -- only a gap, never an overlap, is visible here. zOrder places
+// it right after "torso" and before "arms"/"head", the same layer a real
+// neck bone would occupy.
 const ROW4_Y = SUIT_RECT.sy + SUIT_RECT.sHeight + GAP;
-const NECK_RECT: AtlasRect = { sx: GAP, sy: ROW4_Y, sWidth: 64, sHeight: 50 };
+const NECK_RECT: AtlasRect = { sx: GAP, sy: ROW4_Y, sWidth: 64, sHeight: 72 };
 
 const CANVAS_WIDTH =
   Math.max(LEG_R_RECT.sx + LEG_R_RECT.sWidth, SUIT_RECT.sx + SUIT_RECT.sWidth, EYES_OPEN_RECT.sx + EYES_OPEN_RECT.sWidth) + GAP;

@@ -684,7 +684,7 @@ const GARMENT_SHAPES: AvatarSkinGarmentShape[] = [
 const PLACEHOLDER_SKIN_PARTS: AvatarSkinPart[] = [
   { partId: "legL", boneIndex: LEG_L, pivotX: 21, pivotY: 4, zOrder: 0 },
   { partId: "legR", boneIndex: LEG_R, pivotX: 21, pivotY: 4, zOrder: 1 },
-  { partId: "neck", boneIndex: TORSO, pivotX: 32, pivotY: 4, zOrder: 2 },
+  { partId: "neck", boneIndex: TORSO, pivotX: 32, pivotY: 24, zOrder: 2 },
   { partId: "torso", boneIndex: TORSO, pivotX: 60, pivotY: 8, zOrder: 3 },
   { partId: "armL", boneIndex: ARM_L, pivotX: 18, pivotY: 4, zOrder: 4 },
   { partId: "armR", boneIndex: ARM_R, pivotX: 18, pivotY: 4, zOrder: 5 },

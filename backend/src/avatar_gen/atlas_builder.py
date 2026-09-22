@@ -100,13 +100,33 @@ SUIT_RECT = {"sx": BLAZER_RECT["sx"] + BLAZER_RECT["sWidth"] + GAP, "sy": _ROW3_
 # back in -- see that function's own doc comment) -- without this, that cut
 # has nothing opaque drawn under it, so the collar "hole" shows the raw
 # video frame straight through instead of reading as an open collar.
-# Sized/pivoted (service.py's "neck" pivot) so it starts just above the
-# bone joint and reaches down past the suit's deepest cut (topY+44,
-# cx+-26 -- see `_draw_torso_suit`); zOrder places it right after "torso"
-# and before "head"/"arms", the same layer conceptually a real neck bone
-# would occupy.
+# Sized/pivoted (service.py's "neck" pivot) so its OPAQUE area (rect minus
+# `_draw_neck`'s own inset=4) starts above wherever "head"'s own drawn chin
+# can plausibly end and reaches a couple px past the suit's deepest cut
+# (topY+44, cx+-26 -- see `_draw_torso_suit`); zOrder places it right after
+# "torso" and before "head"/"arms", the same layer conceptually a real neck
+# bone would occupy.
+#
+# The original 50/4 sizing only closed the gap against the CUTOUT's own top
+# edge (world y 146, 6px below the torso joint) -- the wrong target: "head"'s
+# drawn chin, not the cutout, is the real upper bound of the gap, and it does
+# NOT reliably reach that far down. Measured empirically (crop the baked
+# "head" rect, walk its center column) against every `_FACE_SHAPE_RADIUS_MULT`
+# bucket: "wide" (radius_y mult 0.96, the shortest) ends its opaque chin at
+# local row 124 of HEAD_RECT's 140, i.e. world y 132 -- a full 14px above the
+# cutout's own top edge. Below that, for ANY torso variant (plain "torso"
+# included, not just blazer/suit), nothing was opaque until "torso"'s own
+# inset-shrunk top at world y 146 -- a 14px band showing the raw video/photo
+# frame straight through right at the collar, regardless of which garment
+# was picked. Re-derived to close THAT gap instead: opaque top >= world y 128
+# (4px of margin past the "wide" worst case) and opaque bottom >= world y 192
+# (2px past the suit's cutout tip at 190) -- pivotY=24, sHeight=72 (inset=4
+# unchanged) gives exactly that. A same-skin-tone patch overlapping the chin
+# by a few px is invisible (head is drawn on top, zOrder 6 > 2, and covers it
+# wherever head itself is opaque) -- only a gap, never an overlap, is
+# visible here.
 _ROW4_Y = SUIT_RECT["sy"] + SUIT_RECT["sHeight"] + GAP
-NECK_RECT = {"sx": GAP, "sy": _ROW4_Y, "sWidth": 64, "sHeight": 50}
+NECK_RECT = {"sx": GAP, "sy": _ROW4_Y, "sWidth": 64, "sHeight": 72}
 
 # A fourth/fifth column, to the right of the mouth-shape column -- mirrors
 # frontend/src/lib/video/avatar/placeholderAtlas.ts's own EYEBROWS_*/EYES_*
@@ -577,7 +597,11 @@ _MOOD_EYEBROW_STYLES: dict[str, tuple[float, float, float]] = {
 }
 
 
-def _draw_mood_eyebrow(draw: ImageDraw.ImageDraw, rect: dict, style: str, color: str, skin_tone: str | None = None) -> None:
+_MOOD_EYEBROW_SUPERSAMPLE = 4
+_MOOD_EYEBROW_MARGIN = 12
+
+
+def _draw_mood_eyebrow(image: Image.Image, rect: dict, style: str, color: str, skin_tone: str | None = None) -> None:
     """`skin_tone`, when given, first strokes the SAME curve much wider in
     that color before drawing the real line -- an opaque backing so this
     shape actually REPLACES a real photo eyebrow already sitting under this
@@ -587,12 +611,35 @@ def _draw_mood_eyebrow(draw: ImageDraw.ImageDraw, rect: dict, style: str, color:
     covers glasses-frame pixels that reach into this same rect but sit above
     or below the eyebrow itself -- see [[project_avatar_photo_eyes_transparency_fix]]
     for the real avatar this silently broke (the top rim of a pair of
-    glasses got erased whenever a mood beat fired)."""
+    glasses got erased whenever a mood beat fired).
+
+    Drawn on its own small patch at `_MOOD_EYEBROW_SUPERSAMPLE`x scale, then
+    LANCZOS-downscaled back to 1x before pasting -- PIL's `ImageDraw.line`
+    has no native anti-aliasing, so at this rect's actual size (60x16) and
+    stroke width (3px) the curve rasterized with visibly jagged/stair-stepped
+    edges even though `_smooth_curve_points` already makes the underlying
+    PATH itself geometrically smooth (that fixed the zigzag shape, not the
+    hard-edged rendering of it). Mirrors the same big-then-downscale trick
+    `_paste_cropped_bbox` already relies on for the real per-person "neutral"
+    eyebrow -- applied here to a small local patch instead of a full-canvas
+    layer, since this curve is synthetic and has no real bbox to crop from.
+    `_MOOD_EYEBROW_MARGIN` (12) covers the curve's own overshoot past `rect`
+    (offset_x=20, span=18 puts the outer endpoint ~8px outside `rect`) plus
+    stroke half-width; the patch is mostly transparent outside the actual
+    stroke, so pasting it back with its own alpha as mask can't clobber
+    neighboring atlas cells even where the padded patch geometrically
+    overlaps them."""
     inner_y, outer_y, mid_y = _MOOD_EYEBROW_STYLES[style]
-    center_x = rect["sx"] + rect["sWidth"] / 2
-    center_y = rect["sy"] + rect["sHeight"] / 2
-    span = 18
-    offset_x = 20
+    ss = _MOOD_EYEBROW_SUPERSAMPLE
+    margin = _MOOD_EYEBROW_MARGIN
+    patch_w, patch_h = rect["sWidth"] + margin * 2, rect["sHeight"] + margin * 2
+    patch = Image.new("RGBA", (patch_w * ss, patch_h * ss), (0, 0, 0, 0))
+    patch_draw = ImageDraw.Draw(patch)
+
+    center_x = (margin + rect["sWidth"] / 2) * ss
+    center_y = (margin + rect["sHeight"] / 2) * ss
+    span = 18 * ss
+    offset_x = 20 * ss
     for sign in (-1, 1):
         mid_x = center_x + sign * offset_x
         inner_x = mid_x - sign * span
@@ -602,10 +649,15 @@ def _draw_mood_eyebrow(draw: ImageDraw.ImageDraw, rect: dict, style: str, color:
         # real `quadraticCurveTo` draws through the same 3 points -- PIL has
         # no bezier primitive, so `_smooth_curve_points` approximates one by
         # upsampling a Catmull-Rom spline through these same points instead.
-        curve = _smooth_curve_points([(inner_x, center_y + inner_y), (mid_x, center_y + mid_y), (outer_x, center_y + outer_y)])
+        curve = _smooth_curve_points(
+            [(inner_x, center_y + inner_y * ss), (mid_x, center_y + mid_y * ss), (outer_x, center_y + outer_y * ss)]
+        )
         if skin_tone:
-            draw.line(curve, fill=skin_tone, width=12, joint="curve")
-        draw.line(curve, fill=color, width=3, joint="curve")
+            patch_draw.line(curve, fill=skin_tone, width=12 * ss, joint="curve")
+        patch_draw.line(curve, fill=color, width=3 * ss, joint="curve")
+
+    downscaled = patch.resize((patch_w, patch_h), Image.LANCZOS)
+    image.paste(downscaled, (rect["sx"] - margin, rect["sy"] - margin), downscaled)
 
 
 def _draw_closed_eye(draw: ImageDraw.ImageDraw, rect: dict, skin_tone: str | None = None) -> None:
@@ -696,9 +748,9 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
     )
     _paste_cropped_bbox(image, eyebrows_layer, EYEBROWS_NEUTRAL_RECT)
     _paste_cropped_bbox(image, eyes_layer, EYES_OPEN_RECT)
-    _draw_mood_eyebrow(draw, EYEBROWS_ANGRY_RECT, "angry", brow_color)
-    _draw_mood_eyebrow(draw, EYEBROWS_HAPPY_RECT, "happy", brow_color)
-    _draw_mood_eyebrow(draw, EYEBROWS_SAD_RECT, "sad", brow_color)
+    _draw_mood_eyebrow(image, EYEBROWS_ANGRY_RECT, "angry", brow_color)
+    _draw_mood_eyebrow(image, EYEBROWS_HAPPY_RECT, "happy", brow_color)
+    _draw_mood_eyebrow(image, EYEBROWS_SAD_RECT, "sad", brow_color)
     _draw_closed_eye(draw, EYES_CLOSED_RECT)
     _draw_mouth_closed(draw, MOUTH_CLOSED_RECT, palette.mouth_width_scale)
     _draw_mouth_open(draw, MOUTH_OPEN_RECT, palette.mouth_width_scale)
@@ -998,9 +1050,9 @@ def build_atlas_png_from_photo(
         _paste_cropped_bbox(image, eyebrows_layer, EYEBROWS_NEUTRAL_RECT)
     if not palette.eye_crop_box:
         _paste_cropped_bbox(image, eyes_layer, EYES_OPEN_RECT)
-    _draw_mood_eyebrow(draw, EYEBROWS_ANGRY_RECT, "angry", brow_color, skin_tone=palette.skin_tone)
-    _draw_mood_eyebrow(draw, EYEBROWS_HAPPY_RECT, "happy", brow_color, skin_tone=palette.skin_tone)
-    _draw_mood_eyebrow(draw, EYEBROWS_SAD_RECT, "sad", brow_color, skin_tone=palette.skin_tone)
+    _draw_mood_eyebrow(image, EYEBROWS_ANGRY_RECT, "angry", brow_color, skin_tone=palette.skin_tone)
+    _draw_mood_eyebrow(image, EYEBROWS_HAPPY_RECT, "happy", brow_color, skin_tone=palette.skin_tone)
+    _draw_mood_eyebrow(image, EYEBROWS_SAD_RECT, "sad", brow_color, skin_tone=palette.skin_tone)
     _draw_closed_eye(draw, EYES_CLOSED_RECT, skin_tone=palette.skin_tone)
     eyebrows_pivot = (
         _compute_photo_part_pivot(palette.head_crop_box, palette.eyebrow_crop_box, EYEBROWS_NEUTRAL_RECT)
