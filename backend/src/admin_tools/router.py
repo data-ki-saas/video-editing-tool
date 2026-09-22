@@ -1,7 +1,12 @@
+import logging
+
+from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.admin_tools import service
 from src.core.auth import CurrentUser, require_feature
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin/tools", tags=["admin-tools"])
 
@@ -30,3 +35,25 @@ async def configure_r2_cors(user: CurrentUser = Depends(_require_admin_tools)) -
         return service.run_configure_r2_cors()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ClientError as exc:
+        logger.exception("R2 CORS configuration failed")
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code == "AccessDenied":
+            # R2 API tokens commonly allow Object Read & Write (what every
+            # other r2_client.py call needs) without also granting the
+            # bucket-level "Edit" permission PutBucketCors needs -- these are
+            # separate scopes in Cloudflare's R2 token UI, not a single
+            # "read & write" toggle. Confirmed by reproducing this locally:
+            # head_bucket (object-scope) succeeded, get_bucket_cors
+            # (bucket-scope) returned this same AccessDenied.
+            detail = (
+                "R2 rejected this with Access Denied -- the R2 API token "
+                "(R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY) has object-level "
+                "access but not the bucket-level 'Edit'/CORS permission. "
+                "Either widen that token's scope in the Cloudflare dashboard, "
+                "or apply the CORS policy there directly (R2 > bucket > "
+                "Settings > CORS Policy) instead of through this button."
+            )
+        else:
+            detail = f"R2 rejected this ({code or 'unknown error'}) -- see backend logs for the full response."
+        raise HTTPException(status_code=502, detail=detail) from exc
