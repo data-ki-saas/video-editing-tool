@@ -17,33 +17,20 @@ Run once per environment (local + prod), after backend/.env or the
 platform's env vars are set:
 
     uv run python scripts/configure_r2_cors.py
+
+Same logic as the admin "Reapply R2 CORS policy" button on /admin/tools
+(backend/src/admin_tools/service.py calls
+src.storage.r2_client.configure_uploads_bucket_cors directly) -- kept as a
+standalone script too for first-time setup, before a backend deploy exists
+to click that button on.
 """
 
-from src.core.config import settings
-from src.storage.r2_client import get_r2_client
+from src.storage.r2_client import configure_uploads_bucket_cors
 
 
 def main() -> None:
-    if not settings.cors_origin_list:
-        raise SystemExit("CORS_ORIGINS is empty -- set it before running this script.")
-
-    get_r2_client().put_bucket_cors(
-        Bucket=settings.r2_bucket_name,
-        CORSConfiguration={
-            "CORSRules": [
-                {
-                    "AllowedOrigins": settings.cors_origin_list,
-                    "AllowedMethods": ["GET", "HEAD"],
-                    "AllowedHeaders": ["*"],
-                    # Content-Range/Accept-Ranges let <video> byte-range seek;
-                    # ETag lets the browser cache thumbnail/decode work per asset.
-                    "ExposeHeaders": ["ETag", "Content-Length", "Content-Range", "Accept-Ranges"],
-                    "MaxAgeSeconds": 3600,
-                }
-            ]
-        },
-    )
-    print(f"Applied CORS policy to {settings.r2_bucket_name!r} for origins: {settings.cors_origin_list}")
+    result = configure_uploads_bucket_cors()
+    print(f"Applied CORS policy to {result['bucket']!r} for origins: {result['origins']}")
 
 
 if __name__ == "__main__":

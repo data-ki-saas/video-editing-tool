@@ -12,32 +12,28 @@ the fix out to every existing avatar it affects:
 Avatars with no source_cartoon_key (generated via the free parametric-drawing
 path, or before this caching existed) are skipped -- they were never
 rebakeable and still need the old "generate a new one" path, unchanged.
+
+Same loop as the admin "Rebake all avatars" button on /admin/tools
+(backend/src/admin_tools/service.py calls avatar_gen.service.rebake_all_avatars
+directly) -- kept as a standalone script too since it works without a running
+backend deploy (e.g. first-time environment setup, or a CI/ops box that only
+has DB/R2 credentials, not an HTTP path to the API).
 """
 
 import logging
 
-from src.avatar_gen import repository
-from src.avatar_gen.service import _rebake_record
+from src.avatar_gen.service import rebake_all_avatars
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    records = repository.list_with_source_cartoon()
-    logger.info("found %d avatar(s) with a cached source photo to rebake", len(records))
-
-    succeeded = 0
-    failed = 0
-    for record in records:
-        try:
-            _rebake_record(record)
-            succeeded += 1
-        except Exception:
-            failed += 1
-            logger.exception("failed to rebake avatar design=%s user=%s", record.id, record.user_id)
-
-    logger.info("rebake complete: %d succeeded, %d failed", succeeded, failed)
+    result = rebake_all_avatars()
+    logger.info(
+        "found %d avatar(s) with a cached source photo to rebake", result["total"]
+    )
+    logger.info("rebake complete: %d succeeded, %d failed", result["succeeded"], result["failed"])
 
 
 if __name__ == "__main__":

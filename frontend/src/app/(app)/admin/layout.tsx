@@ -10,6 +10,7 @@ const ADMIN_NAV_ITEMS = [
   { href: "/admin/users", label: "Users" },
   { href: "/admin/tickets", label: "Tickets" },
   { href: "/admin/integrations", label: "Integrations" },
+  { href: "/admin/tools", label: "Tools" },
   { href: "/admin/usage", label: "Usage" },
 ];
 

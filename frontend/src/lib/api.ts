@@ -2102,3 +2102,45 @@ export async function updateTicketTriage(
   });
   return ticketDetailFromWire(await handleResponse<TicketDetailWire>(response));
 }
+
+// --- Admin ops tools (backend/src/admin_tools/*) --------------------------
+// Buttons on /admin/tools for one-off ops scripts that otherwise need direct
+// DB/R2 shell access to run -- see backend/scripts/ for the CLI equivalents
+// these call the exact same underlying logic as.
+
+export interface RebakeAvatarsResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+}
+
+/** POST /api/admin/tools/rebake-avatars -- re-applies today's
+ * atlas_builder.py baking code to every fal.ai avatar with a cached source
+ * photo, across all users. Run after shipping a baking bug fix (mouth
+ * position, eyebrows, transparency, ...) to roll it out without asking each
+ * affected user to regenerate their avatar. */
+export async function rebakeAllAvatars(): Promise<RebakeAvatarsResult> {
+  const response = await apiFetch(`${API_BASE_URL}/api/admin/tools/rebake-avatars`, {
+    method: "POST",
+    headers: await authHeader(),
+  });
+  return handleResponse<RebakeAvatarsResult>(response);
+}
+
+export interface ConfigureR2CorsResult {
+  bucket: string;
+  origins: string[];
+}
+
+/** POST /api/admin/tools/configure-r2-cors -- (re-)applies the private
+ * uploads bucket's CORS policy from today's CORS_ORIGINS. Safe to run
+ * repeatedly; only needed again after CORS_ORIGINS changes (e.g. a new
+ * frontend domain) since the bucket's own policy doesn't update itself. */
+export async function configureR2Cors(): Promise<ConfigureR2CorsResult> {
+  const response = await apiFetch(`${API_BASE_URL}/api/admin/tools/configure-r2-cors`, {
+    method: "POST",
+    headers: await authHeader(),
+  });
+  const body = await handleResponse<{ bucket: string; origins: string[] }>(response);
+  return { bucket: body.bucket, origins: body.origins };
+}

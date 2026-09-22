@@ -117,6 +117,38 @@ def thumbnail_key_from_url(url: str) -> str | None:
     return url[len(prefix):]
 
 
+def configure_uploads_bucket_cors() -> dict[str, object]:
+    """(Re-)applies the private uploads bucket's CORS policy from today's
+    CORS_ORIGINS -- see scripts/configure_r2_cors.py's own module docstring
+    for why this is needed at all (presigned GET URLs bypass the backend's
+    own CORSMiddleware entirely). `put_bucket_cors` replaces the bucket's
+    policy wholesale, so this is safe to call repeatedly/idempotently, unlike
+    avatar_gen.service.rebake_all_avatars this touches no per-user data, only
+    the bucket's own config. Shared by the standalone script and the admin
+    "Reapply R2 CORS policy" button (backend/src/admin_tools/service.py) so
+    the two stay in sync by construction."""
+    if not settings.cors_origin_list:
+        raise ValueError("CORS_ORIGINS is empty -- set it before running this.")
+
+    get_r2_client().put_bucket_cors(
+        Bucket=settings.r2_bucket_name,
+        CORSConfiguration={
+            "CORSRules": [
+                {
+                    "AllowedOrigins": settings.cors_origin_list,
+                    "AllowedMethods": ["GET", "HEAD"],
+                    "AllowedHeaders": ["*"],
+                    # Content-Range/Accept-Ranges let <video> byte-range seek;
+                    # ETag lets the browser cache thumbnail/decode work per asset.
+                    "ExposeHeaders": ["ETag", "Content-Length", "Content-Range", "Accept-Ranges"],
+                    "MaxAgeSeconds": 3600,
+                }
+            ]
+        },
+    )
+    return {"bucket": settings.r2_bucket_name, "origins": settings.cors_origin_list}
+
+
 def presigned_get_url(key: str) -> str:
     """A time-limited, signed read URL for a private R2 object -- the bucket
     itself must NOT be public. Every caller re-checks Supabase ownership

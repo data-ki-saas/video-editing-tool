@@ -262,6 +262,27 @@ def _rebake_record(record: repository.AvatarDesignRecord) -> repository.AvatarDe
     return updated
 
 
+def rebake_all_avatars() -> dict[str, int]:
+    """Admin bulk entry point -- mirrors scripts/rebake_avatars.py's own
+    loop exactly (that script now just calls this and prints the result), so
+    the admin /api/admin/tools/rebake-avatars endpoint and the CLI path stay
+    in sync by construction rather than by two copies of the same loop.
+    Unscoped by user (unlike rebake_generated_avatar) -- deliberately, this
+    is the admin path meant to roll an atlas_builder.py fix out to every
+    affected avatar at once."""
+    records = repository.list_with_source_cartoon()
+    succeeded = 0
+    failed = 0
+    for record in records:
+        try:
+            _rebake_record(record)
+            succeeded += 1
+        except Exception:
+            logger.exception("bulk rebake failed for avatar design=%s user=%s", record.id, record.user_id)
+            failed += 1
+    return {"total": len(records), "succeeded": succeeded, "failed": failed}
+
+
 def rebake_generated_avatar(design_id: str, user: CurrentUser) -> GeneratedAvatarDetail:
     """User-facing entry point for _rebake_record: re-applies the current
     atlas-baking code (build_atlas_png_from_photo) to this avatar's cached

@@ -29,6 +29,7 @@ FEATURES: list[Feature] = [
     Feature("admin_manage_roles", "Manage roles, permissions & user assignment", "Admin"),
     Feature("metering_admin_view", "Usage & cost dashboard", "Admin"),
     Feature("tickets_manage_all", "View & respond to all support tickets", "Admin"),
+    Feature("admin_ops_tools", "Run admin ops tools (rebake avatars, infra scripts)", "Admin"),
 ]
 
 FEATURE_KEYS = frozenset(f.key for f in FEATURES)
