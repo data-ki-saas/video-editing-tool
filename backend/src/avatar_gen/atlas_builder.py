@@ -120,13 +120,42 @@ SUIT_RECT = {"sx": BLAZER_RECT["sx"] + BLAZER_RECT["sWidth"] + GAP, "sy": _ROW3_
 # frame straight through right at the collar, regardless of which garment
 # was picked. Re-derived to close THAT gap instead: opaque top >= world y 128
 # (4px of margin past the "wide" worst case) and opaque bottom >= world y 192
-# (2px past the suit's cutout tip at 190) -- pivotY=24, sHeight=72 (inset=4
-# unchanged) gives exactly that. A same-skin-tone patch overlapping the chin
-# by a few px is invisible (head is drawn on top, zOrder 6 > 2, and covers it
-# wherever head itself is opaque) -- only a gap, never an overlap, is
-# visible here.
+# (2px past the suit's cutout tip at 190) -- pivotY=24 (inset=4 unchanged)
+# gives exactly that for the fixed pivot service.py's `_PARTS` uses on the
+# PARAMETRIC path, where the chin reliably ends at one of a few known
+# `_FACE_SHAPE_RADIUS_MULT` buckets. A same-skin-tone patch overlapping the
+# chin by a few px is invisible (head is drawn on top, zOrder 6 > 2, and
+# covers it wherever head itself is opaque) -- only a gap, never an overlap,
+# is visible here.
+#
+# sHeight is taller than that fixed pivot alone needs (72 would suffice) --
+# the extra headroom is for `_compute_photo_neck_pivot` below, which moves
+# the PIVOT (not this rect) for the fal.ai photo path, per-avatar. A real
+# photo's chin can end well above the "wide" bucket's worst case (see
+# `head_chin_fraction`'s own doc comment in photo_analysis.py -- a face
+# wider than it is tall gets the head crop's extra padding split evenly
+# above AND below the chin, unlike every hand-tuned parametric bucket, which
+# always has the chin sitting near the crop's bottom edge by construction).
+# Growing sHeight while leaving `_PARTS`' own fixed pivotY=24 untouched is
+# harmless for the parametric path -- "torso" (zOrder 3 > "neck"'s 2) still
+# covers the extra opaque area everywhere except the collar cutout, and the
+# cutout's own geometry doesn't reach anywhere near this rect's new, lower
+# bottom edge.
 _ROW4_Y = SUIT_RECT["sy"] + SUIT_RECT["sHeight"] + GAP
-NECK_RECT = {"sx": GAP, "sy": _ROW4_Y, "sWidth": 64, "sHeight": 72}
+_NECK_INSET = 4
+NECK_RECT = {"sx": GAP, "sy": _ROW4_Y, "sWidth": 64, "sHeight": 124}
+
+# Real photos whose face is unusually wide relative to its height push
+# `head_chin_fraction` well below what any parametric bucket ever produced --
+# clamped so a pathological photo can't demand a pivot the rect above has no
+# headroom for (see NECK_RECT's own comment for how its sHeight was sized
+# against this exact floor).
+_NECK_CHIN_FRACTION_MIN = 0.55
+# Same margin the original hand-derived pivotY=24 baked in ("4px of margin
+# past the worst case") -- kept identical so re-deriving the formula below
+# reproduces that constant exactly for the bucket-equivalent fraction
+# (verified: frac=124/140 -> pivotY=24, see `_compute_photo_neck_pivot`).
+_NECK_CHIN_OVERLAP_MARGIN = 4
 
 # A fourth/fifth column, to the right of the mouth-shape column -- mirrors
 # frontend/src/lib/video/avatar/placeholderAtlas.ts's own EYEBROWS_*/EYES_*
@@ -249,6 +278,61 @@ def _compute_photo_part_pivot(
     return pivot_x, pivot_y
 
 
+# service.py's `_PARTS` "neck" pivotX -- kept as a plain literal here (not
+# imported, to avoid a service.py<->atlas_builder.py import cycle, same
+# constraint `_HEAD_PART_PIVOT` above already works around) since "neck"
+# never needs horizontal correction: unlike mouth/eyebrows/eyes, it isn't a
+# real photo feature being aligned to, just a plain filler rect centered
+# under the head regardless of this specific photo's proportions.
+_NECK_PIVOT_X = 32
+
+
+def _compute_photo_neck_pivot(head_chin_fraction: float | None) -> tuple[float, float]:
+    """Where the "neck" part's pivot needs to be so its opaque top reaches
+    (with a small overlap margin) THIS photo's real chin, instead of
+    service.py's `_PARTS` fixed pivotY=24 -- which assumes the chin always
+    ends at a fixed fraction of the head crop, true only for the
+    procedurally-drawn parametric head's known `_FACE_SHAPE_RADIUS_MULT`
+    buckets (see NECK_RECT's own doc comment), not a real photo (a real
+    face's `head_chin_fraction` varies with how much the head crop's
+    square-ing padded the chin away from the crop's own bottom edge -- see
+    that field's own doc comment in photo_analysis.py). Same "don't assume a
+    constant fraction of the head crop" bug class `_compute_photo_part_pivot`
+    above already fixes for mouth/eyebrows/eyes, just anchored to a
+    DIFFERENT bone ("neck" rides "torso", not "head"), so it needs its own
+    (simpler -- no horizontal component, no feature-crop-box input) formula.
+
+    Derivation: "head"'s bone sits at local offset (0, -12) from "torso"
+    (library.ts's DEFAULT_LOCAL_POSE), and "head"'s own rect is drawn at
+    bone-local offset -_HEAD_PART_PIVOT, so head-image row r lands at
+    torso-bone-local y = -12 + (r - _HEAD_PART_PIVOT[1]). The real chin sits
+    at head-image row `head_chin_fraction * HEAD_RECT["sHeight"]`, giving its
+    torso-local y = head_chin_fraction * HEAD_RECT["sHeight"] - HEAD_RECT["sHeight"]
+    (the -12 and -_HEAD_PART_PIVOT[1] terms cancel exactly against
+    `_HEAD_PART_PIVOT[1]` == HEAD_RECT["sHeight"] - 12). "neck"'s own opaque
+    top sits at head-image-equivalent torso-local y = _NECK_INSET - pivotY.
+    Setting that equal to the chin's torso-local y, minus
+    `_NECK_CHIN_OVERLAP_MARGIN` (so the patch reaches a few px PAST the chin,
+    guaranteeing overlap despite any rounding -- same margin the original
+    hand-derived pivotY=24 baked in) and solving for pivotY:
+        pivotY = _NECK_INSET + _NECK_CHIN_OVERLAP_MARGIN
+                 + HEAD_RECT["sHeight"] * (1 - head_chin_fraction)
+    Verified this reproduces the original hand-measured constant exactly:
+    the "wide" parametric bucket's chin fraction (124/140) plugs in to give
+    pivotY=24, the exact value `_PARTS`/this module's own fixed-path
+    NECK_RECT pivot has always used.
+
+    `head_chin_fraction=None` (no detected face; shouldn't normally reach
+    here, since the fal.ai path requires `palette.detected`) falls back to
+    `_NECK_CHIN_FRACTION_MIN`'s own worst case rather than guessing 1.0 --
+    erring toward "reaches too far up" (invisible, covered by head) rather
+    than "leaves a gap"."""
+    frac = _NECK_CHIN_FRACTION_MIN if head_chin_fraction is None else head_chin_fraction
+    frac = max(_NECK_CHIN_FRACTION_MIN, min(1.0, frac))
+    pivot_y = _NECK_INSET + _NECK_CHIN_OVERLAP_MARGIN + HEAD_RECT["sHeight"] * (1 - frac)
+    return _NECK_PIVOT_X, pivot_y
+
+
 def _box(rect: dict) -> tuple[float, float, float, float]:
     return rect["sx"], rect["sy"], rect["sx"] + rect["sWidth"], rect["sy"] + rect["sHeight"]
 
@@ -269,7 +353,7 @@ def _draw_neck(draw: ImageDraw.ImageDraw, rect: dict, skin_tone: str) -> None:
     """Plain skin-tone patch for the "neck" part -- see NECK_RECT's own doc
     comment above for why this exists (backing the blazer/suit collar
     cutout). Mirrors placeholderAtlas.ts's drawNeck."""
-    _rounded_rect(draw, rect, inset=4, radius=10, fill=skin_tone)
+    _rounded_rect(draw, rect, inset=_NECK_INSET, radius=10, fill=skin_tone)
 
 
 def _fill_garment_triangle(draw: ImageDraw.ImageDraw, points: list[tuple[float, float]]) -> None:
@@ -864,7 +948,9 @@ def _background_removal_mask(image: Image.Image, background_rgb: tuple[int, int,
 
 def build_atlas_png_from_photo(
     cartoon_image_bytes: bytes, palette: FacePalette
-) -> tuple[bytes, dict[str, dict], tuple[float, float], tuple[float, float] | None, tuple[float, float] | None]:
+) -> tuple[
+    bytes, dict[str, dict], tuple[float, float], tuple[float, float] | None, tuple[float, float] | None, tuple[float, float]
+]:
     """The fal.ai-cartoonify path: crops the head and mouth directly out of
     `cartoon_image_bytes` (a real, if AI-stylized, photo -- see
     avatar_gen/cartoonify_provider.py) using `palette.head_crop_box`/
@@ -874,19 +960,24 @@ def build_atlas_png_from_photo(
     `build_atlas_png` above does. Requires `palette.detected` -- the caller
 
     Returns `(atlas_png_bytes, part_rects, mouth_pivot, eyebrows_pivot,
-    eyes_pivot)` -- the extra pivots (absent from `build_atlas_png`'s return
-    above, since that path's feature positions are fixed by construction) are
-    this specific avatar's own corrected "mouth"/"eyebrows"/"eyes" part
-    pivots from `_compute_photo_part_pivot`; the caller (service.py) must use
-    them to override `_PARTS`' fixed pivots for this avatar's stored skin, or
-    those swappable rects render in the wrong place on this real photo's
-    head. `eyebrows_pivot`/`eyes_pivot` are `None` (meaning "keep _PARTS'
-    fixed pivot") only when `palette.eyebrow_crop_box`/`eye_crop_box` is
-    itself `None` -- i.e. no eyebrow/eye contour was detected at all, same
-    "nothing to correct against" posture as a missing mouth contour would
-    need (mouth_crop_box is asserted non-None below since `palette.detected`
-    already guarantees it, unlike these two which mediapipe could in
-    principle still miss on a partially-obscured face).
+    eyes_pivot, neck_pivot)` -- the extra pivots (absent from
+    `build_atlas_png`'s return above, since that path's feature positions are
+    fixed by construction) are this specific avatar's own corrected
+    "mouth"/"eyebrows"/"eyes"/"neck" part pivots from
+    `_compute_photo_part_pivot`/`_compute_photo_neck_pivot`; the caller
+    (service.py) must use them to override `_PARTS`' fixed pivots for this
+    avatar's stored skin, or those parts render in the wrong place against
+    this real photo's head. `eyebrows_pivot`/`eyes_pivot` are `None` (meaning
+    "keep _PARTS' fixed pivot") only when `palette.eyebrow_crop_box`/
+    `eye_crop_box` is itself `None` -- i.e. no eyebrow/eye contour was
+    detected at all, same "nothing to correct against" posture as a missing
+    mouth contour would need (mouth_crop_box is asserted non-None below since
+    `palette.detected` already guarantees it, unlike these two which
+    mediapipe could in principle still miss on a partially-obscured face).
+    `neck_pivot`, unlike those two, is never `None` -- `_compute_photo_neck_pivot`
+    always has a usable fallback (see its own doc comment) since leaving
+    "neck" at `_PARTS`' fixed pivot is exactly the bug this exists to fix,
+    not a safe default.
     (avatar_gen/service.py) only reaches this function once a clear face was
     already confirmed on the original upload, which is also what gates the
     fal.ai spend in the first place.
@@ -1076,6 +1167,7 @@ def build_atlas_png_from_photo(
     _draw_torso_blazer(draw, BLAZER_RECT)
     _draw_torso_suit(draw, SUIT_RECT)
     _draw_neck(draw, NECK_RECT, palette.skin_tone)
+    neck_pivot = _compute_photo_neck_pivot(palette.head_chin_fraction)
 
     buffer = BytesIO()
     image.save(buffer, format="PNG")
@@ -1104,4 +1196,4 @@ def build_atlas_png_from_photo(
         "suit": SUIT_RECT,
         "neck": NECK_RECT,
     }
-    return buffer.getvalue(), part_rects, mouth_pivot, eyebrows_pivot, eyes_pivot
+    return buffer.getvalue(), part_rects, mouth_pivot, eyebrows_pivot, eyes_pivot, neck_pivot

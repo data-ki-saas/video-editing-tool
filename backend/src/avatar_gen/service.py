@@ -36,13 +36,14 @@ _DEFAULT_NAME = "My Avatar"
 # own doc comment on why the two are authored together). Structural, not
 # palette-dependent for the parametric (build_atlas_png) path -- a generated
 # skin no more needs its own layout than a hand-drawn recolor does THERE.
-# The fal.ai photo path is the one exception: its "mouth" pivot below is
-# only correct for the procedurally-drawn parametric head, where the mouth
-# is guaranteed by construction to sit at this fixed fraction of the head
-# crop. A real photo's mouth position within its own head crop varies with
-# that person's proportions/framing, so _parts_for -- not this constant
-# directly -- is what actually gets stored per avatar; see its own doc
-# comment and build_atlas_png_from_photo's `mouth_pivot` return value.
+# The fal.ai photo path is the exception: its "mouth"/"eyebrows"/"eyes"/
+# "neck" pivots below are only correct for the procedurally-drawn parametric
+# head, where each is guaranteed by construction to sit at a fixed fraction
+# of the head crop. A real photo's own proportions/framing vary that
+# fraction per avatar, so _parts_for -- not this constant directly -- is
+# what actually gets stored per avatar; see its own doc comment and
+# build_atlas_png_from_photo's `mouth_pivot`/`eyebrows_pivot`/`eyes_pivot`/
+# `neck_pivot` return values.
 _PARTS = [
     {"partId": "legL", "boneIndex": 5, "pivotX": 21, "pivotY": 4, "zOrder": 0},
     {"partId": "legR", "boneIndex": 6, "pivotX": 21, "pivotY": 4, "zOrder": 1},
@@ -54,11 +55,17 @@ _PARTS = [
     # cutout (a deliberate fully-transparent cut, see atlas_builder.py's
     # `_cut_garment_notch` doc comment) -- that cutout has nothing else
     # drawn under it, so without "neck" underneath it reveals the raw video
-    # frame instead of skin. pivotY=24 (not NECK_RECT's own sHeight/2=36) is
+    # frame instead of skin. pivotY=24 (not NECK_RECT's own sHeight/2=62) is
     # deliberate -- see NECK_RECT's own doc comment in
     # atlas_builder.py/placeholderAtlas.ts for the exact pivot math that
     # closes the raw-video gap between "head"'s own drawn chin and "torso"'s
-    # opaque top, which the original 4/50 pivot/sHeight left wide open.
+    # opaque top, which the original 4/50 pivot/sHeight left wide open. This
+    # fixed pivotY is only correct for the parametric path's known chin
+    # buckets -- the fal.ai photo path computes its own per-avatar override
+    # via `_compute_photo_neck_pivot` (atlas_builder.py), since a real
+    # photo's chin position within its own head crop varies with that
+    # person's face proportions, same bug class the mouth/eyebrows/eyes
+    # pivots below were already fixed for.
     {"partId": "neck", "boneIndex": 1, "pivotX": 32, "pivotY": 24, "zOrder": 2},
     {"partId": "torso", "boneIndex": 1, "pivotX": 60, "pivotY": 8, "zOrder": 3},
     {"partId": "armL", "boneIndex": 3, "pivotX": 18, "pivotY": 4, "zOrder": 4},
@@ -98,14 +105,15 @@ def _parts_for(
     mouth_pivot: tuple[float, float] | None,
     eyebrows_pivot: tuple[float, float] | None = None,
     eyes_pivot: tuple[float, float] | None = None,
+    neck_pivot: tuple[float, float] | None = None,
 ) -> list[dict]:
-    """`_PARTS`, with the "mouth"/"eyebrows"/"eyes" entries' pivots
+    """`_PARTS`, with the "mouth"/"eyebrows"/"eyes"/"neck" entries' pivots
     overridden when given (the fal.ai photo path -- see
     build_atlas_png_from_photo's own doc comment). Each left `None` (the
     parametric path, or a photo where that particular feature wasn't
     detected) keeps `_PARTS`' own fixed pivot for that part, which is already
     correct by construction for the parametric path."""
-    overrides = {"mouth": mouth_pivot, "eyebrows": eyebrows_pivot, "eyes": eyes_pivot}
+    overrides = {"mouth": mouth_pivot, "eyebrows": eyebrows_pivot, "eyes": eyes_pivot, "neck": neck_pivot}
     if not any(overrides.values()):
         return _PARTS
 
@@ -161,7 +169,18 @@ def resolve_avatar_record(record: repository.AvatarDesignRecord) -> GeneratedAva
 
 async def _cartoonify_and_crop(
     *, user_id: str, photo_bytes: bytes, original_palette: FacePalette
-) -> tuple[bytes, bytes, dict[str, dict], tuple[float, float], tuple[float, float] | None, tuple[float, float] | None] | None:
+) -> (
+    tuple[
+        bytes,
+        bytes,
+        dict[str, dict],
+        tuple[float, float],
+        tuple[float, float] | None,
+        tuple[float, float] | None,
+        tuple[float, float],
+    ]
+    | None
+):
     """The fal.ai path: stage the real photo in R2 (fal needs a fetchable
     URL, not raw bytes -- same reason matting/service.py presigns a URL
     before calling fal's rembg), cartoonify it, then re-run face analysis on
@@ -225,7 +244,7 @@ def _rebake_record(record: repository.AvatarDesignRecord) -> repository.AvatarDe
     if not palette.detected:
         raise HTTPException(status_code=502, detail="Couldn't re-detect a face in this avatar's cached source photo")
 
-    atlas_png, part_rects, mouth_pivot, eyebrows_pivot, eyes_pivot = build_atlas_png_from_photo(cartoon_bytes, palette)
+    atlas_png, part_rects, mouth_pivot, eyebrows_pivot, eyes_pivot, neck_pivot = build_atlas_png_from_photo(cartoon_bytes, palette)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
         tmp.write(atlas_png)
@@ -250,7 +269,7 @@ def _rebake_record(record: repository.AvatarDesignRecord) -> repository.AvatarDe
     new_skin = {
         **record.skin,
         "atlas": {**record.skin["atlas"], "partRects": part_rects},
-        "parts": _parts_for(mouth_pivot, eyebrows_pivot, eyes_pivot),
+        "parts": _parts_for(mouth_pivot, eyebrows_pivot, eyes_pivot, neck_pivot),
         "mouthShapes": _MOUTH_SHAPES,
         "colorSlots": _COLOR_SLOTS,
         "garmentShapes": _GARMENT_SHAPES,
@@ -334,6 +353,7 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
     mouth_pivot: tuple[float, float] | None = None
     eyebrows_pivot: tuple[float, float] | None = None
     eyes_pivot: tuple[float, float] | None = None
+    neck_pivot: tuple[float, float] | None = None
     source_cartoon_key: str | None = None
     fal_result = await _cartoonify_and_crop(user_id=user.id, photo_bytes=photo_bytes, original_palette=palette) if palette.detected else None
 
@@ -341,7 +361,7 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
     atlas_key = f"avatars/{user.id}/{design_id}/atlas.png"
 
     if fal_result is not None:
-        cartoon_bytes, atlas_png, part_rects, mouth_pivot, eyebrows_pivot, eyes_pivot = fal_result
+        cartoon_bytes, atlas_png, part_rects, mouth_pivot, eyebrows_pivot, eyes_pivot, neck_pivot = fal_result
         used_fal = True
         # Best-effort: if this upload fails, generation still succeeds --
         # it just means a future baking-code fix can't rebake THIS avatar in
@@ -380,7 +400,7 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
         "skinId": design_id,
         "topologyId": _TOPOLOGY_ID,
         "atlas": {"imageRef": "", "partRects": part_rects},
-        "parts": _parts_for(mouth_pivot, eyebrows_pivot, eyes_pivot),
+        "parts": _parts_for(mouth_pivot, eyebrows_pivot, eyes_pivot, neck_pivot),
         "mouthShapes": _MOUTH_SHAPES,
         "colorSlots": _COLOR_SLOTS,
         "garmentShapes": _GARMENT_SHAPES,

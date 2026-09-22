@@ -35,6 +35,7 @@ class FacePaletteResponse(BaseModel):
     eyebrow_crop_box: _Box | None
     eye_crop_box: _Box | None
     background_rgb: tuple[int, int, int] | None
+    head_chin_fraction: float | None
 
 
 def _require_internal_secret(x_internal_secret: str = Header(default="")) -> None:
@@ -72,4 +73,5 @@ async def analyze(file: UploadFile = File(...)) -> FacePaletteResponse:
         eyebrow_crop_box=palette.eyebrow_crop_box,
         eye_crop_box=palette.eye_crop_box,
         background_rgb=palette.background_rgb,
+        head_chin_fraction=palette.head_chin_fraction,
     )

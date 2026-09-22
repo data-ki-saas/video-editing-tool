@@ -54,6 +54,12 @@ class FacePalette:
     eyebrow_crop_box: Box | None = None
     eye_crop_box: Box | None = None
     background_rgb: tuple[int, int, int] | None = None
+    # Chin's position as a fraction of head_crop_box's own height -- see
+    # face-analysis/src/photo_analysis.py's FacePalette.head_chin_fraction
+    # for why this isn't always ~1.0. Feeds atlas_builder.py's per-photo
+    # "neck" pivot the same way mouth_crop_box/eyebrow_crop_box/eye_crop_box
+    # feed the mouth/eyebrows/eyes pivots.
+    head_chin_fraction: float | None = None
 
 
 _DEFAULT_SKIN_TONE = "#e8b48c"
@@ -98,6 +104,7 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             eyebrow_crop_box=tuple(body["eyebrow_crop_box"]) if body.get("eyebrow_crop_box") else None,
             eye_crop_box=tuple(body["eye_crop_box"]) if body.get("eye_crop_box") else None,
             background_rgb=tuple(body["background_rgb"]) if body.get("background_rgb") else None,
+            head_chin_fraction=body.get("head_chin_fraction"),
         )
     except Exception:
         logger.exception("face-analysis service call failed; falling back to default proportions")
