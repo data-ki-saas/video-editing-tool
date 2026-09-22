@@ -7,7 +7,7 @@ import httpx
 from fastapi import HTTPException
 
 from src.avatar_gen import repository
-from src.avatar_gen.atlas_builder import _PANTS_COLOR, _SHIRT_COLOR, build_atlas_png, build_atlas_png_from_photo
+from src.avatar_gen.atlas_builder import _PANTS_COLOR, _SHIRT_COLOR, _TRIM_COLOR, build_atlas_png, build_atlas_png_from_photo
 from src.avatar_gen.cartoonify_provider import cartoonify_image
 from src.avatar_gen.photo_analysis import FacePalette, analyze_photo
 from src.avatar_gen.schemas import GeneratedAvatarCreateResponse, GeneratedAvatarDetail, GeneratedAvatarSummary
@@ -68,8 +68,19 @@ _PARTS = [
     # pivots below were already fixed for.
     {"partId": "neck", "boneIndex": 1, "pivotX": 32, "pivotY": 24, "zOrder": 2},
     {"partId": "torso", "boneIndex": 1, "pivotX": 60, "pivotY": 8, "zOrder": 3},
+    # "torsoTrim" -- rides the SAME bone/pivot as "torso" (see
+    # atlas_builder.py's TORSO_TRIM_*_RECT doc comment for why this is a
+    # separate part, not a second color fill on "torso" itself), drawn just
+    # above it so the collar/button accent shows over the shirt fill.
+    {"partId": "torsoTrim", "boneIndex": 1, "pivotX": 60, "pivotY": 8, "zOrder": 3.5},
     {"partId": "armL", "boneIndex": 3, "pivotX": 18, "pivotY": 4, "zOrder": 4},
     {"partId": "armR", "boneIndex": 4, "pivotX": 18, "pivotY": 4, "zOrder": 5},
+    # "handL"/"handR" -- the rig's first real drawn hand, riding new
+    # HAND_L/HAND_R bones (boneIndex 7/8, mirrors
+    # frontend/src/lib/video/avatar/library.ts's own HAND_L/HAND_R exactly).
+    # pivot near TOP-center, same convention armL/armR's own pivot uses.
+    {"partId": "handL", "boneIndex": 7, "pivotX": 14, "pivotY": 4, "zOrder": 4.5},
+    {"partId": "handR", "boneIndex": 8, "pivotX": 14, "pivotY": 4, "zOrder": 5.5},
     {"partId": "head", "boneIndex": 2, "pivotX": 70, "pivotY": 128, "zOrder": 6},
     # "eyes"/"eyebrows" -- mirrors library.ts's own biped-simple pivots
     # exactly (same shared topology/rig, so the SAME bone-local offsets place
@@ -98,6 +109,13 @@ _EXPRESSION_SHAPES = [
     {"shapeId": "sad", "partId": "eyebrows"},
     {"shapeId": "eyeOpen", "partId": "eyes"},
     {"shapeId": "eyeClosed", "partId": "eyes"},
+    # Gesture-driven hand pose -- mirrors library.ts's own EXPRESSION_SHAPES
+    # hand entries exactly. "open" is deliberately not listed, same "base
+    # rect IS the default shape" convention as eyebrows/"neutral" above.
+    {"shapeId": "handLFist", "partId": "handL"},
+    {"shapeId": "handLPoint", "partId": "handL"},
+    {"shapeId": "handRFist", "partId": "handR"},
+    {"shapeId": "handRPoint", "partId": "handR"},
 ]
 
 
@@ -131,10 +149,28 @@ def _parts_for(
 # whole-rect source-atop tint. defaultColor MUST match _SHIRT_COLOR/
 # _PANTS_COLOR above -- those are the literal colors build_atlas_png actually
 # painted into this generated atlas.
-_COLOR_SLOTS = [
-    {"slotId": "shirtColor", "targetPartIds": ["torso"], "defaultColor": _SHIRT_COLOR},
-    {"slotId": "pantsColor", "targetPartIds": ["legL", "legR"], "defaultColor": _PANTS_COLOR, "respondsToExpressionParams": ["colorMood"]},
-]
+def _color_slots_for(skin_tone: str) -> list[dict]:
+    """Mirrors frontend/src/lib/video/avatar/library.ts's own
+    colorSlotsForPalette -- shirt/pants/trim are each a fixed, non-photo-
+    derived flat fill (this module always draws them as _SHIRT_COLOR/
+    _PANTS_COLOR/_TRIM_COLOR regardless of which photo generated this
+    avatar), but "handColor" is the one slot whose actually-drawn color
+    genuinely varies per avatar (`skin_tone` is this avatar's own detected
+    palette.skin_tone, not a fixed module constant) -- unlike those three,
+    it can't be a static list, since `defaultColor` must equal whatever
+    color was actually baked into THIS avatar's own atlas pixels."""
+    return [
+        {"slotId": "shirtColor", "targetPartIds": ["torso"], "defaultColor": _SHIRT_COLOR},
+        {"slotId": "pantsColor", "targetPartIds": ["legL", "legR"], "defaultColor": _PANTS_COLOR, "respondsToExpressionParams": ["colorMood"]},
+        # Defaults to this avatar's own detected skin tone -- a hand is
+        # drawn in that same flat skin-tone fill (mirrors library.ts's own
+        # handColor slot).
+        {"slotId": "handColor", "targetPartIds": ["handL", "handR"], "defaultColor": skin_tone},
+        # "trimColor" -- targets ONLY the "torsoTrim" overlay part (never
+        # "torso" itself). Default matches _TRIM_COLOR, the fixed flat color
+        # _draw_torso_trim_*'s own accent art is actually drawn with.
+        {"slotId": "trimColor", "targetPartIds": ["torsoTrim"], "defaultColor": _TRIM_COLOR},
+    ]
 
 # Phase 8 ("selectable torsos") -- mirrors frontend/src/lib/video/avatar/
 # library.ts's own GARMENT_SHAPES exactly. "plainShirt" (the base "torso"
@@ -145,6 +181,12 @@ _GARMENT_SHAPES = [
     {"shapeId": "polo", "partId": "torso"},
     {"shapeId": "blazer", "partId": "torso"},
     {"shapeId": "suit", "partId": "torso"},
+    # "torsoTrim" -- the SAME three garmentIds, resolved against the SEPARATE
+    # "torsoTrim" overlay part (see _PARTS's own doc comment), mirrors
+    # library.ts's own GARMENT_SHAPES exactly.
+    {"shapeId": "polo", "partId": "torsoTrim"},
+    {"shapeId": "blazer", "partId": "torsoTrim"},
+    {"shapeId": "suit", "partId": "torsoTrim"},
 ]
 
 _ALLOWED_PHOTO_TYPES = {"image/jpeg", "image/png"}
@@ -271,7 +313,7 @@ def _rebake_record(record: repository.AvatarDesignRecord) -> repository.AvatarDe
         "atlas": {**record.skin["atlas"], "partRects": part_rects},
         "parts": _parts_for(mouth_pivot, eyebrows_pivot, eyes_pivot, neck_pivot),
         "mouthShapes": _MOUTH_SHAPES,
-        "colorSlots": _COLOR_SLOTS,
+        "colorSlots": _color_slots_for(palette.skin_tone),
         "garmentShapes": _GARMENT_SHAPES,
         "expressionShapes": _EXPRESSION_SHAPES,
     }
@@ -402,7 +444,7 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
         "atlas": {"imageRef": "", "partRects": part_rects},
         "parts": _parts_for(mouth_pivot, eyebrows_pivot, eyes_pivot, neck_pivot),
         "mouthShapes": _MOUTH_SHAPES,
-        "colorSlots": _COLOR_SLOTS,
+        "colorSlots": _color_slots_for(palette.skin_tone),
         "garmentShapes": _GARMENT_SHAPES,
         "expressionShapes": _EXPRESSION_SHAPES,
     }

@@ -62,6 +62,18 @@ export interface AvatarRenderState {
   // elapsed time/action rather than mood) merge that in separately before
   // calling drawAvatar.
   expressionShapeIds: Record<string, string> | undefined;
+  // Gesture-driven discrete hand pose (fist/open/pointing) -- keyed by
+  // skin.ts expressionShapes partId ("handL"/"handR"), same mechanism/shape
+  // as expressionShapeIds above (see topology.ts's own
+  // gestureHandPoseShapeIds doc comment for why this is its own field rather
+  // than folded into that one: it's keyed off the active GESTURE beat, not
+  // the active mood beat, so the two can be active independently and must be
+  // resolved from separate beat lists). `undefined` means every hand part
+  // falls back to its own base atlas rect (the open-palm pose). Callers merge
+  // this into the same map they pass drawAvatar as `activeExpressionShapeIds`
+  // (CanvasPlayer.tsx/exportTimeline.ts already merge blink's eyeShapeId in
+  // there too).
+  handPoseShapeIds: Record<string, string> | undefined;
 }
 
 /** One resolved beat, normalized to a common shape regardless of whether it
@@ -246,6 +258,13 @@ export function resolveAvatarRenderState(
   const activeMoodBeat = moodBiasInput.find((beat) => localElapsedMs >= beat.startMs && localElapsedMs < beat.endMs);
   const expressionShapeIds = activeMoodBeat ? topology.moodExpressionShapes?.[activeMoodBeat.moodId] : undefined;
 
+  // Same "snap, no ease" pick as expressionShapeIds above, but off the
+  // active GESTURE beat rather than the active mood beat -- a gesture not
+  // listed in gestureHandPoseShapeIds (or no gesture active at all) leaves
+  // handPoseShapeIds undefined, which renderer.ts's drawAvatar already
+  // treats as "use each hand's own base rect" (the open-palm pose).
+  const handPoseShapeIds = activeGesture ? topology.gestureHandPoseShapeIds?.[activeGesture.id] : undefined;
+
   // Mood beats that declare a mouth override (e.g. "laugh" -> "laughOpen")
   // win over the word-driven mouthShapeId computed above -- same "snap, no
   // lerp" convention as expressionShapeIds. Every mood NOT listed in
@@ -253,5 +272,5 @@ export function resolveAvatarRenderState(
   // resolvePostureAndMouth computed it, so lip-sync is unaffected.
   const moodMouthShapeId = activeMoodBeat ? topology.moodMouthShapeIds?.[activeMoodBeat.moodId] : undefined;
 
-  return { activation, mouthShapeId: moodMouthShapeId ?? mouthShapeId, expressionBias, expressionShapeIds };
+  return { activation, mouthShapeId: moodMouthShapeId ?? mouthShapeId, expressionBias, expressionShapeIds, handPoseShapeIds };
 }

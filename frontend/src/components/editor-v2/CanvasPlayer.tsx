@@ -1570,7 +1570,7 @@ export const CanvasPlayer = forwardRef<
       // own timelines merged with tag-derived beats from whichever TTS
       // overlay overlaps it), and mood-adjusted expressionBias -- see
       // resolveAvatarRenderState's own doc comment for the full precedence.
-      const { activation, mouthShapeId, expressionBias, expressionShapeIds } = resolveAvatarRenderState(
+      const { activation, mouthShapeId, expressionBias, expressionShapeIds, handPoseShapeIds } = resolveAvatarRenderState(
         clip,
         ttsOverlays,
         compiled.design.expressionBias,
@@ -1592,7 +1592,7 @@ export const CanvasPlayer = forwardRef<
         { x: destX, y: destY, width: destWidth, height: destHeight },
         mouthShapeId,
         clip.framing ?? "full",
-        { ...expressionShapeIds, eyes: eyeShapeId }
+        { ...expressionShapeIds, ...handPoseShapeIds, eyes: eyeShapeId }
       );
     }
 

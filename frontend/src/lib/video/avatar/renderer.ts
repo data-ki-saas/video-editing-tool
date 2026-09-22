@@ -172,7 +172,20 @@ export function drawAvatar(
 
   for (const part of skin.parts) {
     if (hiddenBoneIndices.includes(part.boneIndex)) continue;
-    if (armBoneIndices.has(part.boneIndex) && Math.abs(pose[part.boneIndex].rotation) > ARM_RAISED_ROTATION_THRESHOLD_RADIANS) {
+    // A hand bone (biped-simple's "handL"/"handR") rides one level BELOW an
+    // arm bone (its parent) and never gets its own rotation keyframed --
+    // gestures/talk-emphasize only ever rotate the ARM bone, so a hand's own
+    // local rotation stays 0 even while its parent arm is raised past the
+    // head. Checking `part.boneIndex`'s own rotation here would therefore
+    // never defer a hand part, leaving a raised arm's hand stuck at its
+    // static (pre-raise) zOrder -- BEHIND the head -- while its own arm
+    // correctly draws in front. Falling back to the bone's PARENT when the
+    // bone itself isn't in armBoneIndices (one level of ancestor lookup is
+    // enough -- a hand is always exactly one level below its owning arm)
+    // reads the rotation that actually moved this part, so hand parts defer
+    // in lockstep with their own arm.
+    const rotationBoneIndex = armBoneIndices.has(part.boneIndex) ? part.boneIndex : topology.parentIndex[part.boneIndex];
+    if (armBoneIndices.has(rotationBoneIndex) && Math.abs(pose[rotationBoneIndex].rotation) > ARM_RAISED_ROTATION_THRESHOLD_RADIANS) {
       deferredRaisedArmParts.push(part);
       continue;
     }

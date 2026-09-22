@@ -535,10 +535,17 @@ export function AvatarFramingDialog({
   // own skin.garmentShapes (same "derive from what this avatar actually
   // supports" principle as actionOptions above), so a foreign/older skin
   // with none just offers Shirt alone rather than a swap that would silently
-  // no-op at compile time.
+  // no-op at compile time. Deduped by shapeId -- a single garmentId (e.g.
+  // "polo") is now declared once per garment-bearing PART (both "torso" and
+  // its "torsoTrim" collar/button overlay, see compile.ts's compileSkin), so
+  // `garmentShapes` itself has two entries per outfit; this is still exactly
+  // one user-facing choice.
   const garmentOptions: { id: string | undefined; label: string }[] = [
     { id: undefined, label: "Shirt" },
-    ...(resolvedEntry?.skin.garmentShapes ?? []).map((shape) => ({ id: shape.shapeId, label: garmentLabel(shape.shapeId) })),
+    ...Array.from(new Set((resolvedEntry?.skin.garmentShapes ?? []).map((shape) => shape.shapeId))).map((shapeId) => ({
+      id: shapeId,
+      label: garmentLabel(shapeId),
+    })),
   ];
 
   // "Held item" -- a manual, direct-manipulation picker for the same

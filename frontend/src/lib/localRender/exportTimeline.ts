@@ -1765,7 +1765,7 @@ export async function exportVideoLocally(
         // own doc comment for the full precedence. Same call shape as
         // CanvasPlayer.tsx's live-preview loop, so export and preview never
         // disagree on which action/mouth shape is active at a given instant.
-        const { activation, mouthShapeId, expressionBias, expressionShapeIds } = resolveAvatarRenderState(
+        const { activation, mouthShapeId, expressionBias, expressionShapeIds, handPoseShapeIds } = resolveAvatarRenderState(
           clip,
           selections.ttsOverlays,
           compiled.design.expressionBias,
@@ -1787,7 +1787,7 @@ export async function exportVideoLocally(
           { x: destX, y: destY, width: destWidth, height: destHeight },
           mouthShapeId,
           clip.framing ?? "full",
-          { ...expressionShapeIds, eyes: eyeShapeId }
+          { ...expressionShapeIds, ...handPoseShapeIds, eyes: eyeShapeId }
         );
       }
 

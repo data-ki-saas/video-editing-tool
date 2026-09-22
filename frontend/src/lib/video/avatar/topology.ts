@@ -331,4 +331,20 @@ export interface AvatarTopology {
   // "laugh" -> "laughOpen") -- every other mood leaves mouthShapeId
   // untouched, still fully driven by narration word timing as before.
   moodMouthShapeIds?: Partial<Record<AvatarMoodId, string>>;
+
+  // Gesture-driven discrete HAND pose shape -- gestureId -> a partial map of
+  // skin.ts's expressionShapes partIds ("handL"/"handR") to the shapeId that
+  // gesture should show for that hand, while its beat is active. Same
+  // "discrete snap, no per-frame easing" mechanism as moodExpressionShapes
+  // above (reused rather than duplicated -- see resolveAvatarRenderState.ts,
+  // which resolves this alongside the mood->eyebrow lookup and merges both
+  // into the same `activeExpressionShapeIds` map renderer.ts's drawAvatar
+  // already accepts), just keyed off the active GESTURE instead of the active
+  // mood, since a hand's pose (fist/open/pointing) tracks whichever gesture
+  // is currently swinging the arm, not the character's mood. A gesture id
+  // absent here (or naming a part this skin declares no expressionShapes
+  // for) leaves that hand at its own base atlas rect -- the open-palm pose,
+  // by the same "base rect IS the default shape" convention every other
+  // expression shape slot already uses.
+  gestureHandPoseShapeIds?: Partial<Record<AvatarGestureId, Record<string, string>>> & Record<string, Record<string, string>>;
 }

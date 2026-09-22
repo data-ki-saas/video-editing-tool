@@ -145,6 +145,51 @@ _ROW4_Y = SUIT_RECT["sy"] + SUIT_RECT["sHeight"] + GAP
 _NECK_INSET = 4
 NECK_RECT = {"sx": GAP, "sy": _ROW4_Y, "sWidth": 64, "sHeight": 124}
 
+# Row 5 -- hand pose variants, mirrors frontend/src/lib/video/avatar/
+# placeholderAtlas.ts's own Row 5 exactly (same rect sizes/order): the rig's
+# first real drawn hand (see service.py's own "handL"/"handR" `_PARTS`
+# entries, riding new HAND_L/HAND_R bones), replacing the old bare
+# arm-end-as-anchor. "open" is each hand's own BASE rect; "fist"/"pointing"
+# are per-frame swappable shapes picked by frontend/library.ts's
+# GESTURE_HAND_POSE_SHAPES.
+_ROW5_Y = NECK_RECT["sy"] + NECK_RECT["sHeight"] + GAP
+_HAND_WIDTH = 28
+_HAND_HEIGHT = 34
+HAND_L_OPEN_RECT = {"sx": GAP, "sy": _ROW5_Y, "sWidth": _HAND_WIDTH, "sHeight": _HAND_HEIGHT}
+HAND_L_FIST_RECT = {"sx": HAND_L_OPEN_RECT["sx"] + _HAND_WIDTH + GAP, "sy": _ROW5_Y, "sWidth": _HAND_WIDTH, "sHeight": _HAND_HEIGHT}
+HAND_L_POINT_RECT = {"sx": HAND_L_FIST_RECT["sx"] + _HAND_WIDTH + GAP, "sy": _ROW5_Y, "sWidth": _HAND_WIDTH, "sHeight": _HAND_HEIGHT}
+HAND_R_OPEN_RECT = {"sx": HAND_L_POINT_RECT["sx"] + _HAND_WIDTH + GAP, "sy": _ROW5_Y, "sWidth": _HAND_WIDTH, "sHeight": _HAND_HEIGHT}
+HAND_R_FIST_RECT = {"sx": HAND_R_OPEN_RECT["sx"] + _HAND_WIDTH + GAP, "sy": _ROW5_Y, "sWidth": _HAND_WIDTH, "sHeight": _HAND_HEIGHT}
+HAND_R_POINT_RECT = {"sx": HAND_R_FIST_RECT["sx"] + _HAND_WIDTH + GAP, "sy": _ROW5_Y, "sWidth": _HAND_WIDTH, "sHeight": _HAND_HEIGHT}
+
+# Row 6 -- "torsoTrim", mirrors placeholderAtlas.ts's own Row 6 exactly: a
+# small overlay part riding the SAME bone/pivot as "torso" (service.py's
+# `_PARTS`), carrying only collar/button accent linework, so `trimColor` can
+# recolor it independently of `shirtColor` (a second color slot can't safely
+# share "torso"'s own rect -- a flat-fill recolor there would just overwrite
+# whichever slot resolves second). Same size as TORSO_RECT so "torso"'s own
+# pivot keeps it pixel-aligned regardless of where either rect is packed.
+_ROW6_Y = _ROW5_Y + _HAND_HEIGHT + GAP
+TORSO_TRIM_BASE_RECT = {"sx": GAP, "sy": _ROW6_Y, "sWidth": TORSO_RECT["sWidth"], "sHeight": TORSO_RECT["sHeight"]}
+TORSO_TRIM_POLO_RECT = {
+    "sx": TORSO_TRIM_BASE_RECT["sx"] + TORSO_TRIM_BASE_RECT["sWidth"] + GAP,
+    "sy": _ROW6_Y,
+    "sWidth": TORSO_RECT["sWidth"],
+    "sHeight": TORSO_RECT["sHeight"],
+}
+TORSO_TRIM_BLAZER_RECT = {
+    "sx": TORSO_TRIM_POLO_RECT["sx"] + TORSO_TRIM_POLO_RECT["sWidth"] + GAP,
+    "sy": _ROW6_Y,
+    "sWidth": TORSO_RECT["sWidth"],
+    "sHeight": TORSO_RECT["sHeight"],
+}
+TORSO_TRIM_SUIT_RECT = {
+    "sx": TORSO_TRIM_BLAZER_RECT["sx"] + TORSO_TRIM_BLAZER_RECT["sWidth"] + GAP,
+    "sy": _ROW6_Y,
+    "sWidth": TORSO_RECT["sWidth"],
+    "sHeight": TORSO_RECT["sHeight"],
+}
+
 # Real photos whose face is unusually wide relative to its height push
 # `head_chin_fraction` well below what any parametric bucket ever produced --
 # clamped so a pathological photo can't demand a pivot the rect above has no
@@ -178,8 +223,16 @@ _EYES_HEIGHT = 20
 EYES_OPEN_RECT = {"sx": _EYES_COLUMN_X, "sy": GAP, "sWidth": _EYES_WIDTH, "sHeight": _EYES_HEIGHT}
 EYES_CLOSED_RECT = {"sx": _EYES_COLUMN_X, "sy": EYES_OPEN_RECT["sy"] + _EYES_HEIGHT + GAP, "sWidth": _EYES_WIDTH, "sHeight": _EYES_HEIGHT}
 
-CANVAS_WIDTH = max(LEG_R_RECT["sx"] + LEG_R_RECT["sWidth"], SUIT_RECT["sx"] + SUIT_RECT["sWidth"], EYES_OPEN_RECT["sx"] + EYES_OPEN_RECT["sWidth"]) + GAP
-CANVAS_HEIGHT = NECK_RECT["sy"] + NECK_RECT["sHeight"] + GAP
+CANVAS_WIDTH = (
+    max(
+        LEG_R_RECT["sx"] + LEG_R_RECT["sWidth"],
+        SUIT_RECT["sx"] + SUIT_RECT["sWidth"],
+        EYES_OPEN_RECT["sx"] + EYES_OPEN_RECT["sWidth"],
+        TORSO_TRIM_SUIT_RECT["sx"] + TORSO_TRIM_SUIT_RECT["sWidth"],
+    )
+    + GAP
+)
+CANVAS_HEIGHT = TORSO_TRIM_BASE_RECT["sy"] + TORSO_TRIM_BASE_RECT["sHeight"] + GAP
 
 # Kept fixed (not photo-derived) -- only skin/hair tone vary per generated
 # character, same scope placeholderAtlas.ts's own PlaceholderAtlasPalette
@@ -197,6 +250,12 @@ _EYE_SCLERA_COLOR = "#f5f0e8"
 _EYE_IRIS_RADIUS_FRACTION = 0.34
 _DEFAULT_BROW_COLOR = "#3a2a1f"
 _OUTLINE_COLOR = (0, 0, 0, 46)  # rgba(0,0,0,0.18) baked to RGBA
+# The "trimColor" slot's fixed default (service.py's own _COLOR_SLOTS) -- a
+# plain off-white piping/button accent, not part of FacePalette since nothing
+# customizes it per generated avatar today, same fixed-constant posture as
+# _EYE_COLOR/_DEFAULT_BROW_COLOR above. Matches
+# frontend/src/lib/video/avatar/placeholderAtlas.ts's own TRIM_COLOR.
+_TRIM_COLOR = "#f2e9df"
 
 # Maps photo_analysis.py's normalized face-relative units (origin = hairline/
 # chin midpoint, unit = hairline-to-chin distance) onto HEAD_RECT pixels.
@@ -413,6 +472,84 @@ def _draw_torso_suit(draw: ImageDraw.ImageDraw, rect: dict) -> None:
         draw, [(rect["sx"] + rect["sWidth"] - 8, top_y + 18), (rect["sx"] + rect["sWidth"] - 8, top_y - 6), (cx + 16, top_y)]
     )
     _cut_garment_notch(draw, [(cx - 26, top_y), (cx, top_y + 44), (cx + 26, top_y)])
+
+
+def _draw_hand_base(draw: ImageDraw.ImageDraw, rect: dict, skin_tone: str) -> None:
+    """The plain rounded-paddle hand shape every pose below starts from --
+    mirrors placeholderAtlas.ts's drawHandBase."""
+    _rounded_rect(draw, rect, inset=2, radius=10, fill=skin_tone)
+
+
+def _draw_hand_open(draw: ImageDraw.ImageDraw, rect: dict, skin_tone: str) -> None:
+    """"Open" -- the plain hand base plus two shallow notches cut into the
+    far edge, reading as slightly-separated fingers. Mirrors
+    placeholderAtlas.ts's drawHandOpen. `fill=(0, 0, 0, 0)` genuinely erases
+    alpha here rather than compositing (PIL's ImageDraw sets raw RGBA pixel
+    values), same technique `_cut_garment_notch` already uses."""
+    _draw_hand_base(draw, rect, skin_tone)
+    cx = rect["sx"] + rect["sWidth"] / 2
+    bottom_y = rect["sy"] + rect["sHeight"]
+    for dx in (-6, 6):
+        draw.ellipse((cx + dx - 2.5, bottom_y - 7, cx + dx + 2.5, bottom_y + 3), fill=(0, 0, 0, 0))
+
+
+def _draw_hand_fist(draw: ImageDraw.ImageDraw, rect: dict, skin_tone: str) -> None:
+    """"Fist" -- a plain, more compact rounded blob with no finger notches at
+    all. Mirrors placeholderAtlas.ts's drawHandFist."""
+    x0, y0, x1, y1 = _box(rect)
+    draw.rounded_rectangle((x0 + 3, y0 + 3, x1 - 3, y1 - 10), radius=10, fill=skin_tone, outline=_OUTLINE_COLOR, width=2)
+
+
+def _draw_hand_pointing(draw: ImageDraw.ImageDraw, rect: dict, skin_tone: str) -> None:
+    """"Pointing" -- the fist base plus one thin extended finger protruding
+    past its far (bottom) edge. Mirrors placeholderAtlas.ts's
+    drawHandPointing."""
+    cx = rect["sx"] + rect["sWidth"] / 2
+    x0, y0, x1, y1 = _box(rect)
+    draw.rounded_rectangle((x0 + 4, y0 + 3, x1 - 4, y0 + rect["sHeight"] * 0.63), radius=9, fill=skin_tone, outline=_OUTLINE_COLOR, width=2)
+    finger_top = y0 + rect["sHeight"] * 0.55
+    finger_bottom = finger_top + rect["sHeight"] * 0.42
+    draw.rounded_rectangle((cx - 3, finger_top, cx + 3, finger_bottom), radius=2, fill=skin_tone, outline=_OUTLINE_COLOR, width=1)
+
+
+def _draw_trim_button(draw: ImageDraw.ImageDraw, cx: float, cy: float, color: str) -> None:
+    """One small filled accent circle -- shared by every _draw_torso_trim_*
+    below. Always a single flat `color` with no outline (unlike
+    _fill_garment_triangle's silhouette shapes), since this whole part is
+    meant to stay a single recolorable flat-fill region -- an outline in a
+    second, fixed color would survive a trimColor recolor unchanged."""
+    draw.ellipse((cx - 4, cy - 4, cx + 4, cy + 4), fill=color)
+
+
+def _draw_torso_trim_polo(draw: ImageDraw.ImageDraw, rect: dict, color: str) -> None:
+    """"Polo" trim -- three small buttons down the front center, below where
+    "torso"'s own polo collar points are drawn. Mirrors
+    placeholderAtlas.ts's drawTorsoTrimPolo."""
+    cx = rect["sx"] + rect["sWidth"] / 2
+    top_y = rect["sy"] + 30
+    for i in range(3):
+        _draw_trim_button(draw, cx, top_y + i * 22, color)
+
+
+def _draw_torso_trim_blazer(draw: ImageDraw.ImageDraw, rect: dict, color: str) -> None:
+    """"Blazer" trim -- a thin piping stroke tracing the SAME open notch
+    "torso"'s own _draw_torso_blazer cuts, plus one waist-closure button.
+    Mirrors placeholderAtlas.ts's drawTorsoTrimBlazer."""
+    cx = rect["sx"] + rect["sWidth"] / 2
+    top_y = rect["sy"] + 6
+    draw.line([(cx - 20, top_y), (cx, top_y + 30), (cx + 20, top_y)], fill=color, width=3, joint="curve")
+    _draw_trim_button(draw, cx, rect["sy"] + rect["sHeight"] - 30, color)
+
+
+def _draw_torso_trim_suit(draw: ImageDraw.ImageDraw, rect: dict, color: str) -> None:
+    """"Suit" trim -- piping along the deeper suit notch (same coordinates as
+    _draw_torso_suit's own cut) plus two closure buttons. Mirrors
+    placeholderAtlas.ts's drawTorsoTrimSuit."""
+    cx = rect["sx"] + rect["sWidth"] / 2
+    top_y = rect["sy"] + 6
+    draw.line([(cx - 26, top_y), (cx, top_y + 44), (cx + 26, top_y)], fill=color, width=3, joint="curve")
+    for i in range(2):
+        _draw_trim_button(draw, cx, top_y + 56 + i * 22, color)
 
 
 # Fallback-only (no face_oval contour available, e.g. detected=False): the
@@ -850,6 +987,17 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
     _draw_torso_blazer(draw, BLAZER_RECT)
     _draw_torso_suit(draw, SUIT_RECT)
     _draw_neck(draw, NECK_RECT, palette.skin_tone)
+    _draw_hand_open(draw, HAND_L_OPEN_RECT, palette.skin_tone)
+    _draw_hand_fist(draw, HAND_L_FIST_RECT, palette.skin_tone)
+    _draw_hand_pointing(draw, HAND_L_POINT_RECT, palette.skin_tone)
+    _draw_hand_open(draw, HAND_R_OPEN_RECT, palette.skin_tone)
+    _draw_hand_fist(draw, HAND_R_FIST_RECT, palette.skin_tone)
+    _draw_hand_pointing(draw, HAND_R_POINT_RECT, palette.skin_tone)
+    # TORSO_TRIM_BASE_RECT is left blank on purpose -- a plain shirt has no
+    # trim accent (see its own doc comment above).
+    _draw_torso_trim_polo(draw, TORSO_TRIM_POLO_RECT, _TRIM_COLOR)
+    _draw_torso_trim_blazer(draw, TORSO_TRIM_BLAZER_RECT, _TRIM_COLOR)
+    _draw_torso_trim_suit(draw, TORSO_TRIM_SUIT_RECT, _TRIM_COLOR)
 
     buffer = BytesIO()
     image.save(buffer, format="PNG")
@@ -877,6 +1025,16 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
         "blazer": BLAZER_RECT,
         "suit": SUIT_RECT,
         "neck": NECK_RECT,
+        "handL": HAND_L_OPEN_RECT,
+        "handR": HAND_R_OPEN_RECT,
+        "handLFist": HAND_L_FIST_RECT,
+        "handLPoint": HAND_L_POINT_RECT,
+        "handRFist": HAND_R_FIST_RECT,
+        "handRPoint": HAND_R_POINT_RECT,
+        "torsoTrim": TORSO_TRIM_BASE_RECT,
+        "torsoTrim::polo": TORSO_TRIM_POLO_RECT,
+        "torsoTrim::blazer": TORSO_TRIM_BLAZER_RECT,
+        "torsoTrim::suit": TORSO_TRIM_SUIT_RECT,
     }
     return buffer.getvalue(), part_rects
 
@@ -1168,6 +1326,17 @@ def build_atlas_png_from_photo(
     _draw_torso_suit(draw, SUIT_RECT)
     _draw_neck(draw, NECK_RECT, palette.skin_tone)
     neck_pivot = _compute_photo_neck_pivot(palette.head_chin_fraction)
+    _draw_hand_open(draw, HAND_L_OPEN_RECT, palette.skin_tone)
+    _draw_hand_fist(draw, HAND_L_FIST_RECT, palette.skin_tone)
+    _draw_hand_pointing(draw, HAND_L_POINT_RECT, palette.skin_tone)
+    _draw_hand_open(draw, HAND_R_OPEN_RECT, palette.skin_tone)
+    _draw_hand_fist(draw, HAND_R_FIST_RECT, palette.skin_tone)
+    _draw_hand_pointing(draw, HAND_R_POINT_RECT, palette.skin_tone)
+    # TORSO_TRIM_BASE_RECT is left blank on purpose -- a plain shirt has no
+    # trim accent (see its own doc comment above).
+    _draw_torso_trim_polo(draw, TORSO_TRIM_POLO_RECT, _TRIM_COLOR)
+    _draw_torso_trim_blazer(draw, TORSO_TRIM_BLAZER_RECT, _TRIM_COLOR)
+    _draw_torso_trim_suit(draw, TORSO_TRIM_SUIT_RECT, _TRIM_COLOR)
 
     buffer = BytesIO()
     image.save(buffer, format="PNG")
@@ -1195,5 +1364,15 @@ def build_atlas_png_from_photo(
         "blazer": BLAZER_RECT,
         "suit": SUIT_RECT,
         "neck": NECK_RECT,
+        "handL": HAND_L_OPEN_RECT,
+        "handR": HAND_R_OPEN_RECT,
+        "handLFist": HAND_L_FIST_RECT,
+        "handLPoint": HAND_L_POINT_RECT,
+        "handRFist": HAND_R_FIST_RECT,
+        "handRPoint": HAND_R_POINT_RECT,
+        "torsoTrim": TORSO_TRIM_BASE_RECT,
+        "torsoTrim::polo": TORSO_TRIM_POLO_RECT,
+        "torsoTrim::blazer": TORSO_TRIM_BLAZER_RECT,
+        "torsoTrim::suit": TORSO_TRIM_SUIT_RECT,
     }
     return buffer.getvalue(), part_rects, mouth_pivot, eyebrows_pivot, eyes_pivot, neck_pivot

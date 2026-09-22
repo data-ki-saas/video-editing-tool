@@ -78,6 +78,10 @@ export interface CompiledTopology {
   // "laugh" -> "laughOpen"). Absent for any topology declaring no mood-driven
   // mouth override at all.
   moodMouthShapeIds?: Record<string, string>;
+  // Carried straight through from AvatarTopology, consumed by
+  // resolveAvatarRenderState.ts's gesture->hand-pose-shape resolution. Absent
+  // for any topology declaring no gesture-driven hand pose at all.
+  gestureHandPoseShapeIds?: Record<string, Record<string, string>>;
   // `AvatarTopology.boneGroups.arms`, carried straight through -- consumed by
   // renderer.ts's drawAvatar to decide when a gesture/talk-emphasize has
   // rotated an arm bone far enough to need drawing in front of the head
@@ -215,6 +219,7 @@ function compileTopology(topology: AvatarTopology): CompiledTopology {
     moodPresets: topology.moodPresets,
     moodExpressionShapes: topology.moodExpressionShapes,
     moodMouthShapeIds: topology.moodMouthShapeIds,
+    gestureHandPoseShapeIds: topology.gestureHandPoseShapeIds,
     armBoneIndices: topology.boneGroups.arms,
   };
 }
@@ -415,7 +420,19 @@ async function compileSkin(
       throw new Error(`compileAvatar: skin "${skin.skinId}" part "${part.partId}" references out-of-range boneIndex ${part.boneIndex}`);
     }
     const garmentShape = garmentId ? skin.garmentShapes?.find((shape) => shape.partId === part.partId && shape.shapeId === garmentId) : undefined;
-    const atlasRect = skin.atlas.partRects[garmentShape?.shapeId ?? part.partId];
+    // A part-scoped key (`${partId}::${shapeId}`) is tried FIRST, falling
+    // back to the bare shapeId -- more than one garment-bearing part (e.g.
+    // "torso" and an overlay like "torsoTrim") can share the identical
+    // garmentId ("polo") while each still substituting its OWN rect, since
+    // the bare shapeId string alone would otherwise collide in the atlas's
+    // one flat partRects namespace (both parts' garmentShapes entries must
+    // literally share shapeId===garmentId to be found at all). The fallback
+    // keeps every already-authored skin (garment rects packed under the bare
+    // "polo"/"blazer"/"suit" keys, "torso" being the only garment-bearing
+    // part before this) resolving exactly as before.
+    const atlasRect = garmentShape
+      ? (skin.atlas.partRects[`${part.partId}::${garmentShape.shapeId}`] ?? skin.atlas.partRects[garmentShape.shapeId])
+      : skin.atlas.partRects[part.partId];
     if (!atlasRect) {
       throw new Error(`compileAvatar: skin "${skin.skinId}" part "${part.partId}" has no matching atlas rect`);
     }

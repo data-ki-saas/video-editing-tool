@@ -118,9 +118,68 @@ const SUIT_RECT: AtlasRect = { sx: BLAZER_RECT.sx + BLAZER_RECT.sWidth + GAP, sy
 const ROW4_Y = SUIT_RECT.sy + SUIT_RECT.sHeight + GAP;
 const NECK_RECT: AtlasRect = { sx: GAP, sy: ROW4_Y, sWidth: 64, sHeight: 72 };
 
-const CANVAS_WIDTH =
-  Math.max(LEG_R_RECT.sx + LEG_R_RECT.sWidth, SUIT_RECT.sx + SUIT_RECT.sWidth, EYES_OPEN_RECT.sx + EYES_OPEN_RECT.sWidth) + GAP;
-const CANVAS_HEIGHT = NECK_RECT.sy + NECK_RECT.sHeight + GAP;
+// Row 5 -- hand pose variants for the rig's first real drawn hand (see
+// library.ts's HAND_L/HAND_R bones): "open" is each hand part's own BASE
+// rect (same "base rect IS the default shape" convention neutral/eyeOpen
+// already use), "fist"/"pointing" are per-frame swappable shapes picked by
+// library.ts's GESTURE_HAND_POSE_SHAPES. handL/handR get separate rects
+// (rather than one shared pair reused both sides) so a future pass can draw
+// them asymmetrically without a layout change -- today's simple placeholder
+// geometry happens to be left/right-identical, same as the plain arm rects
+// this replaces.
+const ROW5_Y = NECK_RECT.sy + NECK_RECT.sHeight + GAP;
+const HAND_WIDTH = 28;
+const HAND_HEIGHT = 34;
+const HAND_L_OPEN_RECT: AtlasRect = { sx: GAP, sy: ROW5_Y, sWidth: HAND_WIDTH, sHeight: HAND_HEIGHT };
+const HAND_L_FIST_RECT: AtlasRect = { sx: HAND_L_OPEN_RECT.sx + HAND_WIDTH + GAP, sy: ROW5_Y, sWidth: HAND_WIDTH, sHeight: HAND_HEIGHT };
+const HAND_L_POINT_RECT: AtlasRect = { sx: HAND_L_FIST_RECT.sx + HAND_WIDTH + GAP, sy: ROW5_Y, sWidth: HAND_WIDTH, sHeight: HAND_HEIGHT };
+const HAND_R_OPEN_RECT: AtlasRect = { sx: HAND_L_POINT_RECT.sx + HAND_WIDTH + GAP, sy: ROW5_Y, sWidth: HAND_WIDTH, sHeight: HAND_HEIGHT };
+const HAND_R_FIST_RECT: AtlasRect = { sx: HAND_R_OPEN_RECT.sx + HAND_WIDTH + GAP, sy: ROW5_Y, sWidth: HAND_WIDTH, sHeight: HAND_HEIGHT };
+const HAND_R_POINT_RECT: AtlasRect = { sx: HAND_R_FIST_RECT.sx + HAND_WIDTH + GAP, sy: ROW5_Y, sWidth: HAND_WIDTH, sHeight: HAND_HEIGHT };
+
+// Row 6 -- "torsoTrim": a small overlay part riding the SAME bone (and the
+// SAME pivot -- see library.ts's PLACEHOLDER_SKIN_PARTS) as "torso", carrying
+// ONLY collar/button accent linework (rest of the rect fully transparent),
+// drawn just above "torso" in zOrder. This is what makes `trimColor` an
+// independently recolorable region from `shirtColor`: compile.ts's
+// recolorAtlas flat-fills a WHOLE target rect, so a second color sharing
+// "torso"'s own rect would just overwrite the first -- a separate rect (and
+// separate compiled part) sidesteps that entirely. Sized identically to
+// TORSO_RECT so the SAME pivot (60, 8) keeps it pixel-aligned to "torso"
+// regardless of where either rect is actually packed in the atlas. The base
+// (no garmentId / plain shirt) rect is deliberately left blank -- a plain
+// shirt has no trim accent -- and the three garment variants below (looked
+// up the same way "torso"'s own polo/blazer/suit substitution works, see
+// compile.ts's compileSkin) trace a piping/button accent matching each
+// outfit's own collar shape.
+const ROW6_Y = ROW5_Y + HAND_HEIGHT + GAP;
+const TORSO_TRIM_BASE_RECT: AtlasRect = { sx: GAP, sy: ROW6_Y, sWidth: TORSO_RECT.sWidth, sHeight: TORSO_RECT.sHeight };
+const TORSO_TRIM_POLO_RECT: AtlasRect = {
+  sx: TORSO_TRIM_BASE_RECT.sx + TORSO_TRIM_BASE_RECT.sWidth + GAP,
+  sy: ROW6_Y,
+  sWidth: TORSO_RECT.sWidth,
+  sHeight: TORSO_RECT.sHeight,
+};
+const TORSO_TRIM_BLAZER_RECT: AtlasRect = {
+  sx: TORSO_TRIM_POLO_RECT.sx + TORSO_TRIM_POLO_RECT.sWidth + GAP,
+  sy: ROW6_Y,
+  sWidth: TORSO_RECT.sWidth,
+  sHeight: TORSO_RECT.sHeight,
+};
+const TORSO_TRIM_SUIT_RECT: AtlasRect = {
+  sx: TORSO_TRIM_BLAZER_RECT.sx + TORSO_TRIM_BLAZER_RECT.sWidth + GAP,
+  sy: ROW6_Y,
+  sWidth: TORSO_RECT.sWidth,
+  sHeight: TORSO_RECT.sHeight,
+};
+
+const CANVAS_WIDTH = Math.max(
+  LEG_R_RECT.sx + LEG_R_RECT.sWidth,
+  SUIT_RECT.sx + SUIT_RECT.sWidth,
+  EYES_OPEN_RECT.sx + EYES_OPEN_RECT.sWidth,
+  TORSO_TRIM_SUIT_RECT.sx + TORSO_TRIM_SUIT_RECT.sWidth
+) + GAP;
+const CANVAS_HEIGHT = TORSO_TRIM_BASE_RECT.sy + TORSO_TRIM_BASE_RECT.sHeight + GAP;
 
 // Flat, pleasant placeholder colors -- this is explicitly not meant to look
 // polished, just to read unambiguously as "a simple person" with cleanly
@@ -136,6 +195,14 @@ const OUTLINE_COLOR = "rgba(0,0,0,0.18)";
 // synthetic/drawn avatar and the fal.ai photo-avatar path's baked teeth read
 // as the same shade.
 const TEETH_COLOR = "#f2e9df";
+// The "trimColor" slot's fixed default (see colorSlotsForPalette in
+// library.ts) -- a plain off-white piping/button accent, not part of
+// PlaceholderAtlasPalette since nothing customizes it per seed character
+// today, same fixed-constant posture as EYE_COLOR/EYEBROW_COLOR above.
+// Exported so library.ts can build an accurate AvatarSkinColorSlot
+// `defaultColor` without re-typing this literal a second time. Matches
+// backend/src/avatar_gen/atlas_builder.py's own _TRIM_COLOR.
+export const TRIM_COLOR = "#f2e9df";
 
 /**
  * The subset of this file's colors that actually vary seed-character to
@@ -347,6 +414,107 @@ function drawTorsoSuit(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: 
  * cutout). Mirrors atlas_builder.py's `_draw_neck`. */
 function drawNeck(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
   drawRoundedRect(ctx, rect.sx + 4, rect.sy + 4, rect.sWidth - 8, rect.sHeight - 8, 10, palette.skinTone);
+}
+
+/** The plain rounded-paddle hand shape every pose below starts from -- a
+ * softer, smaller rounded rect than the plain arm-end it replaces, with a
+ * shallow scalloped notch cut into its far (bottom) edge to hint at finger
+ * separation without needing real finger art at this fidelity. */
+function drawHandBase(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  drawRoundedRect(ctx, rect.sx + 2, rect.sy + 2, rect.sWidth - 4, rect.sHeight - 4, 10, palette.skinTone);
+}
+
+/** "Open" -- the plain hand base plus two shallow notches cut into the far
+ * edge, reading as slightly-separated fingers on an otherwise flat palm. */
+function drawHandOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  drawHandBase(ctx, rect, palette);
+  const cx = rect.sx + rect.sWidth / 2;
+  const bottomY = rect.sy + rect.sHeight;
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-out";
+  for (const dx of [-6, 6]) {
+    ctx.beginPath();
+    ctx.ellipse(cx + dx, bottomY - 2, 2.5, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** "Fist" -- a plain, slightly more compact rounded blob with no finger
+ * notches at all, reading as a closed hand (fistThump/hitLeft/hitRight). */
+function drawHandFist(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  drawRoundedRect(ctx, rect.sx + 3, rect.sy + 3, rect.sWidth - 6, rect.sHeight - 10, 11, palette.skinTone);
+}
+
+/** "Pointing" -- the fist base plus one thin extended finger protruding past
+ * its far edge, reading as an outstretched index finger (point/pointLeft/
+ * pointRight). The finger extends toward the rect's own BOTTOM edge --
+ * "away from the wrist," matching this part's own pivot convention (near the
+ * top, same as armL/armR) -- so it reads correctly whichever way the owning
+ * arm bone has rotated the whole hand. */
+function drawHandPointing(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  const cx = rect.sx + rect.sWidth / 2;
+  drawRoundedRect(ctx, rect.sx + 4, rect.sy + 3, rect.sWidth - 8, rect.sHeight * 0.6, 9, palette.skinTone);
+  drawRoundedRect(ctx, cx - 3, rect.sy + rect.sHeight * 0.55, 6, rect.sHeight * 0.42, 3, palette.skinTone);
+}
+
+/** One small filled accent circle ("button") -- shared by every
+ * drawTorsoTrim* below. Always a single flat `color` (no separate outline
+ * color, unlike fillGarmentTriangle's silhouette shapes) since this whole
+ * part is meant to be a single recolorable flat-fill region (see
+ * TORSO_TRIM_*_RECT's own doc comment) -- an outline in a second, fixed
+ * color would survive a trimColor recolor unchanged and look like a stray
+ * mismatched fleck. */
+function drawTrimButton(ctx: CanvasRenderingContext2D, cx: number, cy: number, color: string): void {
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+/** "Polo" trim -- three small buttons down the front center, below where
+ * the "torso" part's own polo collar points are drawn. */
+function drawTorsoTrimPolo(ctx: CanvasRenderingContext2D, rect: AtlasRect, color: string): void {
+  const cx = rect.sx + rect.sWidth / 2;
+  const topY = rect.sy + 30;
+  for (let i = 0; i < 3; i++) drawTrimButton(ctx, cx, topY + i * 22, color);
+}
+
+/** "Blazer" trim -- a thin piping stroke tracing the SAME open notch the
+ * "torso" part's own drawTorsoBlazer cuts (see that function's own
+ * coordinates -- deliberately identical here so the piping hugs the cut
+ * edge exactly), plus one waist-closure button. */
+function drawTorsoTrimBlazer(ctx: CanvasRenderingContext2D, rect: AtlasRect, color: string): void {
+  const cx = rect.sx + rect.sWidth / 2;
+  const topY = rect.sy + 6;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(cx - 20, topY);
+  ctx.lineTo(cx, topY + 30);
+  ctx.lineTo(cx + 20, topY);
+  ctx.stroke();
+  drawTrimButton(ctx, cx, rect.sy + rect.sHeight - 30, color);
+}
+
+/** "Suit" trim -- piping along the deeper suit notch (same coordinates as
+ * drawTorsoSuit's own cut) plus two closure buttons, reading as more formal
+ * detailing than the blazer's single line + button. */
+function drawTorsoTrimSuit(ctx: CanvasRenderingContext2D, rect: AtlasRect, color: string): void {
+  const cx = rect.sx + rect.sWidth / 2;
+  const topY = rect.sy + 6;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(cx - 26, topY);
+  ctx.lineTo(cx, topY + 44);
+  ctx.lineTo(cx + 26, topY);
+  ctx.stroke();
+  for (let i = 0; i < 2; i++) drawTrimButton(ctx, cx, topY + 56 + i * 22, color);
 }
 
 function drawHead(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
@@ -576,6 +744,29 @@ export function buildPlaceholderAtlas(
     blazer: BLAZER_RECT,
     suit: SUIT_RECT,
     neck: NECK_RECT,
+    // "handL"/"handR" slots' own base rect is "open" (the open-palm pose) --
+    // same "base rect IS the default shape" convention as eyebrows/eyes
+    // above. "fist"/"pointing" shapeIds are globally-unique per hand
+    // ("handLFist" not "fist") since this whole `partRects` map is one flat
+    // namespace shared by every part's shapes -- a bare "fist" would collide
+    // between handL's and handR's own (different) rects.
+    handL: HAND_L_OPEN_RECT,
+    handR: HAND_R_OPEN_RECT,
+    handLFist: HAND_L_FIST_RECT,
+    handLPoint: HAND_L_POINT_RECT,
+    handRFist: HAND_R_FIST_RECT,
+    handRPoint: HAND_R_POINT_RECT,
+    // "torsoTrim" slot's own base rect (no garmentId / plain shirt -- left
+    // fully transparent, drawn nowhere below) plus its three garment-variant
+    // rects, resolved the same part-scoped-key way "torso"'s own
+    // polo/blazer/suit substitution is (see compile.ts's compileSkin) --
+    // registered under a `torsoTrim::`-prefixed key so the bare "polo"/
+    // "blazer"/"suit" strings keep resolving to "torso"'s OWN rects above,
+    // never these.
+    torsoTrim: TORSO_TRIM_BASE_RECT,
+    "torsoTrim::polo": TORSO_TRIM_POLO_RECT,
+    "torsoTrim::blazer": TORSO_TRIM_BLAZER_RECT,
+    "torsoTrim::suit": TORSO_TRIM_SUIT_RECT,
   };
 
   // `document` doesn't exist outside a browser. library.ts calls this
@@ -622,6 +813,17 @@ export function buildPlaceholderAtlas(
   drawTorsoBlazer(ctx, BLAZER_RECT, palette);
   drawTorsoSuit(ctx, SUIT_RECT, palette);
   drawNeck(ctx, NECK_RECT, palette);
+  drawHandOpen(ctx, HAND_L_OPEN_RECT, palette);
+  drawHandFist(ctx, HAND_L_FIST_RECT, palette);
+  drawHandPointing(ctx, HAND_L_POINT_RECT, palette);
+  drawHandOpen(ctx, HAND_R_OPEN_RECT, palette);
+  drawHandFist(ctx, HAND_R_FIST_RECT, palette);
+  drawHandPointing(ctx, HAND_R_POINT_RECT, palette);
+  // TORSO_TRIM_BASE_RECT is left blank on purpose -- a plain shirt has no
+  // trim accent (see its own doc comment above).
+  drawTorsoTrimPolo(ctx, TORSO_TRIM_POLO_RECT, TRIM_COLOR);
+  drawTorsoTrimBlazer(ctx, TORSO_TRIM_BLAZER_RECT, TRIM_COLOR);
+  drawTorsoTrimSuit(ctx, TORSO_TRIM_SUIT_RECT, TRIM_COLOR);
 
   return { dataUrl: canvas.toDataURL("image/png"), partRects, resolvedPalette: palette };
 }

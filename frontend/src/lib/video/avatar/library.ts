@@ -15,7 +15,7 @@
 import type { ActionCurveSpec, AvatarAnchor, AvatarBustFraming, AvatarTopology, BoneTransform, ExpressionParamSpec } from "./topology";
 import type { AvatarSkin, AvatarSkinColorSlot, AvatarSkinPart, AvatarSkinMouthShape, AvatarSkinGarmentShape, AvatarSkinExpressionShape } from "./skin";
 import type { AvatarDesign } from "./design";
-import { buildPlaceholderAtlas, type PlaceholderAtlasPalette } from "./placeholderAtlas";
+import { buildPlaceholderAtlas, TRIM_COLOR, type PlaceholderAtlasPalette } from "./placeholderAtlas";
 
 export interface AvatarLibraryEntry {
   design: AvatarDesign;
@@ -37,9 +37,18 @@ const ARM_L = 3;
 const ARM_R = 4;
 const LEG_L = 5;
 const LEG_R = 6;
+// The rig's first real hand bones -- previously "handL"/"handR" were only a
+// bare anchor point (a math offset past the end of armL/armR, see ANCHORS
+// below), used just to position held-prop icons with no drawn part of their
+// own. As real child bones of armL/armR they get an actual sprite (see
+// PLACEHOLDER_SKIN_PARTS) AND automatically inherit their parent arm's
+// rotation/scale through the same forward-kinematics chain every other bone
+// already uses -- no new parenting mechanism needed.
+const HAND_L = 7;
+const HAND_R = 8;
 
-const BONE_NAMES = ["root", "torso", "head", "armL", "armR", "legL", "legR"];
-const PARENT_INDEX = [-1, ROOT, TORSO, TORSO, TORSO, ROOT, ROOT];
+const BONE_NAMES = ["root", "torso", "head", "armL", "armR", "legL", "legR", "handL", "handR"];
+const PARENT_INDEX = [-1, ROOT, TORSO, TORSO, TORSO, ROOT, ROOT, ARM_L, ARM_R];
 
 // The authoring canvas every bone position/atlas pixel rect below is defined
 // against -- portrait-ish per convention (this product's primary reel
@@ -74,6 +83,13 @@ const DEFAULT_LOCAL_POSE: BoneTransform[] = [
   { x: 42, y: 0, rotation: 0, scaleX: 1, scaleY: 1 }, // armR
   { x: -28, y: 0, rotation: 0, scaleX: 1, scaleY: 1 }, // legL
   { x: 28, y: 0, rotation: 0, scaleX: 1, scaleY: 1 }, // legR
+  // handL/handR -- reuses the exact offset the old handL/handR ANCHORS used
+  // (armL/armR + local (0, 115)), since that was already the tuned "where a
+  // hand sits at the end of the forearm" position; retargeting the anchors
+  // themselves onto these new bones (see ANCHORS below) needs a much smaller
+  // nudge from here instead.
+  { x: 0, y: 115, rotation: 0, scaleX: 1, scaleY: 1 }, // handL
+  { x: 0, y: 115, rotation: 0, scaleX: 1, scaleY: 1 }, // handR
 ];
 
 // "torso"/"limbs" are not consumed by anything in this phase (see
@@ -88,13 +104,18 @@ const BONE_GROUPS: Record<string, number[]> = {
   head: [HEAD],
 };
 
-// Not consumed by anything in this phase (see AvatarAnchor's own doc comment
-// in topology.ts) -- a head anchor for a future hat/headwear accessory, and
-// a symmetric hand pair for a future held prop.
+// A head anchor for hat/sunglasses accessories, and a hand anchor pair for
+// held props (accessories.ts's ACCESSORY_CATALOG) -- handL/handR now ride
+// their own HAND_L/HAND_R bone (previously ARM_L/ARM_R directly, with a much
+// larger offset standing in for "where the hand roughly is"), so this is now
+// just a small "in the palm" nudge from the hand bone's own origin rather
+// than the full shoulder-to-hand distance. accessories.ts/compile.ts resolve
+// anchors purely by boneIndex + localOffset, so retargeting which bone an
+// anchor rides needed no changes there at all.
 const ANCHORS: AvatarAnchor[] = [
   { anchorId: "head", boneIndex: HEAD, localOffset: { x: 0, y: -120 } },
-  { anchorId: "handL", boneIndex: ARM_L, localOffset: { x: 0, y: 115 } },
-  { anchorId: "handR", boneIndex: ARM_R, localOffset: { x: 0, y: 115 } },
+  { anchorId: "handL", boneIndex: HAND_L, localOffset: { x: 0, y: 14 } },
+  { anchorId: "handR", boneIndex: HAND_R, localOffset: { x: 0, y: 14 } },
 ];
 
 // A gentle vertical breathing bob shared (at different amplitudes/periods)
@@ -463,9 +484,12 @@ const HIT_LEFT: ActionCurveSpec = {
   ],
 };
 
-// armR raises nearly all the way up and in, toward the face -- this rig has
-// no separate hand/finger bone to actually touch the head with, so a full
-// raise reads as "hand at the face" well enough at this simple 2D fidelity.
+// armR raises nearly all the way up and in, toward the face -- handR (see
+// GESTURE_HAND_POSE_SHAPES) is deliberately left at its default open-palm
+// pose rather than given its own "facepalm" shape: there's no separate
+// finger bone to curl against the face, so a plain open hand at the end of
+// a fully raised arm already reads as "hand at the face" well enough at this
+// simple 2D fidelity.
 const FACEPALM: ActionCurveSpec = {
   periodSeconds: GESTURE_PERIOD_SECONDS.facepalm,
   loop: false,
@@ -569,19 +593,42 @@ const MOOD_MOUTH_SHAPES: AvatarTopology["moodMouthShapeIds"] = {
   laugh: "laughOpen",
 };
 
+// Gesture-driven hand pose -- which of the "handL"/"handR" parts' own
+// EXPRESSION_SHAPES (below) should be active while a given gesture's beat is
+// playing. Every gesture NOT listed here leaves both hands at their own base
+// rect (the open-palm pose) -- wave/shrug/openArms/facepalm all read fine
+// with an open hand at this simple 2D fidelity (facepalm in particular --
+// see FACEPALM's own comment above -- an open hand at the face is exactly as
+// good a "no separate finger bone" approximation as the old bare-arm-end
+// was). hitLeft/hitRight rotate BOTH arms the same sign (see HIT_LEFT/
+// HIT_RIGHT above), so both hands fist for either.
+const GESTURE_HAND_POSE_SHAPES: NonNullable<AvatarTopology["gestureHandPoseShapeIds"]> = {
+  point: { handR: "handRPoint" },
+  pointRight: { handR: "handRPoint" },
+  pointLeft: { handL: "handLPoint" },
+  fistThump: { handR: "handRFist" },
+  hitLeft: { handL: "handLFist", handR: "handRFist" },
+  hitRight: { handL: "handLFist", handR: "handRFist" },
+};
+
 // Phase 8 ("Portrait mode") -- the hip joint (ROOT, see DEFAULT_LOCAL_POSE's
 // own comment: "root (hip) = (100, 258)") is exactly where the legs attach,
 // so hiding LEG_L/LEG_R and fitting-by-height to just past that y (rather
 // than the full 400-tall rig) is what turns "full body" into "hands+torso,
 // no legs" -- the "sitting position" framing this phase's own feature
-// request asked for. The +22 over the bare hip y=258 is slack for the hand
-// anchors, which dangle a little BELOW the hip line at rest (ANCHORS'
-// handL/handR = armL/armR + local (0, 115), landing near world y=263) plus
-// idle/talk's own small breathing bob -- without it, a hand would render a
+// request asked for. The +42 over the bare hip y=258 is slack for the
+// HAND_L/HAND_R bones (armL/armR + local (0, 115), landing at world y=263,
+// same position the old handL/handR anchors already used) PLUS their own
+// drawn hand sprite, which -- unlike the old bare anchor point -- extends a
+// further ~30px below that bone (pivot near its own top, same convention
+// armL/armR's own pivot uses): worst case (the "open" pose's own 34px-tall
+// rect) bottoms out at world y ~293, plus a few more px of slack for
+// idle/talk/sleep's own breathing bob (which translates TORSO, and so
+// everything below it in the chain) -- without this, a hand would render a
 // few px past this framing's own destRect bottom edge on some frames.
 const BUST_FRAMING: AvatarBustFraming = {
   hiddenBoneIndices: [LEG_L, LEG_R],
-  frameHeight: 280,
+  frameHeight: 300,
 };
 
 // Exported so avatar_gen's frontend client (generatedLibrary.ts) can bind a
@@ -607,6 +654,7 @@ export const BIPED_SIMPLE_TOPOLOGY: AvatarTopology = {
   moodPresets: MOOD_PRESETS,
   moodExpressionShapes: MOOD_EXPRESSION_SHAPES,
   moodMouthShapeIds: MOOD_MOUTH_SHAPES,
+  gestureHandPoseShapeIds: GESTURE_HAND_POSE_SHAPES,
 };
 
 const MOUTH_SHAPES: AvatarSkinMouthShape[] = [
@@ -633,6 +681,17 @@ const EXPRESSION_SHAPES: AvatarSkinExpressionShape[] = [
   // above.
   { shapeId: "eyeOpen", partId: "eyes" },
   { shapeId: "eyeClosed", partId: "eyes" },
+  // Gesture-driven hand pose (see GESTURE_HAND_POSE_SHAPES above) -- "open"
+  // is deliberately not listed, same "base rect IS the default shape"
+  // convention as eyebrows/"neutral" and eyes/"eyeOpen" above. shapeIds are
+  // globally unique per hand ("handLFist" not "fist") since this skin's
+  // whole `atlas.partRects` is one flat namespace shared by every part's
+  // shapes -- a bare "fist" would collide between handL's and handR's own
+  // (different) rects.
+  { shapeId: "handLFist", partId: "handL" },
+  { shapeId: "handLPoint", partId: "handL" },
+  { shapeId: "handRFist", partId: "handR" },
+  { shapeId: "handRPoint", partId: "handR" },
 ];
 
 // Phase 8 ("selectable torsos") -- "plainShirt" (the base "torso" rect every
@@ -644,6 +703,16 @@ const GARMENT_SHAPES: AvatarSkinGarmentShape[] = [
   { shapeId: "polo", partId: "torso" },
   { shapeId: "blazer", partId: "torso" },
   { shapeId: "suit", partId: "torso" },
+  // "torsoTrim" -- the SAME three garmentIds, resolved against a SEPARATE
+  // overlay part (see PLACEHOLDER_SKIN_PARTS' own "torsoTrim" entry and
+  // compile.ts's compileSkin, which resolves each part's own garment
+  // substitution independently) so an outfit change updates the collar/
+  // button accent art alongside the silhouette, without the two parts'
+  // identical shapeId strings colliding in the atlas's one flat partRects
+  // namespace (compile.ts's part-scoped `${partId}::${shapeId}` rect key).
+  { shapeId: "polo", partId: "torsoTrim" },
+  { shapeId: "blazer", partId: "torsoTrim" },
+  { shapeId: "suit", partId: "torsoTrim" },
 ];
 
 /**
@@ -686,8 +755,27 @@ const PLACEHOLDER_SKIN_PARTS: AvatarSkinPart[] = [
   { partId: "legR", boneIndex: LEG_R, pivotX: 21, pivotY: 4, zOrder: 1 },
   { partId: "neck", boneIndex: TORSO, pivotX: 32, pivotY: 24, zOrder: 2 },
   { partId: "torso", boneIndex: TORSO, pivotX: 60, pivotY: 8, zOrder: 3 },
+  // "torsoTrim" -- rides the SAME bone/pivot as "torso" (see its own doc
+  // comment in placeholderAtlas.ts for why a separate rect, not a second
+  // color fill on "torso" itself, is what makes trimColor independently
+  // recolorable), drawn just above it so the collar/button accent shows over
+  // the shirt fill.
+  { partId: "torsoTrim", boneIndex: TORSO, pivotX: 60, pivotY: 8, zOrder: 3.5 },
   { partId: "armL", boneIndex: ARM_L, pivotX: 18, pivotY: 4, zOrder: 4 },
   { partId: "armR", boneIndex: ARM_R, pivotX: 18, pivotY: 4, zOrder: 5 },
+  // "handL"/"handR" -- the rig's first real drawn hand, riding the new
+  // HAND_L/HAND_R bones (see this file's own top-of-file comment). pivot
+  // near TOP-center, same convention armL/armR's own pivot already uses: the
+  // wrist/forearm joint sits at the top of the hand image, which extends
+  // downward to the fingertips. zOrder sits just above its own arm (so a
+  // hand draws over its own forearm at rest) but below "head" -- when a
+  // gesture raises an arm past the head, renderer.ts's own raised-arm defer
+  // logic (which a hand bone's own zero local rotation would otherwise skip
+  // entirely -- see that file's own comment) re-orders both the arm AND its
+  // hand to draw last, in this same relative order, so the hand still sits
+  // on top of its own arm even then.
+  { partId: "handL", boneIndex: HAND_L, pivotX: 14, pivotY: 4, zOrder: 4.5 },
+  { partId: "handR", boneIndex: HAND_R, pivotX: 14, pivotY: 4, zOrder: 5.5 },
   { partId: "head", boneIndex: HEAD, pivotX: 70, pivotY: 128, zOrder: 6 },
   // The eyes "slot" -- previously baked directly into "head" (two fixed
   // dots, never animated); now its own `parts` entry so blink
@@ -724,6 +812,16 @@ function colorSlotsForPalette(palette: PlaceholderAtlasPalette): AvatarSkinColor
       defaultColor: palette.pantsColor,
       respondsToExpressionParams: ["colorMood"],
     },
+    // "handColor" -- defaults to this skin's own skin tone (a hand is drawn
+    // in the same flat skin-tone fill as an arm), so an unedited Design's
+    // hands render pixel-identical to its own arms with no special-casing.
+    { slotId: "handColor", targetPartIds: ["handL", "handR"], defaultColor: palette.skinTone },
+    // "trimColor" -- targets ONLY the "torsoTrim" overlay part (never
+    // "torso" itself), so a creator can recolor the collar/button accent
+    // independently of the shirt's own base color. Default matches
+    // TRIM_COLOR, the fixed flat color drawTorsoTrim*'s own accent art is
+    // actually drawn with (see placeholderAtlas.ts).
+    { slotId: "trimColor", targetPartIds: ["torsoTrim"], defaultColor: TRIM_COLOR },
   ];
 }
 
