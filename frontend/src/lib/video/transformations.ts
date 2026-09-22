@@ -2150,7 +2150,20 @@ export function applyAddMusicClip(
   const nextClipStart = clips
     .filter((c) => c.startTimeSeconds >= startTimeSeconds)
     .reduce((min, c) => Math.min(min, c.startTimeSeconds), Infinity);
-  const sequenceCap = videoDurationSeconds > startTimeSeconds ? videoDurationSeconds : Infinity;
+  // Gated on videoDurationSeconds being known at all (0/unset -- an empty
+  // timeline with no video yet), NOT on startTimeSeconds being less than it:
+  // that used to be the condition, and it meant an existing clip that
+  // already fills the whole reel (the common case -- a real song's own
+  // source duration is usually longer than a short reel, so a fresh clip's
+  // own default "fill whatever's available" sizing already spans the whole
+  // timeline) left startTimeSeconds === videoDurationSeconds for the next
+  // "Add", which fell through to the Infinity branch and appended a new
+  // clip starting exactly at the timeline's own end with no cap at all --
+  // invisible on the rail, but silently added, so a 2nd/3rd "Add" looked
+  // like it did nothing. Capping unconditionally at videoDurationSeconds
+  // here instead lets the endTimeSeconds <= startTimeSeconds check below do
+  // its job: correctly no-op when there's truly no free space left.
+  const sequenceCap = videoDurationSeconds > 0 ? videoDurationSeconds : Infinity;
   const maxEnd = Math.min(nextClipStart, sequenceCap);
   const endTimeSeconds = Math.min(startTimeSeconds + Math.max(sourceDurationSeconds, 0), maxEnd);
   if (endTimeSeconds <= startTimeSeconds) return { label: "Added music", state: selections };

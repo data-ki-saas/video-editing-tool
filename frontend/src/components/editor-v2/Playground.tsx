@@ -518,7 +518,12 @@ export function Playground({
         </div>
 
         <div className="relative shrink-0" style={{ height: RAIL_HEIGHT_PX, marginTop: RAIL_GAP_PX }}>
-          <div className="absolute left-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
+          {/* pointer-events-none on the wrapper (not just the badge button's
+              own pointer-events-auto) -- otherwise this absolutely
+              positioned, z-10 icon+badge cluster sits on top of whatever the
+              strip below renders at time 0, and swallows drag gestures meant
+              for a clip that starts there instead of passing them through. */}
+          <div className="pointer-events-none absolute left-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
             <span
               title="This reel's own captured sound"
               className="flex shrink-0 items-center justify-center rounded-sm bg-black/25 p-0.5 text-white"
@@ -543,7 +548,12 @@ export function Playground({
         </div>
 
         <div className="relative shrink-0" style={{ height: RAIL_HEIGHT_PX, marginTop: RAIL_GAP_PX }}>
-          <div className="absolute left-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
+          {/* pointer-events-none on the wrapper -- see the matching comment
+              on MainAudioTrackStrip's own icon+badge cluster above; here it
+              was blocking BackgroundTrackStrip's own body-drag/edge-drag on
+              whichever music clip starts at time 0 (the common case, since a
+              fresh clip is placed at the playhead). */}
+          <div className="pointer-events-none absolute left-0.5 top-1/2 z-10 flex -translate-y-1/2 items-center gap-0.5">
             <span
               title="Background music"
               className="flex shrink-0 items-center justify-center rounded-sm bg-black/25 p-0.5 text-white"
