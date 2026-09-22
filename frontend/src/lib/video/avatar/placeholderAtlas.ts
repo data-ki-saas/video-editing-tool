@@ -483,37 +483,41 @@ function drawMouthOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: 
 }
 
 /** The mood-driven "laugh" mouth override (see library.ts's MOOD_MOUTH_SHAPES)
- * -- wider and toothier than drawMouthOpen's plain talk-flap ellipse, with
- * corners curling up to read as a laugh rather than a mid-word open mouth.
- * Teeth sit in the MIDDLE of the cavity, not hugging its top edge -- the same
- * positioning atlas_builder.py's fal.ai photo-avatar path uses for its own
- * teeth ellipse, so both avatar paths agree on where a "toothy" mouth's teeth
- * actually sit. */
+ * -- wider, TALLER, and toothier than drawMouthOpen's plain talk-flap ellipse
+ * (an earlier version drew it flatter than the talk shape, which read as a
+ * dull line rather than a laugh), with corners hooking up and back in toward
+ * center to read as an actual curled-up lip tip rather than a mid-word open
+ * mouth. Teeth sit in the MIDDLE of the cavity, not hugging its top edge --
+ * the same positioning atlas_builder.py's fal.ai photo-avatar path uses for
+ * its own teeth ellipse, so both avatar paths agree on where a "toothy"
+ * mouth's teeth actually sit. */
 function drawMouthLaugh(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
 
   ctx.beginPath();
-  ctx.ellipse(centerX, centerY, 15, 8, 0, 0, Math.PI * 2);
+  ctx.ellipse(centerX, centerY, 15, 10, 0, 0, Math.PI * 2);
   ctx.fillStyle = palette.mouthColor;
   ctx.fill();
 
-  // Corners lifted -- two short strokes curling up and out from each end of
-  // the cavity, the crease at the corner of an open, smiling mouth.
+  // Corners lifted -- a hook, not a straight crease: out from the cavity
+  // then curling back up and IN toward center, so the corner reads as an
+  // actual curled-up lip tip stretched upward rather than a flat oval with
+  // a diagonal nick in it.
   ctx.lineCap = "round";
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 3;
   ctx.strokeStyle = OUTLINE_COLOR;
   for (const sign of [-1, 1]) {
     ctx.beginPath();
-    ctx.moveTo(centerX + sign * 14, centerY + 2);
-    ctx.quadraticCurveTo(centerX + sign * 18, centerY - 2, centerX + sign * 15, centerY - 6);
+    ctx.moveTo(centerX + sign * 14, centerY + 4);
+    ctx.quadraticCurveTo(centerX + sign * 18, centerY - 4, centerX + sign * 13, centerY - 12);
     ctx.stroke();
   }
 
   // Upper teeth -- vertically centered within the cavity (roughly
-  // centerY-1 +/- 3.5), not top-aligned.
+  // centerY-1 +/- 4), not top-aligned.
   ctx.beginPath();
-  ctx.ellipse(centerX, centerY - 1, 11, 3.5, 0, 0, Math.PI * 2);
+  ctx.ellipse(centerX, centerY - 1, 11, 4, 0, 0, Math.PI * 2);
   ctx.fillStyle = TEETH_COLOR;
   ctx.fill();
 }

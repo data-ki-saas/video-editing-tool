@@ -703,22 +703,24 @@ def _draw_mouth_open(draw: ImageDraw.ImageDraw, rect: dict, width_scale: float) 
 
 
 def _draw_mouth_laugh(draw: ImageDraw.ImageDraw, rect: dict, width_scale: float) -> None:
-    """Mirrors placeholderAtlas.ts's own drawMouthLaugh -- wider/toothier
-    than _draw_mouth_open's plain talk-flap ellipse, with corners curling up
-    to read as a laugh. Teeth sit in the MIDDLE of the cavity, not hugging
-    its top edge."""
+    """Mirrors placeholderAtlas.ts's own drawMouthLaugh -- toothier and
+    TALLER than _draw_mouth_open's plain talk-flap ellipse (not flatter, as
+    an earlier version drew it), with corners hooking up and back in toward
+    center -- an actual curled-up lip tip stretched upward, not a straight
+    diagonal crease. Teeth sit in the MIDDLE of the cavity, not hugging its
+    top edge."""
     cx, cy = rect["sx"] + rect["sWidth"] / 2, rect["sy"] + rect["sHeight"] / 2
     half_w = 15 * width_scale
-    draw.ellipse((cx - half_w, cy - 8, cx + half_w, cy + 8), fill=_MOUTH_COLOR)
+    draw.ellipse((cx - half_w, cy - 10, cx + half_w, cy + 10), fill=_MOUTH_COLOR)
     for sign in (-1, 1):
         draw.line(
-            [(cx + sign * (half_w - 1), cy + 2), (cx + sign * (half_w + 3), cy - 2), (cx + sign * half_w, cy - 6)],
+            [(cx + sign * (half_w - 1), cy + 4), (cx + sign * (half_w + 3), cy - 4), (cx + sign * (half_w - 2), cy - 12)],
             fill=_OUTLINE_COLOR,
-            width=2,
+            width=3,
             joint="curve",
         )
     teeth_half_w = 11 * width_scale
-    draw.ellipse((cx - teeth_half_w, cy - 3, cx + teeth_half_w, cy + 3), fill=_TEETH_COLOR)
+    draw.ellipse((cx - teeth_half_w, cy - 4, cx + teeth_half_w, cy + 4), fill=_TEETH_COLOR)
 
 
 def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
@@ -994,21 +996,23 @@ def build_atlas_png_from_photo(
     # the mouth" instead of a natural upper-teeth band.
     open_draw.ellipse((cx - 9, cy - 3, cx + 9, cy + 3), fill=_TEETH_COLOR)
 
-    # "laugh" (mood override, never picked by word-driven lip-sync) -- wider
-    # cavity than "open", same centered teeth band, plus a same-color-as-gap
-    # crease stroke at each corner curling up, mirroring _draw_mouth_laugh's
-    # synthetic-path geometry.
+    # "laugh" (mood override, never picked by word-driven lip-sync) -- taller
+    # cavity than "open" (not flatter), same centered teeth band, plus a
+    # same-color-as-gap stroke at each corner hooking up and back in toward
+    # center, mirroring _draw_mouth_laugh's synthetic-path geometry so both
+    # avatar paths read as an actual curled-up lip tip rather than a flat
+    # oval with a diagonal crease.
     mouth_laugh = mouth_base.copy()
     laugh_draw = ImageDraw.Draw(mouth_laugh)
-    laugh_draw.ellipse((cx - 15, cy - 8, cx + 15, cy + 8), fill=gap_color)
+    laugh_draw.ellipse((cx - 15, cy - 10, cx + 15, cy + 10), fill=gap_color)
     for sign in (-1, 1):
         laugh_draw.line(
-            [(cx + sign * 14, cy + 2), (cx + sign * 18, cy - 2), (cx + sign * 15, cy - 6)],
+            [(cx + sign * 14, cy + 4), (cx + sign * 18, cy - 4), (cx + sign * 13, cy - 12)],
             fill=_OUTLINE_COLOR,
-            width=2,
+            width=3,
             joint="curve",
         )
-    laugh_draw.ellipse((cx - 11, cy - 3, cx + 11, cy + 3), fill=_TEETH_COLOR)
+    laugh_draw.ellipse((cx - 11, cy - 4, cx + 11, cy + 4), fill=_TEETH_COLOR)
 
     image = Image.new("RGBA", (CANVAS_WIDTH, CANVAS_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
