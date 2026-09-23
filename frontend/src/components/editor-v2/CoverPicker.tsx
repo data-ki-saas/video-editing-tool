@@ -19,7 +19,7 @@
  * synchronous request to the backend (see lib/api.ts's uploadThumbnail), so
  * there's no "pending, will update later" state to show.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { CanvasPlayerHandle } from "./CanvasPlayer";
 import { uploadThumbnail, clearThumbnail } from "@/lib/api";
@@ -45,6 +45,26 @@ export function CoverPicker({
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Preview defaults to wherever the playhead is on the tracks right now
+  // (the same pixels "Use current frame" would save), not the last SAVED
+  // cover -- those two frequently differ, since opening this dialog doesn't
+  // require the playhead to be back at the saved cover's timestamp.
+  const [livePreviewUrl, setLivePreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    void playerRef.current?.captureFrame().then((blob) => {
+      if (cancelled || !blob) return;
+      objectUrl = URL.createObjectURL(blob);
+      setLivePreviewUrl(objectUrl);
+    });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-capture whenever the playhead moves while this dialog is open
+  }, [currentTimeSeconds]);
 
   async function handleUseCurrentFrame() {
     setError(null);
@@ -106,7 +126,10 @@ export function CoverPicker({
         </div>
 
         <div className="mx-auto mb-3 flex aspect-[9/16] w-40 items-center justify-center overflow-hidden rounded-md bg-neutral-950">
-          {thumbnailUrl ? (
+          {livePreviewUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- a blob: URL, not a Next-optimizable remote image
+            <img src={livePreviewUrl} alt="Frame at playhead" className="h-full w-full object-cover" />
+          ) : thumbnailUrl ? (
             // eslint-disable-next-line @next/next/no-img-element -- a permanent R2 URL, not a Next-optimizable remote image worth configuring
             <img src={thumbnailUrl} alt="Current cover" className="h-full w-full object-cover" />
           ) : (
@@ -115,6 +138,11 @@ export function CoverPicker({
             </p>
           )}
         </div>
+        {livePreviewUrl && (
+          <p className="mb-3 -mt-2 text-center text-[11px] text-muted">
+            Frame at the playhead's current position
+          </p>
+        )}
 
         {error && <p className="mb-3 text-xs text-red-600">{error}</p>}
 
