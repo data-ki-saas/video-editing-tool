@@ -78,12 +78,14 @@ class Settings(BaseSettings):
     # able to be quite as generous as when this really did cost nothing.
     avatar_generate_daily_cap: int = 10
 
-    # The standalone face-analysis/ Cloud Run service -- moved out of this
-    # backend because Render's native Python runtime can't load mediapipe's
-    # compiled bindings (missing libGLESv2.so.2/libEGL.so.1, no apt/root
-    # access to install them; see [[project_avatar_phase6_photo_gen]] and
-    # avatar_gen/photo_analysis.py's own doc comment). CPU-only (started as
-    # GPU, dropped after a Cloud Run GPU-quota wall). Left blank,
+    # The standalone face-analysis/ service (Render, Docker-deployed) --
+    # moved out of this backend because Render's native Python runtime can't
+    # load mediapipe's compiled bindings (missing libGLESv2.so.2/libEGL.so.1,
+    # no apt/root access to install them; see [[project_avatar_phase6_photo_gen]]
+    # and avatar_gen/photo_analysis.py's own doc comment). CPU-only (started
+    # as GPU on Cloud Run, dropped after a GPU-quota wall there; moved off
+    # Cloud Run entirely afterward since CPU-only no longer needed its
+    # per-request GPU billing). Left blank,
     # analyze_photo fails closed to a generic-toned avatar rather than
     # erroring the whole generation -- same fail-open-on-the-*feature*,
     # never-fail-open-on-*security* posture as this file's other optional

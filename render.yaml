@@ -23,6 +23,15 @@ services:
         sync: false
 
   - type: web
+    name: face-analysis
+    runtime: docker
+    plan: free
+    rootDir: face-analysis
+    envVars:
+      - key: FACE_ANALYSIS_SERVICE_SECRET
+        sync: false
+
+  - type: web
     name: render-transfer-worker
     runtime: node
     plan: free

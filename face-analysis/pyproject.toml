@@ -1,7 +1,7 @@
 [project]
 name = "face-analysis"
 version = "0.1.0"
-description = "Standalone MediaPipe face-landmark analysis service (GPU-capable, Cloud Run) -- backs backend/src/avatar_gen's photo-to-avatar pipeline over HTTP, since Render's native Python runtime can't load mediapipe's libGLESv2 dependency (no apt/root access there)."
+description = "Standalone MediaPipe face-landmark analysis service (CPU-only, Docker-deployed on Render) -- backs backend/src/avatar_gen's photo-to-avatar pipeline over HTTP, since Render's native Python runtime can't load mediapipe's libGLESv2 dependency (no apt/root access there)."
 authors = [
     { name = "Abhinandan Prateek", email = "aprateek@smart-structures.com" }
 ]
