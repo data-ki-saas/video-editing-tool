@@ -37,18 +37,34 @@ const ARM_L = 3;
 const ARM_R = 4;
 const LEG_L = 5;
 const LEG_R = 6;
+// A real elbow joint -- previously armL/armR were a single rigid segment
+// running all the way from shoulder to hand, which reads fine for every
+// EXISTING action/gesture (none of them need the hand to reach past the
+// body's own silhouette) but breaks down for a held prop that needs to
+// reach toward the face (a microphone): rotating one long rigid bone far
+// enough to lift the hand to head height necessarily sweeps that whole
+// straight segment THROUGH the space in front of the face on the way there
+// -- there's no bend to route it around. Splitting the reach into
+// armL/armR (shoulder-to-elbow, unchanged bone, shortened sprite) plus
+// these new forearmL/forearmR (elbow-to-wrist) lets a pose bend at the
+// elbow instead. MUST come before HAND_L/HAND_R below in both this index
+// ordering and BONE_NAMES/PARENT_INDEX -- compileTopology (compile.ts)
+// requires every bone's parent to already be at a SMALLER index, and
+// forearm is now hand's real parent instead of arm.
+const FOREARM_L = 7;
+const FOREARM_R = 8;
 // The rig's first real hand bones -- previously "handL"/"handR" were only a
 // bare anchor point (a math offset past the end of armL/armR, see ANCHORS
 // below), used just to position held-prop icons with no drawn part of their
-// own. As real child bones of armL/armR they get an actual sprite (see
-// PLACEHOLDER_SKIN_PARTS) AND automatically inherit their parent arm's
-// rotation/scale through the same forward-kinematics chain every other bone
-// already uses -- no new parenting mechanism needed.
-const HAND_L = 7;
-const HAND_R = 8;
+// own. As real child bones (now of forearmL/forearmR, see above) they get an
+// actual sprite (see PLACEHOLDER_SKIN_PARTS) AND automatically inherit their
+// parent's rotation/scale through the same forward-kinematics chain every
+// other bone already uses -- no new parenting mechanism needed.
+const HAND_L = 9;
+const HAND_R = 10;
 
-const BONE_NAMES = ["root", "torso", "head", "armL", "armR", "legL", "legR", "handL", "handR"];
-const PARENT_INDEX = [-1, ROOT, TORSO, TORSO, TORSO, ROOT, ROOT, ARM_L, ARM_R];
+const BONE_NAMES = ["root", "torso", "head", "armL", "armR", "legL", "legR", "forearmL", "forearmR", "handL", "handR"];
+const PARENT_INDEX = [-1, ROOT, TORSO, TORSO, TORSO, ROOT, ROOT, ARM_L, ARM_R, FOREARM_L, FOREARM_R];
 
 // The authoring canvas every bone position/atlas pixel rect below is defined
 // against -- portrait-ish per convention (this product's primary reel
@@ -83,13 +99,21 @@ const DEFAULT_LOCAL_POSE: BoneTransform[] = [
   { x: 42, y: 0, rotation: 0, scaleX: 1, scaleY: 1 }, // armR
   { x: -28, y: 0, rotation: 0, scaleX: 1, scaleY: 1 }, // legL
   { x: 28, y: 0, rotation: 0, scaleX: 1, scaleY: 1 }, // legR
-  // handL/handR -- reuses the exact offset the old handL/handR ANCHORS used
-  // (armL/armR + local (0, 115)), since that was already the tuned "where a
-  // hand sits at the end of the forearm" position; retargeting the anchors
-  // themselves onto these new bones (see ANCHORS below) needs a much smaller
-  // nudge from here instead.
-  { x: 0, y: 115, rotation: 0, scaleX: 1, scaleY: 1 }, // handL
-  { x: 0, y: 115, rotation: 0, scaleX: 1, scaleY: 1 }, // handR
+  // forearmL/forearmR (elbow) -- splits the old single armL/armR-to-hand
+  // offset of (0, 115) into two hops, (0, 62) here plus handL/handR's own
+  // (0, 53) below, summing to the exact same 115 total so a rest pose (both
+  // this bone's own rotation AND every existing action/gesture, none of
+  // which touch it) renders PIXEL-IDENTICAL to before this split -- only a
+  // pose that deliberately rotates this bone (see accessories.ts's
+  // restPoseForearmRotationRadians) bends the elbow at all.
+  { x: 0, y: 62, rotation: 0, scaleX: 1, scaleY: 1 }, // forearmL
+  { x: 0, y: 62, rotation: 0, scaleX: 1, scaleY: 1 }, // forearmR
+  // handL/handR -- now riding forearmL/forearmR (see above) instead of
+  // armL/armR directly; local offset shrunk from the old 115 to 53 (62+53
+  // still totals 115) so a still-elbow (rotation 0) keeps the hand at
+  // EXACTLY its old world position.
+  { x: 0, y: 53, rotation: 0, scaleX: 1, scaleY: 1 }, // handL
+  { x: 0, y: 53, rotation: 0, scaleX: 1, scaleY: 1 }, // handR
 ];
 
 // "torso"/"limbs" are not consumed by anything in this phase (see
@@ -763,19 +787,27 @@ const PLACEHOLDER_SKIN_PARTS: AvatarSkinPart[] = [
   { partId: "torsoTrim", boneIndex: TORSO, pivotX: 60, pivotY: 8, zOrder: 3.5 },
   { partId: "armL", boneIndex: ARM_L, pivotX: 18, pivotY: 4, zOrder: 4 },
   { partId: "armR", boneIndex: ARM_R, pivotX: 18, pivotY: 4, zOrder: 5 },
-  // "handL"/"handR" -- the rig's first real drawn hand, riding the new
+  // "forearmL"/"forearmR" -- the elbow's own drawn segment (see this file's
+  // top-of-file comment on FOREARM_L/FOREARM_R). Same TOP-center pivot
+  // convention as armL/armR (the elbow joint sits at the top of THIS image,
+  // extending down to the wrist); zOrder just above its own upper arm (so it
+  // draws over the shoulder-to-elbow segment at their overlap) but below its
+  // own hand, same relative ordering armL/armR->handL/handR already used.
+  { partId: "forearmL", boneIndex: FOREARM_L, pivotX: 18, pivotY: 4, zOrder: 4.3 },
+  { partId: "forearmR", boneIndex: FOREARM_R, pivotX: 18, pivotY: 4, zOrder: 5.3 },
+  // "handL"/"handR" -- the rig's first real drawn hand, riding the
   // HAND_L/HAND_R bones (see this file's own top-of-file comment). pivot
   // near TOP-center, same convention armL/armR's own pivot already uses: the
   // wrist/forearm joint sits at the top of the hand image, which extends
-  // downward to the fingertips. zOrder sits just above its own arm (so a
+  // downward to the fingertips. zOrder sits just above its own forearm (so a
   // hand draws over its own forearm at rest) but below "head" -- when a
   // gesture raises an arm past the head, renderer.ts's own raised-arm defer
-  // logic (which a hand bone's own zero local rotation would otherwise skip
-  // entirely -- see that file's own comment) re-orders both the arm AND its
-  // hand to draw last, in this same relative order, so the hand still sits
-  // on top of its own arm even then.
-  { partId: "handL", boneIndex: HAND_L, pivotX: 14, pivotY: 4, zOrder: 4.5 },
-  { partId: "handR", boneIndex: HAND_R, pivotX: 14, pivotY: 4, zOrder: 5.5 },
+  // logic (which a hand/forearm bone's own zero local rotation would
+  // otherwise skip entirely -- see that file's own comment) re-orders the
+  // arm AND its forearm AND its hand to draw last, in this same relative
+  // order, so the hand still sits on top of its own forearm even then.
+  { partId: "handL", boneIndex: HAND_L, pivotX: 14, pivotY: 4, zOrder: 4.6 },
+  { partId: "handR", boneIndex: HAND_R, pivotX: 14, pivotY: 4, zOrder: 5.6 },
   { partId: "head", boneIndex: HEAD, pivotX: 70, pivotY: 128, zOrder: 6 },
   // The eyes "slot" -- previously baked directly into "head" (two fixed
   // dots, never animated); now its own `parts` entry so blink

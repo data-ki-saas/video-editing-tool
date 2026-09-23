@@ -10,7 +10,7 @@
  * byte-identical results.
  */
 import type { ActionCurveSpec, ActionKeyframe, BoneTransform, ExpressionParamSpec } from "./topology";
-import type { CompiledTopology } from "./compile";
+import type { CompiledAccessory, CompiledTopology } from "./compile";
 import { ambientEffectSeed, mulberry32 } from "../ambientEffects";
 
 // The identity delta -- x/y/rotation at their additive zero, scaleX/scaleY
@@ -194,6 +194,33 @@ function applyExpressionBoneDeltas(topology: CompiledTopology, pose: BoneTransfo
   return next;
 }
 
+/** Applies every attached accessory's own `poseBoneDeltas` (compile.ts's
+ * CompiledAccessory, resolved from accessories.ts's
+ * AccessoryCatalogEntry.restPoseArmRotationRadians/restPoseForearmRotationRadians,
+ * sign already mirrored for "handL" and boneIndex already resolved there) --
+ * additive onto each named bone's existing rotation (same convention as
+ * applyExpressionBoneDeltas), so this is a BASE-POSTURE-level bias, applied
+ * before any gesture/gaze merge -- a gesture later targeting the same arm
+ * bone still fully replaces it (mergeBoneOverride's "highest layer owning a
+ * bone wins outright" rule), it's never fought or double-added. Mutates
+ * nothing, same "always return a fresh array" contract as every other pose
+ * function here. A no-op (returns `pose` itself, not a copy) when nothing's
+ * attached or nothing attached sets either field, so a clip with no held-prop
+ * pose bias at all costs nothing extra per frame. */
+function applyHeldAccessoryPoseBias(pose: BoneTransform[], accessories?: CompiledAccessory[]): BoneTransform[] {
+  if (!accessories || accessories.length === 0) return pose;
+  const deltas = accessories.flatMap((accessory) => accessory.poseBoneDeltas);
+  if (deltas.length === 0) return pose;
+
+  const next = pose.map((bone) => ({ ...bone }));
+  for (const { boneIndex, rotationDelta } of deltas) {
+    const bone = next[boneIndex];
+    if (!bone) continue;
+    next[boneIndex] = { ...bone, rotation: bone.rotation + rotationDelta };
+  }
+  return next;
+}
+
 /** `spec`'s own loop phase (0..1) at `elapsedSeconds` -- wraps modulo
  * `periodSeconds` for an ordinary looping spec (`loop` omitted or true, every
  * spec authored before the layered-motion redesign), or clamps to [0,1]
@@ -253,6 +280,11 @@ function computePosturePose(topology: CompiledTopology, actionId: string, elapse
  * in) -- applied via applyExpressionBoneDeltas above, on top of whatever
  * pose the active action already produced.
  *
+ * `accessories` (optional -- typically `compiled.accessories` off the same
+ * CompiledAvatar) layers each attached accessory's own default held-prop arm
+ * pose in via applyHeldAccessoryPoseBias, BEFORE expressionBias -- see that
+ * function's own doc comment.
+ *
  * Kept as a single-action, single-layer function (unchanged signature and
  * behavior) for the call sites that only ever need one posture pose in
  * isolation -- gallery thumbnails, AvatarFramingDialog's own live preview
@@ -264,9 +296,11 @@ export function computeAvatarPose(
   actionId: string,
   elapsedSeconds: number,
   seed: number,
-  expressionBias?: Record<string, number>
+  expressionBias?: Record<string, number>,
+  accessories?: CompiledAccessory[]
 ): BoneTransform[] {
-  return applyExpressionBoneDeltas(topology, computePosturePose(topology, actionId, elapsedSeconds, seed), expressionBias);
+  const posturePose = applyHeldAccessoryPoseBias(computePosturePose(topology, actionId, elapsedSeconds, seed), accessories);
+  return applyExpressionBoneDeltas(topology, posturePose, expressionBias);
 }
 
 /** Which gesture/gaze (if any) is layered on top of the posture action right
@@ -312,9 +346,11 @@ export function computeLayeredAvatarPose(
   activation: AvatarLayerActivation,
   elapsedSeconds: number,
   seed: number,
-  expressionBias?: Record<string, number>
+  expressionBias?: Record<string, number>,
+  accessories?: CompiledAccessory[]
 ): BoneTransform[] {
   let pose = computePosturePose(topology, activation.postureActionId, elapsedSeconds, seed);
+  pose = applyHeldAccessoryPoseBias(pose, accessories);
 
   const gestureSpec = activation.gesture ? topology.gestures?.[activation.gesture.gestureId] : undefined;
   if (gestureSpec && activation.gesture) {

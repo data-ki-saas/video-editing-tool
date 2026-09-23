@@ -281,7 +281,14 @@ function AvatarPreviewCanvas({
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         const compiled = compiledRef.current;
         if (compiled) {
-          const pose = computeAvatarPose(compiled.topology, action, elapsedSeconds, seedRef.current, compiled.design.expressionBias);
+          const pose = computeAvatarPose(
+            compiled.topology,
+            action,
+            elapsedSeconds,
+            seedRef.current,
+            compiled.design.expressionBias,
+            compiled.accessories
+          );
           const mouthShapeId = computeMouthShapeId(action, elapsedSeconds);
           // No moodTimeline exists in this dialog's own preview (it drives one
           // fixed `action` directly, not a resolved clip) -- eyebrows fall

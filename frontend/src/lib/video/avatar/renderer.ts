@@ -172,20 +172,25 @@ export function drawAvatar(
 
   for (const part of skin.parts) {
     if (hiddenBoneIndices.includes(part.boneIndex)) continue;
-    // A hand bone (biped-simple's "handL"/"handR") rides one level BELOW an
-    // arm bone (its parent) and never gets its own rotation keyframed --
-    // gestures/talk-emphasize only ever rotate the ARM bone, so a hand's own
-    // local rotation stays 0 even while its parent arm is raised past the
+    // A hand or forearm bone (biped-simple's "handL"/"handR"/"forearmL"/
+    // "forearmR") rides one or more levels BELOW an arm bone (its ancestor)
+    // and never gets its own rotation keyframed by a gesture/talk-emphasize
+    // -- those only ever rotate the ARM bone itself, so a hand/forearm's own
+    // local rotation stays 0 even while its owning arm is raised past the
     // head. Checking `part.boneIndex`'s own rotation here would therefore
-    // never defer a hand part, leaving a raised arm's hand stuck at its
-    // static (pre-raise) zOrder -- BEHIND the head -- while its own arm
-    // correctly draws in front. Falling back to the bone's PARENT when the
-    // bone itself isn't in armBoneIndices (one level of ancestor lookup is
-    // enough -- a hand is always exactly one level below its owning arm)
-    // reads the rotation that actually moved this part, so hand parts defer
-    // in lockstep with their own arm.
-    const rotationBoneIndex = armBoneIndices.has(part.boneIndex) ? part.boneIndex : topology.parentIndex[part.boneIndex];
-    if (armBoneIndices.has(rotationBoneIndex) && Math.abs(pose[rotationBoneIndex].rotation) > ARM_RAISED_ROTATION_THRESHOLD_RADIANS) {
+    // never defer it, leaving it stuck at its static (pre-raise) zOrder --
+    // BEHIND the head -- while the arm itself correctly draws in front.
+    // Walking UP the parent chain until landing on a bone that's actually in
+    // armBoneIndices (rather than assuming exactly one hop, which broke once
+    // the elbow bone put hand two levels below arm instead of one) finds
+    // whichever bone actually carries the rotation that moved this part, so
+    // it defers in lockstep with its own arm regardless of how many bones
+    // sit in between.
+    let rotationBoneIndex = part.boneIndex;
+    while (rotationBoneIndex !== -1 && !armBoneIndices.has(rotationBoneIndex)) {
+      rotationBoneIndex = topology.parentIndex[rotationBoneIndex];
+    }
+    if (rotationBoneIndex !== -1 && Math.abs(pose[rotationBoneIndex].rotation) > ARM_RAISED_ROTATION_THRESHOLD_RADIANS) {
       deferredRaisedArmParts.push(part);
       continue;
     }

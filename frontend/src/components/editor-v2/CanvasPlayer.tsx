@@ -1579,7 +1579,7 @@ export const CanvasPlayer = forwardRef<
         localElapsed
       );
       const seed = ambientEffectSeed(clip.id);
-      const pose = computeLayeredAvatarPose(compiled.topology, activation, localElapsed, seed, expressionBias);
+      const pose = computeLayeredAvatarPose(compiled.topology, activation, localElapsed, seed, expressionBias, compiled.accessories);
       const destX = clip.rect.x * canvas.width;
       const destY = clip.rect.y * canvas.height;
       const destWidth = clip.rect.width * canvas.width;

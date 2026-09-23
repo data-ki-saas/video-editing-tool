@@ -134,6 +134,19 @@ export interface CompiledAccessory {
   // (accessories.ts), applied around the pivot on top of the anchor bone's
   // own current rotation. 0 for accessories that don't set one.
   rotationDegrees: number;
+  // Radians, additive onto specific ANCESTOR bones of this accessory's own
+  // anchor bone (actions.ts's applyHeldAccessoryPoseBias reads this) -- e.g.
+  // a microphone raising the whole arm AND bending the elbow toward the face
+  // by default, not just its own sprite drawn at a fixed hand position. Each
+  // entry's `boneIndex` and (sign-mirrored for the "handL" side) `rotationDelta`
+  // are fully resolved HERE at compile time -- see compileAccessories below
+  // -- so actions.ts never needs to walk the bone hierarchy itself at
+  // pose-compute time. Empty for every accessory that doesn't set either of
+  // AccessoryCatalogEntry's restPoseArmRotationRadians/
+  // restPoseForearmRotationRadians fields (every prop that just rests at the
+  // hand's own default position -- pen/knife/gun/stick/money/wallet/
+  // creditCard -- omits both, same as they've always worked).
+  poseBoneDeltas: { boneIndex: number; rotationDelta: number }[];
 }
 
 export interface CompiledAvatar {
@@ -506,6 +519,23 @@ async function compileAccessories(
       );
     }
     const image = await loadAccessoryImage(catalogEntry, attached.colorOverride);
+    // Mirror sign for the "handL" side -- same convention library.ts's own
+    // POINT_LEFT already uses to mirror POINT_RIGHT's armR rotation onto
+    // armL (negate), since the two arm bones are mirrored across the body's
+    // centerline. Both `restPoseForearmRotationRadians` (the anchor bone's
+    // immediate parent -- forearmL/forearmR) and `restPoseArmRotationRadians`
+    // (its grandparent -- armL/armR) are always authored as if for "handR";
+    // anything else (including "handR" itself) keeps the sign as-is.
+    const mirror = attached.anchorId === "handL" ? -1 : 1;
+    const poseBoneDeltas: CompiledAccessory["poseBoneDeltas"] = [];
+    const forearmBoneIndex = topology.parentIndex[anchor.boneIndex];
+    if (catalogEntry.restPoseForearmRotationRadians !== undefined && forearmBoneIndex >= 0) {
+      poseBoneDeltas.push({ boneIndex: forearmBoneIndex, rotationDelta: mirror * catalogEntry.restPoseForearmRotationRadians });
+    }
+    const armBoneIndex = forearmBoneIndex >= 0 ? topology.parentIndex[forearmBoneIndex] : -1;
+    if (catalogEntry.restPoseArmRotationRadians !== undefined && armBoneIndex >= 0) {
+      poseBoneDeltas.push({ boneIndex: armBoneIndex, rotationDelta: mirror * catalogEntry.restPoseArmRotationRadians });
+    }
     compiled.push({
       boneIndex: anchor.boneIndex,
       offsetX: anchor.localOffset.x + catalogEntry.offsetFromAnchor.x,
@@ -516,6 +546,7 @@ async function compileAccessories(
       width: catalogEntry.width,
       height: catalogEntry.height,
       rotationDegrees: catalogEntry.rotationDegrees ?? 0,
+      poseBoneDeltas,
     });
   }
   return compiled;

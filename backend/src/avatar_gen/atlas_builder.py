@@ -75,9 +75,18 @@ _HEAD_PART_PIVOT = (70, 128)
 
 _ROW2_Y = HEAD_RECT["sy"] + HEAD_RECT["sHeight"] + GAP
 TORSO_RECT = {"sx": GAP, "sy": _ROW2_Y, "sWidth": 120, "sHeight": 140}
-ARM_L_RECT = {"sx": TORSO_RECT["sx"] + TORSO_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 36, "sHeight": 130}
-ARM_R_RECT = {"sx": ARM_L_RECT["sx"] + ARM_L_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 36, "sHeight": 130}
-LEG_L_RECT = {"sx": ARM_R_RECT["sx"] + ARM_R_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 42, "sHeight": 150}
+# Shrunk from the old single 130-tall rigid rect (shoulder-to-hand) down to
+# just shoulder-to-elbow -- mirrors frontend/src/lib/video/avatar/library.ts's
+# FOREARM_L/FOREARM_R split exactly (see that file's own comment: a real
+# elbow joint so a held prop can bend around the face instead of a single
+# rigid arm bone sweeping straight through it).
+ARM_L_RECT = {"sx": TORSO_RECT["sx"] + TORSO_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 36, "sHeight": 74}
+ARM_R_RECT = {"sx": ARM_L_RECT["sx"] + ARM_L_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 36, "sHeight": 74}
+# The elbow-to-wrist segment -- same rounded-rect skin-tone look as
+# ARM_L_RECT/ARM_R_RECT, just its own independently-posable rect/bone.
+FOREARM_L_RECT = {"sx": ARM_R_RECT["sx"] + ARM_R_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 34, "sHeight": 68}
+FOREARM_R_RECT = {"sx": FOREARM_L_RECT["sx"] + FOREARM_L_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 34, "sHeight": 68}
+LEG_L_RECT = {"sx": FOREARM_R_RECT["sx"] + FOREARM_R_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 42, "sHeight": 150}
 LEG_R_RECT = {"sx": LEG_L_RECT["sx"] + LEG_L_RECT["sWidth"] + GAP, "sy": _ROW2_Y, "sWidth": 42, "sHeight": 150}
 
 # Row 3 -- mirrors frontend/src/lib/video/avatar/placeholderAtlas.ts's own
@@ -981,6 +990,8 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
     _torso_body(draw, TORSO_RECT)
     _rounded_rect(draw, ARM_L_RECT, inset=4, radius=14, fill=palette.skin_tone)
     _rounded_rect(draw, ARM_R_RECT, inset=4, radius=14, fill=palette.skin_tone)
+    _rounded_rect(draw, FOREARM_L_RECT, inset=4, radius=13, fill=palette.skin_tone)
+    _rounded_rect(draw, FOREARM_R_RECT, inset=4, radius=13, fill=palette.skin_tone)
     _rounded_rect(draw, LEG_L_RECT, inset=4, radius=17, fill=_PANTS_COLOR)
     _rounded_rect(draw, LEG_R_RECT, inset=4, radius=17, fill=_PANTS_COLOR)
     _draw_torso_polo(draw, POLO_RECT)
@@ -1019,6 +1030,8 @@ def build_atlas_png(palette: FacePalette) -> tuple[bytes, dict[str, dict]]:
         "torso": TORSO_RECT,
         "armL": ARM_L_RECT,
         "armR": ARM_R_RECT,
+        "forearmL": FOREARM_L_RECT,
+        "forearmR": FOREARM_R_RECT,
         "legL": LEG_L_RECT,
         "legR": LEG_R_RECT,
         "polo": POLO_RECT,
@@ -1347,6 +1360,8 @@ def build_atlas_png_from_photo(
     _torso_body(draw, TORSO_RECT)
     _rounded_rect(draw, ARM_L_RECT, inset=4, radius=14, fill=palette.skin_tone)
     _rounded_rect(draw, ARM_R_RECT, inset=4, radius=14, fill=palette.skin_tone)
+    _rounded_rect(draw, FOREARM_L_RECT, inset=4, radius=13, fill=palette.skin_tone)
+    _rounded_rect(draw, FOREARM_R_RECT, inset=4, radius=13, fill=palette.skin_tone)
     _rounded_rect(draw, LEG_L_RECT, inset=4, radius=17, fill=_PANTS_COLOR)
     _rounded_rect(draw, LEG_R_RECT, inset=4, radius=17, fill=_PANTS_COLOR)
     _draw_torso_polo(draw, POLO_RECT)
@@ -1386,6 +1401,8 @@ def build_atlas_png_from_photo(
         "torso": TORSO_RECT,
         "armL": ARM_L_RECT,
         "armR": ARM_R_RECT,
+        "forearmL": FOREARM_L_RECT,
+        "forearmR": FOREARM_R_RECT,
         "legL": LEG_L_RECT,
         "legR": LEG_R_RECT,
         "polo": POLO_RECT,

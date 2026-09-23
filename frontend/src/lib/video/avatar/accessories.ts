@@ -52,6 +52,32 @@ export interface AccessoryCatalogEntry {
   // consulted (compile.ts/edits.ts validation, AvatarFramingDialog's hand
   // picker).
   alternateAnchorIds?: string[];
+  // Radians, additive onto the ARM bone (the anchor's own grandparent --
+  // e.g. armR for a "handR"-anchored prop) as part of the BASE posture pose
+  // (actions.ts's applyHeldAccessoryPoseBias/compile.ts's compileAccessories)
+  // -- a default "how is this held" position, distinct from `rotationDegrees`
+  // above (which only spins the accessory's own sprite around its pivot, not
+  // the arm underneath it). Always authored as if for "handR" -- compileAccessories
+  // negates it automatically when the actual attached anchor is "handL", same
+  // mirroring convention library.ts's POINT_LEFT/POINT_RIGHT already use for a
+  // single-arm gesture. Optional: every prop that just rests at the hand's own
+  // default position (pen/knife/gun/stick/money/wallet/creditCard) omits this
+  // entirely. Because this is base-POSTURE-level (not a gesture), any gesture
+  // later targeting the same arm bone still fully overrides it (mergeBoneOverride
+  // in actions.ts) -- e.g. a future "reach the mic out" gesture simply wins
+  // outright while active, it's not fought by this default.
+  restPoseArmRotationRadians?: number;
+  // Same idea, one joint further down the SAME chain -- the anchor's own
+  // immediate parent (e.g. forearmR for a "handR"-anchored prop), i.e. the
+  // elbow bend. A single rigid arm bone rotated far enough to lift the hand
+  // to head height necessarily sweeps a straight line through whatever's in
+  // between (the face); combining a smaller `restPoseArmRotationRadians`
+  // (swings the elbow up across the chest, clear of the face) with a larger
+  // bend here (folds the forearm back up from there to bring the hand the
+  // rest of the way) is what actually gets a prop near the face without
+  // crossing it. Both fields are independent -- either, neither, or both may
+  // be set.
+  restPoseForearmRotationRadians?: number;
   defaultColor: string;
   draw: (ctx: CanvasRenderingContext2D, color: string) => void;
 }
@@ -453,6 +479,23 @@ export const ACCESSORY_CATALOG: AccessoryCatalogEntry[] = [
     // usually gripped fairly high up, not at the very butt end.
     pivotX: 18,
     pivotY: 10,
+    // Held up near the mouth by default (a mic is naturally spoken into, not
+    // set back down mid-take) -- NOT a straight-arm raise (see this
+    // codebase's own bad first attempt at this, reverted after it swept the
+    // rigid arm bone straight across the face). Values found by numerically
+    // simulating this rig's exact bone chain (root->torso->armR->forearmR->
+    // handR) rather than hand-derived trig -- see the transcript this shipped
+    // in for the search -- picking the closest-to-the-mouth landing spot
+    // whose two segments (shoulder->elbow, elbow->hand) never cross the
+    // eyes/nose region: the arm swings in across the chest (elbow ends up
+    // roughly at the sternum, a normal/expected overlap, not the face), then
+    // the forearm folds back up from there to bring the hand near the chin.
+    // rotationDegrees below is UNCHANGED from the original resting-hand
+    // value -- it's the mic's grip angle relative to the HAND's own local
+    // frame, not world space, so it doesn't need to change just because the
+    // hand's accumulated world rotation now does.
+    restPoseArmRotationRadians: (46 * Math.PI) / 180,
+    restPoseForearmRotationRadians: (128 * Math.PI) / 180,
     rotationDegrees: -40,
     defaultColor: "#1f2937",
     draw: drawMicrophone,

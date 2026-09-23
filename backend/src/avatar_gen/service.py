@@ -85,12 +85,22 @@ _PARTS = [
     {"partId": "torsoTrim", "boneIndex": 1, "pivotX": 60, "pivotY": 8, "zOrder": 3.5},
     {"partId": "armL", "boneIndex": 3, "pivotX": 18, "pivotY": 4, "zOrder": 4},
     {"partId": "armR", "boneIndex": 4, "pivotX": 18, "pivotY": 4, "zOrder": 5},
-    # "handL"/"handR" -- the rig's first real drawn hand, riding new
-    # HAND_L/HAND_R bones (boneIndex 7/8, mirrors
+    # "forearmL"/"forearmR" -- the elbow's own drawn segment, riding new
+    # FOREARM_L/FOREARM_R bones (boneIndex 7/8, mirrors
+    # frontend/src/lib/video/avatar/library.ts's own FOREARM_L/FOREARM_R
+    # exactly -- see that file's top-of-file comment on why a real elbow
+    # joint was added: a mic-holding pose needs to bend around the face, not
+    # sweep a single rigid arm bone straight through it). Same TOP-center
+    # pivot convention as armL/armR; zOrder just above its own upper arm.
+    {"partId": "forearmL", "boneIndex": 7, "pivotX": 18, "pivotY": 4, "zOrder": 4.3},
+    {"partId": "forearmR", "boneIndex": 8, "pivotX": 18, "pivotY": 4, "zOrder": 5.3},
+    # "handL"/"handR" -- the rig's first real drawn hand, riding
+    # HAND_L/HAND_R bones (boneIndex 9/10 -- shifted from the old 7/8 to make
+    # room for FOREARM_L/FOREARM_R above; mirrors
     # frontend/src/lib/video/avatar/library.ts's own HAND_L/HAND_R exactly).
     # pivot near TOP-center, same convention armL/armR's own pivot uses.
-    {"partId": "handL", "boneIndex": 7, "pivotX": 14, "pivotY": 4, "zOrder": 4.5},
-    {"partId": "handR", "boneIndex": 8, "pivotX": 14, "pivotY": 4, "zOrder": 5.5},
+    {"partId": "handL", "boneIndex": 9, "pivotX": 14, "pivotY": 4, "zOrder": 4.6},
+    {"partId": "handR", "boneIndex": 10, "pivotX": 14, "pivotY": 4, "zOrder": 5.6},
     {"partId": "head", "boneIndex": 2, "pivotX": 70, "pivotY": 128, "zOrder": 6},
     # "eyes"/"eyebrows" -- mirrors library.ts's own biped-simple pivots
     # exactly (same shared topology/rig, so the SAME bone-local offsets place

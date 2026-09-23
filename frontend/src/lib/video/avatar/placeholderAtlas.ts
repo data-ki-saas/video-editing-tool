@@ -62,9 +62,17 @@ const EYES_CLOSED_RECT: AtlasRect = { sx: EYES_COLUMN_X, sy: EYES_OPEN_RECT.sy +
 // below the tallest thing in row 1 (the head).
 const ROW2_Y = HEAD_RECT.sy + HEAD_RECT.sHeight + GAP;
 const TORSO_RECT: AtlasRect = { sx: GAP, sy: ROW2_Y, sWidth: 120, sHeight: 140 };
-const ARM_L_RECT: AtlasRect = { sx: TORSO_RECT.sx + TORSO_RECT.sWidth + GAP, sy: ROW2_Y, sWidth: 36, sHeight: 130 };
-const ARM_R_RECT: AtlasRect = { sx: ARM_L_RECT.sx + ARM_L_RECT.sWidth + GAP, sy: ROW2_Y, sWidth: 36, sHeight: 130 };
-const LEG_L_RECT: AtlasRect = { sx: ARM_R_RECT.sx + ARM_R_RECT.sWidth + GAP, sy: ROW2_Y, sWidth: 42, sHeight: 150 };
+// Shrunk from the old single 130-tall rigid rect (shoulder-to-hand) down to
+// just shoulder-to-elbow -- see library.ts's FOREARM_L/FOREARM_R comment for
+// why the reach is now split across two bones/sprites instead of one.
+const ARM_L_RECT: AtlasRect = { sx: TORSO_RECT.sx + TORSO_RECT.sWidth + GAP, sy: ROW2_Y, sWidth: 36, sHeight: 74 };
+const ARM_R_RECT: AtlasRect = { sx: ARM_L_RECT.sx + ARM_L_RECT.sWidth + GAP, sy: ROW2_Y, sWidth: 36, sHeight: 74 };
+// The elbow-to-wrist segment -- same rounded-rect skin-tone look as
+// ARM_L_RECT/ARM_R_RECT (drawn with the same drawRoundedRect call below),
+// just its own independently-posable rect/bone.
+const FOREARM_L_RECT: AtlasRect = { sx: ARM_R_RECT.sx + ARM_R_RECT.sWidth + GAP, sy: ROW2_Y, sWidth: 34, sHeight: 68 };
+const FOREARM_R_RECT: AtlasRect = { sx: FOREARM_L_RECT.sx + FOREARM_L_RECT.sWidth + GAP, sy: ROW2_Y, sWidth: 34, sHeight: 68 };
+const LEG_L_RECT: AtlasRect = { sx: FOREARM_R_RECT.sx + FOREARM_R_RECT.sWidth + GAP, sy: ROW2_Y, sWidth: 42, sHeight: 150 };
 const LEG_R_RECT: AtlasRect = { sx: LEG_L_RECT.sx + LEG_L_RECT.sWidth + GAP, sy: ROW2_Y, sWidth: 42, sHeight: 150 };
 
 // Row 3 (Phase 8, "selectable torsos") -- three alternate torso silhouettes
@@ -736,6 +744,8 @@ export function buildPlaceholderAtlas(
     torso: TORSO_RECT,
     armL: ARM_L_RECT,
     armR: ARM_R_RECT,
+    forearmL: FOREARM_L_RECT,
+    forearmR: FOREARM_R_RECT,
     legL: LEG_L_RECT,
     legR: LEG_R_RECT,
     // Phase 8 ("selectable torsos") -- additional swappable rects for the
@@ -807,6 +817,8 @@ export function buildPlaceholderAtlas(
   drawTorsoBody(ctx, TORSO_RECT, palette);
   drawRoundedRect(ctx, ARM_L_RECT.sx + 4, ARM_L_RECT.sy + 4, ARM_L_RECT.sWidth - 8, ARM_L_RECT.sHeight - 8, 14, palette.skinTone);
   drawRoundedRect(ctx, ARM_R_RECT.sx + 4, ARM_R_RECT.sy + 4, ARM_R_RECT.sWidth - 8, ARM_R_RECT.sHeight - 8, 14, palette.skinTone);
+  drawRoundedRect(ctx, FOREARM_L_RECT.sx + 4, FOREARM_L_RECT.sy + 4, FOREARM_L_RECT.sWidth - 8, FOREARM_L_RECT.sHeight - 8, 13, palette.skinTone);
+  drawRoundedRect(ctx, FOREARM_R_RECT.sx + 4, FOREARM_R_RECT.sy + 4, FOREARM_R_RECT.sWidth - 8, FOREARM_R_RECT.sHeight - 8, 13, palette.skinTone);
   drawRoundedRect(ctx, LEG_L_RECT.sx + 4, LEG_L_RECT.sy + 4, LEG_L_RECT.sWidth - 8, LEG_L_RECT.sHeight - 8, 17, palette.pantsColor);
   drawRoundedRect(ctx, LEG_R_RECT.sx + 4, LEG_R_RECT.sy + 4, LEG_R_RECT.sWidth - 8, LEG_R_RECT.sHeight - 8, 17, palette.pantsColor);
   drawTorsoPolo(ctx, POLO_RECT, palette);
