@@ -95,19 +95,28 @@ const DEFAULT_LOCAL_POSE: BoneTransform[] = [
   { x: 100, y: 258, rotation: 0, scaleX: 1, scaleY: 1 }, // root
   { x: 0, y: -110, rotation: 0, scaleX: 1, scaleY: 1 }, // torso
   { x: 0, y: -12, rotation: 0, scaleX: 1, scaleY: 1 }, // head
-  { x: -42, y: 0, rotation: 0, scaleX: 1, scaleY: 1 }, // armL
-  { x: 42, y: 0, rotation: 0, scaleX: 1, scaleY: 1 }, // armR
+  // A slight permanent elbow-out bend at rest -- a perfectly straight
+  // hanging arm reads as stiff/robotic; armL/armR lean the elbow a little
+  // OUTWARD from the body (away from center) and forearmL/forearmR fold back
+  // in slightly from there (see below), same small-but-real "not perfectly
+  // rigid" naturalism idle/talk/walk's own breathing bob already goes for.
+  { x: -42, y: 0, rotation: (15 * Math.PI) / 180, scaleX: 1, scaleY: 1 }, // armL
+  { x: 42, y: 0, rotation: (-15 * Math.PI) / 180, scaleX: 1, scaleY: 1 }, // armR
   { x: -28, y: 0, rotation: 0, scaleX: 1, scaleY: 1 }, // legL
   { x: 28, y: 0, rotation: 0, scaleX: 1, scaleY: 1 }, // legR
   // forearmL/forearmR (elbow) -- splits the old single armL/armR-to-hand
   // offset of (0, 115) into two hops, (0, 62) here plus handL/handR's own
-  // (0, 53) below, summing to the exact same 115 total so a rest pose (both
-  // this bone's own rotation AND every existing action/gesture, none of
-  // which touch it) renders PIXEL-IDENTICAL to before this split -- only a
-  // pose that deliberately rotates this bone (see accessories.ts's
-  // restPoseForearmRotationRadians) bends the elbow at all.
-  { x: 0, y: 62, rotation: 0, scaleX: 1, scaleY: 1 }, // forearmL
-  { x: 0, y: 62, rotation: 0, scaleX: 1, scaleY: 1 }, // forearmR
+  // (0, 53) below, summing to the exact same 115 total, so ONLY the small
+  // rotation below (not the reach itself) is what's new versus the old
+  // single rigid segment. A small rotation, opposite sign from armL/armR's
+  // own outward lean above, folds the forearm back in slightly from that
+  // outward elbow -- together reading as a relaxed, very-slightly-bent arm
+  // at rest rather than either a ramrod-straight one or an exaggerated bend.
+  // Any pose that deliberately rotates this bone further (see accessories.ts's
+  // restPoseForearmRotationRadians) adds ON TOP of this baseline, not instead
+  // of it.
+  { x: 0, y: 62, rotation: (-20 * Math.PI) / 180, scaleX: 1, scaleY: 1 }, // forearmL
+  { x: 0, y: 62, rotation: (20 * Math.PI) / 180, scaleX: 1, scaleY: 1 }, // forearmR
   // handL/handR -- now riding forearmL/forearmR (see above) instead of
   // armL/armR directly; local offset shrunk from the old 115 to 53 (62+53
   // still totals 115) so a still-elbow (rotation 0) keeps the hand at

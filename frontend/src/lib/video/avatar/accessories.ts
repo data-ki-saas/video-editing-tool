@@ -484,19 +484,36 @@ export const ACCESSORY_CATALOG: AccessoryCatalogEntry[] = [
     // codebase's own bad first attempt at this, reverted after it swept the
     // rigid arm bone straight across the face). Values found by numerically
     // simulating this rig's exact bone chain (root->torso->armR->forearmR->
-    // handR) rather than hand-derived trig -- see the transcript this shipped
-    // in for the search -- picking the closest-to-the-mouth landing spot
-    // whose two segments (shoulder->elbow, elbow->hand) never cross the
-    // eyes/nose region: the arm swings in across the chest (elbow ends up
-    // roughly at the sternum, a normal/expected overlap, not the face), then
-    // the forearm folds back up from there to bring the hand near the chin.
-    // rotationDegrees below is UNCHANGED from the original resting-hand
-    // value -- it's the mic's grip angle relative to the HAND's own local
-    // frame, not world space, so it doesn't need to change just because the
-    // hand's accumulated world rotation now does.
-    restPoseArmRotationRadians: (46 * Math.PI) / 180,
-    restPoseForearmRotationRadians: (128 * Math.PI) / 180,
-    rotationDegrees: -40,
+    // handR) rather than hand-derived trig, picking a candidate that (a)
+    // never crosses the eyes/nose region on either segment, (b) lands
+    // reasonably near the chin/mouth, AND (c) keeps the elbow's own bend
+    // fairly OPEN (~90 degrees interior angle, a natural bent-elbow look)
+    // rather than sharply folded -- a first pass optimized purely for (a)+(b)
+    // landed closer to the target but bent the elbow ~128 degrees, which
+    // read as overly folded.
+    //
+    // These two fields are ACCESSORY deltas, added on top of armR/forearmR's
+    // own DEFAULT_LOCAL_POSE baseline (library.ts's own small resting elbow-
+    // out lean, -15/+20 degrees) -- not the total rotation itself. Solved
+    // for TOTAL armR=58 deg / forearmR=90 deg (the elbow swings in across the
+    // chest -- a normal/expected overlap, not the face -- then folds back up
+    // at a natural ~90-degree bend to bring the hand near the chin), so:
+    //   restPoseArmRotationRadians (delta)     = 58 - (-15) = 73 deg
+    //   restPoseForearmRotationRadians (delta) = 90 - 20    = 70 deg
+    // If library.ts's own armR/forearmR baseline ever changes, these two
+    // need re-deriving against the new baseline the same way.
+    //
+    // rotationDegrees is NOT relative to the hand's own local frame -- see
+    // its own doc comment above ("ON TOP OF whatever rotation the anchor
+    // bone already carries"), so it stacks additively onto the hand's
+    // ACCUMULATED world rotation (armR total 58 + forearmR total 90 = 148 deg
+    // here). drawMicrophone's own head-end sits along this sprite's local +x
+    // axis; in this rig's clockwise-from-+x convention, 270 deg points
+    // straight up -- so rotationDegrees = 270 - 148 = 122 deg points the
+    // capsule head up toward the mouth instead of down at the floor.
+    restPoseArmRotationRadians: (73 * Math.PI) / 180,
+    restPoseForearmRotationRadians: (70 * Math.PI) / 180,
+    rotationDegrees: 122,
     defaultColor: "#1f2937",
     draw: drawMicrophone,
   },
