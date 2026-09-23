@@ -1089,18 +1089,29 @@ def _border_connected_removal_mask(candidate: Image.Image) -> Image.Image:
 
 def _background_removal_mask(image: Image.Image, background_rgb: tuple[int, int, int], threshold: int = 45) -> Image.Image:
     """Cheap chroma-key: pixels close to `background_rgb` become transparent
-    (mask=0), everything else opaque (mask=255). `ImageChops.difference` +
-    `.convert('L')` is a luminance-weighted proxy for color distance, not a
-    true Euclidean one -- adequate for a fairly uniform background (this
-    project's existing "informal heuristic, no real segmentation model"
-    posture, same as photo_analysis.py's own color-sampling code), and
-    avoids needing numpy in this venv (backend/ doesn't have it -- mediapipe/
-    numpy live only in face-analysis/ now, see that split's own history).
-    Only removes background-colored pixels that are actually
+    (mask=0), everything else opaque (mask=255). Distance is the true
+    per-channel MAX difference (a Chebyshev distance, via three
+    `ImageChops.lighter` calls on the split diff channels) -- pure Pillow, no
+    numpy needed in this venv (backend/ doesn't have it -- mediapipe/numpy
+    live only in face-analysis/ now, see that split's own history). This used
+    to `.convert('L')` the diff instead (`R*0.299 + G*0.587 + B*0.114`,
+    Pillow's standard luma weights) -- a real bug, not just an approximation:
+    a warm-cream photo background and a warm skin highlight can differ by 80+
+    in the BLUE channel alone yet still land under threshold once that's
+    diluted to 11.4% weight, misclassifying real forehead skin as background
+    -- reported as a persistent transparent forehead band on one specific
+    avatar whose photo happened to have this exact color relationship, see
+    [[project_face_analysis_render_migration]]. A per-channel MAX can only
+    ever be >= the old weighted-average value for the same two colors, so
+    this is strictly more conservative (can only remove FEWER pixels as
+    "background" than before, never more) -- same "belt and braces, no
+    surprise regressions" posture as `_border_connected_removal_mask`'s own
+    doc comment. Only removes background-colored pixels that are actually
     border-connected -- see `_border_connected_removal_mask`."""
     bg_solid = Image.new("RGB", image.size, background_rgb)
-    diff = ImageChops.difference(image.convert("RGB"), bg_solid).convert("L")
-    candidate = diff.point(lambda v: 0 if v <= threshold else 255)
+    diff_r, diff_g, diff_b = ImageChops.difference(image.convert("RGB"), bg_solid).split()
+    diff_max = ImageChops.lighter(ImageChops.lighter(diff_r, diff_g), diff_b)
+    candidate = diff_max.point(lambda v: 0 if v <= threshold else 255)
     return _border_connected_removal_mask(candidate)
 
 
