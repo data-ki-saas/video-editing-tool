@@ -75,6 +75,11 @@ class FacePalette:
     # FacePalette.head_top_fraction. Feeds atlas_builder.py's per-photo
     # forehead chroma-key protection instead of a fixed fraction guess.
     head_top_fraction: float | None = None
+    # RAW pixel-space face_oval contour (same space as head_crop_box) -- see
+    # face-analysis/src/photo_analysis.py's FacePalette.face_oval_raw. Lets
+    # atlas_builder.py shape the head silhouette to this photo's real
+    # jawline instead of a fixed generic ellipse. None whenever detected=False.
+    face_oval_raw: list[Point] | None = None
 
 
 _DEFAULT_SKIN_TONE = "#e8b48c"
@@ -121,6 +126,7 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             background_rgb=tuple(body["background_rgb"]) if body.get("background_rgb") else None,
             head_chin_fraction=body.get("head_chin_fraction"),
             head_top_fraction=body.get("head_top_fraction"),
+            face_oval_raw=[tuple(p) for p in body["face_oval_raw"]] if body.get("face_oval_raw") else None,
         )
     except Exception:
         logger.exception("face-analysis service call failed; falling back to default proportions")

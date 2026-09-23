@@ -175,6 +175,19 @@ class FacePalette:
     # real forehead band unprotected on an unusual face proportion. None
     # whenever detected=False.
     head_top_fraction: float | None = None
+    # RAW pixel-space face_oval contour (unlike `face_oval` above, which is
+    # normalized to face-relative units for the parametric/non-photo
+    # generator) -- same coordinate space as `head_crop_box`, so
+    # atlas_builder.py can transform it straight into head_crop-relative,
+    # HEAD_RECT-scaled coordinates with the same crop+resize math it already
+    # applies to the image itself, no denormalization needed. Lets the fal.ai
+    # photo path's head silhouette follow this specific photo's real
+    # jawline/cheek/chin instead of a fixed generic ellipse -- see
+    # atlas_builder.py's own comment on why it's only used below the
+    # contour's own top edge (mediapipe's face contour doesn't reach up over
+    # the scalp, so using it as the ENTIRE outer shape would clip hair off
+    # entirely). None whenever detected=False.
+    face_oval_raw: list[Point] | None = None
 
 
 def _ensure_model() -> Path:
@@ -587,6 +600,7 @@ def analyze_photo(photo_bytes: bytes) -> FacePalette:
             background_rgb=background_rgb,
             head_chin_fraction=head_chin_fraction,
             head_top_fraction=head_top_fraction,
+            face_oval_raw=face_oval_raw,
         )
 
         # TEMPORARY diagnostic -- the rendered output doesn't match what

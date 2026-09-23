@@ -1169,6 +1169,43 @@ def build_atlas_png_from_photo(
     oval_mask = Image.new("L", (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), 0)
     ImageDraw.Draw(oval_mask).ellipse((0, 2, HEAD_RECT["sWidth"], HEAD_RECT["sHeight"] - 2), fill=255)
 
+    # Outer silhouette shape only -- entirely separate concern from the
+    # background chroma-key below, and left untouched by it either direction
+    # (this never removes MORE than the chroma-key already would, and the
+    # chroma-key's own protected-ellipse belt-and-braces logic below is
+    # unaffected by this). Without `face_oval_raw`, the plain ellipse above
+    # is the whole shape -- reads as a generic circle/oval regardless of the
+    # real photo's own jawline. When it's available (same raw pixel space as
+    # head_crop_box, see photo_analysis.py's own doc comment), reshape the
+    # LOWER portion (roughly eyebrow-height down: cheeks/jaw/chin) to this
+    # photo's own real contour instead. Deliberately NOT used for the WHOLE
+    # shape -- mediapipe's face_oval contour doesn't reach up over the scalp,
+    # so clipping the entire head to it would remove hair entirely; only the
+    # region at/below the contour's own topmost point is touched, and even
+    # there it's INTERSECTED with (never allowed to extend past) the plain
+    # ellipse -- so this can only ever shrink the silhouette toward the real
+    # face outline, never grow it beyond today's shape.
+    if palette.face_oval_raw:
+        hx0, hy0, hx1, hy1 = palette.head_crop_box
+        crop_w, crop_h = hx1 - hx0, hy1 - hy0
+        scale_x = HEAD_RECT["sWidth"] / crop_w if crop_w else 1.0
+        scale_y = HEAD_RECT["sHeight"] / crop_h if crop_h else 1.0
+        face_polygon = [((px - hx0) * scale_x, (py - hy0) * scale_y) for (px, py) in palette.face_oval_raw]
+        poly_top_y = min(y for _, y in face_polygon)
+
+        face_mask = Image.new("L", (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), 0)
+        if len(face_polygon) >= 3:
+            ImageDraw.Draw(face_mask).polygon(face_polygon, fill=255)
+
+        lower_region = Image.new("L", (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), 0)
+        ImageDraw.Draw(lower_region).rectangle((0, poly_top_y, HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), fill=255)
+        upper_region = ImageChops.invert(lower_region)
+
+        oval_mask = ImageChops.lighter(
+            ImageChops.multiply(oval_mask, upper_region),
+            ImageChops.multiply(ImageChops.multiply(oval_mask, face_mask), lower_region),
+        )
+
     # `_background_removal_mask` is a per-pixel color-distance check against
     # a SINGLE sampled corner pixel (see that function's own doc comment) --
     # a cartoonify style's flat shading/highlights can still read close
