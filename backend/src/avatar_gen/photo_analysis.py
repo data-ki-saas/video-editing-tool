@@ -1,6 +1,7 @@
-"""Thin HTTP client for the standalone `face-analysis/` Cloud Run service --
-the actual mediapipe FaceLandmarker analysis used to run in-process here,
-but Render's native Python runtime has no apt/root access to install the
+"""Thin HTTP client for the standalone `face-analysis/` service (Render,
+Docker-deployed -- see [[project_face_analysis_render_migration]]) -- the
+actual mediapipe FaceLandmarker analysis used to run in-process here, but
+Render's native Python runtime has no apt/root access to install the
 Mesa/GLES/EGL system libraries mediapipe's compiled bindings need, which made
 every photo analysis on Render silently fail and fall back to defaults --
 see [[project_avatar_phase6_photo_gen]] for the incident this fixes.
@@ -21,7 +22,17 @@ from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT_SECONDS = 20.0
+# Render's free tier scales this service to zero between requests -- a cold
+# start (container boot + mediapipe model load) can comfortably exceed 20s,
+# which showed up as every avatar_gen.service.rebake_all_avatars bulk run
+# reliably timing out on the FIRST record only (the one paying the cold-start
+# cost) while the rest, hitting the now-warm instance, succeeded in ~1s each.
+# 60s is a generous buffer for that specific cold path without meaningfully
+# changing the experience of the normal warm-instance case (see
+# [[project_face_analysis_render_migration]]) -- this fails toward the exact
+# same silent default-proportions fallback either way, just gives a cold
+# start enough runway to not need it.
+_TIMEOUT_SECONDS = 60.0
 
 FaceShape = Literal["oval", "round", "wide"]
 HairLength = Literal["bald", "short", "medium", "long"]
