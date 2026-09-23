@@ -1,13 +1,23 @@
 import logging
 import tempfile
 import uuid
+from io import BytesIO
 from pathlib import Path
 
 import httpx
 from fastapi import HTTPException
+from PIL import Image
 
 from src.avatar_gen import repository
-from src.avatar_gen.atlas_builder import _PANTS_COLOR, _SHIRT_COLOR, _TRIM_COLOR, build_atlas_png, build_atlas_png_from_photo
+from src.avatar_gen.atlas_builder import (
+    HEAD_RECT,
+    _FACE_PROTECTED_TOP_FRACTION,
+    _PANTS_COLOR,
+    _SHIRT_COLOR,
+    _TRIM_COLOR,
+    build_atlas_png,
+    build_atlas_png_from_photo,
+)
 from src.avatar_gen.cartoonify_provider import cartoonify_image
 from src.avatar_gen.photo_analysis import FacePalette, analyze_photo
 from src.avatar_gen.schemas import GeneratedAvatarCreateResponse, GeneratedAvatarDetail, GeneratedAvatarSummary
@@ -271,6 +281,53 @@ async def _cartoonify_and_crop(
             logger.exception("failed to clean up temp cartoonify source %r", temp_key)
 
 
+def _log_forehead_diagnostic(design_id: str, cartoon_bytes: bytes, palette: FacePalette) -> None:
+    """TEMPORARY diagnostic -- [[project_avatar_face_top_protection_fix]]'s
+    head_top_fraction fix still leaves a visible forehead transparency band on
+    at least one real avatar after rebake, and pulling the cached source
+    photo directly to investigate isn't possible from the dev sandbox (no
+    network path to Supabase/R2 there). This piggybacks on the admin rebake
+    button (which already runs on Render, with real network access) to log
+    the exact numbers/pixels involved so the cause can be read straight out
+    of Render logs instead. Never raises -- a diagnostic logging bug must
+    never break an actual rebake. Remove once the forehead band is confirmed
+    fixed for real avatars."""
+    try:
+        if not palette.detected or not palette.head_crop_box or not palette.background_rgb:
+            logger.info("forehead-diag design=%s: not detected / missing crop box or background_rgb", design_id)
+            return
+        cartoon_image = Image.open(BytesIO(cartoon_bytes)).convert("RGB")
+        head_crop = cartoon_image.crop(tuple(round(v) for v in palette.head_crop_box)).resize(
+            (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), Image.LANCZOS
+        )
+        protected_top_fraction = _FACE_PROTECTED_TOP_FRACTION
+        if palette.head_top_fraction is not None:
+            protected_top_fraction = min(_FACE_PROTECTED_TOP_FRACTION, palette.head_top_fraction)
+        protected_top = HEAD_RECT["sHeight"] * protected_top_fraction
+        # Sample a row just above the protected ellipse's own top edge -- this
+        # is exactly the boundary where a real forehead/hair pixel either
+        # stays opaque (inside the ellipse) or becomes subject to the
+        # border-connected chroma-key (above it), so whatever's wrong shows up
+        # right here first.
+        sample_y = max(0, min(head_crop.height - 1, int(protected_top) - 5))
+        row_colors = [head_crop.getpixel((x, sample_y)) for x in range(0, head_crop.width, 20)]
+        logger.info(
+            "forehead-diag design=%s: head_top_fraction=%s fixed_guess=%.3f chosen_fraction=%.3f "
+            "protected_top_px=%.1f/%d background_rgb=%s row_y=%d row_colors=%s",
+            design_id,
+            palette.head_top_fraction,
+            _FACE_PROTECTED_TOP_FRACTION,
+            protected_top_fraction,
+            protected_top,
+            HEAD_RECT["sHeight"],
+            palette.background_rgb,
+            sample_y,
+            row_colors,
+        )
+    except Exception:
+        logger.exception("forehead diagnostic logging failed for design=%s (non-fatal)", design_id)
+
+
 def _rebake_record(record: repository.AvatarDesignRecord) -> repository.AvatarDesignRecord:
     """Shared core of rebake_generated_avatar and scripts/rebake_avatars.py:
     re-runs build_atlas_png_from_photo against `record`'s cached
@@ -285,6 +342,8 @@ def _rebake_record(record: repository.AvatarDesignRecord) -> repository.AvatarDe
     palette = analyze_photo(cartoon_bytes)
     if not palette.detected:
         raise HTTPException(status_code=502, detail="Couldn't re-detect a face in this avatar's cached source photo")
+
+    _log_forehead_diagnostic(record.id, cartoon_bytes, palette)
 
     atlas_png, part_rects, mouth_pivot, eyebrows_pivot, eyes_pivot, neck_pivot = build_atlas_png_from_photo(cartoon_bytes, palette)
 
