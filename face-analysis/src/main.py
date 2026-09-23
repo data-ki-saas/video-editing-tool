@@ -37,7 +37,6 @@ class FacePaletteResponse(BaseModel):
     background_rgb: tuple[int, int, int] | None
     head_chin_fraction: float | None
     head_top_fraction: float | None
-    face_oval_raw: list[Point] | None
 
 
 def _require_internal_secret(x_internal_secret: str = Header(default="")) -> None:
@@ -77,5 +76,4 @@ async def analyze(file: UploadFile = File(...)) -> FacePaletteResponse:
         background_rgb=palette.background_rgb,
         head_chin_fraction=palette.head_chin_fraction,
         head_top_fraction=palette.head_top_fraction,
-        face_oval_raw=palette.face_oval_raw,
     )
