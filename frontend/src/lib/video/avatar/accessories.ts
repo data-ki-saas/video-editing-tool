@@ -52,22 +52,6 @@ export interface AccessoryCatalogEntry {
   // consulted (compile.ts/edits.ts validation, AvatarFramingDialog's hand
   // picker).
   alternateAnchorIds?: string[];
-  // Radians, additive onto the arm bone owning this accessory's actual
-  // attached anchor, applied continuously as part of the BASE posture pose
-  // (actions.ts's applyHeldAccessoryPoseBias) -- a default "how is this held"
-  // arm position, distinct from `rotationDegrees` above (which only spins
-  // the accessory's own sprite around its pivot, not the arm underneath it).
-  // Always authored as if for "handR" -- compile.ts's compileAccessories
-  // negates it automatically when the actual attached anchor is "handL",
-  // same mirroring convention library.ts's POINT_LEFT/POINT_RIGHT already
-  // use for a single-arm gesture. Optional: every prop that just rests at
-  // the hand's own default position (pen/knife/gun/stick/money/wallet/
-  // creditCard) omits this entirely, same as they've always worked. Because
-  // this is base-POSTURE-level (not a gesture), any gesture later targeting
-  // the same arm bone still fully overrides it (mergeBoneOverride in
-  // actions.ts) -- e.g. a future "reach the mic out" gesture is not fought
-  // by this default, it simply wins outright while active.
-  restPoseArmRotationRadians?: number;
   defaultColor: string;
   draw: (ctx: CanvasRenderingContext2D, color: string) => void;
 }
@@ -469,25 +453,7 @@ export const ACCESSORY_CATALOG: AccessoryCatalogEntry[] = [
     // usually gripped fairly high up, not at the very butt end.
     pivotX: 18,
     pivotY: 10,
-    // Reuses FACEPALM's own proven ARM_R rotation (library.ts) rather than
-    // re-deriving a new magic number -- same "raise the arm nearly all the
-    // way up and in, toward the face" motion, just held for good (a mic is
-    // naturally spoken into, not something set back down mid-take) instead
-    // of one gesture beat. See AccessoryCatalogEntry.restPoseArmRotationRadians's
-    // own doc comment for the mechanism, and compile.ts's compileAccessories
-    // for the "handL" sign-mirroring.
-    restPoseArmRotationRadians: 2.9,
-    // Re-derived for the raised pose above, NOT the old resting-at-the-side
-    // rotationDegrees=-40 this replaces: the arm bone itself now contributes
-    // ~166 degrees (2.9 rad) of its own rotation, which this accessory's
-    // rotationDegrees stacks additively onto (see that field's own doc
-    // comment) -- so pointing the capsule roughly upright, mic head toward
-    // the mouth, needs roughly the INVERSE of that plus a small tilt, not a
-    // small tweak of the old value. Best-effort geometric estimate, not
-    // confirmed against a live render (this sandbox has no browser canvas to
-    // check against) -- nudge in the editor if the capsule doesn't read as
-    // "held up to the mouth."
-    rotationDegrees: 104,
+    rotationDegrees: -40,
     defaultColor: "#1f2937",
     draw: drawMicrophone,
   },

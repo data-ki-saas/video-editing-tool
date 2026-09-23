@@ -134,18 +134,6 @@ export interface CompiledAccessory {
   // (accessories.ts), applied around the pivot on top of the anchor bone's
   // own current rotation. 0 for accessories that don't set one.
   rotationDegrees: number;
-  // Radians, additive onto whichever arm bone owns this accessory's anchor
-  // (actions.ts's applyHeldAccessoryPoseBias reads this) -- e.g. a
-  // microphone raising the whole arm toward the face by default, not just
-  // its own sprite drawn at a fixed hand position. Resolved ONCE here (not
-  // left to actions.ts) because sign-mirroring for the "handL"/"handR" side
-  // actually attached needs `attached.anchorId`, which this function already
-  // has in scope -- see AccessoryCatalogEntry.restPoseArmRotationRadians's
-  // own doc comment for the un-mirrored, handR-relative value this is
-  // derived from. Undefined for every accessory that doesn't set one, same
-  // as `rotationDegrees` defaulting to 0 rather than needing a separate
-  // "has one" flag.
-  armPoseRotationDelta?: number;
 }
 
 export interface CompiledAvatar {
@@ -518,17 +506,6 @@ async function compileAccessories(
       );
     }
     const image = await loadAccessoryImage(catalogEntry, attached.colorOverride);
-    // Mirror sign for the "handL" side -- same convention library.ts's own
-    // POINT_LEFT already uses to mirror POINT_RIGHT's armR rotation onto
-    // armL (negate), since the two arm bones are mirrored across the body's
-    // centerline. `restPoseArmRotationRadians` is always authored as if for
-    // "handR"; anything else (including "handR" itself) keeps the sign as-is.
-    const armPoseRotationDelta =
-      catalogEntry.restPoseArmRotationRadians === undefined
-        ? undefined
-        : attached.anchorId === "handL"
-          ? -catalogEntry.restPoseArmRotationRadians
-          : catalogEntry.restPoseArmRotationRadians;
     compiled.push({
       boneIndex: anchor.boneIndex,
       offsetX: anchor.localOffset.x + catalogEntry.offsetFromAnchor.x,
@@ -539,7 +516,6 @@ async function compileAccessories(
       width: catalogEntry.width,
       height: catalogEntry.height,
       rotationDegrees: catalogEntry.rotationDegrees ?? 0,
-      armPoseRotationDelta,
     });
   }
   return compiled;
