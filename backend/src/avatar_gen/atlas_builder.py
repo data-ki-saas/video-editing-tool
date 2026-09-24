@@ -1128,6 +1128,54 @@ def _background_removal_mask(image: Image.Image, background_rgb: tuple[int, int,
     return _border_connected_removal_mask(candidate)
 
 
+# Supersample factor for `_face_oval_head_mask` below -- PIL's `polygon`
+# fill has no antialiasing, and face_oval's ~36 sparse landmark points make a
+# 1x-drawn edge visibly faceted at HEAD_RECT's 140px size (an ellipse's
+# smooth curve hid the same lack of antialiasing far better). Draw at 4x,
+# downsample with LANCZOS, same trick `head_crop` above already relies on
+# for its own resize.
+_HEAD_MASK_SUPERSAMPLE = 4
+
+
+def _face_oval_head_mask(face_oval: list[Point], head_crop_box: tuple[float, float, float, float]) -> Image.Image | None:
+    """The real per-photo face_oval contour (same landmark set `_draw_head`
+    already draws for the parametric path -- see this module's own doc
+    comment), remapped into head_crop's local HEAD_RECT-sized pixel space
+    and stretched to fill it exactly like the plain circle this replaces
+    used to. `None` when `face_oval` is empty (shouldn't happen once
+    `palette.detected` is true, but this function has no independent
+    guarantee of that -- see its own caller).
+
+    Stretched rather than placed at its true remapped size/position because
+    face_oval traces the jaw+forehead line ALONE, not hair -- a straight
+    remap would crop away the hair margin `head_crop_box` was deliberately
+    padded with (see `_FACE_PROTECTED_*` above's own doc comment on that
+    margin). Rescaling face_oval's own bounding box to fill HEAD_RECT
+    corner-to-corner (same coverage the old `ellipse((0, 2, 140, 138))` gave)
+    keeps that same full coverage -- hair/ears outside the true jawline are
+    included exactly as before -- while the shape itself is now this
+    person's real tapered-chin, rounded-forehead proportions instead of a
+    circle. Eyebrows/eyes/mouth are unaffected either way: those paste via
+    their own crop_box/pivot math entirely independent of this mask."""
+    if not face_oval:
+        return None
+    hx0, hy0, hx1, hy1 = head_crop_box
+    crop_w, crop_h = max(1.0, hx1 - hx0), max(1.0, hy1 - hy0)
+    local = [((x - hx0) / crop_w * HEAD_RECT["sWidth"], (y - hy0) / crop_h * HEAD_RECT["sHeight"]) for x, y in face_oval]
+    xs, ys = [p[0] for p in local], [p[1] for p in local]
+    min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
+    span_x, span_y = max(1e-6, max_x - min_x), max(1e-6, max_y - min_y)
+
+    s = _HEAD_MASK_SUPERSAMPLE
+    stretched = [
+        ((x - min_x) / span_x * HEAD_RECT["sWidth"] * s, (2 + (y - min_y) / span_y * (HEAD_RECT["sHeight"] - 4)) * s)
+        for x, y in local
+    ]
+    big_mask = Image.new("L", (HEAD_RECT["sWidth"] * s, HEAD_RECT["sHeight"] * s), 0)
+    ImageDraw.Draw(big_mask).polygon(stretched, fill=255)
+    return big_mask.resize((HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), Image.LANCZOS)
+
+
 def build_atlas_png_from_photo(
     cartoon_image_bytes: bytes, palette: FacePalette
 ) -> tuple[
@@ -1179,8 +1227,10 @@ def build_atlas_png_from_photo(
     head_crop = cartoon_image.crop(tuple(round(v) for v in palette.head_crop_box)).resize(
         (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), Image.LANCZOS
     )
-    oval_mask = Image.new("L", (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), 0)
-    ImageDraw.Draw(oval_mask).ellipse((0, 2, HEAD_RECT["sWidth"], HEAD_RECT["sHeight"] - 2), fill=255)
+    head_shape_mask = _face_oval_head_mask(palette.face_oval, palette.head_crop_box)
+    if head_shape_mask is None:
+        head_shape_mask = Image.new("L", (HEAD_RECT["sWidth"], HEAD_RECT["sHeight"]), 0)
+        ImageDraw.Draw(head_shape_mask).ellipse((0, 2, HEAD_RECT["sWidth"], HEAD_RECT["sHeight"] - 2), fill=255)
 
     # `_background_removal_mask` is a per-pixel color-distance check against
     # a SINGLE sampled corner pixel (see that function's own doc comment) --
@@ -1226,7 +1276,7 @@ def build_atlas_png_from_photo(
 
     bg_mask = _background_removal_mask(head_crop, palette.background_rgb).filter(ImageFilter.GaussianBlur(1.0))
     bg_mask = ImageChops.lighter(bg_mask, protected_mask)
-    head_mask = ImageChops.multiply(oval_mask, bg_mask)
+    head_mask = ImageChops.multiply(head_shape_mask, bg_mask)
 
     mouth_crop = cartoon_image.crop(tuple(round(v) for v in palette.mouth_crop_box))
     mouth_base = mouth_crop.resize((MOUTH_CLOSED_RECT["sWidth"], MOUTH_CLOSED_RECT["sHeight"]), Image.LANCZOS).convert("RGBA")
