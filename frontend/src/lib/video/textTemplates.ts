@@ -477,35 +477,74 @@ export function getTextTemplateRenderer(templateId: string): TextTemplateRendere
   return (TEXT_TEMPLATE_RENDERERS as Record<string, TextTemplateRenderer>)[templateId];
 }
 
+// How many words of context to show on each side of the currently-spoken
+// word -- a sliding window rather than laying out the WHOLE narration and
+// shrinking the font to fit (what this used to do), which for anything
+// longer than a sentence produced a wall of tiny, hard-to-read text. Keeps
+// the caption at a stable, glanceable size the way real karaoke/subtitle
+// UIs do.
+const KARAOKE_WORDS_BEFORE = 3;
+const KARAOKE_WORDS_AFTER = 3;
+
+/** Which word the window should be centered on at `relativeMs` -- the exact
+ * active word when one is currently speaking, or (during a pause between
+ * words, e.g. a comma/sentence break in the synthesized audio -- these are
+ * common, not just at the narration's very start/end) the most recently
+ * spoken word, so the window holds steady through the gap instead of
+ * snapping back to word 0. Before the first word has started, centers on
+ * word 0 so the window shows the upcoming text. */
+function resolveKaraokeCenterIndex(words: TtsWordTiming[], relativeMs: number): { activeIndex: number; centerIndex: number } {
+  const activeIndex = words.findIndex((w) => relativeMs >= w.startMs && relativeMs < w.endMs);
+  if (activeIndex !== -1) return { activeIndex, centerIndex: activeIndex };
+
+  let centerIndex = 0;
+  for (let i = 0; i < words.length; i += 1) {
+    if (words[i].startMs <= relativeMs) centerIndex = i;
+    else break;
+  }
+  return { activeIndex: -1, centerIndex };
+}
+
 /** Karaoke-highlight renderer for a TtsOverlay in "karaoke" displayMode --
  * a dedicated, simpler-than-the-above renderer (word-wrap + per-word
  * highlight only, no entrance/exit animation system) since this is driven
  * by which word is CURRENTLY active, not a single 0..1 progress value the
- * way every TEXT_TEMPLATE_RENDERERS entry is. Lays every word out via
+ * way every TEXT_TEMPLATE_RENDERERS entry is. Only lays out a sliding
+ * window of KARAOKE_WORDS_BEFORE/AFTER words around the active one (see
+ * resolveKaraokeCenterIndex), not the full narration text, via
  * fitTextToRect's own word-grouping (shared with Word Pop's per-word layout
  * above) so wrapping stays consistent with the rest of the app, then draws
  * the active word with a filled highlight pill and every other word plain
- * white-with-stroke. `words` and the wrapped layout's own flattened word
- * order line up 1:1 (word-wrap only groups words into lines, it never
- * reorders or drops any), so `activeIndex` (a plain index into `words`) can
- * be compared directly against a running counter while iterating the
- * wrapped layout.
+ * white-with-stroke. `windowWords` and the wrapped layout's own flattened
+ * word order line up 1:1 (word-wrap only groups words into lines, it never
+ * reorders or drops any), so `localActiveIndex` (activeIndex re-based to
+ * the window's own start) can be compared directly against a running
+ * counter while iterating the wrapped layout.
  *
  * Exported (not local to one component) so both CanvasPlayer.tsx's live
  * preview and lib/localRender/exportTimeline.ts's offline export draw
  * karaoke captions identically -- a preview/render mismatch here would be
  * exactly the kind of drift this codebase's shared-renderer convention
- * (getTextTemplateRenderer above) exists to avoid. */
+ * (getTextTemplateRenderer above) exists to avoid. `relativeMs` (not a
+ * pre-resolved activeIndex) is what's passed in, since this needs it for
+ * the pause-fallback centering above too -- both call sites already have
+ * it as `(currentTimeSeconds - overlay.startTimeSeconds) * 1000`. */
 export function drawKaraokeCaption(
   ctx: CanvasRenderingContext2D,
   rectPx: { x: number; y: number; width: number; height: number },
   words: TtsWordTiming[],
-  activeIndex: number,
+  relativeMs: number,
   templateId: string
 ) {
   if (words.length === 0) return;
+  const { activeIndex, centerIndex } = resolveKaraokeCenterIndex(words, relativeMs);
+  const windowStart = Math.max(0, centerIndex - KARAOKE_WORDS_BEFORE);
+  const windowEnd = Math.min(words.length - 1, centerIndex + KARAOKE_WORDS_AFTER);
+  const windowWords = words.slice(windowStart, windowEnd + 1);
+  const localActiveIndex = activeIndex === -1 ? -1 : activeIndex - windowStart;
+
   const fontSpec = (size: number) => `bold ${size}px sans-serif`;
-  const fullText = words.map((w) => w.word).join(" ");
+  const fullText = windowWords.map((w) => w.word).join(" ");
   const baseFontSize = fontSizeFor(rectPx, getTextTemplateFontFraction(templateId));
   const layout = fitTextToRect(ctx, fullText, rectPx.width, rectPx.height, baseFontSize, fontSpec);
 
@@ -526,7 +565,7 @@ export function drawKaraokeCaption(
     const y = startY + lineIndex * layout.lineHeightPx;
 
     lineWords.forEach((word, wordIndexInLine) => {
-      const isActive = globalWordIndex === activeIndex;
+      const isActive = globalWordIndex === localActiveIndex;
       const centerX = x + wordWidths[wordIndexInLine] / 2;
       if (isActive) {
         const paddingX = layout.fontSize * 0.15;

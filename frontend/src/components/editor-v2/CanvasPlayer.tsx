@@ -113,7 +113,6 @@ import {
   buildVirtualCutTransitionSkipRanges,
   findActiveTtsOverlays,
   ttsOverlayEndTimeSeconds,
-  findActiveWordIndex,
   computeOutputDimensions,
   computeMaxCoverageCropRect,
   computeContainFitRect,
@@ -1624,7 +1623,7 @@ export const CanvasPlayer = forwardRef<
       };
       if (overlay.displayMode === "none") continue; // audio-only narration -- nothing drawn
       if (overlay.displayMode === "karaoke") {
-        drawKaraokeCaption(ctx, rectPx, overlay.wordTimings, findActiveWordIndex(overlay, elapsedSeconds), overlay.templateId);
+        drawKaraokeCaption(ctx, rectPx, overlay.wordTimings, (elapsedSeconds - overlay.startTimeSeconds) * 1000, overlay.templateId);
         continue;
       }
       const renderer = getTextTemplateRenderer(overlay.templateId);

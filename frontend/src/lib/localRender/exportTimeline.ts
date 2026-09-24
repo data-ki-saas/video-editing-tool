@@ -67,7 +67,6 @@ import {
   computeProgress,
   findActiveTextOverlays,
   findActiveTtsOverlays,
-  findActiveWordIndex,
   ttsOverlayEndTimeSeconds,
   findActiveExclusiveOverlay,
   findActivePictureInPictureOverlays,
@@ -1811,8 +1810,8 @@ export async function exportVideoLocally(
       // preview draws (see that file's own comment): "background" reuses the
       // exact same template renderer as a plain TextOverlay above, "karaoke"
       // uses the shared drawKaraokeCaption (textTemplates.ts), driven by the
-      // synthesis engine's own exact per-word timings (findActiveWordIndex),
-      // not ASR -- this is why it's safe to burn in here identically to the
+      // synthesis engine's own exact per-word timings, not ASR -- this is
+      // why it's safe to burn in here identically to the
       // live preview, unlike auto-captions (transcriptCaption), which stay
       // Creatomate-only (see this file's own module comment).
       for (const overlay of findActiveTtsOverlays(selections.ttsOverlays, sourceTimeSeconds)) {
@@ -1824,7 +1823,7 @@ export async function exportVideoLocally(
         };
         if (overlay.displayMode === "none") continue; // audio-only narration -- nothing drawn
         if (overlay.displayMode === "karaoke") {
-          drawKaraokeCaption(ctx, rectPx, overlay.wordTimings, findActiveWordIndex(overlay, sourceTimeSeconds), overlay.templateId);
+          drawKaraokeCaption(ctx, rectPx, overlay.wordTimings, (sourceTimeSeconds - overlay.startTimeSeconds) * 1000, overlay.templateId);
           continue;
         }
         const renderer = getTextTemplateRenderer(overlay.templateId);
