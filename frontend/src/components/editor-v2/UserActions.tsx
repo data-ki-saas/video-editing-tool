@@ -220,12 +220,12 @@ export function UserActions({
     <div className="flex h-full items-stretch gap-4 overflow-x-auto pt-4">
       {/* BASE -- blue family, lightest to darkest: Clip, Thumbnail, Cutaway, Text Slide */}
       <div className="relative flex h-full gap-3">
-        <GroupLabel colorClassName="text-blue-600">Base</GroupLabel>
+        <GroupLabel colorClassName="text-blue-600 dark:text-blue-400">Base</GroupLabel>
         <button
           type="button"
           onClick={onOpenClipRectDialog}
           title="Clip rectangle"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-500 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-500 dark:text-blue-300 hover:bg-background"
         >
           <CropToolIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -241,7 +241,7 @@ export function UserActions({
           type="button"
           onClick={onOpenCoverPicker}
           title="Thumbnail -- pick the frame shown before this reel plays"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-600 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-600 dark:text-blue-400 hover:bg-background"
         >
           <CoverIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -256,7 +256,7 @@ export function UserActions({
           type="button"
           onClick={onOpenCutawayDialog}
           title="Add a Cutaway -- a video clip or an animated photo, appended to the reel"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-700 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-700 dark:text-blue-500 hover:bg-background"
         >
           <ImageMotionIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -268,7 +268,7 @@ export function UserActions({
           type="button"
           onClick={onOpenTextSlideDialog}
           title="Add a Text Slide -- a full-frame slide of text and/or an image, with its own duration, that slides in and out of the reel"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-800 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-800 dark:text-blue-600 hover:bg-background"
         >
           <TextSlideIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -280,12 +280,12 @@ export function UserActions({
 
       {/* OVERLAYS -- amber family, lightest to darkest: Video Overlay, Image Overlay, Text, TTS, Avatar */}
       <div className="relative flex h-full gap-3">
-        <GroupLabel colorClassName="text-amber-600">Overlays</GroupLabel>
+        <GroupLabel colorClassName="text-amber-600 dark:text-amber-400">Overlays</GroupLabel>
         <button
           type="button"
           onClick={onOpenVideoOverlayPicker}
           title="Video Overlay -- a second video on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-400 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-400 dark:text-amber-300 hover:bg-background"
         >
           <VideoOverlayIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -297,7 +297,7 @@ export function UserActions({
           type="button"
           onClick={onOpenImageOverlayPicker}
           title="Image Overlay -- a photo on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-500 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-500 dark:text-amber-400 hover:bg-background"
         >
           <PhotoOverlayIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -309,7 +309,7 @@ export function UserActions({
           type="button"
           onClick={onOpenTextDialog}
           title="Add text"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-600 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-600 dark:text-amber-500 hover:bg-background"
         >
           <TextGlyphIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -321,7 +321,7 @@ export function UserActions({
           type="button"
           onClick={onOpenTtsDialog}
           title="TTS Narration -- type a script, generate speech, and caption it as background text or word-by-word karaoke"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-700 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-700 dark:text-amber-600 hover:bg-background"
         >
           <TtsIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
@@ -333,7 +333,7 @@ export function UserActions({
           type="button"
           onClick={onOpenAvatarDialog}
           title="Avatar -- a 2D animated character (pick who, pick what they're doing) placed on the frame"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-800 hover:bg-background"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-800 dark:text-amber-700 hover:bg-background"
         >
           <AvatarPersonIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>

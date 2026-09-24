@@ -479,24 +479,25 @@ export const ACCESSORY_CATALOG: AccessoryCatalogEntry[] = [
     // usually gripped fairly high up, not at the very butt end.
     pivotX: 18,
     pivotY: 10,
-    // Held up near the mouth by default (a mic is naturally spoken into, not
-    // set back down mid-take) -- NOT a straight-arm raise (see this
-    // codebase's own bad first attempt at this, reverted after it swept the
-    // rigid arm bone straight across the face). Values found by numerically
-    // simulating this rig's exact bone chain (root->torso->armR->forearmR->
-    // handR) rather than hand-derived trig, picking a candidate that (a)
-    // never crosses the eyes/nose region on either segment, (b) lands the
-    // hand centered in front of the lower face (mouth/chin/jaw height,
-    // exactly where a held mic naturally overlaps the face -- unlike the
-    // eyes/nose, that's the point), and (c) keeps the SHOULDER's own
-    // rotation close to its natural resting angle (library.ts's own -15 deg
-    // idle lean), letting the elbow do most of the lifting instead -- an
-    // earlier pass swung the shoulder itself ~58 deg to land closer to a
-    // higher target, which read as too raised/too far from a natural hanging
-    // arm; reducing the shoulder's swing brought the whole hand down and
-    // more in front of the face, at the cost of a somewhat less open elbow
-    // (~60 deg interior angle here vs ~90 deg in that pass -- still clearly
-    // more open than this feature's very first, sharply-folded attempt).
+    // Held up near the lower face by default (a mic is naturally spoken
+    // into, not set back down mid-take) -- NOT a straight-arm raise (see
+    // this codebase's own bad first attempt at this, reverted after it swept
+    // the rigid arm bone straight across the face). Values found by
+    // numerically simulating this rig's exact bone chain (root->torso->
+    // armR->forearmR->handR) rather than hand-derived trig, picking a
+    // candidate that (a) never crosses the eyes/nose region on either
+    // segment, (b) lands the hand centered in front of the lower face
+    // (mouth/chin/jaw height, exactly where a held mic naturally overlaps
+    // the face -- unlike the eyes/nose, that's the point), and (c) keeps the
+    // SHOULDER's own rotation close to its natural resting angle (library.ts's
+    // own -15 deg idle lean), letting the elbow do most of the lifting
+    // instead -- an earlier pass swung the shoulder itself ~58 deg to land
+    // closer to a higher target, which read as too raised/too far from a
+    // natural hanging arm; reducing the shoulder's swing brought the whole
+    // hand down and more in front of the face, at the cost of a somewhat
+    // less open elbow (~60 deg interior angle here vs ~90 deg in that pass --
+    // still clearly more open than this feature's very first, sharply-folded
+    // attempt).
     //
     // These two fields are ACCESSORY deltas, added on top of armR/forearmR's
     // own DEFAULT_LOCAL_POSE baseline (library.ts's own small resting elbow-
@@ -505,7 +506,12 @@ export const ACCESSORY_CATALOG: AccessoryCatalogEntry[] = [
     //   restPoseArmRotationRadians (delta)     = 26 - (-15) = 41 deg
     //   restPoseForearmRotationRadians (delta) = 120 - 20   = 100 deg
     // If library.ts's own armR/forearmR baseline ever changes, these two
-    // need re-deriving against the new baseline the same way.
+    // need re-deriving against the new baseline the same way. This part of
+    // the solve is UNCHANGED by the chin-height retarget below -- the wrist
+    // itself already lands close to jaw height (world y~148 against the
+    // chin joint's own world y=136, i.e. already just below the chin), so
+    // only the capsule's own swing angle (rotationDegrees, next) needed
+    // re-solving, not the arm/elbow that puts the hand there.
     //
     // rotationDegrees is NOT relative to the hand's own local frame -- see
     // its own doc comment above ("ON TOP OF whatever rotation the anchor
@@ -513,11 +519,18 @@ export const ACCESSORY_CATALOG: AccessoryCatalogEntry[] = [
     // ACCUMULATED world rotation (armR total 26 + forearmR total 120 = 146
     // deg here). drawMicrophone's own head-end sits along this sprite's
     // local +x axis; in this rig's clockwise-from-+x convention, 270 deg
-    // points straight up -- so rotationDegrees = 270 - 146 = 124 deg points
-    // the capsule head up toward the mouth instead of down at the floor.
+    // points straight up, which put the capsule head at world y~117 --
+    // mouth/nose height, not chin -- because the full 31.6px reach from
+    // pivot to capsule center was spent going almost straight up from a
+    // wrist that already sits only ~12px above chin height. Retargeting the
+    // capsule to land at chin height (world y~136, only that same ~12px
+    // above the wrist) instead needs a much shallower swing: solving
+    // world y = anchorY(148.18) + 31.6*sin(146+rotationDegrees) for a target
+    // of ~138 gives rotationDegrees = 196 (capsule center lands at roughly
+    // (107, 138) -- right at the chin, no longer up at the mouth/nose).
     restPoseArmRotationRadians: (41 * Math.PI) / 180,
     restPoseForearmRotationRadians: (100 * Math.PI) / 180,
-    rotationDegrees: 124,
+    rotationDegrees: 196,
     defaultColor: "#1f2937",
     draw: drawMicrophone,
   },
