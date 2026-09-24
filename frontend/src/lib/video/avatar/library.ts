@@ -164,21 +164,92 @@ function breathingBobKeyframes(boneIndex: number, amplitude: number): ActionCurv
   ];
 }
 
+// Rotation counterpart to breathingBobKeyframes above -- same 4-sample
+// sine-ish loop, but for a bone's rotation instead of its y-offset, and with
+// an adjustable starting phase (`phaseOffset`, 0..1, wrapped) so several of
+// these on different bones don't all crest at the exact same instant (which
+// would read as one rigid unit rocking rather than independent limbs). Kept
+// OFF breathingBobKeyframes' own 0/.25/.5/.75 grid (multiples of 0.125
+// instead) for every call below that shares a bone with a breathingBob
+// curve in the same spec (HEAD in TALK) -- actions.ts's deltaAtPhase merges
+// every keyframe for a bone into one sorted list regardless of which field
+// it sets, so two keyframes landing on the identical t would create a
+// same-instant tie (one field's value would jump rather than ease in),
+// where interleaved t's instead compose into one smooth combined curve.
+function swayRotationKeyframes(boneIndex: number, amplitude: number, phaseOffset: number): ActionCurveSpec["keyframes"] {
+  const phaseAt = (base: number) => ((base + phaseOffset) % 1 + 1) % 1;
+  return [
+    { t: phaseAt(0), boneIndex, delta: { rotation: 0 } },
+    { t: phaseAt(0.25), boneIndex, delta: { rotation: amplitude } },
+    { t: phaseAt(0.5), boneIndex, delta: { rotation: 0 } },
+    { t: phaseAt(0.75), boneIndex, delta: { rotation: -amplitude } },
+  ];
+}
+
+// Idle's own arm/forearm/hand drift is deliberately faint -- a standing
+// figure that's merely "not frozen", not one visibly gesturing. Each bone
+// gets its own phase offset (see swayRotationKeyframes' own doc comment)
+// purely so the two arms and the shoulder/elbow/wrist chain don't all peak
+// together -- amplitudes still small enough that the mic's own carefully
+// hand-solved rest angle (accessories.ts's restPoseArmRotationRadians/
+// restPoseForearmRotationRadians, applied as a bias ON TOP of this posture
+// pose) is never at real risk of sweeping toward the face.
+const IDLE_HEAD_SWAY_RADIANS = 0.025;
+const IDLE_ARM_SWAY_RADIANS = 0.018;
+const IDLE_FOREARM_SWAY_RADIANS = 0.03;
+const IDLE_HAND_SWAY_RADIANS = 0.018;
+
 const IDLE_PERIOD_SECONDS = 3;
 const IDLE: ActionCurveSpec = {
   periodSeconds: IDLE_PERIOD_SECONDS,
-  // Subtle torso breathing bob -- the only motion in idle.
-  keyframes: breathingBobKeyframes(TORSO, 3),
+  keyframes: [
+    // Subtle torso breathing bob.
+    ...breathingBobKeyframes(TORSO, 3),
+    // A faint idle head tilt.
+    ...swayRotationKeyframes(HEAD, IDLE_HEAD_SWAY_RADIANS, 0.125),
+    // Faint independent drift down each arm's own shoulder/elbow/wrist
+    // chain, so a standing idle figure reads as alive rather than posed.
+    ...swayRotationKeyframes(ARM_R, IDLE_ARM_SWAY_RADIANS, 0),
+    ...swayRotationKeyframes(FOREARM_R, IDLE_FOREARM_SWAY_RADIANS, 0.2),
+    ...swayRotationKeyframes(HAND_R, IDLE_HAND_SWAY_RADIANS, 0.45),
+    ...swayRotationKeyframes(ARM_L, IDLE_ARM_SWAY_RADIANS, 0.375),
+    ...swayRotationKeyframes(FOREARM_L, IDLE_FOREARM_SWAY_RADIANS, 0.575),
+    ...swayRotationKeyframes(HAND_L, IDLE_HAND_SWAY_RADIANS, 0.825),
+  ],
 };
+
+// Talking animates the hand/head a little more than idle does -- closer to
+// how someone naturally moves while speaking (a small emphasis tilt of the
+// head, a bit of hand drift on the mic-holding side) -- but still well shy
+// of an authored gesture beat, which fully takes over these same bones via
+// mergeBoneOverride's "highest layer wins outright" rule whenever one is
+// actually active.
+const TALK_HEAD_SWAY_RADIANS = 0.04;
+const TALK_ARM_SWAY_RADIANS = 0.025;
+const TALK_FOREARM_SWAY_RADIANS = 0.045;
+const TALK_HAND_SWAY_RADIANS = 0.025;
 
 const TALK: ActionCurveSpec = {
   // Slightly faster and smaller than idle's own bob -- mouth animation
   // itself is NOT part of this curve at all (see actions.ts's
   // computeMouthShapeId, driven independently off actionId==="talk"); this
-  // curve is only the small torso/head sway that reads as "alive" underneath
-  // whatever the mouth is doing.
+  // curve is only the small torso/head/hand sway that reads as "alive"
+  // underneath whatever the mouth is doing.
   periodSeconds: 1.8,
-  keyframes: [...breathingBobKeyframes(TORSO, 1.5), ...breathingBobKeyframes(HEAD, 1)],
+  keyframes: [
+    ...breathingBobKeyframes(TORSO, 1.5),
+    ...breathingBobKeyframes(HEAD, 1),
+    // Off HEAD's own y-bob grid on purpose -- see swayRotationKeyframes'
+    // own doc comment on why this can't reuse 0/.25/.5/.75 for a bone that
+    // already carries a breathingBob curve in this same spec.
+    ...swayRotationKeyframes(HEAD, TALK_HEAD_SWAY_RADIANS, 0.125),
+    ...swayRotationKeyframes(ARM_R, TALK_ARM_SWAY_RADIANS, 0),
+    ...swayRotationKeyframes(FOREARM_R, TALK_FOREARM_SWAY_RADIANS, 0.2),
+    ...swayRotationKeyframes(HAND_R, TALK_HAND_SWAY_RADIANS, 0.45),
+    ...swayRotationKeyframes(ARM_L, TALK_ARM_SWAY_RADIANS, 0.375),
+    ...swayRotationKeyframes(FOREARM_L, TALK_FOREARM_SWAY_RADIANS, 0.575),
+    ...swayRotationKeyframes(HAND_L, TALK_HAND_SWAY_RADIANS, 0.825),
+  ],
 };
 
 const WALK_PERIOD_SECONDS = 1;
