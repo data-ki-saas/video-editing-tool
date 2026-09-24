@@ -26,6 +26,7 @@ import { hasAnyDesignOverride, mergeDesignOverrides } from "./design";
 import { getAvatarLibraryEntry } from "./library";
 import { fetchGeneratedAvatarEntry } from "./generatedLibrary";
 import { accessoryAcceptsAnchor, getAccessoryCatalogEntry, loadAccessoryImage } from "./accessories";
+import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 
 /** One resolved, ready-to-draw part -- `zOrder` itself is dropped once it's
  * done its one job (deciding this entry's position in the already-sorted
@@ -167,17 +168,27 @@ export interface CompiledAvatar {
 }
 
 /** Loads a skin atlas's `imageRef` (a plain URL or a `data:` URL -- both
- * decode identically through `Image`/`decode()`, no branching needed between
- * the two) into a real, drawable image. Split out of compileAvatar only so
- * that function's own body reads as "validate, then load, then resolve" in
- * one place rather than burying the async boundary. */
+ * fetch identically) into a real, drawable image. Split out of compileAvatar
+ * only so that function's own body reads as "validate, then load, then
+ * resolve" in one place rather than burying the async boundary.
+ *
+ * Goes through loadCrossOriginImage (fetch()+blob URL), NOT a plain `new
+ * Image(); image.src = imageRef` -- a photo-generated avatar's atlas
+ * (avatar_gen/service.py) is a presigned R2 URL, same private-bucket asset
+ * every other cross-origin load in this app has to route through
+ * crossOriginImage.ts for (see that module's own comment for the
+ * tainted-canvas/cache-poisoning incident). Drawing a plain-`<img>`-loaded
+ * atlas anywhere in CanvasPlayer's canvas permanently taints it, breaking
+ * CoverPicker's "Use current frame" (canvas.toBlob throws SecurityError)
+ * for the rest of that canvas's life. The blob URL is revoked immediately
+ * after decode, same as CanvasPlayer's own loadImage wrapper -- the decoded
+ * pixels are already captured into the image element by then. */
 async function loadAtlasImage(imageRef: string): Promise<HTMLImageElement> {
-  const image = new Image();
-  image.src = imageRef;
+  const { image, blobUrl } = await loadCrossOriginImage(imageRef);
+  URL.revokeObjectURL(blobUrl);
   // decode() resolves once the image is fully decoded and safe to draw --
-  // preferred over an onload handler here since it's already a Promise (no
-  // hand-rolled executor) and, unlike onload, also rejects on a decode
-  // failure rather than hanging forever.
+  // preferred over relying on the already-fired onload here since it also
+  // rejects on a decode failure rather than hanging forever.
   await image.decode();
   return image;
 }
