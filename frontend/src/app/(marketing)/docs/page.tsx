@@ -26,7 +26,7 @@ function Topic({ title, children }: { title: string; children: React.ReactNode }
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-lg font-medium">{title}</h3>
-      <p className="text-neutral-600">{children}</p>
+      <p className="text-muted">{children}</p>
     </div>
   );
 }
@@ -47,7 +47,7 @@ function Topic({ title, children }: { title: string; children: React.ReactNode }
 function VideoExample({ title, shareUrl, children }: { title: string; shareUrl: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-      <div className="aspect-[9/16] w-full max-w-[220px] shrink-0 overflow-hidden rounded-md border border-neutral-300 bg-black">
+      <div className="aspect-[9/16] w-full max-w-[220px] shrink-0 overflow-hidden rounded-md border border-border bg-black">
         <iframe
           src={shareUrl}
           title={title}
@@ -57,7 +57,7 @@ function VideoExample({ title, shareUrl, children }: { title: string; shareUrl: 
       </div>
       <div className="flex flex-col gap-2 sm:pt-1">
         <h3 className="text-lg font-medium">{title}</h3>
-        <p className="text-neutral-600">{children}</p>
+        <p className="text-muted">{children}</p>
       </div>
     </div>
   );
@@ -68,7 +68,7 @@ export default function DocsPage() {
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-14 px-4 py-16">
       <div className="flex flex-col gap-2">
         <h1 className="text-3xl font-semibold">Documentation</h1>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           Everything you need to go from a blank project to a finished, share-ready reel.
         </p>
       </div>

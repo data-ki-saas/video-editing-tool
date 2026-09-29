@@ -6,9 +6,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/contact" },
 };
 
-// Placeholder contact details -- replace with a real monitored inbox (and,
-// eventually, a working contact form) before this page goes live for real.
-const CONTACT_EMAIL = "hello@example.com";
+// TODO: eventually replace this mailto with a working in-app contact form.
+const CONTACT_EMAIL = "hello@myreels.in";
 
 export default function ContactPage() {
   return (
@@ -17,7 +16,7 @@ export default function ContactPage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">Get in touch</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           Questions, feedback, or need help with a reel that didn&apos;t render right?
           Reach out and we&apos;ll get back to you.
         </p>
@@ -28,7 +27,7 @@ export default function ContactPage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">Response time</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           {/* Placeholder -- set real expectations once support is actually staffed. */}
           We&apos;re a small team in early access, so replies may take a day or two.
         </p>

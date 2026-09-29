@@ -18,9 +18,9 @@ export default function PricingPage() {
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-16">
       <h1 className="text-3xl font-semibold">Pricing</h1>
 
-      <section className="flex flex-col gap-3 rounded-md border border-neutral-300 p-6">
+      <section className="flex flex-col gap-3 rounded-md border border-border p-6">
         <h2 className="text-lg font-medium">Early access — free</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           {/* Placeholder -- this app has no billing yet by design (see the
               project's own README). Replace this section once real plans exist. */}
           Reel Creator is currently free to use while we&apos;re in early access.
@@ -29,7 +29,7 @@ export default function PricingPage() {
         </p>
         <Link
           href="/signup"
-          className="mt-2 self-start rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700"
+          className="mt-2 self-start rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:opacity-90"
         >
           Sign up free
         </Link>
@@ -37,7 +37,7 @@ export default function PricingPage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">What&apos;s next</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           We plan to introduce paid plans as the product matures — likely priced around
           how many reels you create per month, with a generous free tier for trying it
           out. Nothing is finalized yet, and existing early-access users will hear about

@@ -20,7 +20,7 @@ export default function AboutPage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">What we do</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           {/* Placeholder copy -- replace with your real founding story once one exists. */}
           Reel Creator turns the photos and video clips you already have into a
           finished, share-ready reel — no video editing experience required. Pick your
@@ -31,7 +31,7 @@ export default function AboutPage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">Who it&apos;s for</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           Real estate agents, hotels and short-term rentals, auto dealers, garment and
           gift shops, hardware stores — or any business type at all. The form you fill
           out to create a reel adapts automatically to whatever niche you tell it about.
@@ -40,7 +40,7 @@ export default function AboutPage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">Where we are today</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           Reel Creator is in early access. We&apos;re actively building — see{" "}
           <a href="/docs" className="underline">
             Documentation

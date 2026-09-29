@@ -89,7 +89,7 @@ export default function FaqPage() {
 
       <div className="flex flex-col gap-2">
         <h1 className="text-3xl font-semibold">Frequently Asked Questions</h1>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           See <a href="/docs" className="underline">Documentation</a> for the full feature list.
         </p>
       </div>
@@ -98,7 +98,7 @@ export default function FaqPage() {
         {FAQ_ENTRIES.map(({ question, answer }) => (
           <section key={question} className="flex flex-col gap-2">
             <h2 className="text-lg font-medium">{question}</h2>
-            <p className="text-neutral-600">{answer}</p>
+            <p className="text-muted">{answer}</p>
           </section>
         ))}
       </div>

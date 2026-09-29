@@ -13,11 +13,11 @@ export default function TermsPage() {
 
       {/* Placeholder -- this is not real, legally-reviewed terms of use.
           Replace before relying on this for real users. */}
-      <p className="text-sm text-neutral-500">Last updated: placeholder — not yet legally reviewed.</p>
+      <p className="text-sm text-muted">Last updated: placeholder — not yet legally reviewed.</p>
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">Your content</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           You own the photos, clips, and reels you create. You&apos;re responsible for
           having the rights to anything you upload.
         </p>
@@ -25,7 +25,7 @@ export default function TermsPage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">Fair use</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           Daily limits on uploads and renders exist to keep the service usable for
           everyone during early access — see{" "}
           <a href="/docs" className="underline">
@@ -37,7 +37,7 @@ export default function TermsPage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">Early access</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           Reel Creator is under active development. Features may change, and we
           can&apos;t guarantee uninterrupted availability during this stage.
         </p>

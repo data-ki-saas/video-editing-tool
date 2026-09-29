@@ -13,11 +13,11 @@ export default function PrivacyPage() {
 
       {/* Placeholder -- this is not a real, legally-reviewed privacy policy.
           Replace before handling real user data at any meaningful scale. */}
-      <p className="text-sm text-neutral-500">Last updated: placeholder — not yet legally reviewed.</p>
+      <p className="text-sm text-muted">Last updated: placeholder — not yet legally reviewed.</p>
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">What we collect</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           Your account email, the photos/videos you upload to create reels, and the
           reels themselves. We don&apos;t sell your data to third parties.
         </p>
@@ -25,7 +25,7 @@ export default function PrivacyPage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">Where it&apos;s stored</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           Account data lives in Supabase; uploaded media and finished videos are stored
           in Cloudflare R2. Uploaded source files are kept private and are only ever
           accessed through short-lived, authenticated links.
@@ -34,7 +34,7 @@ export default function PrivacyPage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">Questions</h2>
-        <p className="text-neutral-600">
+        <p className="text-muted">
           Reach out via the <a href="/contact" className="underline">Contact</a> page
           with any privacy questions.
         </p>
