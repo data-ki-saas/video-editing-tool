@@ -150,6 +150,7 @@ export function Playground({
   onOpenCutawayFilter,
   onOpenCutawayCanvasFill,
   onReorderCutaway,
+  onDropNewTextSlide,
   onResizeCutawayStart,
   onResizeCutawayEnd,
   onOpenClipTransition,
@@ -270,6 +271,7 @@ export function Playground({
   onOpenCutawayFilter: (segment: CutawaySegment) => void;
   onOpenCutawayCanvasFill: (segment: CutawaySegment) => void;
   onReorderCutaway: (segments: CutawaySegment[], entryId: string, toIndex: number) => void;
+  onDropNewTextSlide: (segments: CutawaySegment[], atIndex: number) => void;
   onResizeCutawayStart: (segment: CutawaySegment, newDurationSeconds: number) => void;
   onResizeCutawayEnd: (segment: CutawaySegment, newDurationSeconds: number) => void;
   onOpenClipTransition: (entry: SequenceEntry) => void;
@@ -427,6 +429,7 @@ export function Playground({
             onOpenCutawayFilter={onOpenCutawayFilter}
             onOpenCutawayCanvasFill={onOpenCutawayCanvasFill}
             onReorderCutaway={onReorderCutaway}
+            onDropNewTextSlide={onDropNewTextSlide}
             onResizeCutawayStart={onResizeCutawayStart}
             onResizeCutawayEnd={onResizeCutawayEnd}
             onOpenClipTransition={onOpenClipTransition}

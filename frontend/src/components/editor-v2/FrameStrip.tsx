@@ -494,6 +494,7 @@ export function FrameStrip({
   onOpenCutawayFilter,
   onOpenCutawayCanvasFill,
   onReorderCutaway,
+  onDropNewTextSlide,
   onResizeCutawayStart,
   onResizeCutawayEnd,
   onOpenClipTransition,
@@ -617,6 +618,11 @@ export function FrameStrip({
   // The Cutaways rail's own click-hold-drag reorder -- see CutawayTrack's
   // own prop comment and transformations.ts's applyMoveSequenceClip.
   onReorderCutaway: (segments: CutawaySegment[], entryId: string, toIndex: number) => void;
+  // The Cutaways rail's own drop target for a NEW Text Slide dragged in from
+  // UserActions.tsx's toolbar button -- `atIndex` is in [0, segments.length]
+  // inclusive, see CutawayTrack's own onDropNewTextSlide/insertIndexForClientX
+  // prop comments.
+  onDropNewTextSlide: (segments: CutawaySegment[], atIndex: number) => void;
   // The Cutaways rail's own left/right-edge resize handles -- see
   // CutawayTrack's own onResizeStart/onResizeEnd prop comments for the exact
   // shape, and ThreePaneEditor.tsx's handleResizeCutawayStart/End for how
@@ -1212,6 +1218,7 @@ export function FrameStrip({
           onOpenFilter={onOpenCutawayFilter}
           onOpenCanvasFill={onOpenCutawayCanvasFill}
           onReorder={onReorderCutaway}
+          onDropNewTextSlide={onDropNewTextSlide}
           onResizeStart={onResizeCutawayStart}
           onResizeEnd={onResizeCutawayEnd}
         />

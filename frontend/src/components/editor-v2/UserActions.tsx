@@ -60,6 +60,7 @@
 import { CropToolIcon } from "@/components/icons/UIIcons";
 import { CoverIcon } from "./icons/PlayerIcons";
 import { CLIP_RECT_OPTIONS, ClipRectIcon } from "./ClipRectIcon";
+import { NEW_CUTAWAY_DRAG_TYPE } from "./CutawayTrack";
 
 function TextGlyphIcon({ className }: { className?: string }) {
   return (
@@ -266,9 +267,22 @@ export function UserActions({
         </button>
         <button
           type="button"
+          draggable
+          onDragStart={(e) => {
+            // Lets CutawayTrack's own rail accept a drop at a specific
+            // position in the sequence (see its onDropNewTextSlide prop) --
+            // the click path above still always appends to the end, this is
+            // just an additional way in. A plain click still works fine
+            // alongside `draggable` -- native drag-and-drop only kicks in
+            // once the pointer actually moves past the browser's own drag
+            // threshold, same as CutawayTrack's own DRAG_THRESHOLD_PX for
+            // its internal reorder drag.
+            e.dataTransfer.setData(NEW_CUTAWAY_DRAG_TYPE, "text");
+            e.dataTransfer.effectAllowed = "copy";
+          }}
           onClick={onOpenTextSlideDialog}
-          title="Add a Text Slide -- a full-frame slide of text and/or an image, with its own duration, that slides in and out of the reel"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-800 dark:text-blue-600 hover:bg-background"
+          title="Add a Text Slide -- a full-frame slide of text and/or an image, with its own duration, that slides in and out of the reel. Drag onto the timeline to drop it at a specific spot."
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-blue-800 dark:text-blue-600 hover:bg-background cursor-grab active:cursor-grabbing"
         >
           <TextSlideIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>

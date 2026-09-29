@@ -442,6 +442,15 @@ export function ThreePaneEditor({
   // handleEditCutaway's own kind branch.
   const [isTextSlideDialogOpen, setIsTextSlideDialogOpen] = useState(false);
   const [editingTextSlide, setEditingTextSlide] = useState<CutawaySegment | null>(null);
+  // Set only when the dialog was opened by dropping the Text Slide toolbar
+  // button onto a specific spot on the Cutaways rail (CutawayTrack's
+  // onDropNewTextSlide), rather than by the button's own plain click --
+  // `segments` is CutawayTrack's own resolved list AT DROP TIME (before the
+  // new slide exists), needed by handleSaveTextSlide below to place the new
+  // entry at `atIndex` instead of always appending to the end. Never set
+  // together with editingTextSlide (a drop only ever starts a fresh Add, an
+  // edit only ever reopens via handleEditCutaway's click path).
+  const [pendingTextSlideInsert, setPendingTextSlideInsert] = useState<{ segments: CutawaySegment[]; atIndex: number } | null>(null);
 
   // FilterPresetDialog's open/edit-target state -- three separate targets
   // (same "one state var per dialog target type" convention as
@@ -2192,14 +2201,31 @@ export function ThreePaneEditor({
 
   // "Text Slide" button in UserActions -- opens TextSlideDialog fresh, to
   // add a new slide (editingTextSlide is already null here, never set
-  // except by handleEditCutaway's own "text" branch above).
+  // except by handleEditCutaway's own "text" branch above). Always appends
+  // to the end -- pendingTextSlideInsert stays null, since this is the plain
+  // click path, not a drop (see handleDropNewTextSlide below for that one).
   function handleOpenTextSlideDialog() {
+    setPendingTextSlideInsert(null);
+    setIsTextSlideDialogOpen(true);
+  }
+
+  // CutawayTrack's own onDropNewTextSlide -- fires once when the Text Slide
+  // toolbar button is dragged onto the Cutaways rail and released at
+  // `atIndex` (see UserActions.tsx's onDragStart and CutawayTrack's own
+  // hoverIndexForClientX). Opens the same TextSlideDialog the plain click
+  // does, fresh (not editing), just remembering where to insert once the
+  // user actually saves -- dropping alone can't supply the slide's own text,
+  // so the dialog still has to open either way.
+  function handleDropNewTextSlide(segments: CutawaySegment[], atIndex: number) {
+    setEditingTextSlide(null);
+    setPendingTextSlideInsert({ segments, atIndex });
     setIsTextSlideDialogOpen(true);
   }
 
   function handleCloseTextSlideDialog() {
     setIsTextSlideDialogOpen(false);
     setEditingTextSlide(null);
+    setPendingTextSlideInsert(null);
   }
 
   // TextSlideDialog's "Add" / "Save changes" -- appends a new Text Slide to
@@ -2209,6 +2235,16 @@ export function ThreePaneEditor({
   // handleAddImageSequenceClip. `videoDurationSeconds` (already tracked
   // from the extraction effect above) is the sequence's current total
   // length, i.e. exactly where a freshly-added slide starts.
+  //
+  // When pendingTextSlideInsert is set (the dialog was opened by dropping
+  // the toolbar button onto a specific spot -- see handleDropNewTextSlide),
+  // the fresh-add path below is followed by a second transformation that
+  // moves the brand-new entry from the end to that spot, reusing
+  // applyMoveSequenceClip's own reflow logic (the same one CutawayTrack's
+  // click-hold-drag reorder already relies on) rather than duplicating it.
+  // Both transformations land in the SAME history entry (one pushChange),
+  // so undo removes the slide outright rather than un-moving it back to the
+  // end first.
   function handleSaveTextSlide(
     text: string,
     style: TextSlideStyle,
@@ -2221,39 +2257,72 @@ export function ThreePaneEditor({
     canvasFillColor?: string,
     canvasFillGradientColor?: string
   ) {
-    const { label, state } =
-      editingTextSlide && editingTextSlide.kind === "text"
-        ? applyEditTextSequenceClip(
-            selections,
-            editingTextSlide.entryId,
-            text,
-            style,
-            layout,
-            durationSeconds,
-            entranceId,
-            exitId,
-            editingTextSlide.startTimeSeconds,
-            assetId,
-            canvasFillMode,
-            canvasFillColor,
-            canvasFillGradientColor
-          )
-        : applyAddTextSequenceClip(
-            selections,
-            text,
-            style,
-            layout,
-            durationSeconds,
-            entranceId,
-            exitId,
-            assetId,
-            canvasFillMode,
-            canvasFillColor,
-            canvasFillGradientColor
-          );
-    pushChange(label, state);
+    if (editingTextSlide && editingTextSlide.kind === "text") {
+      const { label, state } = applyEditTextSequenceClip(
+        selections,
+        editingTextSlide.entryId,
+        text,
+        style,
+        layout,
+        durationSeconds,
+        entranceId,
+        exitId,
+        editingTextSlide.startTimeSeconds,
+        assetId,
+        canvasFillMode,
+        canvasFillColor,
+        canvasFillGradientColor
+      );
+      pushChange(label, state);
+      setIsTextSlideDialogOpen(false);
+      setEditingTextSlide(null);
+      return;
+    }
+
+    const added = applyAddTextSequenceClip(
+      selections,
+      text,
+      style,
+      layout,
+      durationSeconds,
+      entranceId,
+      exitId,
+      assetId,
+      canvasFillMode,
+      canvasFillColor,
+      canvasFillGradientColor
+    );
+
+    if (pendingTextSlideInsert) {
+      const newEntry = added.state.sequenceClips[added.state.sequenceClips.length - 1];
+      const startSecondsByEntryId = new Map(
+        pendingTextSlideInsert.segments.map((segment) => [segment.entryId, segment.startTimeSeconds])
+      );
+      const durationSecondsByEntryId = new Map(
+        pendingTextSlideInsert.segments.map((segment) => [segment.entryId, segment.durationSeconds])
+      );
+      // The new entry's own resolved position/length aren't in either map
+      // above (it didn't exist yet when pendingTextSlideInsert.segments was
+      // captured) -- its start is wherever `added` just appended it
+      // (videoDurationSeconds, the sequence's total length pre-add), and its
+      // duration is whatever applyAddTextSequenceClip clamped it to.
+      startSecondsByEntryId.set(newEntry.id, videoDurationSeconds);
+      durationSecondsByEntryId.set(newEntry.id, newEntry.kind === "text" ? newEntry.durationSeconds : durationSeconds);
+      const moved = applyMoveSequenceClip(
+        added.state,
+        newEntry.id,
+        pendingTextSlideInsert.atIndex,
+        (id) => startSecondsByEntryId.get(id) ?? 0,
+        (entry) => durationSecondsByEntryId.get(entry.id) ?? 0
+      );
+      pushChange(added.label, moved.state);
+    } else {
+      pushChange(added.label, added.state);
+    }
+
     setIsTextSlideDialogOpen(false);
     setEditingTextSlide(null);
+    setPendingTextSlideInsert(null);
   }
 
   // FrameStrip's post-add drag handle on an image clip's boundary --
@@ -3217,6 +3286,7 @@ export function ThreePaneEditor({
           onOpenCutawayFilter={handleOpenCutawayFilter}
           onOpenCutawayCanvasFill={handleOpenCutawayCanvasFill}
           onReorderCutaway={handleReorderCutaway}
+          onDropNewTextSlide={handleDropNewTextSlide}
           onResizeCutawayStart={handleResizeCutawayStart}
           onResizeCutawayEnd={handleResizeCutawayEnd}
           onOpenClipTransition={handleOpenClipTransition}

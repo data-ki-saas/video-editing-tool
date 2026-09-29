@@ -44,6 +44,15 @@
  * kind, which (unlike trimming footage out of view) actually splices the
  * clip out of the sequence and closes the gap -- see transformations.ts's
  * applyDeleteSequenceClip.
+ *
+ * This rail is ALSO a drop target for a brand-new Text Slide dragged in
+ * from UserActions.tsx's own toolbar button (native HTML5 drag-and-drop,
+ * not the click-hold-drag reorder above -- see NEW_CUTAWAY_DRAG_TYPE,
+ * handleTrackDragOver/handleTrackDrop, and insertIndexForClientX). Dropping
+ * doesn't insert anything by itself -- text content can't come from a drag
+ * gesture -- it just tells ThreePaneEditor's TextSlideDialog where to place
+ * the slide once the user actually saves it, same dialog the toolbar
+ * button's plain click already opens.
  */
 import { useRef, useState } from "react";
 import type { BackgroundRemovalState, CropRect } from "@/lib/video/video_math";
@@ -69,6 +78,14 @@ import type { TextSlideTransitionId } from "@/lib/video/textSlideTransitions";
 // menu. Deliberately small: this rail is thin, so a hair-trigger drag start
 // feels more responsive than a click that occasionally needs a second try.
 const DRAG_THRESHOLD_PX = 4;
+
+// dataTransfer type for an external (native HTML5 DnD) drag of a brand-new
+// cutaway onto this rail -- currently only the Text Slide toolbar button in
+// UserActions.tsx sets this (see its own onDragStart). Kept as a named
+// constant rather than a raw string literal so a future second draggable
+// source (e.g. an asset tile) can share the same drop handling below just
+// by setting the same key.
+export const NEW_CUTAWAY_DRAG_TYPE = "application/x-ffmpeg-new-cutaway";
 
 // A jagged/torn silhouette for whichever edge(s) of a VIDEO segment carry an
 // active head/tail TrimRange -- visually distinguishes "this footage
@@ -391,6 +408,7 @@ export function CutawayTrack({
   onOpenFilter,
   onOpenCanvasFill,
   onReorder,
+  onDropNewTextSlide,
   onResizeStart,
   onResizeEnd,
 }: {
@@ -406,6 +424,13 @@ export function CutawayTrack({
   // and the dragged entry's new index, Array.splice "move" semantics (see
   // transformations.ts's applyMoveSequenceClip, which this is built for).
   onReorder: (segments: CutawaySegment[], entryId: string, toIndex: number) => void;
+  // Fires once on dropping a NEW Text Slide dragged in from outside this
+  // rail (see NEW_CUTAWAY_DRAG_TYPE) -- `atIndex` is in [0, segments.length]
+  // inclusive (see insertIndexForClientX below), letting the caller insert
+  // the new entry at that exact position -- including after every existing
+  // segment -- instead of always appending to the end. Never fires for an
+  // ordinary internal reorder drag (that stays on onReorder above).
+  onDropNewTextSlide: (segments: CutawaySegment[], atIndex: number) => void;
   // Fires once on drop of the left-edge (trim-from-start) resize handle --
   // never live during the drag, same "only the final release commits" shape
   // as onReorder above and FrameStrip's own older boundary-drag handle --
@@ -448,9 +473,89 @@ export function CutawayTrack({
     candidateDurationSeconds: number;
   } | null>(null);
 
+  // Live insertion point while a NEW Text Slide is being dragged in from
+  // outside this rail (see handleTrackDragOver/handleTrackDrop below) --
+  // null whenever no such external drag is over the track. Separate from
+  // dragPreviewOrder/draggingEntryId above, which are only ever set by an
+  // INTERNAL reorder drag (handleDragPointerDown).
+  const [externalDropIndex, setExternalDropIndex] = useState<number | null>(null);
+
   if (segments.length === 0) return null;
 
   const toPercent = (seconds: number) => (videoDurationSeconds > 0 ? (seconds / videoDurationSeconds) * 100 : 0);
+
+  // The internal reorder drag's own hover-slot logic below -- walks
+  // `segments` (the stable, un-previewed order) by x position to find which
+  // EXISTING segment's own midpoint the pointer has crossed. Always in
+  // range [0, segments.length - 1]; that's correct for a MOVE (the dragged
+  // entry is spliced out of the array before being reinserted, so its own
+  // former slot never counts against the target range -- reinserting at
+  // segments.length - 1 into the now-shorter array already lands at the
+  // true end). See insertIndexForClientX below for why a brand-new entry
+  // needs a different range.
+  function hoverIndexForClientX(clientX: number): number {
+    const trackRect = trackRef.current?.getBoundingClientRect();
+    if (!trackRect || trackRect.width <= 0 || videoDurationSeconds <= 0) return segments.length - 1;
+    const percent = ((clientX - trackRect.left) / trackRect.width) * 100;
+    const timeSeconds = (percent / 100) * videoDurationSeconds;
+    let hoverIndex = segments.length - 1;
+    let accSeconds = 0;
+    for (let i = 0; i < segments.length; i++) {
+      const durationSeconds = segments[i].durationSeconds;
+      if (timeSeconds < accSeconds + durationSeconds / 2) {
+        hoverIndex = i;
+        break;
+      }
+      accSeconds += durationSeconds;
+    }
+    return hoverIndex;
+  }
+
+  // Same x-position walk as hoverIndexForClientX, but for dropping a BRAND
+  // NEW entry (nothing spliced out first) -- range is [0, segments.length]
+  // inclusive, where segments.length itself means "insert after every
+  // existing segment," a slot hoverIndexForClientX's own range can't
+  // express (its max, segments.length - 1, means "insert before the last
+  // segment" here, not after it -- there's no removed slot to absorb that
+  // last step). Falls through to that trailing sentinel whenever the drop
+  // is past the last segment's own midpoint.
+  function insertIndexForClientX(clientX: number): number {
+    const trackRect = trackRef.current?.getBoundingClientRect();
+    if (!trackRect || trackRect.width <= 0 || videoDurationSeconds <= 0) return segments.length;
+    const percent = ((clientX - trackRect.left) / trackRect.width) * 100;
+    const timeSeconds = (percent / 100) * videoDurationSeconds;
+    let accSeconds = 0;
+    for (let i = 0; i < segments.length; i++) {
+      const durationSeconds = segments[i].durationSeconds;
+      if (timeSeconds < accSeconds + durationSeconds / 2) return i;
+      accSeconds += durationSeconds;
+    }
+    return segments.length;
+  }
+
+  function handleTrackDragOver(e: React.DragEvent) {
+    if (!e.dataTransfer.types.includes(NEW_CUTAWAY_DRAG_TYPE)) return;
+    e.preventDefault(); // required for onDrop to ever fire
+    e.dataTransfer.dropEffect = "copy";
+    setExternalDropIndex(insertIndexForClientX(e.clientX));
+  }
+
+  function handleTrackDragLeave(e: React.DragEvent) {
+    // Only clear once the pointer actually leaves the track (not just moving
+    // between two child segment buttons within it, which also fires
+    // dragleave on the child) -- relatedTarget is null when it's left the
+    // browser window entirely, which should also clear.
+    if (e.relatedTarget && trackRef.current?.contains(e.relatedTarget as Node)) return;
+    setExternalDropIndex(null);
+  }
+
+  function handleTrackDrop(e: React.DragEvent) {
+    if (!e.dataTransfer.types.includes(NEW_CUTAWAY_DRAG_TYPE)) return;
+    e.preventDefault();
+    const atIndex = insertIndexForClientX(e.clientX);
+    setExternalDropIndex(null);
+    onDropNewTextSlide(segments, atIndex);
+  }
 
   // While a drag is live, left offsets preview the reordered sequence --
   // every segment keeps its OWN durationSeconds (a reorder never changes
@@ -482,23 +587,11 @@ export function CutawayTrack({
 
       const trackRect = trackRef.current?.getBoundingClientRect();
       if (!trackRect || trackRect.width <= 0 || videoDurationSeconds <= 0) return;
-      const percent = ((ev.clientX - trackRect.left) / trackRect.width) * 100;
-      const timeSeconds = (percent / 100) * videoDurationSeconds;
-
-      // Hover slot: walk the ORIGINAL (not preview) segment order/durations
+      // Hover slot: walks the ORIGINAL (not preview) segment order/durations
       // -- a stable reference frame recomputed fresh from `segments` on
       // every move, so a fast drag across several slots never accumulates
       // drift off a stale preview order.
-      let hoverIndex = segments.length - 1;
-      let accSeconds = 0;
-      for (let i = 0; i < segments.length; i++) {
-        const durationSeconds = segments[i].durationSeconds;
-        if (timeSeconds < accSeconds + durationSeconds / 2) {
-          hoverIndex = i;
-          break;
-        }
-        accSeconds += durationSeconds;
-      }
+      const hoverIndex = hoverIndexForClientX(ev.clientX);
 
       const fromIndex = segments.findIndex((s) => s.entryId === entryId);
       const nextOrder = segments.map((s) => s.entryId);
@@ -590,8 +683,29 @@ export function CutawayTrack({
     onResizeEnd(segment, segment.nativeStartTimeSeconds + segment.nativeDurationSeconds - segment.startTimeSeconds);
   }
 
+  // Where the insertion-point indicator line sits while a new Text Slide is
+  // being dragged in -- the running sum of durations of every segment
+  // BEFORE externalDropIndex, in `segments`' own (un-previewed) order, since
+  // an external drag and an internal reorder drag never overlap.
+  const externalDropLeftPercent =
+    externalDropIndex !== null
+      ? toPercent(segments.slice(0, externalDropIndex).reduce((sum, s) => sum + s.durationSeconds, 0))
+      : null;
+
   return (
-    <div ref={trackRef} className="relative mb-1 h-4 w-full shrink-0">
+    <div
+      ref={trackRef}
+      className="relative mb-1 h-4 w-full shrink-0"
+      onDragOver={handleTrackDragOver}
+      onDragLeave={handleTrackDragLeave}
+      onDrop={handleTrackDrop}
+    >
+      {externalDropLeftPercent !== null && (
+        <div
+          className="pointer-events-none absolute top-0 z-30 h-full w-0.5 -translate-x-1/2 bg-sky-300"
+          style={{ left: `${externalDropLeftPercent}%` }}
+        />
+      )}
       {segments.map((segment) => {
         const isResizingThis = resizePreview?.entryId === segment.entryId;
         const previewDurationSeconds = isResizingThis ? resizePreview.candidateDurationSeconds : segment.durationSeconds;
