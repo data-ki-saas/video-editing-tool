@@ -12,6 +12,7 @@ const NAV_LINKS = [
   { href: "/contact", label: "Contact Us" },
   { href: "/pricing", label: "Pricing" },
   { href: "/docs", label: "Documentation" },
+  { href: "/faq", label: "FAQ" },
 ];
 
 // Same session-detection pattern as the sibling ../data project's

@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
+import { SITE_URL } from "@/lib/siteUrl";
+
+const TITLE = "Documentation";
+const DESCRIPTION =
+  "How Reel Creator works: getting started, adding assets, editing actions, and generating your reel — including free, instant, browser-based rendering.";
 
 export const metadata: Metadata = {
-  title: "Documentation",
-  description:
-    "How Reel Creator works: getting started, adding assets, editing actions, and generating your reel — including free, instant, browser-based rendering.",
+  title: TITLE,
+  description: DESCRIPTION,
   alternates: { canonical: "/docs" },
+  openGraph: { title: TITLE, description: DESCRIPTION, url: `${SITE_URL}/docs`, siteName: "Reel Creator", type: "website" },
+  twitter: { card: "summary", title: TITLE, description: DESCRIPTION },
 };
 
 function Category({ title, children }: { title: string; children: React.ReactNode }) {
@@ -108,7 +114,7 @@ export default function DocsPage() {
         </Topic>
         <VideoExample
           title="3D Ken Burns, pulsing with the beat"
-          shareUrl="https://video-editing-tool-gamma.vercel.app/share/2cd5793b-5db8-4902-a2af-6075f1ef98f3"
+          shareUrl={`${SITE_URL}/share/2cd5793b-5db8-4902-a2af-6075f1ef98f3`}
         >
           Make it 3D turns the same cutaway into a real camera move — the photo&apos;s own subject
           lifts off its background as the camera pushes in and pans, genuine depth rather than a
@@ -120,7 +126,7 @@ export default function DocsPage() {
         </Topic>
         <VideoExample
           title="Ken Burns with animated sparkle"
-          shareUrl="https://video-editing-tool-gamma.vercel.app/share/e9fb44f2-2593-4b19-97fb-6c7ec7af5dea"
+          shareUrl={`${SITE_URL}/share/e9fb44f2-2593-4b19-97fb-6c7ec7af5dea`}
         >
           A photo cutaway animated with a Ken Burns zoom/pan, with the Sparkle ambient effect
           layered softly on top — one of a full library of effects (light sweep, sparkle, leaves,
@@ -138,7 +144,7 @@ export default function DocsPage() {
         </Topic>
         <VideoExample
           title="Ken Burns that pulses with the beat"
-          shareUrl="https://video-editing-tool-gamma.vercel.app/share/05bac439-f4eb-4cb1-a668-59116add98ab"
+          shareUrl={`${SITE_URL}/share/05bac439-f4eb-4cb1-a668-59116add98ab`}
         >
           The same kind of Ken Burns cutaway, this time with Pulse with music turned on — it
           gently grows and shrinks in time with the background track automatically, no

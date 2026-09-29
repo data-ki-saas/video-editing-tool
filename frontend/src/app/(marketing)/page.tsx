@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ReelIcon } from "@/components/IconButton";
 import { HeroLanguageCarousel } from "@/components/marketing/HeroLanguageCarousel";
-
-const SITE_URL = "https://video-editing-tool-gamma.vercel.app";
+import { SITE_URL } from "@/lib/siteUrl";
 
 // Title/description tuned for people searching for what this actually is:
 // a video reel maker that works across business types, not a single-niche

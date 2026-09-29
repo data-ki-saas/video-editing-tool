@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
+import { SITE_URL } from "@/lib/siteUrl";
+
+const TITLE = "About Us";
+const DESCRIPTION =
+  "Reel Creator helps real estate agents, hotels, auto dealers, and small businesses of any niche turn photos and clips into a finished promotional video reel in minutes.";
 
 export const metadata: Metadata = {
-  title: "About Us",
-  description:
-    "Reel Creator helps real estate agents, hotels, auto dealers, and small businesses of any niche turn photos and clips into a finished promotional video reel in minutes.",
+  title: TITLE,
+  description: DESCRIPTION,
   alternates: { canonical: "/about" },
+  openGraph: { title: TITLE, description: DESCRIPTION, url: `${SITE_URL}/about`, siteName: "Reel Creator", type: "website" },
+  twitter: { card: "summary", title: TITLE, description: DESCRIPTION },
 };
 
 export default function AboutPage() {

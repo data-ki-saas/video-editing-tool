@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
+import { SITE_URL } from "@/lib/siteUrl";
+
+const TITLE = "What's New";
+const DESCRIPTION = "A running log of new features and improvements to Reel Creator.";
 
 export const metadata: Metadata = {
-  title: "What's New",
-  description: "A running log of new features and improvements to Reel Creator.",
+  title: TITLE,
+  description: DESCRIPTION,
   alternates: { canonical: "/whats-new" },
+  openGraph: { title: TITLE, description: DESCRIPTION, url: `${SITE_URL}/whats-new`, siteName: "Reel Creator", type: "website" },
+  twitter: { card: "summary", title: TITLE, description: DESCRIPTION },
 };
 
 interface ChangelogEntry {

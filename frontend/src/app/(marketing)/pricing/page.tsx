@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SITE_URL } from "@/lib/siteUrl";
+
+const TITLE = "Pricing";
+const DESCRIPTION = "Reel Creator is free during early access. Paid plans are coming later.";
 
 export const metadata: Metadata = {
-  title: "Pricing",
-  description: "Reel Creator is free during early access. Paid plans are coming later.",
+  title: TITLE,
+  description: DESCRIPTION,
   alternates: { canonical: "/pricing" },
+  openGraph: { title: TITLE, description: DESCRIPTION, url: `${SITE_URL}/pricing`, siteName: "Reel Creator", type: "website" },
+  twitter: { card: "summary", title: TITLE, description: DESCRIPTION },
 };
 
 export default function PricingPage() {
