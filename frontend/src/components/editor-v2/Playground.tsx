@@ -110,8 +110,11 @@ const PROXY_SCROLLBAR_HEIGHT_PX = 10;
 // track rail and above the proxy scrollbar -- see that file's own module
 // comment on why it's a standalone row instead of drawn inside a rail.
 // Shorter than RAIL_HEIGHT_PX since it's just a tick + a one-line label,
-// not a rail with its own background/content.
-const TIME_RULER_HEIGHT_PX = 14;
+// not a rail with its own background/content. Tall enough that the
+// second-label row (which hangs down from the axis line at its own top)
+// fully clears this row's bottom edge -- otherwise the proxy scrollbar row
+// right below paints over the label's lower half.
+const TIME_RULER_HEIGHT_PX = 20;
 
 // Shared time-to-pixel scale for all three strips -- see this file's
 // module comment. 120 (not 60) so a 1-second thumbnail tile on FrameStrip
@@ -591,7 +594,7 @@ export function Playground({
           />
         </div>
 
-        <div className="shrink-0" style={{ height: TIME_RULER_HEIGHT_PX, marginTop: RAIL_GAP_PX }}>
+        <div className="shrink-0" style={{ height: TIME_RULER_HEIGHT_PX, marginTop: RAIL_GAP_PX, marginBottom: 4 }}>
           <TimeRulerStrip
             videoDurationSeconds={videoDurationSeconds}
             pixelsPerSecond={PIXELS_PER_SECOND}
