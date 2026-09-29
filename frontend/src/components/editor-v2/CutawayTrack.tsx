@@ -9,25 +9,40 @@
  * video clip too. Sits above TrimTrack (the Cut and Trim rail) per spec,
  * below MarkerTrack.
  *
- * A segment's WIDTH still comes from FrameStrip's own clip-boundary drag
- * handle, same as every other clip seam -- this rail can't change how long
- * a clip plays. Its POSITION IN THE SEQUENCE, though, is click-hold-drag
- * reorderable right here: press and drag a segment past a neighbor's
- * midpoint to preview swapping places with it, drop to commit (see
- * handleDragPointerDown below and transformations.ts's
- * applyMoveSequenceClip, which reflows every time-anchored selection --
- * zoom/pan, overlays, captions, trims -- so a reorder never silently
- * desyncs something already authored against the old order). Desktop-only;
- * MobileAssetStrip's own reorder is deliberately buttons, not drag -- see
- * that file's comment for why touch precision made a different call.
+ * A segment's own clip BOUNDARIES (its position in the sequence relative to
+ * its neighbors) still come from FrameStrip's own clip-boundary drag handle
+ * -- this rail can't move a seam. What a segment DISPLAYS, though, can now
+ * be narrower than its full boundary span on either edge -- see the small
+ * handles at each segment's own left/right edge, dragged to trim from the
+ * start or end respectively. An image/text segment's own authored duration
+ * just shrinks/grows in place (applyResizeImageClip/applyResizeTextClip,
+ * reflowing everything after it, same as FrameStrip's older boundary-drag
+ * handle already did) -- but a VIDEO segment has no authored duration to
+ * shrink (only ever the probed source file's own length), so trimming one
+ * instead cuts a TrimRange at that edge (applyTrimCutawayHead/
+ * applyTrimCutawayTail) -- the exact same cut-and-skip TrimTrack's own
+ * two-click gesture already uses, just from a drag. A trimmed video edge
+ * shows as a jagged/torn silhouette (see buildCutawayClipPath below) rather
+ * than a plain straight edge, and right-click offers "Restore trimmed
+ * start"/"Restore trimmed end" to undo it without re-dragging back out by
+ * hand.
+ *
+ * A segment's POSITION IN THE SEQUENCE is click-hold-drag reorderable right
+ * here: press and drag a segment past a neighbor's midpoint to preview
+ * swapping places with it, drop to commit (see handleDragPointerDown below
+ * and transformations.ts's applyMoveSequenceClip, which reflows every
+ * time-anchored selection -- zoom/pan, overlays, captions, trims -- so a
+ * reorder never silently desyncs something already authored against the old
+ * order). Desktop-only; MobileAssetStrip's own reorder is deliberately
+ * buttons, not drag -- see that file's comment for why touch precision made
+ * a different call.
  *
  * Left-click (when it's not the end of a drag) only does anything for an
- * IMAGE segment (jumps back into CutawayDialog to edit that cutaway's
- * photo/animation/duration/crop -- a video segment has nothing authored to
- * edit in place, its duration is always just whatever the file actually
- * plays). Right-click always offers "Remove Cutaway" for either kind, which
- * (unlike trimming footage out of view) actually splices the clip out of
- * the sequence and closes the gap -- see transformations.ts's
+ * IMAGE or TEXT segment (jumps back into CutawayDialog/TextSlideDialog to
+ * edit that cutaway's content in place -- a video segment has nothing else
+ * authored to edit). Right-click always offers "Remove Cutaway" for any
+ * kind, which (unlike trimming footage out of view) actually splices the
+ * clip out of the sequence and closes the gap -- see transformations.ts's
  * applyDeleteSequenceClip.
  */
 import { useRef, useState } from "react";
@@ -39,7 +54,13 @@ import type { AmbientEffectId } from "@/lib/video/ambientEffects";
 import type { FaceEffectId } from "@/lib/video/faceLandmarks";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 import { MattingProgressBadge } from "./MattingProgressBadge";
-import type { TextSlideLayout, TextSlideStyle } from "@/lib/video/transformations";
+import {
+  MIN_IMAGE_CLIP_DURATION_SECONDS,
+  MAX_IMAGE_CLIP_DURATION_SECONDS,
+  MIN_VIDEO_CUTAWAY_DURATION_SECONDS,
+  type TextSlideLayout,
+  type TextSlideStyle,
+} from "@/lib/video/transformations";
 import type { TextSlideTransitionId } from "@/lib/video/textSlideTransitions";
 
 // Pixel movement, from the initial pointerdown, before a press-and-move
@@ -48,6 +69,52 @@ import type { TextSlideTransitionId } from "@/lib/video/textSlideTransitions";
 // menu. Deliberately small: this rail is thin, so a hair-trigger drag start
 // feels more responsive than a click that occasionally needs a second try.
 const DRAG_THRESHOLD_PX = 4;
+
+// A jagged/torn silhouette for whichever edge(s) of a VIDEO segment carry an
+// active head/tail TrimRange -- visually distinguishes "this footage
+// actually continues past what's shown, cut off here" from an image/text
+// segment's plain straight edge (its whole authored duration IS what's
+// shown, nothing hidden past it). Returns undefined when neither edge is
+// trimmed, so an untrimmed segment keeps its ordinary rectangular box with
+// no clip-path at all.
+function buildCutawayClipPath(jaggedLeft: boolean, jaggedRight: boolean): string | undefined {
+  if (!jaggedLeft && !jaggedRight) return undefined;
+  const rightEdge: [number, number][] = jaggedRight
+    ? [
+        [100, 0],
+        [90, 16.6],
+        [100, 33.3],
+        [90, 50],
+        [100, 66.6],
+        [90, 83.3],
+        [100, 100],
+      ]
+    : [
+        [100, 0],
+        [100, 100],
+      ];
+  const leftEdge: [number, number][] = jaggedLeft
+    ? [
+        [0, 100],
+        [10, 83.3],
+        [0, 66.6],
+        [10, 50],
+        [0, 33.3],
+        [10, 16.6],
+        [0, 0],
+      ]
+    : [
+        [0, 100],
+        [0, 0],
+      ];
+  // Traces the box clockwise from its own top-left corner: across the top
+  // edge, down the right edge (jagged or straight), across the bottom edge,
+  // then up the left edge (jagged or straight) -- leftEdge's own last point
+  // is dropped since it's the same top-left corner the path already opened
+  // with (polygon() closes the path back to its first point automatically).
+  const points = [[0, 0] as [number, number], ...rightEdge, ...leftEdge.slice(0, -1)];
+  return `polygon(${points.map(([x, y]) => `${x}% ${y}%`).join(", ")})`;
+}
 
 export type CutawaySegment =
   | {
@@ -90,8 +157,28 @@ export type CutawaySegment =
       kind: "video";
       entryId: string;
       assetId: string;
+      // The clip's own EFFECTIVE start -- nativeStartTimeSeconds plus
+      // whatever's already cut from its HEAD by a TrimRange (see
+      // transformations.ts's applyTrimCutawayHead and FrameStrip's own
+      // cutawaySegments memo, which resolves this). Not the same as
+      // nativeStartTimeSeconds below.
       startTimeSeconds: number;
+      // The clip's own EFFECTIVE duration -- its real (untrimmed) boundary
+      // span minus whatever's already cut from either end by a TrimRange
+      // (applyTrimCutawayHead/applyTrimCutawayTail). Not the same as
+      // nativeDurationSeconds below.
       durationSeconds: number;
+      // The clip's real, untrimmed boundary START -- fixed for as long as
+      // this clip sits at this point in the sequence (only reordering or
+      // deleting a neighbor changes it), unlike startTimeSeconds above. The
+      // left-edge resize handle's own min bound: dragging it back out this
+      // far removes the head trim entirely.
+      nativeStartTimeSeconds: number;
+      // The clip's real, untrimmed boundary SPAN -- same fixed-unless-
+      // reordered lifetime as nativeStartTimeSeconds above, unlike
+      // durationSeconds. The right-edge resize handle's own max bound:
+      // dragging it back out this far removes the tail trim entirely.
+      nativeDurationSeconds: number;
       colorFilterId: FilterPresetId | null;
       canvasFillMode: CanvasFillMode | null;
       canvasFillColor?: string;
@@ -120,7 +207,12 @@ function CutawaySegmentButton({
   leftPercent,
   widthPercent,
   isDragging,
+  resizingEdge,
   onDragPointerDown,
+  onResizeStartPointerDown,
+  onResizeEndPointerDown,
+  onRestoreHead,
+  onRestoreTail,
   onEdit,
   onDelete,
   onOpenFilter,
@@ -130,7 +222,20 @@ function CutawaySegmentButton({
   leftPercent: number;
   widthPercent: number;
   isDragging: boolean;
+  // Which edge (if either) THIS segment is being live-resized from, for the
+  // handle's own highlight -- never both at once, a single drag only ever
+  // touches one edge.
+  resizingEdge: "start" | "end" | null;
   onDragPointerDown: (e: React.PointerEvent) => void;
+  onResizeStartPointerDown: (e: React.PointerEvent) => void;
+  onResizeEndPointerDown: (e: React.PointerEvent) => void;
+  // Right-click "Restore trimmed start"/"Restore trimmed end" -- undoes
+  // just that one edge's TrimRange without touching the other. Always
+  // provided (even for an image/text segment, which never actually calls
+  // it) -- this component itself gates whether the menu item ever shows, via
+  // its own isHeadTrimmed/isTailTrimmed below.
+  onRestoreHead: () => void;
+  onRestoreTail: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onOpenFilter: () => void;
@@ -141,6 +246,14 @@ function CutawaySegmentButton({
   const isText = segment.kind === "text";
   const filterOption = segment.kind !== "text" && segment.colorFilterId ? getFilterPresetOption(segment.colorFilterId) : null;
   const canvasFillOption = segment.kind !== "text" && segment.canvasFillMode ? getCanvasFillOption(segment.canvasFillMode) : null;
+  // A small epsilon, not exact equality -- these are floating-point seconds
+  // derived from a pixel-based drag, so "restored all the way back out"
+  // rarely lands on the native bound exactly.
+  const isHeadTrimmed = segment.kind === "video" && segment.startTimeSeconds > segment.nativeStartTimeSeconds + 0.05;
+  const isTailTrimmed =
+    segment.kind === "video" &&
+    segment.startTimeSeconds + segment.durationSeconds < segment.nativeStartTimeSeconds + segment.nativeDurationSeconds - 0.05;
+  const clipPath = buildCutawayClipPath(isHeadTrimmed, isTailTrimmed);
 
   return (
     <>
@@ -163,6 +276,8 @@ function CutawaySegmentButton({
               : [
                   { label: "Filter…", onSelect: onOpenFilter },
                   { label: "Canvas fill…", onSelect: onOpenCanvasFill },
+                  ...(isHeadTrimmed ? [{ label: "Restore trimmed start", onSelect: onRestoreHead }] : []),
+                  ...(isTailTrimmed ? [{ label: "Restore trimmed end", onSelect: onRestoreTail }] : []),
                   { label: "Remove Cutaway", danger: true, onSelect: onDelete },
                 ]
           )
@@ -187,6 +302,7 @@ function CutawaySegmentButton({
           left: `${leftPercent}%`,
           width: `${widthPercent}%`,
           touchAction: "none",
+          clipPath,
         }}
       >
         <span className="pointer-events-none shrink-0 pl-1">{isImage ? "🖼" : isText ? "📝" : "▶"}</span>
@@ -218,6 +334,49 @@ function CutawaySegmentButton({
             <MattingProgressBadge progress={segment.backgroundRemoval.progress ?? 0} />
           )
         )}
+        {/* Trim-from-the-start resize handle -- same shape as the end
+            handle below, mirrored onto the left edge. VIDEO only: a video
+            clip's footage genuinely continues past its own trimmed-off
+            head, worth revealing again -- an image/text clip's authored
+            duration has nothing analogous "before" its own start to skip
+            into, so it gets no left handle at all (shrinking one is always
+            just the end handle, whichever end that visually reads as). */}
+        {segment.kind === "video" && (
+          <div
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onResizeStartPointerDown(e);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            title="Drag to trim this cutaway's start"
+            className="absolute left-0 top-0 z-20 h-full w-2 cursor-ew-resize"
+            style={{ touchAction: "none" }}
+          >
+            <div
+              className={"absolute left-0 top-1/2 h-3 w-0.5 -translate-y-1/2 rounded-full " + (resizingEdge === "start" ? "bg-white" : "bg-white/60")}
+            />
+          </div>
+        )}
+        {/* Trim-from-the-end resize handle -- a narrow hit region riding
+            the segment's own right edge, deliberately stopping propagation
+            on both pointerdown and click so it never also starts the
+            button's own reorder-drag or (for an image/text segment) opens
+            the edit dialog. See CutawayTrack's own handleResizePointerDown
+            for what a drag here actually commits, per kind. */}
+        <div
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onResizeEndPointerDown(e);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          title="Drag to trim this cutaway's end"
+          className="absolute right-0 top-0 z-20 h-full w-2 cursor-ew-resize"
+          style={{ touchAction: "none" }}
+        >
+          <div
+            className={"absolute right-0 top-1/2 h-3 w-0.5 -translate-y-1/2 rounded-full " + (resizingEdge === "end" ? "bg-white" : "bg-white/60")}
+          />
+        </div>
       </button>
       <ContextMenu state={contextMenuState} onClose={closeContextMenu} />
     </>
@@ -232,6 +391,8 @@ export function CutawayTrack({
   onOpenFilter,
   onOpenCanvasFill,
   onReorder,
+  onResizeStart,
+  onResizeEnd,
 }: {
   segments: CutawaySegment[];
   videoDurationSeconds: number;
@@ -245,6 +406,22 @@ export function CutawayTrack({
   // and the dragged entry's new index, Array.splice "move" semantics (see
   // transformations.ts's applyMoveSequenceClip, which this is built for).
   onReorder: (segments: CutawaySegment[], entryId: string, toIndex: number) => void;
+  // Fires once on drop of the left-edge (trim-from-start) resize handle --
+  // never live during the drag, same "only the final release commits" shape
+  // as onReorder above and FrameStrip's own older boundary-drag handle --
+  // with the ORIGINAL segment (kind/startTimeSeconds/durationSeconds/native*
+  // all in one place, no separate lookup) and the new candidate
+  // durationSeconds AFTER trimming from the start (i.e. the segment's own
+  // effective END stays fixed, its effective START moves to
+  // end - newDurationSeconds). Only ever called for a video segment -- see
+  // CutawaySegmentButton's own left-handle render guard.
+  onResizeStart: (segment: CutawaySegment, newDurationSeconds: number) => void;
+  // Same shape as onResizeStart, for the right-edge (trim-from-end) handle:
+  // the segment's own effective START stays fixed, its effective END moves
+  // to start + newDurationSeconds. Called for every kind -- the caller
+  // picks the right transformation by kind (image/text reflow vs. a video's
+  // own TrimRange) -- see ThreePaneEditor.tsx's handleResizeCutawayEnd.
+  onResizeEnd: (segment: CutawaySegment, newDurationSeconds: number) => void;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   // Whether the pointer actually moved past DRAG_THRESHOLD_PX during the
@@ -256,6 +433,20 @@ export function CutawayTrack({
   const didDragRef = useRef(false);
   const [dragPreviewOrder, setDragPreviewOrder] = useState<string[] | null>(null);
   const [draggingEntryId, setDraggingEntryId] = useState<string | null>(null);
+  // Live preview of the segment currently being resized -- kept local
+  // (never lifted to the caller until pointerup) for the same reason
+  // dragPreviewOrder above is: committing on every pointermove would re-run
+  // ThreePaneEditor's full reflow at 60fps of drag deltas. `edge` says which
+  // handle started this drag -- a "start" drag keeps the segment's own
+  // effective END fixed (so its LEFT offset must shift live too, not just
+  // its width), while an "end" drag keeps its effective START fixed (only
+  // width changes) -- see the render map's own leftPercent/widthPercent
+  // below.
+  const [resizePreview, setResizePreview] = useState<{
+    entryId: string;
+    edge: "start" | "end";
+    candidateDurationSeconds: number;
+  } | null>(null);
 
   if (segments.length === 0) return null;
 
@@ -333,25 +524,112 @@ export function CutawayTrack({
     window.addEventListener("pointerup", handleUp);
   }
 
+  // Trim-from-the-start/end resize -- drag either edge handle to shrink
+  // (or, up to its own max, re-grow) the segment's own displayed duration.
+  // An "end" drag anchors the segment's effective START (never moves),
+  // so shrinking removes time from the end; a "start" drag anchors its
+  // effective END instead, so shrinking removes time from the start --
+  // hence the sign flip on deltaSeconds below (dragging the LEFT handle
+  // rightward shrinks, same on-screen direction as dragging the RIGHT
+  // handle leftward would). The min/max bound differs by kind -- an
+  // image/text clip's authored duration clamps between MIN/
+  // MAX_IMAGE_CLIP_DURATION_SECONDS (same floor/ceiling CutawayDialog's own
+  // duration control already uses), while a video clip's only ever-real
+  // bound is its own nativeDurationSeconds (dragging back out that far
+  // removes that edge's trim entirely -- see applyTrimCutawayHead/
+  // applyTrimCutawayTail).
+  function handleResizePointerDown(e: React.PointerEvent, segment: CutawaySegment, edge: "start" | "end") {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startClientX = e.clientX;
+    const startDurationSeconds = segment.durationSeconds;
+    const minDurationSeconds = segment.kind === "video" ? MIN_VIDEO_CUTAWAY_DURATION_SECONDS : MIN_IMAGE_CLIP_DURATION_SECONDS;
+    const maxDurationSeconds = segment.kind === "video" ? segment.nativeDurationSeconds : MAX_IMAGE_CLIP_DURATION_SECONDS;
+    let candidateDurationSeconds = startDurationSeconds;
+    setResizePreview({ entryId: segment.entryId, edge, candidateDurationSeconds });
+
+    function handleMove(ev: PointerEvent) {
+      const trackRect = trackRef.current?.getBoundingClientRect();
+      if (!trackRect || trackRect.width <= 0 || videoDurationSeconds <= 0) return;
+      const rawDeltaSeconds = ((ev.clientX - startClientX) / trackRect.width) * videoDurationSeconds;
+      const deltaSeconds = edge === "end" ? rawDeltaSeconds : -rawDeltaSeconds;
+      candidateDurationSeconds = Math.min(maxDurationSeconds, Math.max(minDurationSeconds, startDurationSeconds + deltaSeconds));
+      setResizePreview({ entryId: segment.entryId, edge, candidateDurationSeconds });
+    }
+
+    function handleUp() {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      setResizePreview(null);
+      // A small dead zone, same reasoning as DRAG_THRESHOLD_PX above -- a
+      // press-release with barely any movement shouldn't push a no-op
+      // history entry.
+      if (Math.abs(candidateDurationSeconds - startDurationSeconds) > 0.05) {
+        if (edge === "end") onResizeEnd(segment, candidateDurationSeconds);
+        else onResizeStart(segment, candidateDurationSeconds);
+      }
+    }
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
+  // Right-click "Restore trimmed start/end" -- undoes just ONE edge's trim,
+  // computed so the OTHER edge's own current position (which may itself
+  // already be trimmed) is preserved rather than reset. onResizeStart/
+  // onResizeEnd always anchor at the segment's own OTHER effective edge
+  // (see their own prop comments), so handing them "the full distance back
+  // to nativeStart/nativeEnd from that anchor" is exactly a restore of just
+  // this one edge, whatever the other edge currently is.
+  function handleRestoreHead(segment: CutawaySegment) {
+    if (segment.kind !== "video") return;
+    onResizeStart(segment, segment.startTimeSeconds + segment.durationSeconds - segment.nativeStartTimeSeconds);
+  }
+  function handleRestoreTail(segment: CutawaySegment) {
+    if (segment.kind !== "video") return;
+    onResizeEnd(segment, segment.nativeStartTimeSeconds + segment.nativeDurationSeconds - segment.startTimeSeconds);
+  }
+
   return (
     <div ref={trackRef} className="relative mb-1 h-4 w-full shrink-0">
-      {segments.map((segment) => (
-        <CutawaySegmentButton
-          key={segment.entryId}
-          segment={segment}
-          leftPercent={leftPercentByEntryId.get(segment.entryId) ?? toPercent(segment.startTimeSeconds)}
-          widthPercent={toPercent(segment.durationSeconds)}
-          isDragging={draggingEntryId === segment.entryId}
-          onDragPointerDown={(e) => handleDragPointerDown(e, segment.entryId)}
-          onEdit={() => {
-            if (didDragRef.current) return;
-            onEdit(segment);
-          }}
-          onDelete={() => onDelete(segment)}
-          onOpenFilter={() => onOpenFilter(segment)}
-          onOpenCanvasFill={() => onOpenCanvasFill(segment)}
-        />
-      ))}
+      {segments.map((segment) => {
+        const isResizingThis = resizePreview?.entryId === segment.entryId;
+        const previewDurationSeconds = isResizingThis ? resizePreview.candidateDurationSeconds : segment.durationSeconds;
+        // A "start"-edge drag moves the segment's own LEFT offset live too
+        // (its effective end is the fixed anchor) -- computed from the
+        // segment's OWN current end, not from leftPercentByEntryId (which
+        // only tracks reorder preview, never a resize in progress).
+        const previewStartTimeSeconds =
+          isResizingThis && resizePreview.edge === "start"
+            ? segment.startTimeSeconds + segment.durationSeconds - resizePreview.candidateDurationSeconds
+            : segment.startTimeSeconds;
+        return (
+          <CutawaySegmentButton
+            key={segment.entryId}
+            segment={segment}
+            leftPercent={
+              isResizingThis && resizePreview.edge === "start"
+                ? toPercent(previewStartTimeSeconds)
+                : (leftPercentByEntryId.get(segment.entryId) ?? toPercent(segment.startTimeSeconds))
+            }
+            widthPercent={toPercent(previewDurationSeconds)}
+            isDragging={draggingEntryId === segment.entryId}
+            resizingEdge={isResizingThis ? resizePreview.edge : null}
+            onDragPointerDown={(e) => handleDragPointerDown(e, segment.entryId)}
+            onResizeStartPointerDown={(e) => handleResizePointerDown(e, segment, "start")}
+            onResizeEndPointerDown={(e) => handleResizePointerDown(e, segment, "end")}
+            onRestoreHead={() => handleRestoreHead(segment)}
+            onRestoreTail={() => handleRestoreTail(segment)}
+            onEdit={() => {
+              if (didDragRef.current) return;
+              onEdit(segment);
+            }}
+            onDelete={() => onDelete(segment)}
+            onOpenFilter={() => onOpenFilter(segment)}
+            onOpenCanvasFill={() => onOpenCanvasFill(segment)}
+          />
+        );
+      })}
     </div>
   );
 }

@@ -104,6 +104,9 @@ import {
   applyDeleteSequenceClip,
   applyMoveSequenceClip,
   applyResizeImageClip,
+  applyResizeTextClip,
+  applyTrimCutawayHead,
+  applyTrimCutawayTail,
   applyAddTextOverlay,
   applyEditTextOverlay,
   applyTextOverlayRectCommit,
@@ -2264,6 +2267,53 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  // CutawayTrack's own right-edge (trim-from-end) resize handle. Branches by
+  // kind since each stores "how long" very differently: image/text have an
+  // authored durationSeconds (reflowed by applyResizeImageClip/
+  // applyResizeTextClip, same shape as handleResizeImageClip above and
+  // FrameStrip's older boundary-drag handle), while a video clip has none --
+  // only ever the probed source file's own length -- so shortening one
+  // instead trims its tail via a TrimRange (applyTrimCutawayTail), which
+  // never shifts anything after it. `segment` is CutawayTrack's own
+  // resolved segment (FrameStrip's cutawaySegments memo), which already
+  // carries a video segment's nativeStartTimeSeconds/nativeDurationSeconds
+  // (its real, untrimmed boundary) alongside its current effective
+  // startTimeSeconds/durationSeconds.
+  function handleResizeCutawayEnd(segment: CutawaySegment, newDurationSeconds: number) {
+    if (segment.kind === "image") {
+      const { label, state } = applyResizeImageClip(selections, segment.entryId, newDurationSeconds, segment.startTimeSeconds);
+      pushChange(label, state);
+    } else if (segment.kind === "text") {
+      const { label, state } = applyResizeTextClip(selections, segment.entryId, newDurationSeconds, segment.startTimeSeconds);
+      pushChange(label, state);
+    } else {
+      const clipEndSeconds = segment.nativeStartTimeSeconds + segment.nativeDurationSeconds;
+      const { label, state } = applyTrimCutawayTail(
+        selections,
+        segment.nativeStartTimeSeconds,
+        clipEndSeconds,
+        segment.startTimeSeconds + newDurationSeconds
+      );
+      pushChange(label, state);
+    }
+  }
+
+  // CutawayTrack's own left-edge (trim-from-start) resize handle -- only
+  // ever called for a video segment (see CutawaySegmentButton's own
+  // left-handle render guard; an image/text clip has nothing analogous
+  // "before" its own start to skip into, so it gets no left handle at all).
+  // `newDurationSeconds` is the duration AFTER trimming from the start, so
+  // the clip's own effective END (not start) is what stays fixed here --
+  // mirrors handleResizeCutawayEnd's own applyTrimCutawayTail call exactly,
+  // just trimming the opposite edge.
+  function handleResizeCutawayStart(segment: CutawaySegment, newDurationSeconds: number) {
+    if (segment.kind !== "video") return;
+    const clipEndSeconds = segment.nativeStartTimeSeconds + segment.nativeDurationSeconds;
+    const newStartSeconds = segment.startTimeSeconds + segment.durationSeconds - newDurationSeconds;
+    const { label, state } = applyTrimCutawayHead(selections, segment.nativeStartTimeSeconds, clipEndSeconds, newStartSeconds);
+    pushChange(label, state);
+  }
+
   // Right-click "Add" on a music asset in AssetGallery -- places a new,
   // freely movable/resizable MusicClip (see video_math.ts's own doc comment
   // and BackgroundTrackStrip.tsx), right after whichever clip currently
@@ -3167,6 +3217,8 @@ export function ThreePaneEditor({
           onOpenCutawayFilter={handleOpenCutawayFilter}
           onOpenCutawayCanvasFill={handleOpenCutawayCanvasFill}
           onReorderCutaway={handleReorderCutaway}
+          onResizeCutawayStart={handleResizeCutawayStart}
+          onResizeCutawayEnd={handleResizeCutawayEnd}
           onOpenClipTransition={handleOpenClipTransition}
           mainAudioVolume={mainAudioVolume}
           onChangeMainAudioVolume={setMainAudioVolume}

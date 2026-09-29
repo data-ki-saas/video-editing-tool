@@ -425,6 +425,87 @@ export function applyDeleteTrimRange(selections: EditSelectionsSnapshot, rangeIn
   };
 }
 
+/** Resizing a VIDEO cutaway's duration from CutawayTrack's own resize
+ * handle (drag the right edge of its segment). Unlike an image/text clip --
+ * an authored `durationSeconds`, reflowed by applyResizeImageClip/
+ * applyResizeTextClip -- a video clip's SequenceEntry has no duration field
+ * of its own at all (only ever the probed source file's real length, see
+ * that type's own doc comment), so there's nothing to shrink there. Instead
+ * this trims the tail with a TrimRange spanning [newEndSeconds,
+ * clipEndSeconds) -- the exact same cut-and-skip mechanism TrimTrack's own
+ * two-click gesture already builds (see applyTrimTrackClick/
+ * skipTrimmedRanges), just placed here from a drag instead of two clicks.
+ * Deliberately does NOT shift anything after this clip (unlike the
+ * image/text resize) -- `clipEndSeconds` (this clip's own boundary) never
+ * moves, only what plays inside it changes, matching CutawayTrack.tsx's own
+ * "this rail can't change how long a clip plays [on the timeline]" note.
+ *
+ * `clipStartSeconds`/`clipEndSeconds` are passed in by the caller (already
+ * resolved from clipBoundarySeconds, see FrameStrip's cutawaySegments memo)
+ * for the same reason applyResizeImageClip takes `clipStartSeconds` --
+ * this module never sees probed durations, only `selections`. Dragging back
+ * out past any trim this same clip already had removes it outright, rather
+ * than leaving a zero-length range sitting there, so fully re-extending
+ * genuinely restores playback of that footage. */
+export function applyTrimCutawayTail(
+  selections: EditSelectionsSnapshot,
+  clipStartSeconds: number,
+  clipEndSeconds: number,
+  newEndSeconds: number
+): TransformationResult {
+  const clampedEndSeconds = Math.min(
+    clipEndSeconds,
+    Math.max(clipStartSeconds + MIN_VIDEO_CUTAWAY_DURATION_SECONDS, newEndSeconds)
+  );
+  // Drop whatever tail trim this same clip already had -- a range whose own
+  // end lines up with this clip's real end -- before folding in the new
+  // one. Without this, re-dragging would add a SECOND overlapping range
+  // instead of adjusting the first; mergeTrimRanges would still fold the two
+  // together, but into the WIDER of the two, silently ignoring a drag toward
+  // a shorter trim.
+  const withoutOwnTailTrim = selections.trimRanges.filter(
+    (range) => !(range.startTimeSeconds >= clipStartSeconds && Math.abs(range.endTimeSeconds - clipEndSeconds) < 0.01)
+  );
+  const trimRanges =
+    clipEndSeconds - clampedEndSeconds < 0.01
+      ? withoutOwnTailTrim
+      : mergeTrimRanges([...withoutOwnTailTrim, { startTimeSeconds: clampedEndSeconds, endTimeSeconds: clipEndSeconds }]);
+  return { label: "Trimmed cutaway", state: { ...selections, trimRanges } };
+}
+
+/** Same as applyTrimCutawayTail, mirrored onto the HEAD of a video cutaway
+ * (CutawayTrack's own left-edge resize handle) -- trims a TrimRange
+ * spanning [clipStartSeconds, newStartSeconds) instead. `clipStartSeconds`
+ * (this clip's own boundary start) never moves either, matching the tail
+ * case exactly: only what plays inside the clip changes, nothing shifts.
+ * Kept as a genuinely separate function (rather than one shared
+ * `applyTrimCutawayEdge(edge, ...)`) since the two directions clamp/filter
+ * against opposite ends -- trying to parametrize the difference away reads
+ * worse than just writing both out. */
+export function applyTrimCutawayHead(
+  selections: EditSelectionsSnapshot,
+  clipStartSeconds: number,
+  clipEndSeconds: number,
+  newStartSeconds: number
+): TransformationResult {
+  const clampedStartSeconds = Math.max(
+    clipStartSeconds,
+    Math.min(clipEndSeconds - MIN_VIDEO_CUTAWAY_DURATION_SECONDS, newStartSeconds)
+  );
+  // Drop whatever head trim this same clip already had -- a range whose own
+  // start lines up with this clip's real start -- before folding in the new
+  // one, same "adjust the existing one, don't stack a second" reasoning as
+  // applyTrimCutawayTail's own withoutOwnTailTrim.
+  const withoutOwnHeadTrim = selections.trimRanges.filter(
+    (range) => !(Math.abs(range.startTimeSeconds - clipStartSeconds) < 0.01 && range.endTimeSeconds <= clipEndSeconds + 0.01)
+  );
+  const trimRanges =
+    clampedStartSeconds - clipStartSeconds < 0.01
+      ? withoutOwnHeadTrim
+      : mergeTrimRanges([...withoutOwnHeadTrim, { startTimeSeconds: clipStartSeconds, endTimeSeconds: clampedStartSeconds }]);
+  return { label: "Trimmed cutaway", state: { ...selections, trimRanges } };
+}
+
 // Default window/placement for a freshly-added image overlay -- a modest,
 // clearly-adjustable centered box (unlike a video overlay's default
 // bottom-right DEFAULT_PIP_RECT below, chosen to match the position this
@@ -718,6 +799,14 @@ export function applySetBackgroundRemoval(
 export const DEFAULT_IMAGE_CLIP_DURATION_SECONDS = 4;
 export const MIN_IMAGE_CLIP_DURATION_SECONDS = 1;
 export const MAX_IMAGE_CLIP_DURATION_SECONDS = 15;
+
+// Floor for CutawayTrack's own resize handle on a VIDEO segment (see
+// applyTrimCutawayTail below) -- same floor as an image/text clip's own
+// MIN_IMAGE_CLIP_DURATION_SECONDS, for a consistent feel across every kind
+// of cutaway, and deliberately NOT MIN_VIDEO_OVERLAY_DURATION_SECONDS (a
+// much smaller floor meant for a Picture-in-Picture snippet, not a
+// base-sequence clip carrying the main frame).
+export const MIN_VIDEO_CUTAWAY_DURATION_SECONDS = 1;
 
 /** Appends an image asset to the concatenated sequence as its own
  * full-screen clip, animated via one or more combined Ken Burns templates --

@@ -184,6 +184,33 @@ function resolveVideoOverlayFrameUrl(
   );
 }
 
+/** A video cutaway's own EFFECTIVE start/duration on the Cutaways rail --
+ * its real (untrimmed) boundary span, narrowed on either edge by a
+ * head/tail TrimRange already sitting exactly at that edge (see
+ * transformations.ts's applyTrimCutawayHead/applyTrimCutawayTail). Trims are
+ * on the SAME absolute timeline as clip boundaries (a trim never shifts
+ * them, see skipTrimmedRanges), so matching by "starts/ends exactly at this
+ * clip's own native start/end" is stable regardless of drag order --
+ * re-opening the editor shows the segment at the length it's actually
+ * playing, not its full untrimmed boundary span (which the caller still
+ * gets separately, as nativeStartTimeSeconds/nativeDurationSeconds, for the
+ * resize handles' own bounds -- see cutawaySegments below). */
+function resolveCutawayVideoTrim(
+  trimRanges: TrimRange[],
+  nativeStartSeconds: number,
+  nativeEndSeconds: number
+): { startTimeSeconds: number; durationSeconds: number } {
+  const headTrim = trimRanges.find(
+    (range) => Math.abs(range.startTimeSeconds - nativeStartSeconds) < 0.01 && range.endTimeSeconds <= nativeEndSeconds + 0.01
+  );
+  const tailTrim = trimRanges.find(
+    (range) => range.startTimeSeconds >= nativeStartSeconds && Math.abs(range.endTimeSeconds - nativeEndSeconds) < 0.01
+  );
+  const startTimeSeconds = headTrim ? headTrim.endTimeSeconds : nativeStartSeconds;
+  const endTimeSeconds = tailTrim ? tailTrim.startTimeSeconds : nativeEndSeconds;
+  return { startTimeSeconds, durationSeconds: Math.max(0, endTimeSeconds - startTimeSeconds) };
+}
+
 const FrameTile = memo(function FrameTile({
   src,
   index,
@@ -467,6 +494,8 @@ export function FrameStrip({
   onOpenCutawayFilter,
   onOpenCutawayCanvasFill,
   onReorderCutaway,
+  onResizeCutawayStart,
+  onResizeCutawayEnd,
   onOpenClipTransition,
   isLoading,
   durationSeconds,
@@ -588,6 +617,12 @@ export function FrameStrip({
   // The Cutaways rail's own click-hold-drag reorder -- see CutawayTrack's
   // own prop comment and transformations.ts's applyMoveSequenceClip.
   onReorderCutaway: (segments: CutawaySegment[], entryId: string, toIndex: number) => void;
+  // The Cutaways rail's own left/right-edge resize handles -- see
+  // CutawayTrack's own onResizeStart/onResizeEnd prop comments for the exact
+  // shape, and ThreePaneEditor.tsx's handleResizeCutawayStart/End for how
+  // each kind maps the new duration onto its own state.
+  onResizeCutawayStart: (segment: CutawaySegment, newDurationSeconds: number) => void;
+  onResizeCutawayEnd: (segment: CutawaySegment, newDurationSeconds: number) => void;
   // The clip-boundary transition badge's own click (see clipBoundarySeconds'
   // own render block below) -- opens CutTransitionDialog scoped to the
   // INCOMING clip of that boundary (whichever sequenceEntries[index+1] is),
@@ -1083,12 +1118,19 @@ export function FrameStrip({
           durationSeconds: endTimeSeconds - startTimeSeconds,
         };
       }
+      const { startTimeSeconds: effectiveStartTimeSeconds, durationSeconds: effectiveDurationSeconds } = resolveCutawayVideoTrim(
+        trimRanges,
+        startTimeSeconds,
+        endTimeSeconds
+      );
       return {
         kind: "video" as const,
         entryId: entry.id,
         assetId: entry.assetId,
-        startTimeSeconds,
-        durationSeconds: endTimeSeconds - startTimeSeconds,
+        startTimeSeconds: effectiveStartTimeSeconds,
+        durationSeconds: effectiveDurationSeconds,
+        nativeStartTimeSeconds: startTimeSeconds,
+        nativeDurationSeconds: endTimeSeconds - startTimeSeconds,
         colorFilterId: entry.colorFilterId ?? null,
         canvasFillMode: entry.canvasFillMode ?? null,
         canvasFillColor: entry.canvasFillColor,
@@ -1096,7 +1138,7 @@ export function FrameStrip({
         backgroundRemoval: entry.backgroundRemoval,
       };
     });
-  }, [sequenceEntries, clipBoundarySeconds, durationSeconds]);
+  }, [sequenceEntries, clipBoundarySeconds, durationSeconds, trimRanges]);
 
   // The tile whose OWN timestamp is closest to the playhead -- NOT an
   // even-spacing index formula (see this file's module comment on why
@@ -1170,6 +1212,8 @@ export function FrameStrip({
           onOpenFilter={onOpenCutawayFilter}
           onOpenCanvasFill={onOpenCutawayCanvasFill}
           onReorder={onReorderCutaway}
+          onResizeStart={onResizeCutawayStart}
+          onResizeEnd={onResizeCutawayEnd}
         />
 
         <TrimTrack
