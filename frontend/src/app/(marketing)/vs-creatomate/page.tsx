@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SITE_URL } from "@/lib/siteUrl";
 
-const TITLE = "myreels.in vs Creatomate";
+const TITLE = "Myreels.in vs Creatomate";
 const DESCRIPTION =
-  "How myreels.in's end-to-end reel creator compares to Creatomate's developer-focused video rendering API.";
+  "How Myreels.in's end-to-end reel creator compares to Creatomate's developer-focused video rendering API.";
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -57,10 +57,10 @@ export default function VsCreatomatePage() {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-16">
       <div className="flex flex-col gap-2">
-        <h1 className="text-3xl font-semibold text-foreground">myreels.in vs Creatomate</h1>
+        <h1 className="text-3xl font-semibold text-foreground">Myreels.in vs Creatomate</h1>
         <p className="text-muted">
           Creatomate is a solid video rendering API that developers use to automate video
-          generation inside their own apps. myreels.in is a finished, self-serve product — you
+          generation inside their own apps. Myreels.in is a finished, self-serve product — you
           don&apos;t need to build anything. Sign up, tell it about your business, and get a
           rendered reel out the other end.
         </p>
@@ -71,7 +71,7 @@ export default function VsCreatomatePage() {
           <thead>
             <tr className="border-b border-border bg-surface">
               <th className="p-3 font-medium text-foreground">Feature</th>
-              <th className="p-3 font-medium text-foreground">myreels.in</th>
+              <th className="p-3 font-medium text-foreground">Myreels.in</th>
               <th className="p-3 font-medium text-foreground">Creatomate</th>
             </tr>
           </thead>
@@ -96,7 +96,7 @@ export default function VsCreatomatePage() {
         href="/signup"
         className="self-start rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-accent-foreground transition-colors hover:opacity-90"
       >
-        Try myreels.in free
+        Try Myreels.in free
       </Link>
     </main>
   );

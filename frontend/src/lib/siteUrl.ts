@@ -8,4 +8,4 @@
 // Falls back to the production custom domain so local/preview builds (where
 // SITE_URL is typically unset, per DEPLOY.md) still get a real, absolute
 // URL rather than a broken one.
-export const SITE_URL = process.env.SITE_URL ?? "https://myreels.in";
+export const SITE_URL = process.env.SITE_URL ?? "https://Myreels.in";

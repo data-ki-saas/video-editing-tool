@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SITE_URL } from "@/lib/siteUrl";
 
-const TITLE = "myreels.in vs CapCut";
+const TITLE = "Myreels.in vs CapCut";
 const DESCRIPTION =
-  "How myreels.in's niche-aware reel maker compares to CapCut for creating business and social media reels.";
+  "How Myreels.in's niche-aware reel maker compares to CapCut for creating business and social media reels.";
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -61,10 +61,10 @@ export default function VsCapCutPage() {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-16">
       <div className="flex flex-col gap-2">
-        <h1 className="text-3xl font-semibold text-foreground">myreels.in vs CapCut</h1>
+        <h1 className="text-3xl font-semibold text-foreground">Myreels.in vs CapCut</h1>
         <p className="text-muted">
           CapCut is a great general-purpose video editor that a lot of creators already know
-          and love. myreels.in is built for a narrower job: turning your photos and clips into a
+          and love. Myreels.in is built for a narrower job: turning your photos and clips into a
           finished reel for your specific business, fast — with the script, avatar, and
           niche-specific templates handled for you.
         </p>
@@ -75,7 +75,7 @@ export default function VsCapCutPage() {
           <thead>
             <tr className="border-b border-border bg-surface">
               <th className="p-3 font-medium text-foreground">Feature</th>
-              <th className="p-3 font-medium text-foreground">myreels.in</th>
+              <th className="p-3 font-medium text-foreground">Myreels.in</th>
               <th className="p-3 font-medium text-foreground">CapCut</th>
             </tr>
           </thead>
@@ -100,7 +100,7 @@ export default function VsCapCutPage() {
         href="/signup"
         className="self-start rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-accent-foreground transition-colors hover:opacity-90"
       >
-        Try myreels.in free
+        Try Myreels.in free
       </Link>
     </main>
   );

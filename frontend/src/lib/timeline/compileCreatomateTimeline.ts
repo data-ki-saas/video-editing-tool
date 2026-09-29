@@ -1290,7 +1290,7 @@ function buildTtsOverlayElements(
   return elements;
 }
 
-/** Automatic "Made by myreels.in" attribution, burned into every cloud
+/** Automatic "Made by Myreels.in" attribution, burned into every cloud
  * render's final BRAND_WATERMARK_DURATION_SECONDS -- NOT a user-authored
  * TextOverlay (no toggle exists to remove it), always present regardless
  * of what else is on the timeline. Its constants (text, duration, padding/

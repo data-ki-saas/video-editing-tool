@@ -7,7 +7,7 @@ export const metadata: Metadata = {
 };
 
 // TODO: eventually replace this mailto with a working in-app contact form.
-const CONTACT_EMAIL = "hello@myreels.in";
+const CONTACT_EMAIL = "hello@Myreels.in";
 
 export default function ContactPage() {
   return (

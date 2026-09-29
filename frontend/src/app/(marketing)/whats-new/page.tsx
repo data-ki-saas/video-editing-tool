@@ -23,9 +23,9 @@ interface ChangelogEntry {
 const ENTRIES: ChangelogEntry[] = [
   {
     date: "2026-09-29",
-    title: "See how myreels.in compares",
+    title: "See how Myreels.in compares",
     description:
-      "New comparison pages on the homepage lay out how myreels.in stacks up against CapCut and Creatomate — what each is built for, and where myreels.in's niche-driven scripts, avatar, and free browser rendering fit in.",
+      "New comparison pages on the homepage lay out how Myreels.in stacks up against CapCut and Creatomate — what each is built for, and where Myreels.in's niche-driven scripts, avatar, and free browser rendering fit in.",
     isLatest: true,
   },
   {

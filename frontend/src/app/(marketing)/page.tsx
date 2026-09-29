@@ -107,11 +107,11 @@ export default function Home() {
             >
               <img
                 src="/images/vs-capcut-placeholder.svg"
-                alt="myreels.in vs CapCut"
+                alt="Myreels.in vs CapCut"
                 className="aspect-[1200/630] w-full object-cover"
               />
               <div className="flex flex-col gap-1 p-4">
-                <p className="text-sm font-semibold text-foreground">myreels.in vs CapCut</p>
+                <p className="text-sm font-semibold text-foreground">Myreels.in vs CapCut</p>
                 <p className="text-sm text-muted">
                   See how a niche-aware reel maker with free browser rendering compares to a
                   general-purpose mobile editor.
@@ -124,11 +124,11 @@ export default function Home() {
             >
               <img
                 src="/images/vs-creatomate-placeholder.svg"
-                alt="myreels.in vs Creatomate"
+                alt="Myreels.in vs Creatomate"
                 className="aspect-[1200/630] w-full object-cover"
               />
               <div className="flex flex-col gap-1 p-4">
-                <p className="text-sm font-semibold text-foreground">myreels.in vs Creatomate</p>
+                <p className="text-sm font-semibold text-foreground">Myreels.in vs Creatomate</p>
                 <p className="text-sm text-muted">
                   See how an all-in-one reel creator compares to a developer-focused video
                   rendering API.

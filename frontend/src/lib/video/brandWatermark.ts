@@ -1,5 +1,5 @@
 /**
- * Automatic "Made by myreels.in" attribution burned into the last couple
+ * Automatic "Made by Myreels.in" attribution burned into the last couple
  * seconds of every export -- NOT a user-authored TextOverlay (no dialog, no
  * toggle, doesn't live in Timeline/SequenceEntry state at all): it's always
  * present regardless of what else is on the timeline, the same way a
@@ -18,7 +18,7 @@
  * textTemplates.ts's TEXT_TEMPLATE_FONT_FRACTIONS/
  * STROKE_WIDTH_FONT_SIZE_FRACTIONS).
  */
-export const BRAND_WATERMARK_TEXT = "Made by myreels.in";
+export const BRAND_WATERMARK_TEXT = "Made by Myreels.in";
 export const BRAND_WATERMARK_DURATION_SECONDS = 2;
 
 // Fractions of the canvas's own SMALLER dimension (matches this app's fixed

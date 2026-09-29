@@ -90,9 +90,9 @@ Facebook Page" click uploads that specific, already-saved reel.
       `pages_manage_posts`/`instagram_content_publish` can go from
       Development mode to Live/Advanced Access.
 - [ ] A live **Privacy Policy** URL — already exists at `/privacy`; link
-      the deployed production URL (e.g. `https://www.myreels.in/privacy`).
+      the deployed production URL (e.g. `https://www.Myreels.in/privacy`).
 - [ ] A live **Terms of Service** URL — already exists at `/terms`
-      (`https://www.myreels.in/terms`).
+      (`https://www.Myreels.in/terms`).
 - [ ] A real **test Facebook Page** (any Page the developer account
       administers works for review) and, if demoing Instagram, a **test
       Instagram Business account** linked to that Page.
