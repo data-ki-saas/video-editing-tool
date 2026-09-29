@@ -22,11 +22,101 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-09-29",
+    title: "See how myreels.in compares",
+    description:
+      "New comparison pages on the homepage lay out how myreels.in stacks up against CapCut and Creatomate — what each is built for, and where myreels.in's niche-driven scripts, avatar, and free browser rendering fit in.",
+    isLatest: true,
+  },
+  {
+    date: "2026-09-29",
+    title: "Drag text straight onto your timeline",
+    description:
+      "Text cutaways can now be dragged directly onto the timeline. Trimming the ends of a cutaway also ripples through your other tracks automatically, so everything stays in sync instead of drifting out of place.",
+  },
+  {
+    date: "2026-09-24",
+    title: "More natural avatar movement, and props to hold",
+    description:
+      "Avatars now bend their elbows and rotate their shoulders like a real person, can hold a mic, pen, or other prop in hand, and laugh with proper mouth and eyebrow motion.",
+  },
+  {
+    date: "2026-09-20",
+    title: "Multiple avatars, each with their own line",
+    description:
+      "Add more than one avatar to a scene and give each their own script — perfect for a back-and-forth or a two-host format. Their voice-over clips are resizable right on the timeline, and we fixed captions incorrectly showing raw mood markup like “{happy}”.",
+  },
+  {
+    date: "2026-09-19",
+    title: "Avatars blink, gesture, and react automatically",
+    description:
+      "Talking avatars now blink on their own, raise their eyebrows to match your script's mood, and can point or react on cue — no manual keyframing needed.",
+  },
+  {
+    date: "2026-09-19",
+    title: "A global asset library",
+    description:
+      "Every avatar, image, and clip you upload is now saved to a shared library you can reuse across all of your projects, not just the one you uploaded it in.",
+  },
+  {
+    date: "2026-09-17",
+    title: "Your script's mood drives your avatar",
+    description:
+      "Add simple tags like {happy} or {serious} to your script and your avatar's expression and gestures follow automatically as it talks.",
+  },
+  {
+    date: "2026-09-15",
+    title: "Avatar portrait mode and new outfits",
+    description:
+      "Frame your avatar in a tighter, bust-up portrait crop, dress it in a new Polo, Suit, or Blazer, and rename any avatar you've generated to keep your library organized.",
+  },
+  {
+    date: "2026-09-14",
+    title: "Turn your own photo into an avatar",
+    description:
+      "Upload a selfie and Reel Creator generates a cartoon-style avatar with your face and hairstyle, ready to talk in your reels.",
+  },
+  {
+    date: "2026-09-13",
+    title: "Meet your on-screen avatar",
+    description:
+      "A brand-new, in-house animated avatar system: pick a character, have it speak your script with synced lip movement and timed actions, and tweak its look just by typing what you want changed — “make it taller,” “add sunglasses,” “look more serious.”",
+  },
+  {
+    date: "2026-09-10",
+    title: "A dedicated overlay editor, plus cutaway filters and background removal",
+    description:
+      "Click any overlay right on the timeline to edit it directly, and give your cutaway clips a color filter or one-tap background removal from the same editor.",
+  },
+  {
+    date: "2026-09-09",
+    title: "Text slides",
+    description:
+      "Add a full-screen text slide as its own clip type, right alongside your video and photo cutaways.",
+  },
+  {
+    date: "2026-09-09",
+    title: "Get help without leaving the app",
+    description:
+      "Open a support ticket right from Reel Creator if you run into an issue — no need to dig up an email address.",
+  },
+  {
+    date: "2026-09-08",
+    title: "Recording on mobile, reworked",
+    description:
+      "Recording straight from your phone now fills the whole screen, ties your script directly to the recording so the teleprompter matches it, and remembers your teleprompter speed between sessions.",
+  },
+  {
+    date: "2026-09-07",
+    title: "Background music, as movable clips",
+    description:
+      "Instead of one looping track, add multiple background-music clips and drag or resize them anywhere on the timeline, just like your video clips.",
+  },
+  {
     date: "2026-09-07",
     title: "Teleprompter for in-app recording",
     description:
       "Recording yourself straight from the app now has a built-in teleprompter — paste your script and it scrolls on its own, right near the camera lens, so you can read while still looking at the camera. Recording on your phone also now defaults to the front camera, with a digital zoom slider to frame your shot.",
-    isLatest: true,
   },
   {
     date: "2026-09-06",

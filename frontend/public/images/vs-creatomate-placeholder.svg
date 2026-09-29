@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f3f4f6" />
+  <rect x="16" y="16" width="1168" height="598" rx="12" fill="none" stroke="#9ca3af" stroke-width="4" stroke-dasharray="12 10" />
+  <text x="600" y="300" text-anchor="middle" font-family="system-ui, sans-serif" font-size="36" font-weight="600" fill="#6b7280">
+    Replace this image
+  </text>
+  <text x="600" y="350" text-anchor="middle" font-family="system-ui, sans-serif" font-size="24" fill="#9ca3af">
+    myreels.in vs Creatomate screenshot
+  </text>
+</svg>

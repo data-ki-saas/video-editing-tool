@@ -100,6 +100,43 @@ export default function Home() {
             </p>
           </div>
 
+          <div className="grid w-full max-w-2xl grid-cols-1 gap-4 text-left sm:grid-cols-2">
+            <Link
+              href="/vs-capcut"
+              className="group flex flex-col overflow-hidden rounded-lg border border-border transition-colors hover:border-accent"
+            >
+              <img
+                src="/images/vs-capcut-placeholder.svg"
+                alt="myreels.in vs CapCut"
+                className="aspect-[1200/630] w-full object-cover"
+              />
+              <div className="flex flex-col gap-1 p-4">
+                <p className="text-sm font-semibold text-foreground">myreels.in vs CapCut</p>
+                <p className="text-sm text-muted">
+                  See how a niche-aware reel maker with free browser rendering compares to a
+                  general-purpose mobile editor.
+                </p>
+              </div>
+            </Link>
+            <Link
+              href="/vs-creatomate"
+              className="group flex flex-col overflow-hidden rounded-lg border border-border transition-colors hover:border-accent"
+            >
+              <img
+                src="/images/vs-creatomate-placeholder.svg"
+                alt="myreels.in vs Creatomate"
+                className="aspect-[1200/630] w-full object-cover"
+              />
+              <div className="flex flex-col gap-1 p-4">
+                <p className="text-sm font-semibold text-foreground">myreels.in vs Creatomate</p>
+                <p className="text-sm text-muted">
+                  See how an all-in-one reel creator compares to a developer-focused video
+                  rendering API.
+                </p>
+              </div>
+            </Link>
+          </div>
+
           <div className="flex flex-wrap justify-center gap-2">
             {EXAMPLE_NICHES.map((niche) => (
               <span
