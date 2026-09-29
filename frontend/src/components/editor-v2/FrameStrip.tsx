@@ -1482,6 +1482,29 @@ export function FrameStrip({
           deleteLabel="Delete mirror"
           onDeleteSegment={onDeleteFlipVerticalSegment}
         />
+
+        {/* A dim red band per trim range, spanning every rail in the strip
+            (same inset-y-0 full-height trick as the playhead line/marker
+            guides above) -- rendered LAST among trackRef's children so it
+            paints on top of every other rail's own background, not just the
+            gaps between them. TrimTrack's own row already shows a SOLID red
+            segment for exactly this stretch; every other rail (thumbnails,
+            every overlay track, ZoomEffectsTrack, FlipTrack) has nothing of
+            its own to show that this same stretch is skipped during
+            playback too (skipTrimmedRanges) -- its own authored content
+            just silently continues to exist there, unreachable. This makes
+            that "everything here gets jumped over" visible everywhere, not
+            only on TrimTrack's own row. */}
+        {trimRanges.map((range, index) => (
+          <div
+            key={index}
+            className="pointer-events-none absolute inset-y-0 bg-red-600/20"
+            style={{
+              left: `${durationSeconds > 0 ? (range.startTimeSeconds / durationSeconds) * 100 : 0}%`,
+              width: `${durationSeconds > 0 ? ((range.endTimeSeconds - range.startTimeSeconds) / durationSeconds) * 100 : 0}%`,
+            }}
+          />
+        ))}
       </div>
     </div>
   );
