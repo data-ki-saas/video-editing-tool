@@ -283,6 +283,16 @@ const WALK: ActionCurveSpec = {
     { t: 0.25, boneIndex: ROOT, delta: { y: -2 } },
     { t: 0.5, boneIndex: ROOT, delta: { y: 0 } },
     { t: 0.75, boneIndex: ROOT, delta: { y: -2 } },
+    // Torso counter-rotates against the hips and the head dips with each
+    // footstrike, so the upper body isn't a rigid block riding the legs.
+    { t: 0, boneIndex: TORSO, delta: { rotation: 0 } },
+    { t: 0.25, boneIndex: TORSO, delta: { rotation: -0.04 } },
+    { t: 0.5, boneIndex: TORSO, delta: { rotation: 0 } },
+    { t: 0.75, boneIndex: TORSO, delta: { rotation: 0.04 } },
+    { t: 0, boneIndex: HEAD, delta: { y: 0 } },
+    { t: 0.25, boneIndex: HEAD, delta: { y: -1 } },
+    { t: 0.5, boneIndex: HEAD, delta: { y: 0 } },
+    { t: 0.75, boneIndex: HEAD, delta: { y: -1 } },
   ],
 };
 
@@ -359,6 +369,27 @@ const TALK_EMPHASIZE: ActionCurveSpec = {
   ],
 };
 
+// A looping bounce-and-sway: the root dips twice per cycle on the beat, the
+// torso rocks side to side, and the arms pump alternately. Same bones and
+// magnitude scale as WALK/IDLE, so it stays in the character's own range.
+const DANCE: ActionCurveSpec = {
+  periodSeconds: 1,
+  keyframes: [
+    { t: 0, boneIndex: ROOT, delta: { y: 0 } },
+    { t: 0.25, boneIndex: ROOT, delta: { y: -4 } },
+    { t: 0.5, boneIndex: ROOT, delta: { y: 0 } },
+    { t: 0.75, boneIndex: ROOT, delta: { y: -4 } },
+    { t: 0, boneIndex: TORSO, delta: { rotation: -0.08 } },
+    { t: 0.5, boneIndex: TORSO, delta: { rotation: 0.08 } },
+    { t: 0, boneIndex: HEAD, delta: { rotation: 0.1 } },
+    { t: 0.5, boneIndex: HEAD, delta: { rotation: -0.1 } },
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 2.0 } },
+    { t: 0.5, boneIndex: ARM_R, delta: { rotation: 0.4 } },
+    { t: 0, boneIndex: ARM_L, delta: { rotation: 0.4 } },
+    { t: 0.5, boneIndex: ARM_L, delta: { rotation: -2.0 } },
+  ],
+};
+
 const LOOK_AROUND: ActionCurveSpec = {
   // Unused by this action's own special-cased evaluator (see actions.ts's
   // computeSeededPose) -- kept nonzero only to satisfy ActionCurveSpec's
@@ -431,6 +462,7 @@ const ACTIONS: AvatarTopology["actions"] = {
   // TALK_EMPHASIZE's own comment) so a future actionId.startsWith("talk")
   // check elsewhere can treat it as a talking variant.
   talkEmphasize: TALK_EMPHASIZE,
+  dance: DANCE,
 };
 
 // Layered motion -- gestures (arm-only, layered on top of whichever posture
@@ -453,6 +485,7 @@ const GESTURE_PERIOD_SECONDS = {
   facepalm: 1.6,
   hitLeft: 1.0,
   hitRight: 1.0,
+  thumbsUp: 1.4,
 } as const;
 
 // A friendly side-to-side hand wave -- armR raises to about shoulder-raised
@@ -605,7 +638,22 @@ const FACEPALM: ActionCurveSpec = {
   ],
 };
 
+// A raised fist held up at about shoulder height for a "great / approved" beat
+// (handR swaps to its fist shape via GESTURE_HAND_POSE_SHAPES). There's no
+// separate thumb sprite, so a raised fist is the closest this rig can read as.
+const THUMBS_UP: ActionCurveSpec = {
+  periodSeconds: GESTURE_PERIOD_SECONDS.thumbsUp,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.25, boneIndex: ARM_R, delta: { rotation: 1.3 } },
+    { t: 0.8, boneIndex: ARM_R, delta: { rotation: 1.3 } },
+    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
 const GESTURES: AvatarTopology["gestures"] = {
+  thumbsUp: THUMBS_UP,
   wave: WAVE,
   point: POINT,
   pointLeft: POINT_LEFT,
@@ -639,7 +687,51 @@ function gazeSpec(targetRotation: number): ActionCurveSpec {
   };
 }
 
+// Head-only reaction one-shots (HEAD is this rig's whole head group, so these
+// are gazes by the compile-time bone-scope rule, not gestures). Unlike
+// gazeSpec's ease-and-hold, both return to rest so they read as a reaction.
+const NOD: ActionCurveSpec = {
+  periodSeconds: 0.9,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: HEAD, delta: { rotation: 0 } },
+    { t: 0.25, boneIndex: HEAD, delta: { rotation: 0.28 } },
+    { t: 0.5, boneIndex: HEAD, delta: { rotation: 0 } },
+    { t: 0.75, boneIndex: HEAD, delta: { rotation: 0.28 } },
+    { t: 1, boneIndex: HEAD, delta: { rotation: 0 } },
+  ],
+};
+
+const SHAKE_HEAD: ActionCurveSpec = {
+  periodSeconds: 1.0,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: HEAD, delta: { rotation: 0 } },
+    { t: 0.2, boneIndex: HEAD, delta: { rotation: -0.3 } },
+    { t: 0.4, boneIndex: HEAD, delta: { rotation: 0.3 } },
+    { t: 0.6, boneIndex: HEAD, delta: { rotation: -0.3 } },
+    { t: 0.8, boneIndex: HEAD, delta: { rotation: 0.3 } },
+    { t: 1, boneIndex: HEAD, delta: { rotation: 0 } },
+  ],
+};
+
+// A curious sideways head tilt -- what a question sounds like. Also what
+// resolveAvatarRenderState's automatic "?" prosody beat plays.
+const TILT_HEAD: ActionCurveSpec = {
+  periodSeconds: 1.2,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: HEAD, delta: { rotation: 0 } },
+    { t: 0.3, boneIndex: HEAD, delta: { rotation: -0.2 } },
+    { t: 0.75, boneIndex: HEAD, delta: { rotation: -0.2 } },
+    { t: 1, boneIndex: HEAD, delta: { rotation: 0 } },
+  ],
+};
+
 const GAZES: AvatarTopology["gazes"] = {
+  tiltHead: TILT_HEAD,
+  nod: NOD,
+  shakeHead: SHAKE_HEAD,
   lookLeft: gazeSpec(-0.4),
   lookRight: gazeSpec(0.4),
   lookDown: gazeSpec(0.5),
@@ -665,6 +757,8 @@ const MOOD_PRESETS: AvatarTopology["moodPresets"] = {
   excited: { browAngle: -0.3, energy: 1.0 },
   scared: { browAngle: -0.7, energy: -0.4 },
   laugh: { browAngle: -0.4, energy: 0.9 },
+  // Wide-eyed and a little jolted upright.
+  surprised: { browAngle: -1.0, energy: 0.6 },
 };
 
 // Each of the 8 moods above ALSO snaps the "eyebrows" part (see
@@ -682,6 +776,7 @@ const MOOD_EXPRESSION_SHAPES: AvatarTopology["moodExpressionShapes"] = {
   happy: { eyebrows: "happy" },
   excited: { eyebrows: "happy" },
   laugh: { eyebrows: "happy" },
+  surprised: { eyebrows: "happy" },
   sad: { eyebrows: "sad" },
   scared: { eyebrows: "sad" },
   calm: { eyebrows: "neutral" },
@@ -711,6 +806,7 @@ const GESTURE_HAND_POSE_SHAPES: NonNullable<AvatarTopology["gestureHandPoseShape
   pointRight: { handR: "handRPoint" },
   pointLeft: { handL: "handLPoint" },
   fistThump: { handR: "handRFist" },
+  thumbsUp: { handR: "handRFist" },
   hitLeft: { handL: "handLFist", handR: "handRFist" },
   hitRight: { handL: "handLFist", handR: "handRFist" },
 };

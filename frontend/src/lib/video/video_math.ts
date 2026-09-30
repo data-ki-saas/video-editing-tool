@@ -1320,6 +1320,11 @@ export interface AvatarOverlayClip {
   //    any narration, even one that time-overlaps it; plays its own
   //    `defaultAction`/timelines only.
   ttsOverlayId?: string | null;
+  // Automatic expression from the narration's punctuation ("!" perks the
+  // avatar up, "?" tilts the head) -- on unless explicitly `false`. Lowest
+  // priority: any explicit {tag} or director beat covering the same moment
+  // wins (avatar/resolveAvatarRenderState.ts).
+  autoExpression?: boolean;
 }
 
 export interface AvatarGestureBeat {

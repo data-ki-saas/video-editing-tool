@@ -83,26 +83,72 @@ export interface ResolvedBeat {
   id: string;
   startMs: number;
   endMs: number;
-  source: "persisted" | "tag";
+  source: "persisted" | "tag" | "prosody";
 }
+
+// Who wins when beats in the same layer overlap: an explicit {tag} beats the
+// director's persisted timeline, which beats the automatic punctuation-derived
+// beats.
+const SOURCE_RANK: Record<ResolvedBeat["source"], number> = { tag: 2, persisted: 1, prosody: 0 };
 
 function findActiveBeat(beats: ResolvedBeat[], localElapsedMs: number): ResolvedBeat | undefined {
   const covering = beats.filter((beat) => localElapsedMs >= beat.startMs && localElapsedMs < beat.endMs);
-  return covering.find((beat) => beat.source === "tag") ?? covering[0];
+  return covering.reduce<ResolvedBeat | undefined>(
+    (best, beat) => (!best || SOURCE_RANK[beat.source] > SOURCE_RANK[best.source] ? beat : best),
+    undefined
+  );
 }
 
-/** Drops any PERSISTED beat that overlaps a tag-derived one in the same
- * layer -- unlike findActiveBeat above (which only needs to pick a winner at
- * one instant), computeActiveMoodBias consumes a whole beat LIST (it reasons
+/** Drops any beat that overlaps a higher-priority one in the same layer --
+ * unlike findActiveBeat above (which only needs to pick a winner at one
+ * instant), computeActiveMoodBias consumes a whole beat LIST (it reasons
  * about ease-in/ease-out around beat boundaries, not just "what's active
- * right now"), so the tag-wins-on-overlap rule has to be applied to the list
- * itself before handing it over, not resolved instant-by-instant. */
-function preferTagBeats(beats: ResolvedBeat[]): ResolvedBeat[] {
-  const tagBeats = beats.filter((beat) => beat.source === "tag");
-  const nonConflictingPersisted = beats.filter(
-    (beat) => beat.source === "persisted" && !tagBeats.some((tagBeat) => beat.startMs < tagBeat.endMs && beat.endMs > tagBeat.startMs)
+ * right now"), so the priority rule has to be applied to the list itself
+ * before handing it over, not resolved instant-by-instant. */
+function dropOutrankedBeats(beats: ResolvedBeat[]): ResolvedBeat[] {
+  return beats.filter(
+    (beat) =>
+      !beats.some((other) => SOURCE_RANK[other.source] > SOURCE_RANK[beat.source] && beat.startMs < other.endMs && beat.endMs > other.startMs)
   );
-  return [...nonConflictingPersisted, ...tagBeats];
+}
+
+// How long an automatic "!" mood beat lasts. Cut short if the next automatic
+// beat in the same layer starts sooner.
+const PROSODY_MOOD_BEAT_MS = 1200;
+
+/** Automatic expression beats from the narration's own punctuation: a word
+ * ending in "!" gets a brief "excited" mood, one ending in "?" a head tilt.
+ * Punctuation isn't in wordTimings (the TTS boundary text drops it), so this
+ * reads it from the script text, relying on the same assumption tags.ts makes:
+ * whitespace-split script words line up 1:1 with wordTimings. If the counts
+ * disagree (a stray "—" token, say) it returns nothing rather than misplace
+ * emphasis. Only emits a beat for a mood/gaze this topology actually has. */
+function prosodyBeats(
+  narration: TtsOverlay,
+  narrationOffsetMs: number,
+  topology: CompiledTopology
+): { gaze: ResolvedBeat[]; mood: ResolvedBeat[] } {
+  const empty = { gaze: [], mood: [] };
+  const tokens = narration.text.replace(/\{[^}]*\}/g, " ").split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || tokens.length !== narration.wordTimings.length) return empty;
+
+  const hasExcited = !!topology.moodPresets?.excited;
+  const tiltSpec = topology.gazes?.tiltHead;
+  const gaze: ResolvedBeat[] = [];
+  const mood: ResolvedBeat[] = [];
+
+  tokens.forEach((token, index) => {
+    const startMs = narrationOffsetMs + narration.wordTimings[index].startMs;
+    if (hasExcited && /!["')\]]*$/.test(token)) {
+      mood.push({ id: "excited", startMs, endMs: startMs + PROSODY_MOOD_BEAT_MS, source: "prosody" });
+    } else if (tiltSpec && /\?["')\]]*$/.test(token)) {
+      gaze.push({ id: "tiltHead", startMs, endMs: startMs + tiltSpec.periodSeconds * 1000, source: "prosody" });
+    }
+  });
+
+  const clampToNext = (beats: ResolvedBeat[]) =>
+    beats.map((beat, i) => (beats[i + 1] ? { ...beat, endMs: Math.min(beat.endMs, beats[i + 1].startMs) } : beat));
+  return { gaze: clampToNext(gaze), mood: clampToNext(mood) };
 }
 
 // A tag anchor names only a TRIGGER instant (avatar/tags.ts has no concept of
@@ -197,11 +243,70 @@ function resolvePostureAndMouth(
     }
     return { postureActionId: "idle", mouthShapeId: computeMouthShapeId("idle", localElapsed) };
   }
+  const talkPostureActionId = clip.defaultAction.startsWith("talk") ? clip.defaultAction : "talk";
   if (wordIndex < 0) {
+    // A breath between two words of the same sentence isn't a change of
+    // posture -- staying in talk here avoids flipping talk<->idle (different
+    // loop periods) on every word gap. Mouth stays closed regardless.
+    if (isShortGapBetweenWords(narration, sequenceTimeSeconds)) {
+      return { postureActionId: talkPostureActionId, mouthShapeId: "closed" };
+    }
     return { postureActionId: "idle", mouthShapeId: computeMouthShapeId("idle", localElapsed) };
   }
-  const postureActionId = clip.defaultAction.startsWith("talk") ? clip.defaultAction : "talk";
-  return { postureActionId, mouthShapeId: wordMouthShapeId()! };
+  return { postureActionId: talkPostureActionId, mouthShapeId: wordMouthShapeId()! };
+}
+
+// Pauses up to this long between two words keep the talking posture; longer
+// ones (a deliberate beat, the end of a sentence) drop back to idle.
+const TALK_GAP_HOLD_MS = 400;
+// How long the cross-fade between two postures lasts, and the resolution at
+// which resolvePostureBlend searches backward for when the change happened.
+export const POSTURE_BLEND_SECONDS = 0.2;
+const POSTURE_BLEND_PROBE_STEP_SECONDS = 0.02;
+
+function isShortGapBetweenWords(narration: TtsOverlay, sequenceTimeSeconds: number): boolean {
+  const relativeMs = (sequenceTimeSeconds - narration.startTimeSeconds) * 1000;
+  let previousEndMs: number | undefined;
+  let nextStartMs: number | undefined;
+  for (const word of narration.wordTimings) {
+    if (word.endMs <= relativeMs) previousEndMs = word.endMs;
+    else if (word.startMs > relativeMs) {
+      nextStartMs = word.startMs;
+      break;
+    }
+  }
+  return previousEndMs !== undefined && nextStartMs !== undefined && nextStartMs - previousEndMs <= TALK_GAP_HOLD_MS;
+}
+
+/** If the posture changed within the last POSTURE_BLEND_SECONDS, the posture
+ * we're leaving and an eased 0..1 progress through the fade; otherwise
+ * undefined. Found by re-resolving posture at earlier instants rather than
+ * remembering the last frame, so it stays a pure function of time -- the live
+ * preview and the seeked export loop agree at any instant. Costs one extra
+ * resolve per frame when posture is steady. */
+function resolvePostureBlend(
+  clip: AvatarOverlayClip,
+  ttsOverlays: TtsOverlay[],
+  sequenceTimeSeconds: number,
+  localElapsed: number,
+  currentPostureActionId: string
+): { previousPostureActionId: string; postureBlend: number } | undefined {
+  if (localElapsed < POSTURE_BLEND_SECONDS) return undefined;
+  const probe = (secondsAgo: number) =>
+    resolvePostureAndMouth(clip, ttsOverlays, sequenceTimeSeconds - secondsAgo, localElapsed - secondsAgo).postureActionId;
+  if (probe(POSTURE_BLEND_SECONDS) === currentPostureActionId) return undefined;
+
+  const stepCount = Math.round(POSTURE_BLEND_SECONDS / POSTURE_BLEND_PROBE_STEP_SECONDS);
+  for (let i = 1; i <= stepCount; i++) {
+    const secondsAgo = i * POSTURE_BLEND_PROBE_STEP_SECONDS;
+    const earlier = probe(secondsAgo);
+    if (earlier === currentPostureActionId) continue;
+    // The change landed somewhere in (secondsAgo - step, secondsAgo]; take the middle.
+    const sinceChange = secondsAgo - POSTURE_BLEND_PROBE_STEP_SECONDS / 2;
+    const t = clamp01(sinceChange / POSTURE_BLEND_SECONDS);
+    return { previousPostureActionId: earlier, postureBlend: t * t * (3 - 2 * t) };
+  }
+  return undefined;
 }
 
 export function resolveAvatarRenderState(
@@ -224,6 +329,11 @@ export function resolveAvatarRenderState(
 
   const localElapsedMs = localElapsed * 1000;
 
+  const prosody =
+    overlappingNarration && clip.autoExpression !== false
+      ? prosodyBeats(overlappingNarration, narrationOffsetMs, topology)
+      : { gaze: [], mood: [] };
+
   const gestureBeats: ResolvedBeat[] = [
     ...(clip.gestureTimeline?.map((beat) => ({ id: beat.gestureId, startMs: beat.startMs, endMs: beat.endMs, source: "persisted" as const })) ?? []),
     ...tagAnchorsToBeats(tagAnchors, "gesture", narrationOffsetMs, topology),
@@ -231,10 +341,12 @@ export function resolveAvatarRenderState(
   const gazeBeats: ResolvedBeat[] = [
     ...(clip.gazeTimeline?.map((beat) => ({ id: beat.gazeId, startMs: beat.startMs, endMs: beat.endMs, source: "persisted" as const })) ?? []),
     ...tagAnchorsToBeats(tagAnchors, "gaze", narrationOffsetMs, topology),
+    ...prosody.gaze,
   ];
   const moodBeats: ResolvedBeat[] = [
     ...(clip.moodTimeline?.map((beat) => ({ id: beat.moodId, startMs: beat.startMs, endMs: beat.endMs, source: "persisted" as const })) ?? []),
     ...tagAnchorsToBeats(tagAnchors, "mood", narrationOffsetMs, topology),
+    ...prosody.mood,
   ];
 
   const activeGesture = findActiveBeat(gestureBeats, localElapsedMs);
@@ -242,11 +354,24 @@ export function resolveAvatarRenderState(
 
   const activation: AvatarLayerActivation = {
     postureActionId,
-    gesture: activeGesture ? { gestureId: activeGesture.id, elapsedSeconds: (localElapsedMs - activeGesture.startMs) / 1000 } : undefined,
-    gaze: activeGaze ? { gazeId: activeGaze.id, elapsedSeconds: (localElapsedMs - activeGaze.startMs) / 1000 } : undefined,
+    ...resolvePostureBlend(clip, ttsOverlays, sequenceTimeSeconds, localElapsed, postureActionId),
+    gesture: activeGesture
+      ? {
+          gestureId: activeGesture.id,
+          elapsedSeconds: (localElapsedMs - activeGesture.startMs) / 1000,
+          remainingSeconds: (activeGesture.endMs - localElapsedMs) / 1000,
+        }
+      : undefined,
+    gaze: activeGaze
+      ? {
+          gazeId: activeGaze.id,
+          elapsedSeconds: (localElapsedMs - activeGaze.startMs) / 1000,
+          remainingSeconds: (activeGaze.endMs - localElapsedMs) / 1000,
+        }
+      : undefined,
   };
 
-  const moodBiasInput = preferTagBeats(moodBeats).map((beat) => ({ moodId: beat.id, startMs: beat.startMs, endMs: beat.endMs }));
+  const moodBiasInput = dropOutrankedBeats(moodBeats).map((beat) => ({ moodId: beat.id, startMs: beat.startMs, endMs: beat.endMs }));
   const moodBias = computeActiveMoodBias(topology.moodPresets, topology.expressionParams, moodBiasInput, localElapsedMs);
   const expressionBias = moodBias ? { ...compiledDesignExpressionBias, ...moodBias } : compiledDesignExpressionBias;
 

@@ -18,7 +18,7 @@
  * textTemplates.ts's TEXT_TEMPLATE_FONT_FRACTIONS/
  * STROKE_WIDTH_FONT_SIZE_FRACTIONS).
  */
-export const BRAND_WATERMARK_TEXT = "Made by Myreels.in";
+export const BRAND_WATERMARK_TEXT = "Myreels.in";
 export const BRAND_WATERMARK_DURATION_SECONDS = 2;
 
 // Fractions of the canvas's own SMALLER dimension (matches this app's fixed

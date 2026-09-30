@@ -22,11 +22,17 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-09-30",
+    title: "Smoother, more expressive avatars",
+    description:
+      "Avatars now ease between poses instead of snapping, and stay in their talking pose through short pauses between words. New reactions: nod, shake head, thumbs up, a surprised look, and a dance. An exclamation mark now perks your avatar up, and a question mark gives a curious head tilt — automatically.",
+    isLatest: true,
+  },
+  {
     date: "2026-09-29",
     title: "See how Myreels.in compares",
     description:
       "New comparison pages on the homepage lay out how Myreels.in stacks up against CapCut and Creatomate — what each is built for, and where Myreels.in's niche-driven scripts, avatar, and free browser rendering fit in.",
-    isLatest: true,
   },
   {
     date: "2026-09-29",

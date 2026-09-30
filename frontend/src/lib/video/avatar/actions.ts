@@ -303,6 +303,11 @@ export function computeAvatarPose(
   return applyExpressionBoneDeltas(topology, posturePose, expressionBias);
 }
 
+/** Per-bone linear blend of two full poses -- `t` 0 is `from`, 1 is `to`. */
+function blendPoses(from: BoneTransform[], to: BoneTransform[], t: number): BoneTransform[] {
+  return to.map((bone, boneIndex) => lerpDelta(from[boneIndex] ?? bone, bone, t));
+}
+
 /** Which gesture/gaze (if any) is layered on top of the posture action right
  * now, plus each one's own elapsedSeconds -- relative to that BEAT's own
  * start, not the clip's global clock, so a `loop: false` gesture/gaze spec
@@ -312,8 +317,26 @@ export function computeAvatarPose(
  * gazeTimeline plus any tag-derived beats. */
 export interface AvatarLayerActivation {
   postureActionId: string;
-  gesture?: { gestureId: string; elapsedSeconds: number };
-  gaze?: { gazeId: string; elapsedSeconds: number };
+  // Set only for the short window right after posture changed: the posture we
+  // are easing away from, and how far through the fade we are (0 = still fully
+  // the old pose, 1 = fully `postureActionId`). Derived from timeline state by
+  // resolveAvatarRenderState, never stored, so preview and export agree.
+  previousPostureActionId?: string;
+  postureBlend?: number;
+  // `remainingSeconds` (time left in the beat) lets the override fade out
+  // before the beat ends instead of snapping back; omitted = no fade-out.
+  gesture?: { gestureId: string; elapsedSeconds: number; remainingSeconds?: number };
+  gaze?: { gazeId: string; elapsedSeconds: number; remainingSeconds?: number };
+}
+
+// Gesture/gaze overrides fade in and out over this long, so they don't pop
+// against the sway the posture layer already has on those bones.
+const OVERRIDE_FADE_SECONDS = 0.1;
+
+function overrideWeight(elapsedSeconds: number, remainingSeconds: number | undefined): number {
+  const fadeIn = Math.min(Math.max(elapsedSeconds / OVERRIDE_FADE_SECONDS, 0), 1);
+  const fadeOut = remainingSeconds === undefined ? 1 : Math.min(Math.max(remainingSeconds / OVERRIDE_FADE_SECONDS, 0), 1);
+  return Math.min(fadeIn, fadeOut);
 }
 
 /** For every bone `overrideSpec` has at least one keyframe for, REPLACES
@@ -323,10 +346,13 @@ export interface AvatarLayerActivation {
  * bones (an additive stack would double-displace an arm the posture layer
  * already moved, e.g. during "walk"), while every bone the override spec
  * doesn't mention is left exactly as the layer underneath produced it. */
-function mergeBoneOverride(base: BoneTransform[], overridePose: BoneTransform[], overrideSpec: ActionCurveSpec): BoneTransform[] {
+function mergeBoneOverride(base: BoneTransform[], overridePose: BoneTransform[], overrideSpec: ActionCurveSpec, weight = 1): BoneTransform[] {
   const overriddenBoneIndices = new Set(overrideSpec.keyframes.map((keyframe) => keyframe.boneIndex));
   if (overriddenBoneIndices.size === 0) return base;
-  return base.map((bone, boneIndex) => (overriddenBoneIndices.has(boneIndex) ? overridePose[boneIndex] : bone));
+  return base.map((bone, boneIndex) => {
+    if (!overriddenBoneIndices.has(boneIndex)) return bone;
+    return weight >= 1 ? overridePose[boneIndex] : lerpDelta(bone, overridePose[boneIndex], weight);
+  });
 }
 
 /**
@@ -350,16 +376,24 @@ export function computeLayeredAvatarPose(
   accessories?: CompiledAccessory[]
 ): BoneTransform[] {
   let pose = computePosturePose(topology, activation.postureActionId, elapsedSeconds, seed);
+  if (activation.previousPostureActionId !== undefined && activation.postureBlend !== undefined && activation.postureBlend < 1) {
+    // The outgoing posture keeps running on the same clock while it fades, so
+    // it doesn't freeze mid-stride as the new one takes over.
+    const previousPose = computePosturePose(topology, activation.previousPostureActionId, elapsedSeconds, seed);
+    pose = blendPoses(previousPose, pose, activation.postureBlend);
+  }
   pose = applyHeldAccessoryPoseBias(pose, accessories);
 
   const gestureSpec = activation.gesture ? topology.gestures?.[activation.gesture.gestureId] : undefined;
   if (gestureSpec && activation.gesture) {
-    pose = mergeBoneOverride(pose, poseFromSpec(topology, gestureSpec, activation.gesture.elapsedSeconds), gestureSpec);
+    const weight = overrideWeight(activation.gesture.elapsedSeconds, activation.gesture.remainingSeconds);
+    pose = mergeBoneOverride(pose, poseFromSpec(topology, gestureSpec, activation.gesture.elapsedSeconds), gestureSpec, weight);
   }
 
   const gazeSpec = activation.gaze ? topology.gazes?.[activation.gaze.gazeId] : undefined;
   if (gazeSpec && activation.gaze) {
-    pose = mergeBoneOverride(pose, poseFromSpec(topology, gazeSpec, activation.gaze.elapsedSeconds), gazeSpec);
+    const weight = overrideWeight(activation.gaze.elapsedSeconds, activation.gaze.remainingSeconds);
+    pose = mergeBoneOverride(pose, poseFromSpec(topology, gazeSpec, activation.gaze.elapsedSeconds), gazeSpec, weight);
   }
 
   return applyExpressionBoneDeltas(topology, pose, expressionBias);

@@ -50,9 +50,10 @@ export type AvatarGestureId =
   | "fistThump"
   | "facepalm"
   | "hitLeft"
-  | "hitRight";
-export type AvatarGazeId = "lookLeft" | "lookRight" | "lookAtCamera" | "lookDown";
-export type AvatarMoodId = "angry" | "happy" | "sad" | "evil" | "calm" | "excited" | "scared" | "laugh";
+  | "hitRight"
+  | "thumbsUp";
+export type AvatarGazeId = "lookLeft" | "lookRight" | "lookAtCamera" | "lookDown" | "nod" | "shakeHead" | "tiltHead";
+export type AvatarMoodId = "angry" | "happy" | "sad" | "evil" | "calm" | "excited" | "scared" | "laugh" | "surprised";
 
 /**
  * A bone's local transform relative to its PARENT bone (or, for the root
