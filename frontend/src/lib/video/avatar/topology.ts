@@ -51,7 +51,9 @@ export type AvatarGestureId =
   | "facepalm"
   | "hitLeft"
   | "hitRight"
-  | "thumbsUp";
+  | "thumbsUp"
+  | "clap"
+  | "jump";
 export type AvatarGazeId = "lookLeft" | "lookRight" | "lookAtCamera" | "lookDown" | "nod" | "shakeHead" | "tiltHead";
 export type AvatarMoodId = "angry" | "happy" | "sad" | "evil" | "calm" | "excited" | "scared" | "laugh" | "surprised";
 

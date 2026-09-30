@@ -390,6 +390,39 @@ const DANCE: ActionCurveSpec = {
   ],
 };
 
+// A one-shot two-armed jump: quick crouch, launch (root lifts, torso stretches),
+// arms thrown up and out at the apex, then landing back at rest. ROOT moves the
+// whole body (legs ride it); compile.ts lets gestures own root+torso for this.
+const JUMP: ActionCurveSpec = {
+  periodSeconds: 1.2,
+  loop: false,
+  keyframes: [
+    { t: 0, boneIndex: ROOT, delta: { y: 0 } },
+    { t: 0.15, boneIndex: ROOT, delta: { y: 8 } },
+    { t: 0.35, boneIndex: ROOT, delta: { y: -32 } },
+    { t: 0.5, boneIndex: ROOT, delta: { y: -32 } },
+    { t: 0.7, boneIndex: ROOT, delta: { y: 0 } },
+    { t: 1, boneIndex: ROOT, delta: { y: 0 } },
+    { t: 0, boneIndex: TORSO, delta: { scaleY: 1 } },
+    { t: 0.15, boneIndex: TORSO, delta: { scaleY: 0.96 } },
+    { t: 0.35, boneIndex: TORSO, delta: { scaleY: 1.03 } },
+    { t: 0.7, boneIndex: TORSO, delta: { scaleY: 1 } },
+    { t: 1, boneIndex: TORSO, delta: { scaleY: 1 } },
+    { t: 0, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0.15, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0.35, boneIndex: ARM_L, delta: { rotation: -2.4 } },
+    { t: 0.55, boneIndex: ARM_L, delta: { rotation: -2.4 } },
+    { t: 0.75, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 1, boneIndex: ARM_L, delta: { rotation: 0 } },
+    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.15, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0.35, boneIndex: ARM_R, delta: { rotation: 2.4 } },
+    { t: 0.55, boneIndex: ARM_R, delta: { rotation: 2.4 } },
+    { t: 0.75, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+  ],
+};
+
 const LOOK_AROUND: ActionCurveSpec = {
   // Unused by this action's own special-cased evaluator (see actions.ts's
   // computeSeededPose) -- kept nonzero only to satisfy ActionCurveSpec's
@@ -486,6 +519,7 @@ const GESTURE_PERIOD_SECONDS = {
   hitLeft: 1.0,
   hitRight: 1.0,
   thumbsUp: 1.4,
+  clap: 1.6,
 } as const;
 
 // A friendly side-to-side hand wave -- armR raises to about shoulder-raised
@@ -652,7 +686,33 @@ const THUMBS_UP: ActionCurveSpec = {
   ],
 };
 
+// Four claps: both arms swing in until the hands meet in front of the body,
+// then back out, opposite signs so they close on each other. Arm bones only
+// (gestures can't drive the forearms), so the meeting point sits around belly
+// height rather than chest height -- an accepted limit of this rig.
+const CLAP_APART = 0.05;
+const CLAP_TOGETHER = 0.5;
+const CLAP_BEATS = [0.15, 0.3, 0.45, 0.6, 0.75, 0.9];
+const CLAP: ActionCurveSpec = {
+  periodSeconds: GESTURE_PERIOD_SECONDS.clap,
+  loop: false,
+  keyframes: [ARM_L, ARM_R].flatMap((bone) => {
+    const sign = bone === ARM_R ? 1 : -1;
+    return [
+      { t: 0, boneIndex: bone, delta: { rotation: 0 } },
+      ...CLAP_BEATS.map((t, i) => ({
+        t,
+        boneIndex: bone,
+        delta: { rotation: sign * (i % 2 === 0 ? CLAP_APART : CLAP_TOGETHER) },
+      })),
+      { t: 1, boneIndex: bone, delta: { rotation: 0 } },
+    ];
+  }),
+};
+
 const GESTURES: AvatarTopology["gestures"] = {
+  clap: CLAP,
+  jump: JUMP,
   thumbsUp: THUMBS_UP,
   wave: WAVE,
   point: POINT,

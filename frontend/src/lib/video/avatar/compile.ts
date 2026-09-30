@@ -225,7 +225,14 @@ function compileTopology(topology: AvatarTopology): CompiledTopology {
   // "fail loudly at the boundary" posture as the parentIndex check above --
   // a gesture that reaches into e.g. the torso bone would silently fight the
   // posture layer for that bone with no visual explanation of why.
-  assertLayerOwnsOnlyItsOwnBones(topology, "gestures", topology.gestures, topology.boneGroups.arms);
+  // Gestures own the arms, plus the torso group (root+torso) for whole-body
+  // beats like "jump" -- a gesture replaces those bones outright while it plays.
+  assertLayerOwnsOnlyItsOwnBones(
+    topology,
+    "gestures",
+    topology.gestures,
+    topology.boneGroups.arms ? [...topology.boneGroups.arms, ...(topology.boneGroups.torso ?? [])] : undefined
+  );
   assertLayerOwnsOnlyItsOwnBones(topology, "gazes", topology.gazes, topology.boneGroups.head);
 
   return {

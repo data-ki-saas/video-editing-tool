@@ -25,7 +25,7 @@ const ENTRIES: ChangelogEntry[] = [
     date: "2026-09-30",
     title: "Smoother, more expressive avatars",
     description:
-      "Avatars now ease between poses instead of snapping, and stay in their talking pose through short pauses between words. New reactions: nod, shake head, thumbs up, a surprised look, and a dance. An exclamation mark now perks your avatar up, and a question mark gives a curious head tilt — automatically.",
+      "Avatars now ease between poses instead of snapping, and stay in their talking pose through short pauses between words. New reactions: nod, shake head, thumbs up, a surprised look, a dance, a clap, and a jump — trigger them with tags like {clap} or {jump} in your script. An exclamation mark now perks your avatar up, and a question mark gives a curious head tilt — automatically.",
     isLatest: true,
   },
   {
