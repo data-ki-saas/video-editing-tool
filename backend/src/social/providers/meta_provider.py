@@ -22,6 +22,8 @@ _SCOPE = "pages_show_list,pages_manage_posts,pages_read_engagement,instagram_bas
 _LONG_LIVED_TOKEN_FALLBACK_SECONDS = 60 * 24 * 3600  # Meta's own long-lived user tokens run ~60 days
 _CONTAINER_POLL_ATTEMPTS = 10
 _CONTAINER_POLL_INTERVAL_SECONDS = 3
+_PAGE_VIDEO_POLL_ATTEMPTS = 24
+_PAGE_VIDEO_POLL_INTERVAL_SECONDS = 5
 
 # NOT verified against a live Meta app/Page/Instagram Business account (none
 # available while wiring this up -- see META_APP_REVIEW.md's prerequisites
@@ -201,21 +203,48 @@ class MetaProvider(SocialProvider):
         # /me/videos, authenticated with the PAGE token, posts to that Page
         # directly -- publish_video's fixed signature (base.py) has no
         # account_id param, so this sidesteps needing the Page's id at all.
+        #
+        # Bytes are uploaded directly (multipart `source`) rather than via
+        # `file_url`: with file_url Facebook fetches the R2 URL itself, and
+        # if that fetch fails it still creates the post with only the text
+        # and no video (observed in practice).
         async with httpx.AsyncClient(timeout=None) as client:
+            source_response = await client.get(video_url)
+            _raise_for_status(source_response)
             response = await client.post(
                 f"{_GRAPH_URL}/me/videos",
                 data={
                     "access_token": page_access_token,
-                    "file_url": video_url,
                     "title": title,
                     "description": description,
                 },
+                files={"source": ("video.mp4", source_response.content, "video/mp4")},
             )
         _raise_for_status(response)
         video_id = response.json().get("id")
         if not video_id:
             raise ValueError(f"Facebook video-publish response had no video id: {response.json()!r}")
+        await self._wait_for_page_video_ready(video_id, page_access_token)
         return await self._permalink(video_id, page_access_token, field="permalink_url")
+
+    async def _wait_for_page_video_ready(self, video_id: str, page_access_token: str) -> None:
+        # /me/videos returns an id before Facebook has processed the video;
+        # a processing failure otherwise leaves a text-only post with no
+        # error on our side. Falling out of the loop while still
+        # "processing" is not a failure -- long videos just take a while.
+        for _ in range(_PAGE_VIDEO_POLL_ATTEMPTS):
+            async with httpx.AsyncClient(timeout=30) as client:
+                status_response = await client.get(
+                    f"{_GRAPH_URL}/{video_id}", params={"fields": "status", "access_token": page_access_token}
+                )
+            _raise_for_status(status_response)
+            status = status_response.json().get("status") or {}
+            video_status = status.get("video_status")
+            if video_status == "ready":
+                return
+            if video_status == "error":
+                raise ValueError(f"Facebook couldn't process this video: {str(status)[:500]}")
+            await asyncio.sleep(_PAGE_VIDEO_POLL_INTERVAL_SECONDS)
 
     async def _publish_to_instagram(self, page_access_token: str, video_url: str, caption: str) -> str:
         ig_account = await self.get_linked_instagram_account(page_access_token)

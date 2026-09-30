@@ -106,7 +106,7 @@ export default function Home() {
               className="group flex flex-col overflow-hidden rounded-lg border border-border transition-colors hover:border-accent"
             >
               <img
-                src="/images/vs-capcut-placeholder.svg"
+                src="/images/vs-capcut.png"
                 alt="Myreels.in vs CapCut"
                 className="aspect-[1200/630] w-full object-cover"
               />
@@ -123,7 +123,7 @@ export default function Home() {
               className="group flex flex-col overflow-hidden rounded-lg border border-border transition-colors hover:border-accent"
             >
               <img
-                src="/images/vs-creatomate-placeholder.svg"
+                src="/images/vs-creatomate.png"
                 alt="Myreels.in vs Creatomate"
                 className="aspect-[1200/630] w-full object-cover"
               />
