@@ -12,11 +12,11 @@ _TOKEN_URL = "https://oauth2.googleapis.com/token"
 _CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
 _UPLOAD_INIT_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 
-# youtube.upload alone already covers the channels.list?mine=true call
-# get_account_info makes (to show which channel got connected) -- requesting
-# a second, narrower scope for that would just mean a second consent
-# screen for no real benefit.
-_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+# youtube.upload does NOT cover the channels.list?mine=true call that
+# get_account_info makes (Google returns 403 ACCESS_TOKEN_SCOPE_INSUFFICIENT),
+# so youtube.readonly is requested alongside it. Both are granted on the same
+# single consent screen.
+_SCOPE = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
 
 # NOT verified against a live Google account (none available while wiring
 # this up) -- same caveat this app's FalVeedProvider already carries for
