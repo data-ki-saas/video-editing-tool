@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { getSocialAccounts, publishSocialPost } from "@/lib/api";
 import { pollSocialPost } from "@/lib/socialPost";
 import { usePermissions } from "@/lib/usePermissions";
-import { UploadIcon } from "@/components/icons/UIIcons";
+import { FacebookIcon, InstagramIcon, YouTubeIcon } from "@/components/icons/UIIcons";
 
 type PostState = "idle" | "posting" | "completed" | "failed";
 type SocialProvider = "youtube" | "meta" | "instagram";
@@ -14,6 +14,8 @@ const PLATFORM_NAME: Record<SocialProvider, string> = {
   meta: "Facebook",
   instagram: "Instagram",
 };
+
+const PLATFORM_ICON = { youtube: YouTubeIcon, meta: FacebookIcon, instagram: InstagramIcon };
 
 /**
  * One-click "Post to <platform>" for an already-saved library video --
@@ -48,6 +50,7 @@ export function PostToSocialButton({
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const platformName = PLATFORM_NAME[provider];
+  const PlatformIcon = PLATFORM_ICON[provider];
 
   useEffect(() => {
     getSocialAccounts()
@@ -118,10 +121,10 @@ export function PostToSocialButton({
         title={error ?? label}
         aria-label={label}
         className={`rounded-full p-1.5 hover:bg-background disabled:opacity-50 ${
-          state === "completed" ? "text-accent" : state === "failed" ? "text-red-600" : "text-muted hover:text-foreground"
+          state === "completed" ? "ring-1 ring-accent" : state === "failed" ? "ring-1 ring-red-600" : ""
         }`}
       >
-        <UploadIcon className="h-4 w-4" />
+        <PlatformIcon className="h-4 w-4" />
       </button>
     );
   }
@@ -134,7 +137,7 @@ export function PostToSocialButton({
         disabled={state === "posting"}
         className="flex w-full items-center justify-center gap-1.5 rounded-md border border-border py-1.5 text-sm font-medium text-foreground hover:bg-background disabled:opacity-50"
       >
-        <UploadIcon className="h-4 w-4" />
+        <PlatformIcon className="h-4 w-4" />
         {label}
       </button>
       {error && <p className="text-xs text-red-600">{error}</p>}
