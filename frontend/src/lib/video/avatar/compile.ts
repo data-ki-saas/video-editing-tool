@@ -227,11 +227,15 @@ function compileTopology(topology: AvatarTopology): CompiledTopology {
   // posture layer for that bone with no visual explanation of why.
   // Gestures own the arms, plus the torso group (root+torso) for whole-body
   // beats like "jump" -- a gesture replaces those bones outright while it plays.
+  // Elbow/wrist bones (boneGroups.armJoints) are allowed too, for gestures
+  // that fold the forearm/hand (facepalm).
   assertLayerOwnsOnlyItsOwnBones(
     topology,
     "gestures",
     topology.gestures,
-    topology.boneGroups.arms ? [...topology.boneGroups.arms, ...(topology.boneGroups.torso ?? [])] : undefined
+    topology.boneGroups.arms
+      ? [...topology.boneGroups.arms, ...(topology.boneGroups.armJoints ?? []), ...(topology.boneGroups.torso ?? [])]
+      : undefined
   );
   assertLayerOwnsOnlyItsOwnBones(topology, "gazes", topology.gazes, topology.boneGroups.head);
 

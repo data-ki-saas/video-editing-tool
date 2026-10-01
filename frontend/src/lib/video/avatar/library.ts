@@ -134,6 +134,11 @@ const BONE_GROUPS: Record<string, number[]> = {
   torso: [ROOT, TORSO],
   limbs: [ARM_L, ARM_R, LEG_L, LEG_R],
   arms: [ARM_L, ARM_R],
+  // Elbow + wrist bones a gesture may also keyframe (facepalm/jump fold the
+  // forearm and hand, not just the shoulder). Kept apart from "arms" so
+  // boneScaleOverrides on "arms" doesn't compound down the chain, and so
+  // renderer.ts's raised-arm defer (which walks up to "arms") is unchanged.
+  armJoints: [FOREARM_L, FOREARM_R, HAND_L, HAND_R],
   head: [HEAD],
 };
 
