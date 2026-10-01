@@ -55,6 +55,12 @@ export default function AdminUsersPage() {
     }
   }
 
+  useEffect(() => {
+    // Show everyone on open (backend caps at 50); Search just narrows it.
+    runSearch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function handleRoleChange(user: AdminUserInfo, newRole: string) {
     setSavingUserId(user.id);
     setError(null);
@@ -109,7 +115,7 @@ export default function AdminUsersPage() {
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {users === null ? (
-        <p className="text-sm text-muted">Search for a user by email to change their role.</p>
+        <p className="text-sm text-muted">Loading users…</p>
       ) : users.length === 0 ? (
         <p className="text-sm text-muted">No users found.</p>
       ) : (
