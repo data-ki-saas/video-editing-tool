@@ -22,11 +22,17 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-10-01",
+    title: "Meet Aria and Pappu, two new avatars",
+    description:
+      "Two new ready-made avatars join Maya: Aria, with fuller long hair, expressive eyes with lashes and shaped lips, and Pappu, with short styled hair, a stronger jaw and heavier brows. Both blink, talk and react just like Maya, and now break into a real smile when the mood is happy — pick them from the avatar gallery.",
+    isLatest: true,
+  },
+  {
     date: "2026-09-30",
     title: "Smoother, more expressive avatars",
     description:
       "Avatars now ease between poses instead of snapping, and stay in their talking pose through short pauses between words. New reactions: nod, shake head, thumbs up, a surprised look, a dance, a clap, and a jump — trigger them with tags like {clap} or {jump} in your script. An exclamation mark now perks your avatar up, and a question mark gives a curious head tilt — automatically.",
-    isLatest: true,
   },
   {
     date: "2026-09-29",

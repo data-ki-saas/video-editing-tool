@@ -30,6 +30,11 @@ const MOUTH_OPEN_RECT: AtlasRect = { sx: MOUTH_CLOSED_RECT.sx, sy: MOUTH_CLOSED_
 // picked by word-driven lip-sync itself. Same size as the talk shapes so it
 // shares their pivot without any special-casing in renderer.ts.
 const MOUTH_LAUGH_RECT: AtlasRect = { sx: MOUTH_CLOSED_RECT.sx, sy: MOUTH_OPEN_RECT.sy + MOUTH_OPEN_RECT.sHeight + GAP, sWidth: 50, sHeight: 28 };
+// A fourth mouth shape -- the mood-driven resting "smile" (library.ts's
+// MOOD_REST_MOUTH_SHAPES), a closed-lip grin used while a happy mood is
+// active and the word-driven mouth would otherwise be "closed". Ends at
+// y=144, still above ROW2_Y (156), so it doesn't shift the layout.
+const MOUTH_SMILE_RECT: AtlasRect = { sx: MOUTH_CLOSED_RECT.sx, sy: MOUTH_LAUGH_RECT.sy + MOUTH_LAUGH_RECT.sHeight + GAP, sWidth: 50, sHeight: 28 };
 
 // A fourth column, to the right of the mouth-shape column -- the 4 curated
 // mood-driven eyebrow shapes (see skin.ts's AvatarSkinExpressionShape and
@@ -226,6 +231,25 @@ export interface PlaceholderAtlasPalette {
   pantsColor: string;
   mouthColor: string;
   hairColor?: string;
+  /** Opt-in richer face art (oval face with a tapered chin, long hair with a
+   * side-swept fringe, almond eyes with irises/lashes, shaped lips, blush,
+   * nose hint). Absent = the original flat-circle look, pixel-identical, so
+   * Maya (and any other existing caller) is untouched. Geometry is held to
+   * the classic face's own anchor points (chin at head-rect y=128, eyes/brows/
+   * mouth centered on the same rect centers and x offsets) so library.ts's
+   * shared part pivots keep working unchanged. */
+  faceStyle?: "detailed";
+  /** Detailed-style only -- masculine variant: squarer jaw with a flat chin,
+   * ears, short hair (quiff + sideburns) instead of long hair, heavier brows,
+   * thinner lips, no blush/lash flick/lip gloss. Same anchor points as the
+   * default detailed face, so it rides the same pivots. */
+  masculine?: boolean;
+  /** Detailed + masculine only -- light shadow over the lower face. */
+  stubble?: boolean;
+  /** Detailed-style only -- iris, lip, and eyebrow colors. */
+  eyeColor?: string;
+  lipColor?: string;
+  browColor?: string;
 }
 
 const DEFAULT_PALETTE: PlaceholderAtlasPalette = {
@@ -525,7 +549,192 @@ function drawTorsoTrimSuit(ctx: CanvasRenderingContext2D, rect: AtlasRect, color
   for (let i = 0; i < 2; i++) drawTrimButton(ctx, cx, topY + 56 + i * 22, color);
 }
 
+/** Detailed-style head: long hair behind, a tapered-chin oval face, blush, a
+ * nose hint, then a side-swept fringe over the forehead. The chin lands at
+ * rect.sy+128 exactly like the classic circle (pivot/neck alignment depend on
+ * it). The two side locks stop short of the chin line and are NOT joined
+ * under it, so they never paint a band over the neck patch behind the head. */
+function drawHeadDetailed(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  const cx = rect.sx + rect.sWidth / 2;
+  const sy = rect.sy;
+  const hair = palette.hairColor ?? "#241a14";
+
+  // Back hair: dome plus a lock down each side.
+  ctx.fillStyle = hair;
+  ctx.strokeStyle = OUTLINE_COLOR;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(cx, sy + 62, 66, 60, 0, 0, Math.PI * 2);
+  ctx.fill();
+  for (const sign of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + sign * 62, sy + 50);
+    ctx.bezierCurveTo(cx + sign * 69, sy + 90, cx + sign * 69, sy + 118, cx + sign * 54, sy + 135);
+    ctx.quadraticCurveTo(cx + sign * 44, sy + 130, cx + sign * 41, sy + 106);
+    ctx.lineTo(cx + sign * 46, sy + 60);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Face.
+  ctx.beginPath();
+  ctx.moveTo(cx, sy + 16);
+  ctx.bezierCurveTo(cx + 50, sy + 16, cx + 50, sy + 70, cx + 30, sy + 112);
+  ctx.quadraticCurveTo(cx + 18, sy + 128, cx, sy + 128);
+  ctx.quadraticCurveTo(cx - 18, sy + 128, cx - 30, sy + 112);
+  ctx.bezierCurveTo(cx - 50, sy + 70, cx - 50, sy + 16, cx, sy + 16);
+  ctx.closePath();
+  ctx.fillStyle = palette.skinTone;
+  ctx.fill();
+  ctx.stroke();
+
+  // Blush.
+  ctx.fillStyle = "rgba(224,90,100,0.2)";
+  for (const sign of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(cx + sign * 28, sy + 92, 10, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Nose: a soft shadow stroke down one side plus a tiny tip curve.
+  ctx.lineCap = "round";
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(120,60,40,0.35)";
+  ctx.beginPath();
+  ctx.moveTo(cx + 1, sy + 68);
+  ctx.quadraticCurveTo(cx - 4, sy + 80, cx - 1, sy + 83);
+  ctx.quadraticCurveTo(cx + 2, sy + 85, cx + 5, sy + 83);
+  ctx.stroke();
+
+  // Side-swept fringe, hairline curving from the right temple up to a part
+  // and sweeping down across the left forehead. Kept above the brow row
+  // (brow centers sit at rect.sy+48) so the eyebrow part never fights it.
+  ctx.fillStyle = hair;
+  ctx.strokeStyle = OUTLINE_COLOR;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 54, sy + 76);
+  ctx.bezierCurveTo(cx - 68, sy + 2, cx + 50, sy - 6, cx + 54, sy + 62);
+  ctx.lineTo(cx + 46, sy + 64);
+  ctx.bezierCurveTo(cx + 40, sy + 36, cx + 22, sy + 24, cx + 8, sy + 24);
+  ctx.bezierCurveTo(cx - 8, sy + 36, cx - 32, sy + 34, cx - 46, sy + 74);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Strand sheen.
+  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.lineWidth = 2;
+  for (const [x0, y0, x1, y1, x2, y2] of [
+    [-30, 20, -14, 10, 10, 12],
+    [-40, 34, -24, 20, -4, 18],
+    [-54, 30, -50, 12, -30, 6],
+    [20, 14, 36, 14, 48, 30],
+    [-60, 70, -64, 96, -56, 118],
+    [60, 70, 64, 96, 56, 118],
+  ]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + x0, sy + y0);
+    ctx.quadraticCurveTo(cx + x1, sy + y1, cx + x2, sy + y2);
+    ctx.stroke();
+  }
+}
+
+/** Masculine detailed head: ears, a squarer jaw ending in a flat chin at
+ * rect.sy+128 (same chin line as every other head), optional stubble, nose,
+ * and short hair -- a quiffed top with sideburns -- instead of long locks. */
+function drawHeadMasculine(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  const cx = rect.sx + rect.sWidth / 2;
+  const sy = rect.sy;
+  const hair = palette.hairColor ?? "#1f1612";
+  ctx.strokeStyle = OUTLINE_COLOR;
+  ctx.lineWidth = 2;
+
+  // Ears first, so the face and hair overlap their inner edge.
+  ctx.fillStyle = palette.skinTone;
+  for (const sign of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(cx + sign * 51, sy + 68, 6, 11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Face: broad cranium, straight cheek-to-jaw line, flat chin.
+  const face = new Path2D();
+  face.moveTo(cx, sy + 14);
+  face.bezierCurveTo(cx + 52, sy + 14, cx + 52, sy + 72, cx + 46, sy + 98);
+  face.quadraticCurveTo(cx + 42, sy + 116, cx + 26, sy + 126);
+  face.lineTo(cx + 20, sy + 128);
+  face.lineTo(cx - 20, sy + 128);
+  face.lineTo(cx - 26, sy + 126);
+  face.quadraticCurveTo(cx - 42, sy + 116, cx - 46, sy + 98);
+  face.bezierCurveTo(cx - 52, sy + 72, cx - 52, sy + 14, cx, sy + 14);
+  face.closePath();
+  ctx.fillStyle = palette.skinTone;
+  ctx.fill(face);
+  ctx.stroke(face);
+
+  if (palette.stubble) {
+    ctx.save();
+    ctx.clip(face);
+    ctx.fillStyle = "rgba(35,22,16,0.17)";
+    ctx.fillRect(cx - 56, sy + 84, 112, 50);
+    ctx.restore();
+  }
+
+  // Nose: shadow stroke plus a slightly broader tip than the feminine face.
+  ctx.lineCap = "round";
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(100,50,35,0.4)";
+  ctx.beginPath();
+  ctx.moveTo(cx + 2, sy + 66);
+  ctx.quadraticCurveTo(cx - 5, sy + 80, cx - 3, sy + 84);
+  ctx.quadraticCurveTo(cx + 1, sy + 87, cx + 6, sy + 84);
+  ctx.stroke();
+
+  // Short hair: a cap from sideburn to sideburn plus a quiff on top.
+  ctx.fillStyle = hair;
+  ctx.strokeStyle = OUTLINE_COLOR;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - 52, sy + 74);
+  // Control points sit well above the face's own crown (sy+14) so the cap's
+  // outer edge peaks near sy+4 and clears the face outline on both sides --
+  // with a shallower arc a band of bare scalp showed above the hair.
+  ctx.bezierCurveTo(cx - 66, sy - 19, cx + 66, sy - 19, cx + 52, sy + 74);
+  ctx.lineTo(cx + 47, sy + 74);
+  ctx.lineTo(cx + 46, sy + 52);
+  ctx.bezierCurveTo(cx + 40, sy + 36, cx + 18, sy + 30, cx + 2, sy + 30);
+  ctx.bezierCurveTo(cx - 16, sy + 30, cx - 38, sy + 36, cx - 46, sy + 52);
+  ctx.lineTo(cx - 47, sy + 74);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(cx + 6, sy + 13, 44, 12, -0.08, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.lineWidth = 2;
+  for (const [x0, y0, x1, y1, x2, y2] of [
+    [-34, 22, -14, 6, 14, 8],
+    [-8, 20, 14, 8, 40, 20],
+    [-46, 44, -42, 30, -28, 24],
+  ]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + x0, sy + y0);
+    ctx.quadraticCurveTo(cx + x1, sy + y1, cx + x2, sy + y2);
+    ctx.stroke();
+  }
+}
+
 function drawHead(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  if (palette.faceStyle === "detailed") {
+    if (palette.masculine) drawHeadMasculine(ctx, rect, palette);
+    else drawHeadDetailed(ctx, rect, palette);
+    return;
+  }
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
   const radius = rect.sWidth / 2 - 12;
@@ -566,7 +775,76 @@ function drawHead(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: Place
 const EYE_DOT_OFFSET_X = 20;
 const EYE_DOT_RADIUS = 7;
 
-function drawEyesOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+const LASH_COLOR = "#1a1210";
+
+/** Detailed almond eye: white, iris, pupil, catchlight, a thick upper lash
+ * line with an outward flick. Half-width 8 (flick to 9.5) keeps the outer
+ * corner inside the 60px-wide eyes rect at the shared +-20 offset. */
+function drawEyesOpenDetailed(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  const centerX = rect.sx + rect.sWidth / 2;
+  const cy = rect.sy + rect.sHeight / 2;
+  for (const sign of [-1, 1]) {
+    const mx = centerX + sign * EYE_DOT_OFFSET_X;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(mx - 8, cy + 1);
+    ctx.quadraticCurveTo(mx, cy - 8, mx + 8, cy + 1);
+    ctx.quadraticCurveTo(mx, cy + 6, mx - 8, cy + 1);
+    ctx.closePath();
+    ctx.fillStyle = "#fbf7f3";
+    ctx.fill();
+    ctx.clip();
+    ctx.beginPath();
+    ctx.arc(mx, cy - 0.5, 5.2, 0, Math.PI * 2);
+    ctx.fillStyle = palette.eyeColor ?? "#5b3a29";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(mx, cy - 0.5, 2.4, 0, Math.PI * 2);
+    ctx.fillStyle = "#111";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(mx + 1.8, cy - 2.4, 1.3, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff";
+    ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = LASH_COLOR;
+    ctx.lineWidth = palette.masculine ? 1.8 : 2.2;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(mx - sign * 8, cy + 1);
+    ctx.quadraticCurveTo(mx, cy - 8, mx + sign * 8, cy + 1);
+    if (!palette.masculine) ctx.lineTo(mx + sign * 9.5, cy - 2.5);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(60,30,20,0.35)";
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(mx - 7, cy + 2);
+    ctx.quadraticCurveTo(mx, cy + 6.5, mx + 7, cy + 2);
+    ctx.stroke();
+  }
+}
+
+function drawEyesClosedDetailed(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  const centerX = rect.sx + rect.sWidth / 2;
+  const cy = rect.sy + rect.sHeight / 2;
+  ctx.strokeStyle = LASH_COLOR;
+  ctx.lineWidth = palette.masculine ? 1.8 : 2.2;
+  ctx.lineCap = "round";
+  for (const sign of [-1, 1]) {
+    const mx = centerX + sign * EYE_DOT_OFFSET_X;
+    ctx.beginPath();
+    ctx.moveTo(mx - sign * 8, cy);
+    ctx.quadraticCurveTo(mx, cy + 5, mx + sign * 8, cy);
+    if (!palette.masculine) ctx.lineTo(mx + sign * 9.5, cy + 2.5);
+    ctx.stroke();
+  }
+}
+
+function drawEyesOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  if (palette.faceStyle === "detailed") {
+    drawEyesOpenDetailed(ctx, rect, palette);
+    return;
+  }
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
   for (const sign of [-1, 1]) {
@@ -577,7 +855,11 @@ function drawEyesOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
   }
 }
 
-function drawEyesClosed(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+function drawEyesClosed(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  if (palette.faceStyle === "detailed") {
+    drawEyesClosedDetailed(ctx, rect, palette);
+    return;
+  }
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
   ctx.strokeStyle = EYE_COLOR;
@@ -602,14 +884,17 @@ function drawEyesClosed(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
  * Mirrors the same `for (const sign of [-1, 1])` convention drawHead's own
  * (baked) eye dots already use, so left/right symmetry is never hand-typed
  * twice. */
-function drawEyebrowPair(ctx: CanvasRenderingContext2D, rect: AtlasRect, innerY: number, outerY: number, midY: number): void {
+function drawEyebrowPair(ctx: CanvasRenderingContext2D, rect: AtlasRect, innerY: number, outerY: number, midY: number, palette: PlaceholderAtlasPalette): void {
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
-  const browSpan = 18; // half-width of one eyebrow stroke
+  const detailed = palette.faceStyle === "detailed";
+  // Detailed brows are shorter and finer (arched, feminine) than the classic
+  // heavy bars, and take their own color.
+  const browSpan = detailed ? (palette.masculine ? 15 : 14) : 18; // half-width of one eyebrow stroke
   const browOffsetX = 20; // distance from center to each eyebrow's own midpoint -- matches EYES_RECT's own eye spacing
   ctx.lineCap = "round";
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = EYEBROW_COLOR;
+  ctx.lineWidth = detailed ? (palette.masculine ? 3.8 : 2.4) : 3;
+  ctx.strokeStyle = detailed ? palette.browColor ?? palette.hairColor ?? EYEBROW_COLOR : EYEBROW_COLOR;
   for (const sign of [-1, 1]) {
     const midX = centerX + sign * browOffsetX;
     const innerX = midX - sign * browSpan; // nearer the nose bridge
@@ -621,26 +906,177 @@ function drawEyebrowPair(ctx: CanvasRenderingContext2D, rect: AtlasRect, innerY:
   }
 }
 
-function drawEyebrowsNeutral(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
-  drawEyebrowPair(ctx, rect, 0, 0, -1);
+function drawEyebrowsNeutral(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  drawEyebrowPair(ctx, rect, 0, 0, -1, palette);
 }
 
-function drawEyebrowsAngry(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+function drawEyebrowsAngry(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
   // Inner corners pulled down and together, outer ends raised -- furrowed.
-  drawEyebrowPair(ctx, rect, 4, -4, 1);
+  drawEyebrowPair(ctx, rect, 4, -4, 1, palette);
 }
 
-function drawEyebrowsHappy(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+function drawEyebrowsHappy(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
   // A gentle upward arch across the whole brow -- raised/open look.
-  drawEyebrowPair(ctx, rect, 1, 1, -5);
+  drawEyebrowPair(ctx, rect, 1, 1, -5, palette);
 }
 
-function drawEyebrowsSad(ctx: CanvasRenderingContext2D, rect: AtlasRect): void {
+function drawEyebrowsSad(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
   // Opposite of angry -- inner corners raised, outer ends drooping.
-  drawEyebrowPair(ctx, rect, -4, 4, -1);
+  drawEyebrowPair(ctx, rect, -4, 4, -1, palette);
+}
+
+const MOUTH_CAVITY_COLOR = "#4a1620";
+const TONGUE_COLOR = "#c4566a";
+
+/** Detailed closed mouth: cupid's-bow upper lip over a fuller lower lip, a
+ * darker lip line, corners a hair upturned, and a small gloss highlight. */
+function drawMouthClosedDetailed(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  const cx = rect.sx + rect.sWidth / 2;
+  const cy = rect.sy + rect.sHeight / 2;
+  const lip = palette.lipColor ?? palette.mouthColor;
+  const masc = !!palette.masculine;
+  const bow = masc ? 4.5 : 7;
+  const bottom = masc ? 7 : 10;
+  const lips = new Path2D();
+  lips.moveTo(cx - 14, cy - 1);
+  lips.quadraticCurveTo(cx - 7, cy - bow, cx, cy - bow / 2);
+  lips.quadraticCurveTo(cx + 7, cy - bow, cx + 14, cy - 1);
+  lips.quadraticCurveTo(cx, cy + bottom, cx - 14, cy - 1);
+  lips.closePath();
+  ctx.fillStyle = lip;
+  ctx.fill(lips);
+  // Seam clipped to the lips so it never pokes past the red at the corners.
+  ctx.save();
+  ctx.clip(lips);
+  ctx.strokeStyle = "rgba(60,15,25,0.55)";
+  ctx.lineWidth = 1.4;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(cx - 14, cy - 1);
+  ctx.quadraticCurveTo(cx, cy + 2.5, cx + 14, cy - 1);
+  ctx.stroke();
+  ctx.restore();
+  if (masc) return; // no gloss highlight on the masculine mouth
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 4.2, 4.5, 1.3, 0, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.28)";
+  ctx.fill();
+}
+
+/** Shared by the detailed open + laugh mouths: shaped outer lips, dark
+ * cavity, upper teeth band, tongue -- differing only in size. */
+function drawMouthOpenDetailed(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette, halfW: number, lift: number, drop: number, cavityRx: number, cavityRy: number): void {
+  const cx = rect.sx + rect.sWidth / 2;
+  const cy = rect.sy + rect.sHeight / 2;
+  const lip = palette.lipColor ?? palette.mouthColor;
+  ctx.beginPath();
+  ctx.moveTo(cx - halfW, cy - 1);
+  ctx.quadraticCurveTo(cx - halfW / 2, cy - lift, cx, cy - lift * 0.65);
+  ctx.quadraticCurveTo(cx + halfW / 2, cy - lift, cx + halfW, cy - 1);
+  ctx.quadraticCurveTo(cx, cy + drop, cx - halfW, cy - 1);
+  ctx.closePath();
+  ctx.fillStyle = lip;
+  ctx.fill();
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 1.5, cavityRx, cavityRy, 0, 0, Math.PI * 2);
+  ctx.fillStyle = MOUTH_CAVITY_COLOR;
+  ctx.fill();
+  ctx.clip();
+  ctx.beginPath();
+  ctx.ellipse(cx, cy - cavityRy * 0.55, cavityRx * 0.8, cavityRy * 0.45, 0, 0, Math.PI * 2);
+  ctx.fillStyle = TEETH_COLOR;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + cavityRy * 0.9, cavityRx * 0.6, cavityRy * 0.45, 0, 0, Math.PI * 2);
+  ctx.fillStyle = TONGUE_COLOR;
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Detailed laugh: a D-shaped smile rather than a big round open mouth. Lip
+ * corners sit HIGH (cy-6, lifted toward the ears), the upper lip is a shallow dip, the lower lip a deep
+ * curve, so the cavity reads as a crescent grin. Upper teeth fill the top of
+ * the cavity; the tongue sits at the bottom. Stays inside the 50x28 rect
+ * (corners +-19, lowest lip edge ~cy+10). */
+function drawMouthLaughDetailed(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  const cx = rect.sx + rect.sWidth / 2;
+  const cy = rect.sy + rect.sHeight / 2;
+  const lip = palette.lipColor ?? palette.mouthColor;
+
+  ctx.beginPath();
+  ctx.moveTo(cx - 19, cy - 6);
+  ctx.quadraticCurveTo(cx, cy + 1, cx + 19, cy - 6);
+  ctx.quadraticCurveTo(cx, cy + 26, cx - 19, cy - 6);
+  ctx.closePath();
+  ctx.fillStyle = lip;
+  ctx.fill();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(cx - 15, cy - 5);
+  ctx.quadraticCurveTo(cx, cy + 3, cx + 15, cy - 5);
+  ctx.quadraticCurveTo(cx, cy + 21, cx - 15, cy - 5);
+  ctx.closePath();
+  ctx.fillStyle = MOUTH_CAVITY_COLOR;
+  ctx.fill();
+  ctx.clip();
+  ctx.fillStyle = TEETH_COLOR;
+  ctx.fillRect(cx - 16, cy - 7, 32, 9.5);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 8, 7, 3.5, 0, 0, Math.PI * 2);
+  ctx.fillStyle = TONGUE_COLOR;
+  ctx.fill();
+  ctx.restore();
+
+}
+
+/** Resting smile: a closed-lip grin stretched wider than the neutral mouth
+ * (corners at +-18 vs +-14) with the corners lifted toward the ears. No
+ * crease strokes past the corners: they ran out of the lips toward the cheek
+ * blush. Classic style is just a thick curved stroke. */
+function drawMouthSmile(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  const cx = rect.sx + rect.sWidth / 2;
+  const cy = rect.sy + rect.sHeight / 2;
+  ctx.lineCap = "round";
+  if (palette.faceStyle !== "detailed") {
+    ctx.strokeStyle = palette.mouthColor;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(cx - 18, cy - 3);
+    ctx.quadraticCurveTo(cx, cy + 8, cx + 18, cy - 3);
+    ctx.stroke();
+    return;
+  }
+  const masc = !!palette.masculine;
+  const bow = masc ? 4 : 6;
+  const bottom = masc ? 8 : 11;
+  const lips = new Path2D();
+  lips.moveTo(cx - 18, cy - 4);
+  lips.quadraticCurveTo(cx - 8, cy - 4 - bow, cx, cy - 3 - bow / 2);
+  lips.quadraticCurveTo(cx + 8, cy - 4 - bow, cx + 18, cy - 4);
+  lips.quadraticCurveTo(cx, cy + bottom, cx - 18, cy - 4);
+  lips.closePath();
+  ctx.fillStyle = palette.lipColor ?? palette.mouthColor;
+  ctx.fill(lips);
+  // The lip seam is clipped to the lip shape: the lips taper to points at the
+  // corners, so an unclipped round-capped stroke poked out past the red.
+  ctx.save();
+  ctx.clip(lips);
+  ctx.strokeStyle = "rgba(60,15,25,0.55)";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(cx - 18, cy - 4);
+  ctx.quadraticCurveTo(cx, cy + 3, cx + 18, cy - 4);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawMouthClosed(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  if (palette.faceStyle === "detailed") {
+    drawMouthClosedDetailed(ctx, rect, palette);
+    return;
+  }
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
   ctx.beginPath();
@@ -650,6 +1086,10 @@ function drawMouthClosed(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette
 }
 
 function drawMouthOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  if (palette.faceStyle === "detailed") {
+    drawMouthOpenDetailed(ctx, rect, palette, 13, 9, 12, 8.5, 6);
+    return;
+  }
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
   ctx.beginPath();
@@ -668,6 +1108,10 @@ function drawMouthOpen(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: 
  * its own teeth ellipse, so both avatar paths agree on where a "toothy"
  * mouth's teeth actually sit. */
 function drawMouthLaugh(ctx: CanvasRenderingContext2D, rect: AtlasRect, palette: PlaceholderAtlasPalette): void {
+  if (palette.faceStyle === "detailed") {
+    drawMouthLaughDetailed(ctx, rect, palette);
+    return;
+  }
   const centerX = rect.sx + rect.sWidth / 2;
   const centerY = rect.sy + rect.sHeight / 2;
 
@@ -725,6 +1169,7 @@ export function buildPlaceholderAtlas(
     closed: MOUTH_CLOSED_RECT,
     open: MOUTH_OPEN_RECT,
     laughOpen: MOUTH_LAUGH_RECT,
+    smile: MOUTH_SMILE_RECT,
     // The "eyebrows" slot's own base rect is "neutral" -- see
     // EXPRESSION_SHAPES's own doc comment in library.ts for why that's a
     // deliberate choice, not an arbitrary default.
@@ -808,12 +1253,13 @@ export function buildPlaceholderAtlas(
   drawMouthClosed(ctx, MOUTH_CLOSED_RECT, palette);
   drawMouthOpen(ctx, MOUTH_OPEN_RECT, palette);
   drawMouthLaugh(ctx, MOUTH_LAUGH_RECT, palette);
-  drawEyebrowsNeutral(ctx, EYEBROWS_NEUTRAL_RECT);
-  drawEyebrowsAngry(ctx, EYEBROWS_ANGRY_RECT);
-  drawEyebrowsHappy(ctx, EYEBROWS_HAPPY_RECT);
-  drawEyebrowsSad(ctx, EYEBROWS_SAD_RECT);
-  drawEyesOpen(ctx, EYES_OPEN_RECT);
-  drawEyesClosed(ctx, EYES_CLOSED_RECT);
+  drawMouthSmile(ctx, MOUTH_SMILE_RECT, palette);
+  drawEyebrowsNeutral(ctx, EYEBROWS_NEUTRAL_RECT, palette);
+  drawEyebrowsAngry(ctx, EYEBROWS_ANGRY_RECT, palette);
+  drawEyebrowsHappy(ctx, EYEBROWS_HAPPY_RECT, palette);
+  drawEyebrowsSad(ctx, EYEBROWS_SAD_RECT, palette);
+  drawEyesOpen(ctx, EYES_OPEN_RECT, palette);
+  drawEyesClosed(ctx, EYES_CLOSED_RECT, palette);
   drawTorsoBody(ctx, TORSO_RECT, palette);
   drawRoundedRect(ctx, ARM_L_RECT.sx + 4, ARM_L_RECT.sy + 4, ARM_L_RECT.sWidth - 8, ARM_L_RECT.sHeight - 8, 14, palette.skinTone);
   drawRoundedRect(ctx, ARM_R_RECT.sx + 4, ARM_R_RECT.sy + 4, ARM_R_RECT.sWidth - 8, ARM_R_RECT.sHeight - 8, 14, palette.skinTone);

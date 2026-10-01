@@ -903,6 +903,14 @@ const MOOD_MOUTH_SHAPES: AvatarTopology["moodMouthShapeIds"] = {
   laugh: "laughOpen",
 };
 
+// Moods that also give the RESTING (closed) mouth a smile -- see
+// AvatarTopology.moodRestMouthShapeIds for why this is separate from
+// MOOD_MOUTH_SHAPES (an open, talking mouth is never overridden).
+const MOOD_REST_MOUTH_SHAPES: AvatarTopology["moodRestMouthShapeIds"] = {
+  happy: "smile",
+  excited: "smile",
+};
+
 // Gesture-driven hand pose -- which of the "handL"/"handR" parts' own
 // EXPRESSION_SHAPES (below) should be active while a given gesture's beat is
 // playing. Every gesture NOT listed here leaves both hands at their own base
@@ -965,6 +973,7 @@ export const BIPED_SIMPLE_TOPOLOGY: AvatarTopology = {
   moodPresets: MOOD_PRESETS,
   moodExpressionShapes: MOOD_EXPRESSION_SHAPES,
   moodMouthShapeIds: MOOD_MOUTH_SHAPES,
+  moodRestMouthShapeIds: MOOD_REST_MOUTH_SHAPES,
   gestureHandPoseShapeIds: GESTURE_HAND_POSE_SHAPES,
 };
 
@@ -972,6 +981,7 @@ const MOUTH_SHAPES: AvatarSkinMouthShape[] = [
   { shapeId: "closed", partId: "mouth" },
   { shapeId: "open", partId: "mouth" },
   { shapeId: "laughOpen", partId: "mouth" },
+  { shapeId: "smile", partId: "mouth" },
 ];
 
 // Mood-driven eyebrow shapes (see MOOD_EXPRESSION_SHAPES above) -- "neutral"
@@ -1187,11 +1197,57 @@ const SEED_MAYA_DESIGN: AvatarDesign = {
   meta: { name: "Maya" },
 };
 
-/** The whole seed Avatar library -- one hand-authored entry, riding
+// "Aria" -- the first character built with placeholderAtlas.ts's opt-in
+// `faceStyle: "detailed"` (oval face, long voluminous hair, almond eyes with
+// lashes, shaped lips). Palette was tuned in frontend/scripts/face-workbench.mjs
+// and pasted here. Maya stays first, so she remains the default.
+const ARIA_SKIN = buildSeedSkin("placeholder-aria", {
+  faceStyle: "detailed",
+  skinTone: "#e0a981",
+  hairColor: "#3b1f14",
+  eyeColor: "#4f6f52",
+  lipColor: "#b8465a",
+  browColor: "#2e1a12",
+  shirtColor: "#2f7f86",
+  pantsColor: "#22344a",
+});
+
+const SEED_ARIA_DESIGN: AvatarDesign = {
+  schemaVersion: 1,
+  designId: "seed-aria-1",
+  skinId: ARIA_SKIN.skinId,
+  meta: { name: "Aria" },
+};
+
+// "Pappu" -- the masculine variant of the detailed face style (squarer jaw,
+// ears, short quiffed hair, heavier brows, thinner lips). Palette is the
+// workbench's masculine default; turn `stubble: true` on for a shadowed jaw.
+const PAPPU_SKIN = buildSeedSkin("placeholder-pappu", {
+  faceStyle: "detailed",
+  masculine: true,
+  skinTone: "#c99468",
+  hairColor: "#1f1612",
+  eyeColor: "#4a3426",
+  lipColor: "#a8605a",
+  browColor: "#1f1612",
+  shirtColor: "#3f5f8a",
+  pantsColor: "#22344a",
+});
+
+const SEED_PAPPU_DESIGN: AvatarDesign = {
+  schemaVersion: 1,
+  designId: "seed-pappu-1",
+  skinId: PAPPU_SKIN.skinId,
+  meta: { name: "Pappu" },
+};
+
+/** The whole seed Avatar library -- hand-authored entries riding
  * `biped-simple` (see this file's own doc comment on how growing the library
  * mostly means adding entries here, not new topology/engine code). */
 export const AVATAR_LIBRARY: AvatarLibraryEntry[] = [
   { design: SEED_MAYA_DESIGN, skin: MAYA_SKIN, topology: BIPED_SIMPLE_TOPOLOGY },
+  { design: SEED_ARIA_DESIGN, skin: ARIA_SKIN, topology: BIPED_SIMPLE_TOPOLOGY },
+  { design: SEED_PAPPU_DESIGN, skin: PAPPU_SKIN, topology: BIPED_SIMPLE_TOPOLOGY },
 ];
 
 /** Looks up a library entry by its Design's own id -- the same id an

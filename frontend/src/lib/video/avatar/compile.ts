@@ -79,6 +79,10 @@ export interface CompiledTopology {
   // "laugh" -> "laughOpen"). Absent for any topology declaring no mood-driven
   // mouth override at all.
   moodMouthShapeIds?: Record<string, string>;
+  // Carried straight through from AvatarTopology -- the mood->mouth override
+  // that applies only while the word-driven mouth is "closed" (e.g. happy ->
+  // "smile"). See AvatarTopology.moodRestMouthShapeIds.
+  moodRestMouthShapeIds?: Record<string, string>;
   // Carried straight through from AvatarTopology, consumed by
   // resolveAvatarRenderState.ts's gesture->hand-pose-shape resolution. Absent
   // for any topology declaring no gesture-driven hand pose at all.
@@ -254,6 +258,7 @@ function compileTopology(topology: AvatarTopology): CompiledTopology {
     moodPresets: topology.moodPresets,
     moodExpressionShapes: topology.moodExpressionShapes,
     moodMouthShapeIds: topology.moodMouthShapeIds,
+    moodRestMouthShapeIds: topology.moodRestMouthShapeIds,
     gestureHandPoseShapeIds: topology.gestureHandPoseShapeIds,
     armBoneIndices: topology.boneGroups.arms,
   };

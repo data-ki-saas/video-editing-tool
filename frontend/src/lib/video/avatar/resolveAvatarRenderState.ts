@@ -397,5 +397,10 @@ export function resolveAvatarRenderState(
   // resolvePostureAndMouth computed it, so lip-sync is unaffected.
   const moodMouthShapeId = activeMoodBeat ? topology.moodMouthShapeIds?.[activeMoodBeat.moodId] : undefined;
 
-  return { activation, mouthShapeId: moodMouthShapeId ?? mouthShapeId, expressionBias, expressionShapeIds, handPoseShapeIds };
+  // A mood's RESTING mouth (e.g. happy -> "smile") only replaces a mouth that
+  // lip-sync already computed as "closed", so an open (talking) mouth is never
+  // overridden and narration timing stays fully in charge while speaking.
+  const moodRestMouthShapeId = activeMoodBeat && mouthShapeId === "closed" ? topology.moodRestMouthShapeIds?.[activeMoodBeat.moodId] : undefined;
+
+  return { activation, mouthShapeId: moodMouthShapeId ?? moodRestMouthShapeId ?? mouthShapeId, expressionBias, expressionShapeIds, handPoseShapeIds };
 }

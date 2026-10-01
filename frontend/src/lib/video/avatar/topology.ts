@@ -335,6 +335,14 @@ export interface AvatarTopology {
   // untouched, still fully driven by narration word timing as before.
   moodMouthShapeIds?: Partial<Record<AvatarMoodId, string>>;
 
+  // Mood-driven RESTING mouth -- moodId -> a mouthShapes shapeId used only
+  // while the word-driven mouth would otherwise be "closed" (silence, or the
+  // closed half of a lip-sync flap). Unlike moodMouthShapeIds above, an open
+  // mouth is never touched, so lip-sync keeps working through the whole mood
+  // beat; this just makes a happy face smile when it isn't mid-word. A skin
+  // that doesn't define the shape falls back to its base (closed) mouth.
+  moodRestMouthShapeIds?: Partial<Record<AvatarMoodId, string>>;
+
   // Gesture-driven discrete HAND pose shape -- gestureId -> a partial map of
   // skin.ts's expressionShapes partIds ("handL"/"handR") to the shapeId that
   // gesture should show for that hand, while its beat is active. Same
