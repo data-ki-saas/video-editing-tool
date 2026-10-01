@@ -698,26 +698,29 @@ const HIT_LEFT: ActionCurveSpec = {
 // finger bone to curl, and an open hand over the mouth reads fine here.
 // renderer.ts defers the forearm/hand to draw over the head even though the
 // upper arm itself never passes its raised threshold here.
-const FACEPALM_ARM = -0.16;
-const FACEPALM_FOREARM = 2.44;
-const FACEPALM_HAND = 0.38;
+// The upper arm hangs near-vertical so the forearm (folded nearly straight up,
+// slightly inward) carries the hand up over the chin and lips; the hold is
+// long (0.25-0.8 of the period) so the hand visibly rests there a moment.
+const FACEPALM_ARM = 0.2;
+const FACEPALM_FOREARM = 2.39;
+const FACEPALM_HAND = 0.1;
+const FACEPALM_HOLD_START = 0.25;
+const FACEPALM_HOLD_END = 0.8;
 const FACEPALM: ActionCurveSpec = {
   periodSeconds: GESTURE_PERIOD_SECONDS.facepalm,
   loop: false,
-  keyframes: [
-    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
-    { t: 0.3, boneIndex: ARM_R, delta: { rotation: FACEPALM_ARM } },
-    { t: 0.75, boneIndex: ARM_R, delta: { rotation: FACEPALM_ARM } },
-    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
-    { t: 0, boneIndex: FOREARM_R, delta: { rotation: 0 } },
-    { t: 0.3, boneIndex: FOREARM_R, delta: { rotation: FACEPALM_FOREARM } },
-    { t: 0.75, boneIndex: FOREARM_R, delta: { rotation: FACEPALM_FOREARM } },
-    { t: 1, boneIndex: FOREARM_R, delta: { rotation: 0 } },
-    { t: 0, boneIndex: HAND_R, delta: { rotation: 0 } },
-    { t: 0.3, boneIndex: HAND_R, delta: { rotation: FACEPALM_HAND } },
-    { t: 0.75, boneIndex: HAND_R, delta: { rotation: FACEPALM_HAND } },
-    { t: 1, boneIndex: HAND_R, delta: { rotation: 0 } },
-  ],
+  keyframes: (
+    [
+      [ARM_R, FACEPALM_ARM],
+      [FOREARM_R, FACEPALM_FOREARM],
+      [HAND_R, FACEPALM_HAND],
+    ] as const
+  ).flatMap(([boneIndex, rotation]) => [
+    { t: 0, boneIndex, delta: { rotation: 0 } },
+    { t: FACEPALM_HOLD_START, boneIndex, delta: { rotation } },
+    { t: FACEPALM_HOLD_END, boneIndex, delta: { rotation } },
+    { t: 1, boneIndex, delta: { rotation: 0 } },
+  ]),
 };
 
 // A raised fist held up at about shoulder height for a "great / approved" beat
