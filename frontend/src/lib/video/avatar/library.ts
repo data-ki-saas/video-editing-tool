@@ -604,21 +604,38 @@ const SHRUG: ActionCurveSpec = {
   ],
 };
 
-// A big "ta-da"/welcoming spread -- both arms swing wide and up, opposite
-// signs so they open outward rather than both sweeping the same way.
+// A welcoming hug: the shoulders open the upper arms out to the sides (about
+// halfway between hanging and horizontal -- NOT raised up), then the elbows
+// fold the forearms back in toward the chest so the hands end up in front of
+// the torso without crossing over it. (armR positive / armL negative swings
+// INWARD across the body, so the spread uses the opposite signs.)
+const HUG_ARM = 0.8;
+const HUG_FOREARM = 2.7;
+const HUG_HAND = 0.2;
 const OPEN_ARMS: ActionCurveSpec = {
   periodSeconds: GESTURE_PERIOD_SECONDS.openArms,
   loop: false,
-  keyframes: [
-    { t: 0, boneIndex: ARM_L, delta: { rotation: 0 } },
-    { t: 0.3, boneIndex: ARM_L, delta: { rotation: -2.4 } },
-    { t: 0.7, boneIndex: ARM_L, delta: { rotation: -2.4 } },
-    { t: 1, boneIndex: ARM_L, delta: { rotation: 0 } },
-    { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
-    { t: 0.3, boneIndex: ARM_R, delta: { rotation: 2.4 } },
-    { t: 0.7, boneIndex: ARM_R, delta: { rotation: 2.4 } },
-    { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
-  ],
+  keyframes: [ARM_L, ARM_R].flatMap((arm) => {
+    // armR spreads with a negative rotation, armL the mirror positive one;
+    // the forearm/hand fold the opposite way from their own arm's spread.
+    const side = arm === ARM_R ? -1 : 1;
+    const forearm = arm === ARM_R ? FOREARM_R : FOREARM_L;
+    const hand = arm === ARM_R ? HAND_R : HAND_L;
+    return [
+      { t: 0, boneIndex: arm, delta: { rotation: 0 } },
+      { t: 0.3, boneIndex: arm, delta: { rotation: side * HUG_ARM } },
+      { t: 0.7, boneIndex: arm, delta: { rotation: side * HUG_ARM } },
+      { t: 1, boneIndex: arm, delta: { rotation: 0 } },
+      { t: 0, boneIndex: forearm, delta: { rotation: 0 } },
+      { t: 0.3, boneIndex: forearm, delta: { rotation: -side * HUG_FOREARM } },
+      { t: 0.7, boneIndex: forearm, delta: { rotation: -side * HUG_FOREARM } },
+      { t: 1, boneIndex: forearm, delta: { rotation: 0 } },
+      { t: 0, boneIndex: hand, delta: { rotation: 0 } },
+      { t: 0.3, boneIndex: hand, delta: { rotation: -side * HUG_HAND } },
+      { t: 0.7, boneIndex: hand, delta: { rotation: -side * HUG_HAND } },
+      { t: 1, boneIndex: hand, delta: { rotation: 0 } },
+    ];
+  }),
 };
 
 // A quick, sharp forward punch-like beat -- fast up, brief hold, fast back,
