@@ -77,21 +77,25 @@ export function AvatarThumbnailCanvas({ avatarId, className }: { avatarId: strin
           drawHeight
         );
 
-        const mouthPart = compiled.skin.mouthShapes.closed ?? compiled.skin.parts.find((part) => part.partId === "mouth");
-        if (mouthPart && mouthPart.boneIndex === headPart.boneIndex) {
-          const mouthRect = mouthPart.atlasRect;
-          const mouthDestX = destX + (headPart.pivotX - mouthPart.pivotX) * scale;
-          const mouthDestY = destY + (headPart.pivotY - mouthPart.pivotY) * scale;
+        // Eyes/eyebrows are their own rig parts (not baked into the head
+        // rect), so draw them the same pivot-offset way as the mouth. Parts
+        // are zOrder-sorted, so iterating in order keeps the same layering
+        // drawAvatar uses. The mouth swaps in its static "closed" shape.
+        for (const part of compiled.skin.parts) {
+          if (part.partId !== "eyes" && part.partId !== "eyebrows" && part.partId !== "mouth") continue;
+          if (part.boneIndex !== headPart.boneIndex) continue;
+          const drawPart = part.partId === "mouth" ? (compiled.skin.mouthShapes.closed ?? part) : part;
+          const rect = drawPart.atlasRect;
           ctx.drawImage(
             compiled.skin.atlasImage,
-            mouthRect.sx,
-            mouthRect.sy,
-            mouthRect.sWidth,
-            mouthRect.sHeight,
-            mouthDestX,
-            mouthDestY,
-            mouthRect.sWidth * scale,
-            mouthRect.sHeight * scale
+            rect.sx,
+            rect.sy,
+            rect.sWidth,
+            rect.sHeight,
+            destX + (headPart.pivotX - drawPart.pivotX) * scale,
+            destY + (headPart.pivotY - drawPart.pivotY) * scale,
+            rect.sWidth * scale,
+            rect.sHeight * scale
           );
         }
       })
