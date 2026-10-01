@@ -393,6 +393,7 @@ const DANCE: ActionCurveSpec = {
 // A one-shot two-armed jump: quick crouch, launch (root lifts, torso stretches),
 // arms thrown up and out at the apex, then landing back at rest. ROOT moves the
 // whole body (legs ride it); compile.ts lets gestures own root+torso for this.
+const JUMP_ARM_SPREAD = 2.4;
 const JUMP: ActionCurveSpec = {
   periodSeconds: 1.2,
   loop: false,
@@ -408,18 +409,29 @@ const JUMP: ActionCurveSpec = {
     { t: 0.35, boneIndex: TORSO, delta: { scaleY: 1.03 } },
     { t: 0.7, boneIndex: TORSO, delta: { scaleY: 1 } },
     { t: 1, boneIndex: TORSO, delta: { scaleY: 1 } },
+    // Arms spread OUTWARD and up into a "V" (armL +, armR -: positive armR
+    // rotation swings inward across the body), with the forearm straightened a
+    // little from its rest fold so the hands reach up rather than curl in.
     { t: 0, boneIndex: ARM_L, delta: { rotation: 0 } },
-    { t: 0.15, boneIndex: ARM_L, delta: { rotation: 0 } },
-    { t: 0.35, boneIndex: ARM_L, delta: { rotation: -2.4 } },
-    { t: 0.55, boneIndex: ARM_L, delta: { rotation: -2.4 } },
+    { t: 0.15, boneIndex: ARM_L, delta: { rotation: 0.1 } },
+    { t: 0.35, boneIndex: ARM_L, delta: { rotation: JUMP_ARM_SPREAD } },
+    { t: 0.55, boneIndex: ARM_L, delta: { rotation: JUMP_ARM_SPREAD } },
     { t: 0.75, boneIndex: ARM_L, delta: { rotation: 0 } },
     { t: 1, boneIndex: ARM_L, delta: { rotation: 0 } },
     { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
-    { t: 0.15, boneIndex: ARM_R, delta: { rotation: 0 } },
-    { t: 0.35, boneIndex: ARM_R, delta: { rotation: 2.4 } },
-    { t: 0.55, boneIndex: ARM_R, delta: { rotation: 2.4 } },
+    { t: 0.15, boneIndex: ARM_R, delta: { rotation: -0.1 } },
+    { t: 0.35, boneIndex: ARM_R, delta: { rotation: -JUMP_ARM_SPREAD } },
+    { t: 0.55, boneIndex: ARM_R, delta: { rotation: -JUMP_ARM_SPREAD } },
     { t: 0.75, boneIndex: ARM_R, delta: { rotation: 0 } },
     { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0, boneIndex: FOREARM_L, delta: { rotation: 0 } },
+    { t: 0.35, boneIndex: FOREARM_L, delta: { rotation: 0.3 } },
+    { t: 0.55, boneIndex: FOREARM_L, delta: { rotation: 0.3 } },
+    { t: 0.75, boneIndex: FOREARM_L, delta: { rotation: 0 } },
+    { t: 0, boneIndex: FOREARM_R, delta: { rotation: 0 } },
+    { t: 0.35, boneIndex: FOREARM_R, delta: { rotation: -0.3 } },
+    { t: 0.55, boneIndex: FOREARM_R, delta: { rotation: -0.3 } },
+    { t: 0.75, boneIndex: FOREARM_R, delta: { rotation: 0 } },
   ],
 };
 
@@ -655,20 +667,32 @@ const HIT_LEFT: ActionCurveSpec = {
   ],
 };
 
-// armR raises nearly all the way up and in, toward the face -- handR (see
-// GESTURE_HAND_POSE_SHAPES) is deliberately left at its default open-palm
-// pose rather than given its own "facepalm" shape: there's no separate
-// finger bone to curl against the face, so a plain open hand at the end of
-// a fully raised arm already reads as "hand at the face" well enough at this
-// simple 2D fidelity.
+// A sharp elbow fold that lands the hand over the mouth/chin: armR lifts the
+// elbow up and out beside the cheek, forearmR folds hard back toward the
+// face, and handR bends so the open palm lies across the lips. (The earlier
+// arm-only version swung one straight limb up past the head, so the hand
+// just swept across the face instead of resting on it.) handR keeps its
+// default open-palm shape (see GESTURE_HAND_POSE_SHAPES) -- there's no
+// finger bone to curl, and an open hand over the mouth reads fine here.
+const FACEPALM_ARM = 3.9;
+const FACEPALM_FOREARM = -2.95;
+const FACEPALM_HAND = 0.9;
 const FACEPALM: ActionCurveSpec = {
   periodSeconds: GESTURE_PERIOD_SECONDS.facepalm,
   loop: false,
   keyframes: [
     { t: 0, boneIndex: ARM_R, delta: { rotation: 0 } },
-    { t: 0.3, boneIndex: ARM_R, delta: { rotation: 2.9 } },
-    { t: 0.75, boneIndex: ARM_R, delta: { rotation: 2.9 } },
+    { t: 0.3, boneIndex: ARM_R, delta: { rotation: FACEPALM_ARM } },
+    { t: 0.75, boneIndex: ARM_R, delta: { rotation: FACEPALM_ARM } },
     { t: 1, boneIndex: ARM_R, delta: { rotation: 0 } },
+    { t: 0, boneIndex: FOREARM_R, delta: { rotation: 0 } },
+    { t: 0.3, boneIndex: FOREARM_R, delta: { rotation: FACEPALM_FOREARM } },
+    { t: 0.75, boneIndex: FOREARM_R, delta: { rotation: FACEPALM_FOREARM } },
+    { t: 1, boneIndex: FOREARM_R, delta: { rotation: 0 } },
+    { t: 0, boneIndex: HAND_R, delta: { rotation: 0 } },
+    { t: 0.3, boneIndex: HAND_R, delta: { rotation: FACEPALM_HAND } },
+    { t: 0.75, boneIndex: HAND_R, delta: { rotation: FACEPALM_HAND } },
+    { t: 1, boneIndex: HAND_R, delta: { rotation: 0 } },
   ],
 };
 
