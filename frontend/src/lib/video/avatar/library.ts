@@ -689,16 +689,18 @@ const HIT_LEFT: ActionCurveSpec = {
   ],
 };
 
-// A sharp elbow fold that lands the hand over the mouth/chin: armR lifts the
-// elbow up and out beside the cheek, forearmR folds hard back toward the
-// face, and handR bends so the open palm lies across the lips. (The earlier
-// arm-only version swung one straight limb up past the head, so the hand
-// just swept across the face instead of resting on it.) handR keeps its
-// default open-palm shape (see GESTURE_HAND_POSE_SHAPES) -- there's no
+// A sharp elbow fold that lands the hand over the mouth/chin: armR stays low
+// with the elbow dropped slightly out and down, forearmR folds hard up toward
+// the face, and handR tilts a touch so the open palm lies across the lips.
+// (The earlier arm-only version swung one straight limb up past the head, so
+// the hand just swept across the face instead of resting on it.) handR keeps
+// its default open-palm shape (see GESTURE_HAND_POSE_SHAPES) -- there's no
 // finger bone to curl, and an open hand over the mouth reads fine here.
-const FACEPALM_ARM = 3.9;
-const FACEPALM_FOREARM = -2.95;
-const FACEPALM_HAND = 0.9;
+// renderer.ts defers the forearm/hand to draw over the head even though the
+// upper arm itself never passes its raised threshold here.
+const FACEPALM_ARM = -0.16;
+const FACEPALM_FOREARM = 2.44;
+const FACEPALM_HAND = 0.38;
 const FACEPALM: ActionCurveSpec = {
   periodSeconds: GESTURE_PERIOD_SECONDS.facepalm,
   loop: false,

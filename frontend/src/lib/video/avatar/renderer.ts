@@ -190,7 +190,17 @@ export function drawAvatar(
     while (rotationBoneIndex !== -1 && !armBoneIndices.has(rotationBoneIndex)) {
       rotationBoneIndex = topology.parentIndex[rotationBoneIndex];
     }
-    if (rotationBoneIndex !== -1 && Math.abs(pose[rotationBoneIndex].rotation) > ARM_RAISED_ROTATION_THRESHOLD_RADIANS) {
+    // A gesture can also fold the forearm/hand up to the face while the upper
+    // arm itself stays low (facepalm: elbow down, hand up), so a forearm/hand
+    // bone past the threshold on its own counts as raised too.
+    let raised = false;
+    if (rotationBoneIndex !== -1) {
+      raised = Math.abs(pose[rotationBoneIndex].rotation) > ARM_RAISED_ROTATION_THRESHOLD_RADIANS;
+      for (let b = part.boneIndex; !raised && b !== rotationBoneIndex; b = topology.parentIndex[b]) {
+        raised = Math.abs(pose[b].rotation) > ARM_RAISED_ROTATION_THRESHOLD_RADIANS;
+      }
+    }
+    if (raised) {
       deferredRaisedArmParts.push(part);
       continue;
     }
