@@ -28,6 +28,7 @@ import {
 } from "@/lib/video/video_math";
 import { getFilterPresetOption } from "@/lib/video/filterPresets";
 import { MattingProgressBadge } from "./MattingProgressBadge";
+import { useCrossOriginImageSrc } from "@/lib/useCrossOriginImageSrc";
 
 const SNAP_THRESHOLD_PX = 8;
 
@@ -87,6 +88,9 @@ function ImageOverlaySegment({
   onDelete: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  // Never a plain <img src={thumbnailUrl}> -- see useCrossOriginImageSrc's own
+  // comment for why that poisons the cache against CanvasPlayer's CORS fetch.
+  const thumbnailSrc = useCrossOriginImageSrc(thumbnailUrl);
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
 
   // Where a click landed, as a time within THIS overlay's own
@@ -224,10 +228,10 @@ function ImageOverlaySegment({
       className={`absolute top-0 flex h-5 cursor-grab items-center gap-1 overflow-hidden rounded-sm border px-1 ${LAYOUT_COLOR_CLASSNAMES[overlay.layout.type]}`}
       style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
     >
-      {thumbnailUrl && (
-        // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset
+      {thumbnailSrc && (
+        // eslint-disable-next-line @next/next/no-img-element -- a same-origin blob: URL, not a Next-optimizable static asset
         <img
-          src={thumbnailUrl}
+          src={thumbnailSrc}
           alt=""
           className="z-10 h-3 w-3 shrink-0 rounded-sm object-cover"
           style={{ filter: getFilterPresetOption(overlay.colorFilterId ?? null).cssFilter }}

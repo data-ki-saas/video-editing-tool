@@ -59,6 +59,7 @@ import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { getFilterPresetOption, type FilterPresetId } from "@/lib/video/filterPresets";
 import { computeFlipSegments, ttsOverlayEndTimeSeconds, formatTimeRange, describeOverlayLayout } from "@/lib/video/video_math";
 import type { Asset } from "@/lib/api";
+import { useCrossOriginImageSrc } from "@/lib/useCrossOriginImageSrc";
 import type { EditSelectionsSnapshot } from "@/lib/projects";
 import type {
   AvatarAction,
@@ -563,6 +564,9 @@ export function ActionArea({
   onOpenCoverPicker: () => void;
   coverThumbnailUrl: string | null;
 }) {
+  // Never a plain <img src={selectedAsset.url}> -- see useCrossOriginImageSrc's
+  // own comment for why that poisons the cache against CanvasPlayer's CORS fetch.
+  const selectedImageSrc = useCrossOriginImageSrc(selectedAsset?.kind === "image" ? selectedAsset.url : null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
   const [isLibraryDialogOpen, setIsLibraryDialogOpen] = useState(false);
@@ -685,10 +689,10 @@ export function ActionArea({
             style={{ aspectRatio: `${playAreaRatio} / 1` }}
           >
             {selectedAsset?.kind === "image" ? (
-              // eslint-disable-next-line @next/next/no-img-element -- a short-lived presigned URL, not a Next-optimizable static asset
+              // eslint-disable-next-line @next/next/no-img-element -- a same-origin blob: URL, not a Next-optimizable static asset
               <img
                 key={selectedAsset.id}
-                src={selectedAsset.url}
+                src={selectedImageSrc ?? undefined}
                 alt={selectedAsset.filename}
                 className="h-full w-full object-contain"
               />

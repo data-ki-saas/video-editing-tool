@@ -102,6 +102,7 @@
 import { memo, useMemo, useRef, useState } from "react";
 import { CropRectOverlay } from "./CropRectOverlay";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
+import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
 import { TextOverlayCanvas } from "./TextOverlayCanvas";
 import { ZoomEffectsTrack } from "./ZoomEffectsTrack";
 import { FlipTrack } from "./FlipTrack";
@@ -756,6 +757,16 @@ export function FrameStrip({
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
 
+  // FrameTile's image-overlay <img>s must never load the presigned asset URL
+  // directly -- see useCrossOriginImageSrcMap's own comment for why that
+  // poisons the cache against CanvasPlayer's later CORS-mode fetch of the
+  // same URL. Resolved once here (not per tile) and handed down as a
+  // same-origin blob: URL map.
+  const imageOverlayAssetIds = Array.from(new Set(overlayImages.map((overlay) => overlay.assetId)));
+  const imageOverlaySrcById = useCrossOriginImageSrcMap(
+    imageOverlayAssetIds.filter((id) => assetUrlById[id]).map((id) => ({ id, url: assetUrlById[id] }))
+  );
+
   // Post-add duration drag on an image clip's own boundary marker (the
   // popup that adds the clip sets its INITIAL duration; this is how it
   // stays adjustable afterward, on the main timeline, per the driving
@@ -1370,7 +1381,7 @@ export function FrameStrip({
               flipHorizontal={tileFlips[index].flipHorizontal}
               flipVertical={tileFlips[index].flipVertical}
               isTrimmed={tileIsTrimmed[index]}
-              assetUrlById={assetUrlById}
+              assetUrlById={imageOverlaySrcById}
               textOverlays={tileTextOverlays[index]}
               imageOverlayPips={tileImageOverlayPips[index]}
               videoOverlayPips={tileVideoOverlayPips[index]}
