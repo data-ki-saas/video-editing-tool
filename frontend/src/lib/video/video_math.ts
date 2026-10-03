@@ -1148,6 +1148,9 @@ export interface TtsOverlay {
   // displayMode === "background", and as the karaoke text's base look too.
   // Always set (defaults to the first TEXT_TEMPLATE_OPTIONS entry).
   templateId: string;
+  // Karaoke text size multiplier (0.5..2, absent = 1) -- karaoke is always a
+  // single line; this scales its font. See textTemplates.ts's drawKaraokeCaption.
+  karaokeFontScale?: number;
   // 0..1, default 1 -- see CanvasPlayer.tsx's own per-overlay gain node.
   volume: number;
   // Script tags (avatar/tags.ts's parseScriptTags/resolveTagAnchorsToTimings)

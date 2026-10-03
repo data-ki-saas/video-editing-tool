@@ -1642,7 +1642,7 @@ export const CanvasPlayer = forwardRef<
       };
       if (overlay.displayMode === "none") continue; // audio-only narration -- nothing drawn
       if (overlay.displayMode === "karaoke") {
-        drawKaraokeCaption(ctx, rectPx, overlay.wordTimings, (elapsedSeconds - overlay.startTimeSeconds) * 1000, overlay.templateId);
+        drawKaraokeCaption(ctx, rectPx, overlay.wordTimings, (elapsedSeconds - overlay.startTimeSeconds) * 1000, overlay.templateId, overlay.karaokeFontScale);
         continue;
       }
       const renderer = getTextTemplateRenderer(overlay.templateId);

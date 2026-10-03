@@ -456,14 +456,11 @@ export function getTextTemplateRenderer(templateId: string): TextTemplateRendere
   return (TEXT_TEMPLATE_RENDERERS as Record<string, TextTemplateRenderer>)[templateId];
 }
 
-// How many words of context to show on each side of the currently-spoken
-// word -- a sliding window rather than laying out the WHOLE narration and
-// shrinking the font to fit (what this used to do), which for anything
-// longer than a sentence produced a wall of tiny, hard-to-read text. Keeps
-// the caption at a stable, glanceable size the way real karaoke/subtitle
-// UIs do.
-const KARAOKE_WORDS_BEFORE = 3;
-const KARAOKE_WORDS_AFTER = 3;
+// Karaoke shows a single line: as many words around the active one as fit
+// the rect's width at the chosen size (see drawKaraokeCaption), never a
+// wrapped multi-line block. Size is tuned by TtsOverlay.karaokeFontScale.
+export const KARAOKE_FONT_SCALE_MIN = 0.5;
+export const KARAOKE_FONT_SCALE_MAX = 2;
 
 /** Which word the window should be centered on at `relativeMs` -- the exact
  * active word when one is currently speaking, or (during a pause between
@@ -513,65 +510,84 @@ export function drawKaraokeCaption(
   rectPx: { x: number; y: number; width: number; height: number },
   words: TtsWordTiming[],
   relativeMs: number,
-  templateId: string
+  templateId: string,
+  fontScale = 1
 ) {
   if (words.length === 0) return;
   const { activeIndex, centerIndex } = resolveKaraokeCenterIndex(words, relativeMs);
-  const windowStart = Math.max(0, centerIndex - KARAOKE_WORDS_BEFORE);
-  const windowEnd = Math.min(words.length - 1, centerIndex + KARAOKE_WORDS_AFTER);
-  const windowWords = words.slice(windowStart, windowEnd + 1);
-  const localActiveIndex = activeIndex === -1 ? -1 : activeIndex - windowStart;
 
   const fontSpec = (size: number) => `bold ${size}px sans-serif`;
-  const fullText = windowWords.map((w) => w.word).join(" ");
-  const baseFontSize = fontSizeFor(rectPx, getTextTemplateFontFraction(templateId));
-  const layout = fitTextToRect(ctx, fullText, rectPx.width, rectPx.height, baseFontSize, fontSpec);
+  const scale = Math.min(Math.max(fontScale, KARAOKE_FONT_SCALE_MIN), KARAOKE_FONT_SCALE_MAX);
+  const lineHeightFor = (size: number) => size * LINE_HEIGHT_MULTIPLIER;
+  // One line must fit the rect's height too.
+  let fontSize = Math.min(fontSizeFor(rectPx, getTextTemplateFontFraction(templateId)) * scale, rectPx.height / LINE_HEIGHT_MULTIPLIER);
 
   ctx.save();
-  ctx.font = fontSpec(layout.fontSize);
+  ctx.font = fontSpec(fontSize);
+  // The active word alone must fit the width (pill padding included).
+  const centerWidth = ctx.measureText(words[centerIndex].word).width;
+  if (centerWidth > rectPx.width * 0.9) {
+    fontSize = Math.max(MIN_FONT_SIZE_PX, (fontSize * rectPx.width * 0.9) / centerWidth);
+    ctx.font = fontSpec(fontSize);
+  }
+  const spacing = ctx.measureText(" ").width;
+  const widthOf = (i: number) => ctx.measureText(words[i].word).width;
+
+  // Grow the window around the center word, alternating after/before, while
+  // the whole line still fits.
+  let windowStart = centerIndex;
+  let windowEnd = centerIndex;
+  let lineWidth = widthOf(centerIndex);
+  const maxWidth = rectPx.width * 0.95;
+  for (;;) {
+    let grew = false;
+    if (windowEnd + 1 < words.length) {
+      const next = lineWidth + spacing + widthOf(windowEnd + 1);
+      if (next <= maxWidth) {
+        windowEnd += 1;
+        lineWidth = next;
+        grew = true;
+      }
+    }
+    if (windowStart - 1 >= 0) {
+      const next = lineWidth + spacing + widthOf(windowStart - 1);
+      if (next <= maxWidth) {
+        windowStart -= 1;
+        lineWidth = next;
+        grew = true;
+      }
+    }
+    if (!grew) break;
+  }
+
+  const lineHeightPx = lineHeightFor(fontSize);
+  const y = rectPx.y + rectPx.height / 2;
+  let x = rectPx.x + rectPx.width / 2 - lineWidth / 2;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const spacing = ctx.measureText(" ").width;
 
-  const totalHeight = layout.lineWords.length * layout.lineHeightPx;
-  const startY = rectPx.y + rectPx.height / 2 - totalHeight / 2 + layout.lineHeightPx / 2;
-
-  let globalWordIndex = 0;
-  layout.lineWords.forEach((lineWords, lineIndex) => {
-    const wordWidths = lineWords.map((word) => ctx.measureText(word).width);
-    const lineWidth = wordWidths.reduce((sum, w) => sum + w, 0) + spacing * (lineWords.length - 1);
-    let x = rectPx.x + rectPx.width / 2 - lineWidth / 2;
-    const y = startY + lineIndex * layout.lineHeightPx;
-
-    lineWords.forEach((word, wordIndexInLine) => {
-      const isActive = globalWordIndex === localActiveIndex;
-      const centerX = x + wordWidths[wordIndexInLine] / 2;
-      if (isActive) {
-        const paddingX = layout.fontSize * 0.15;
-        ctx.save();
-        ctx.fillStyle = "#facc15";
-        ctx.beginPath();
-        ctx.roundRect(
-          x - paddingX,
-          y - layout.lineHeightPx / 2 + 1,
-          wordWidths[wordIndexInLine] + paddingX * 2,
-          layout.lineHeightPx - 2,
-          layout.lineHeightPx * 0.2
-        );
-        ctx.fill();
-        ctx.fillStyle = "#1c1917";
-        ctx.fillText(word, centerX, y);
-        ctx.restore();
-      } else {
-        ctx.lineWidth = layout.fontSize * 0.1;
-        ctx.strokeStyle = "black";
-        ctx.fillStyle = "white";
-        ctx.strokeText(word, centerX, y);
-        ctx.fillText(word, centerX, y);
-      }
-      x += wordWidths[wordIndexInLine] + spacing;
-      globalWordIndex += 1;
-    });
-  });
+  for (let i = windowStart; i <= windowEnd; i += 1) {
+    const word = words[i].word;
+    const wordWidth = widthOf(i);
+    const centerX = x + wordWidth / 2;
+    if (i === activeIndex) {
+      const paddingX = fontSize * 0.15;
+      ctx.save();
+      ctx.fillStyle = "#facc15";
+      ctx.beginPath();
+      ctx.roundRect(x - paddingX, y - lineHeightPx / 2 + 1, wordWidth + paddingX * 2, lineHeightPx - 2, lineHeightPx * 0.2);
+      ctx.fill();
+      ctx.fillStyle = "#1c1917";
+      ctx.fillText(word, centerX, y);
+      ctx.restore();
+    } else {
+      ctx.lineWidth = fontSize * 0.1;
+      ctx.strokeStyle = "black";
+      ctx.fillStyle = "white";
+      ctx.strokeText(word, centerX, y);
+      ctx.fillText(word, centerX, y);
+    }
+    x += wordWidth + spacing;
+  }
   ctx.restore();
 }

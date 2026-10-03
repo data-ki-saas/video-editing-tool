@@ -23,10 +23,16 @@ interface ChangelogEntry {
 const ENTRIES: ChangelogEntry[] = [
   {
     date: "2026-10-03",
+    title: "Karaoke captions on a single line",
+    description:
+      "Karaoke captions now show one clean line of words around the one being spoken instead of a wrapped block, and a new Text size slider in the narration dialog lets you make them bigger or smaller.",
+    isLatest: true,
+  },
+  {
+    date: "2026-10-03",
     title: "See what you use, and a monthly bill",
     description:
       "Your Usage page now shows the charges so far this month, and a new Monthly billing page lists everything you used — voiceovers, background removal, avatars and AI assistance — with the price each was charged at. Browse previous months any time.",
-    isLatest: true,
   },
   {
     date: "2026-10-03",

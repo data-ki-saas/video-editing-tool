@@ -38,7 +38,7 @@
  * again the moment the script is edited away from what was last generated.
  */
 import { useEffect, useState } from "react";
-import { TEXT_TEMPLATE_OPTIONS, type TextTemplateId } from "@/lib/video/textTemplates";
+import { TEXT_TEMPLATE_OPTIONS, KARAOKE_FONT_SCALE_MIN, KARAOKE_FONT_SCALE_MAX, type TextTemplateId } from "@/lib/video/textTemplates";
 import { TextOverlayCanvas } from "./TextOverlayCanvas";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
 import { CropRectOverlay } from "./CropRectOverlay";
@@ -124,6 +124,7 @@ export function TtsOverlayDialog({
   const [language, setLanguage] = useState(() => nicheLanguageForVoiceLocale(editingOverlay?.voice ?? null));
   const [voice, setVoice] = useState(editingOverlay?.voice ?? "");
   const [displayMode, setDisplayMode] = useState<"background" | "karaoke" | "none">(editingOverlay?.displayMode ?? "background");
+  const [karaokeFontScale, setKaraokeFontScale] = useState(editingOverlay?.karaokeFontScale ?? 1);
   const [templateId, setTemplateId] = useState<TextTemplateId>(
     (editingOverlay?.templateId as TextTemplateId) ?? TEXT_TEMPLATE_OPTIONS[0].id
   );
@@ -181,6 +182,7 @@ export function TtsOverlayDialog({
     setVoice((prev) => editingOverlay?.voice ?? prev);
     setDisplayMode(editingOverlay?.displayMode ?? "background");
     setTemplateId((editingOverlay?.templateId as TextTemplateId) ?? TEXT_TEMPLATE_OPTIONS[0].id);
+    setKaraokeFontScale(editingOverlay?.karaokeFontScale ?? 1);
     setRect(editingOverlay?.rect ?? DEFAULT_TTS_OVERLAY_RECT);
     setStartTimeSeconds(editingOverlay?.startTimeSeconds ?? currentTimeSeconds);
     setSynthesis(
@@ -305,6 +307,7 @@ export function TtsOverlayDialog({
       displayMode,
       rect,
       templateId,
+      karaokeFontScale: displayMode === "karaoke" ? karaokeFontScale : undefined,
       volume: editingOverlay?.volume ?? 1,
       tagAnchors: synthesis.tagAnchors,
     };
@@ -377,12 +380,15 @@ export function TtsOverlayDialog({
                       // during real playback (see CanvasPlayer.tsx) -- this
                       // dialog just shows a plain static preview of the text
                       // itself, not a simulated word-timing animation.
-                      <div className="flex h-full w-full items-center justify-center bg-black/60 p-2 text-center">
-                        <span className="rounded bg-violet-400/90 px-1 py-0.5 text-sm font-bold text-black">
+                      <div className="flex h-full w-full items-center justify-center overflow-hidden whitespace-nowrap bg-black/60 p-2 text-center">
+                        <span
+                          className="rounded bg-violet-400/90 px-1 py-0.5 font-bold text-black"
+                          style={{ fontSize: `${karaokeFontScale * 14}px` }}
+                        >
                           {(text.trim() || DEFAULT_PREVIEW_TEXT).split(/\s+/)[0]}
                         </span>
-                        <span className="ml-1 text-sm font-bold text-white">
-                          {text.trim() ? text.trim().split(/\s+/).slice(1).join(" ") : DEFAULT_PREVIEW_TEXT.split(/\s+/).slice(1).join(" ")}
+                        <span className="ml-1 font-bold text-white" style={{ fontSize: `${karaokeFontScale * 14}px` }}>
+                          {(text.trim() || DEFAULT_PREVIEW_TEXT).split(/\s+/).slice(1, 4).join(" ")}
                         </span>
                       </div>
                     )
@@ -479,6 +485,22 @@ export function TtsOverlayDialog({
                 No text
               </button>
             </div>
+
+            {displayMode === "karaoke" && (
+              <label className="mb-2 flex items-center gap-2 text-xs text-muted">
+                Text size
+                <input
+                  type="range"
+                  min={KARAOKE_FONT_SCALE_MIN}
+                  max={KARAOKE_FONT_SCALE_MAX}
+                  step={0.05}
+                  value={karaokeFontScale}
+                  onChange={(e) => setKaraokeFontScale(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <span className="w-9 text-right">{Math.round(karaokeFontScale * 100)}%</span>
+              </label>
+            )}
 
             <div className="mb-2 flex items-center gap-2">
               <button
