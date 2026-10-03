@@ -699,6 +699,7 @@ export function ThreePaneEditor({
     // never touch it" treatment musicClips' own comment below describes.
     avatarOverlays: rawSelections.avatarOverlays ?? [],
     sequenceClips,
+    sequenceCleared: rawSelections.sequenceCleared,
     videoOverlays,
     musicClips: rawSelections.musicClips ?? [],
   };
@@ -1043,7 +1044,7 @@ export function ThreePaneEditor({
   const baseSequenceEntries: SequenceEntry[] =
     resolvedSequenceEntries.length > 0
       ? resolvedSequenceEntries
-      : fallbackVideoAsset
+      : fallbackVideoAsset && !selections.sequenceCleared
         ? [{ id: fallbackVideoAsset.id, kind: "video", assetId: fallbackVideoAsset.id }]
         : [];
   // Splices in this entry's own live matting progress (see

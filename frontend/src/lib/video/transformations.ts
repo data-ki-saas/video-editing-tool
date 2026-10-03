@@ -1291,6 +1291,7 @@ export function applyDeleteSequenceClip(
     state: {
       ...selections,
       sequenceClips: nextEntries,
+      sequenceCleared: nextEntries.length === 0 ? true : selections.sequenceCleared,
       zoomEffects: nextZoomEffects,
       overlayImages: selections.overlayImages.map(shiftEffectRange),
       textOverlays: selections.textOverlays.map(shiftEffectRange),

@@ -103,6 +103,11 @@ export interface EditSelectionsSnapshot {
   // (unlike the background-track fields below) because it changes what the
   // frames actually are.
   sequenceClips: SequenceEntry[];
+  // Set once the user deletes the last clip from `sequenceClips`, so the
+  // editor's "no sequence authored yet -> play the first uploaded video"
+  // fallback (ThreePaneEditor's baseSequenceEntries) doesn't resurrect it.
+  // Optional: absent on every snapshot saved before this existed.
+  sequenceCleared?: boolean;
   // A second video asset placed on its own rail for a time window, with a
   // switchable layout (Full-Screen swap / Picture-in-Picture / Split
   // Screen) -- see video_math.ts's VideoOverlayClip. Duration-neutral
