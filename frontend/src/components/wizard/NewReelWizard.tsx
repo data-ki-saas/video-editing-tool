@@ -69,7 +69,13 @@ const SUGGESTED_NICHES = [
   "Hardware stores",
 ];
 
-export default function NewReelPage() {
+/**
+ * The guided new-reel flow. Rendered two ways: full-page at /dashboard/new
+ * (no `onClose` -- used for a brand-new account with no reels yet), and as a
+ * modal popup from the editor's "New Reel" tab (UserActions.tsx) when
+ * `onClose` is given, same overlay shell as the other editor dialogs.
+ */
+export function NewReelWizard({ onClose }: { onClose?: () => void } = {}) {
   const router = useRouter();
 
   const [step, setStep] = useState<StepId>("niche");
@@ -412,7 +418,7 @@ export default function NewReelPage() {
   const requiredSlotsFilled =
     !niche || niche.media_slots.filter((slot) => slot.required).every((slot) => Boolean(slotAssets[slot.key]));
 
-  return (
+  const content = (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 p-6">
       <WizardProgress steps={STEPS} currentStepId={step} />
 
@@ -869,6 +875,39 @@ export default function NewReelPage() {
           </div>
         </section>
       )}
+    </div>
+  );
+
+  if (!onClose) return content;
+
+  // Closing mid-generation would orphan the in-flight assemble/save, so the
+  // backdrop click and ✕ are inert while `generating`.
+  const handleClose = () => {
+    if (!generating) onClose();
+  };
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="New reel"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={handleClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative max-h-full w-full max-w-2xl overflow-y-auto rounded-lg bg-surface shadow-lg"
+      >
+        <button
+          type="button"
+          onClick={handleClose}
+          disabled={generating}
+          aria-label="Close"
+          className="absolute right-3 top-3 text-muted hover:text-foreground disabled:opacity-40"
+        >
+          ✕
+        </button>
+        {content}
+      </div>
     </div>
   );
 }

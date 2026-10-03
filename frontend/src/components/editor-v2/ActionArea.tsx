@@ -33,6 +33,7 @@ import { UploadDialog } from "./UploadDialog";
 import { StockMediaDialog } from "./StockMediaDialog";
 import { LibraryAssetDialog } from "./LibraryAssetDialog";
 import { UserActions } from "./UserActions";
+import { NewReelWizard } from "@/components/wizard/NewReelWizard";
 import { TextOverlayDialog } from "./TextOverlayDialog";
 import { TtsOverlayDialog } from "./TtsOverlayDialog";
 import { AvatarFramingDialog, type AvatarDirectedLayers } from "./AvatarFramingDialog";
@@ -570,6 +571,9 @@ export function ActionArea({
   // handler) and closes itself in the same click, so nothing outside this
   // component ever needs to know whether it's open.
   const [isClipRectDialogOpen, setIsClipRectDialogOpen] = useState(false);
+  // Local for the same reason -- the wizard creates its own draft project and
+  // navigates away on finish, so nothing outside this component tracks it.
+  const [isNewReelWizardOpen, setIsNewReelWizardOpen] = useState(false);
 
   const sequenceKey = sequenceClips.map((clip) => `${clip.id}:${clip.kind === "image" ? clip.durationSeconds : ""}`).join(",");
 
@@ -622,6 +626,7 @@ export function ActionArea({
 
       <div className="w-[30rem] shrink-0 overflow-hidden border-r border-border pr-4">
         <UserActions
+          onOpenNewReelWizard={() => setIsNewReelWizardOpen(true)}
           selectedClipRectId={selectedClipRectId}
           onOpenClipRectDialog={() => setIsClipRectDialogOpen(true)}
           onOpenCutawayDialog={onOpenCutawayDialog}
@@ -704,6 +709,8 @@ export function ActionArea({
           onDeleteTtsOverlay={onDeleteTtsOverlay}
         />
       </div>
+
+      {isNewReelWizardOpen && <NewReelWizard onClose={() => setIsNewReelWizardOpen(false)} />}
 
       {isUploadDialogOpen && (
         <UploadDialog

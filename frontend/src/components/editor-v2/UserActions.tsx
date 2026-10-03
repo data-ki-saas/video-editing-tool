@@ -57,7 +57,6 @@
  * sequence, and gets its own rail too, the Cutaways rail (CutawayTrack.tsx),
  * stacked directly above the Cut and Trim rail.
  */
-import Link from "next/link";
 import { CropToolIcon } from "@/components/icons/UIIcons";
 import { CoverIcon } from "./icons/PlayerIcons";
 import { CLIP_RECT_OPTIONS, ClipRectIcon } from "./ClipRectIcon";
@@ -191,6 +190,7 @@ function GroupLabel({ children, colorClassName }: { children: React.ReactNode; c
 }
 
 export function UserActions({
+  onOpenNewReelWizard,
   selectedClipRectId,
   onOpenClipRectDialog,
   onOpenCutawayDialog,
@@ -210,6 +210,7 @@ export function UserActions({
   onOpenCoverPicker,
   coverThumbnailUrl,
 }: {
+  onOpenNewReelWizard: () => void;
   selectedClipRectId: string | null;
   onOpenClipRectDialog: () => void;
   onOpenCutawayDialog: () => void;
@@ -232,11 +233,12 @@ export function UserActions({
   const selectedClipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selectedClipRectId) ?? null;
   return (
     <div className="flex h-full items-stretch gap-4 overflow-x-auto pt-4">
-      {/* WIZARD -- emerald; opens the guided new-reel flow (it creates its own draft reel, so it navigates rather than opening a modal on this one) */}
+      {/* WIZARD -- emerald; opens the guided new-reel flow as a modal (it creates its own draft reel, then navigates to it on finish) */}
       <div className="relative flex h-full gap-3">
         <GroupLabel colorClassName="text-emerald-600 dark:text-emerald-400">Wizard</GroupLabel>
-        <Link
-          href="/dashboard/new"
+        <button
+          type="button"
+          onClick={onOpenNewReelWizard}
           title="Reel Wizard -- answer a few questions and get a starting reel assembled for you"
           className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-emerald-600 dark:text-emerald-400 hover:bg-background"
         >
@@ -244,7 +246,7 @@ export function UserActions({
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
             New Reel
           </span>
-        </Link>
+        </button>
       </div>
 
       {/* BASE -- blue family, lightest to darkest: Clip, Thumbnail, Cutaway, Text Slide */}
