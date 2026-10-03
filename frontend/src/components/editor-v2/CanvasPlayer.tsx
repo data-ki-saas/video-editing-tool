@@ -834,7 +834,16 @@ export const CanvasPlayer = forwardRef<
           canvas.height = targetHeight;
         }
         const backgroundImage = textEntry.assetId ? (textSlideImagesRef.current[textEntry.assetId] ?? null) : null;
+        // Cleared first: drawTextSlide applies a fade/slide alpha and
+        // returns without drawing at opacity 0, so without this the previous
+        // frame would show through (or stay frozen) during entrance/exit.
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
         drawTextSlide(ctx, textEntry, { x: 0, y: 0, width: canvas.width, height: canvas.height }, position.localSeconds, backgroundImage);
+        // Avatars/captions/overlays still draw on top of the slide.
+        const exclusiveImageOverlay = findActiveExclusiveOverlay(overlayImages, elapsedSeconds);
+        const exclusiveVideoOverlay = findActiveExclusiveOverlay(videoOverlays, elapsedSeconds);
+        const exclusiveLayout = (exclusiveImageOverlay ?? exclusiveVideoOverlay)?.layout ?? null;
+        drawOverlayLayers(ctx, canvas, elapsedSeconds, exclusiveImageOverlay, exclusiveVideoOverlay, exclusiveLayout ? computeOverlayRects(exclusiveLayout).overlayRect : null);
       }
       return;
     }
@@ -1241,6 +1250,21 @@ export const CanvasPlayer = forwardRef<
       }
     }
 
+    drawOverlayLayers(ctx, canvas, elapsedSeconds, activeExclusiveImageOverlay, activeExclusiveVideoOverlay, overlayRect);
+  }
+
+  /** Everything composited ON TOP of the base frame -- exclusive/PiP
+   * overlays, avatars, text overlays, TTS captions, watermark. Split out of
+   * drawFrameAt so a Text Slide frame (which skips the base-clip machinery
+   * entirely) still gets the same overlay stack drawn over it. */
+  function drawOverlayLayers(
+    ctx: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    elapsedSeconds: number,
+    activeExclusiveImageOverlay: (typeof overlayImages)[number] | null,
+    activeExclusiveVideoOverlay: (typeof videoOverlays)[number] | null,
+    overlayRect: CropRect | null
+  ) {
     // Composited AFTER the flip transform is undone (ctx.restore() above)
     // -- an overlay (image or video) is independent of the base clip's flip
     // state, not something that should mirror along with it. Full-Screen
@@ -2065,7 +2089,13 @@ export const CanvasPlayer = forwardRef<
   // still plays. Keyed on a joined clip id/url string, not the `clips`
   // array reference, so an unrelated re-render (e.g. a crop edit) doesn't
   // re-trigger a full re-extraction.
-  const clipsKey = clips.map((clip) => `${clip.id}:${clip.url}:${clip.kind === "image" ? clip.durationSeconds : ""}`).join(",");
+  // A text slide's duration is authored too (no probed file length to fall
+  // back on), so a duration edit/resize must re-key it just like an image's --
+  // otherwise durationRef/loadedClipsRef keep the old length and playback
+  // stalls at the slide's stale end.
+  const clipsKey = clips
+    .map((clip) => `${clip.id}:${clip.url}:${clip.kind === "image" || clip.kind === "text" ? clip.durationSeconds : ""}`)
+    .join(",");
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);

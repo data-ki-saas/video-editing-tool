@@ -1072,7 +1072,7 @@ export function ThreePaneEditor({
   // own durationSeconds -- a duration edit (FrameStrip's post-add resize
   // handle) must re-trigger extraction too, not just an id/url/kind change.
   const sequenceClipsKey = playbackClips
-    .map((clip) => `${clip.id}:${clip.url}:${clip.kind === "image" ? clip.durationSeconds : ""}`)
+    .map((clip) => `${clip.id}:${clip.url}:${clip.kind === "image" || clip.kind === "text" ? clip.durationSeconds : ""}`)
     .join(",");
 
   // Unfolds the video sequence into a per-second thumbnail strip + duration,
