@@ -16,9 +16,7 @@
  * Every template wraps and auto-shrinks its text to fit rectPx via
  * fitTextToRect below, rather than drawing one line at whatever size looks
  * good in isolation and letting it overflow the caption box -- the same
- * problem Creatomate's own Text element solves with textWrap +
- * fontSizeMinimum/fontSizeMaximum, so this stays a close match for the
- * eventual Creatomate render, not a preview-only fix.
+ * wrapping/auto-shrink the export uses, not a preview-only fix.
  */
 import { easeInOut, type TtsWordTiming } from "./video_math";
 
@@ -68,10 +66,7 @@ export function fontSizeFor(rectPx: TextTemplateRenderContext["rectPx"], fractio
 }
 
 // Each template's base font size, as a fraction of its rect's height --
-// shared between the canvas renderers below (via fontSizeFor) and
-// compileCreatomateTimeline.ts's fontSizeMaximum (which needs the same
-// fraction expressed as vh-of-output, since Creatomate has no per-rect
-// pixel concept), so the two never drift out of sync independently.
+// used by the canvas renderers below (via fontSizeFor).
 const TEXT_TEMPLATE_FONT_FRACTIONS: Record<TextTemplateId, number> = {
   "bold-pop": 0.5,
   "minimal-subtitle": 0.3,
@@ -95,29 +90,13 @@ export function getTextTemplateFontFraction(templateId: string): number {
 // instead, e.g. Highlight Box's pill). Each renderer below multiplies its
 // OWN computed font size by this fraction for ctx.lineWidth -- shared here,
 // same "one source of truth" reasoning as TEXT_TEMPLATE_FONT_FRACTIONS
-// above, so compileCreatomateTimeline.ts's own strokeWidth can be derived
-// from the identical fraction instead of a separately hand-tuned number
-// that can silently drift out of sync with what the preview actually draws
-// (which is exactly what had happened before this constant existed -- the
-// compiled strokeWidth was a flat "2%"/"1%" string bearing no relationship
-// to either this fraction or Creatomate's own real measurement basis for
-// the property, rendering visibly thinner in the cloud output than in
-// preview).
+// above.
 const STROKE_WIDTH_FONT_SIZE_FRACTIONS: Partial<Record<TextTemplateId, number>> = {
   "bold-pop": 0.12,
   "bounce-in": 0.12,
   "word-pop": 0.08,
   typewriter: 0.08,
 };
-
-/** Same fallback reasoning as getTextTemplateFontFraction above. null for a
- * template with no stroke at all (getCreatomateTextStyle's own switch skips
- * strokeColor/strokeWidth entirely for those, so this is never actually
- * multiplied into anything for them) rather than defaulting to some
- * fraction that would silently draw a stroke nothing asked for. */
-export function getStrokeWidthFontSizeFraction(templateId: string): number | null {
-  return (STROKE_WIDTH_FONT_SIZE_FRACTIONS as Record<string, number | undefined>)[templateId] ?? null;
-}
 
 /** A brief overshoot/elastic-feeling ease for entrances that should read
  * as a "bounce" rather than a smooth glide -- distinct from video_math.ts's

@@ -24,11 +24,8 @@
  * background, 255 = subject) -- their RGB is irrelevant and never read,
  * since `ctx.globalCompositeOperation = "destination-in"` (Porter-Duff
  * "DestIn") only consults the SOURCE's alpha, keeping the destination's own
- * color scaled by it. This is the client-side equivalent of Creatomate's
- * real maskMode: "luma" (see compileCreatomateTimeline.ts's
- * buildBackgroundRemovedSegment) -- not the same algorithm, but the same
- * "alpha channel IS the mask" contract on both sides, which is what lets
- * the live preview and the real render agree on where the cutout line is.
+ * color scaled by it. The "alpha channel IS the mask"
+ * contract is what lets the live preview and the real render agree on where the cutout line is.
  */
 import { ImageSegmenter, FilesetResolver } from "@mediapipe/tasks-vision";
 

@@ -2,11 +2,11 @@
  * Ken Burns-style animation presets for an image clip in the base sequence
  * (the "Image Templates" toolbar tool -- see CutawayDialog.tsx).
  * Unlike lib/video/textTemplates.ts / transcriptCaptionTemplates.ts, this
- * catalog doesn't need its own style-rendering or Creatomate-property
+ * catalog doesn't need its own style-rendering
  * mapping: a Ken Burns move IS just a ZoomEffect (video_math.ts), the exact
  * same mechanism ZoomEffectsTrack already drives for video pan/zoom, so the
- * live preview, the thumbnail strip, CanvasPlayer, and the Creatomate
- * compiler all already know how to animate one -- this file only decides
+ * live preview, the thumbnail strip, CanvasPlayer, and the local exporter
+ * all already know how to animate one -- this file only decides
  * WHICH start/end rects a given template produces.
  *
  * Every template here is authored as a ONE-DIRECTIONAL move (start ->

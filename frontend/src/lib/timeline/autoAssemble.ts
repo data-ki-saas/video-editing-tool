@@ -30,12 +30,7 @@ export function interpolateScript(template: string, attributes: Record<string, s
  * - Every clip gets the same flat SECONDS_PER_CLIP duration regardless of
  *   whether it's an image or a video -- probing a video's real duration
  *   client-side is extra complexity not worth it for a first pass.
- * - No pan/zoom keyframe animation: Creatomate's raw JSON keyframe wire
- *   format (as opposed to their JS SDK's typed Keyframe<T> builder, which
- *   this app doesn't use -- `source` is sent as a plain object) hasn't been
- *   verified here, and guessing it wrong would silently break every
- *   quick-create render. Each clip is a static fill instead; add animation
- *   once the exact format is confirmed against a real render.
+ * - No pan/zoom keyframe animation: each clip is a static fill instead.
  */
 export function autoAssembleTimeline(
   assets: Asset[],

@@ -106,9 +106,8 @@ export function CutTransitionDialog({
 
   const isIncomingRevealed = loopPhase % 2 === 0;
   // Wipe: inset() clip-path grows from the right edge to reveal the
-  // incoming frame -- an approximation of Creatomate's own WipeLeft
-  // geometry (see compileCreatomateTimeline.ts's own disclaimer), matched
-  // to CanvasPlayer's identical left-to-right reveal for this preview.
+  // incoming frame -- an approximation of the real WipeLeft
+  // geometry, matched to CanvasPlayer's identical left-to-right reveal for this preview.
   const incomingStyle: React.CSSProperties =
     previewId === "wipe"
       ? { clipPath: isIncomingRevealed ? "inset(0 0 0 0)" : "inset(0 100% 0 0)", transition: `clip-path ${LOOP_DURATION_MS / 2}ms linear` }

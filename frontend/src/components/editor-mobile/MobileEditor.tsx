@@ -14,10 +14,8 @@
  * component just doesn't expose UI for the fields it doesn't edit (crop/pan/
  * zoom dragging, video/image overlay framing, freeform text/caption
  * placement, markers, click-to-place trim, per-overlay volume mixing --
- * all confirmed poor touch fits, deliberately left to desktop). Cloud
- * (Creatomate) rendering has been removed from this editor entirely (see
- * this repo's own render-backend-decision notes) -- the header's Render
- * button triggers the same free/local Edge Render pipeline
+ * all confirmed poor touch fits, deliberately left to desktop). The
+ * header's Render button triggers the same free/local Edge Render pipeline
  * (lib/localRender/exportTimeline.ts, via useLocalRender/handleLocalRenderClick
  * below) ThreePaneEditor's own preview toolbar uses, just from this file's
  * own simpler header instead of a per-preview control row.
@@ -507,8 +505,7 @@ export function MobileEditor({
   }
 
   // The header's Render button -- Edge Render (free, local export), the
-  // only render path this app has now (cloud/Creatomate rendering has been
-  // removed here too). Mirrors ThreePaneEditor's own handleLocalRenderClick
+  // only render path this app has now. Mirrors ThreePaneEditor's own handleLocalRenderClick
   // almost exactly, just against this editor's own simpler state (no
   // matting-progress splice, no separate `effectiveSequenceEntries` --
   // `sequenceClips` here is already the plain resolved list).

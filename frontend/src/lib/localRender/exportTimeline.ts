@@ -1,10 +1,8 @@
 "use client";
 
 /**
- * The free/local render pipeline -- takes the same edit state the
- * Creatomate compiler (lib/timeline/compileCreatomateTimeline.ts) turns
- * into cloud-render JSON, and instead renders it entirely in this tab via
- * Mediabunny (a WebCodecs wrapper) with zero network calls. Deliberately
+ * The free/local render pipeline -- renders the edit state entirely in
+ * this tab via Mediabunny (a WebCodecs wrapper) with zero network calls. Deliberately
  * reuses CanvasPlayer.tsx's exact per-frame compositing steps (crop/zoom,
  * flip, overlays, text templates) and video_math.ts's segment-splitting
  * math (buildRenderSegments) -- this file is mostly "run that same math
@@ -25,7 +23,7 @@
  *
  * Deliberately NOT attempted here (see the plan this shipped from):
  * WebGL/worker/texture-pool architecture, frame-perfect VideoDecoder
- * demuxing, or auto-captions (transcriptCaption needs Creatomate's
+ * demuxing, or auto-captions (transcriptCaption needs
  * server-side speech transcription -- callers must keep the free-render
  * button disabled whenever selections.transcriptCaption is set).
  */
@@ -575,9 +573,8 @@ export async function exportVideoLocally(
   const hasClipRectangle = selections.cropRect !== null;
   const referenceClip = sequenceClips[0];
   const referenceAspectRatio = referenceClip?.width && referenceClip?.height ? referenceClip.width / referenceClip.height : null;
-  // Per-cutaway/per-overlay filter lookup, same "each clip carries its own
-  // colorFilterId" model as compileCreatomateTimeline.ts's identical map --
-  // see that file's own comment on cutawayFilterByEntryId.
+  // Per-cutaway/per-overlay filter lookup -- each clip carries its own
+  // colorFilterId.
   const cutawayFilterByEntryId = new Map(
     selections.sequenceClips.map((entry) => [entry.id, entry.kind === "text" ? null : (entry.colorFilterId ?? null)])
   );
@@ -589,14 +586,11 @@ export async function exportVideoLocally(
       { mode: getCanvasFillMode(entry.canvasFillMode), color: entry.canvasFillColor, gradientColor: entry.canvasFillGradientColor },
     ])
   );
-  // AI background removal -- same per-entryId matteAssetId lookup as
-  // compileCreatomateTimeline.ts's own backgroundRemovalMatteByEntryId.
+  // AI background removal -- per-entryId matteAssetId lookup.
   // Only a REAL, already-completed matte is ever used here (never
   // CanvasPlayer's own MediaPipe approximate-cutout fallback) -- same
-  // "final render only trusts a real matte" policy compileCreatomateTimeline.ts
-  // already established (its own comment: "Only reachable once matteAssetId
-  // is populated... falls back to whatever its canvasFillMode/crop would
-  // already render as"). Running MediaPipe segmentation against every real
+  // "final render only trusts a real matte" policy (falls back to whatever
+  // its canvasFillMode/crop would already render as). Running MediaPipe segmentation against every real
   // seeked export frame (unlike the preview's once-per-clip pre-extracted
   // frames) would be prohibitively slow for no better-than-preview result,
   // so a still-processing job (matteAssetId null) or a matte asset that
@@ -615,8 +609,7 @@ export async function exportVideoLocally(
   const cutawayBackgroundRemovalByEntryId = new Map(
     selections.sequenceClips.map((entry) => [entry.id, entry.kind !== "text" ? (entry.backgroundRemoval ?? null) : null])
   );
-  // Same cut-transition lookup compileCreatomateTimeline.ts builds -- see
-  // that file's own cutTransitionByEntryId comment. A text slide has no
+  // Per-entry cut-transition lookup. A text slide has no
   // cutTransitionInId of its own (see video_math.ts's own doc comment on
   // the "text" variant) -- always null here.
   const cutTransitionByEntryId = new Map(
@@ -692,9 +685,7 @@ export async function exportVideoLocally(
   const matteVideoElementsByAssetId = new Map<string, HTMLVideoElement>();
   // AI background removal -- IMAGE mattes (a Ken Burns cutaway's own rembg
   // cutout, a full already-transparent PNG that REPLACES the original photo
-  // outright rather than a separate mask -- see
-  // compileCreatomateTimeline.ts's buildBackgroundRemovedImageSegment's own
-  // comment) keyed by matteAssetId, same sharing convention as
+  // outright rather than a separate mask) keyed by matteAssetId, same sharing convention as
   // matteVideoElementsByAssetId above.
   const matteImageElementsByAssetId = new Map<string, HTMLImageElement>();
   const overlayBlobUrls: string[] = [];
@@ -1235,9 +1226,8 @@ export async function exportVideoLocally(
           // letterbox/plain-crop branches below (see that file's own
           // comment). No canvasFillMode of "crop" makes sense once the
           // subject is cut out -- falls back to solid DEFAULT_CANVAS_FILL_COLOR,
-          // same default compileCreatomateTimeline.ts's
-          // buildBackgroundRemovedSegment and CanvasPlayer both already use,
-          // so every render path agrees on it.
+          // same default CanvasPlayer already uses, so every render path
+          // agrees on it.
           const rawFill = segment.entryId ? (canvasFillByEntryId.get(segment.entryId) ?? { mode: "crop" as const }) : { mode: "crop" as const };
           const fill = rawFill.mode === "crop" ? { mode: "solid" as const, color: DEFAULT_CANVAS_FILL_COLOR, gradientColor: undefined as string | undefined } : rawFill;
           const canvasAspectRatio = canvas.width / canvas.height;
@@ -1812,8 +1802,8 @@ export async function exportVideoLocally(
       // uses the shared drawKaraokeCaption (textTemplates.ts), driven by the
       // synthesis engine's own exact per-word timings, not ASR -- this is
       // why it's safe to burn in here identically to the
-      // live preview, unlike auto-captions (transcriptCaption), which stay
-      // Creatomate-only (see this file's own module comment).
+      // live preview, unlike auto-captions (transcriptCaption), which aren't
+      // supported by the local export (see this file's own module comment).
       for (const overlay of findActiveTtsOverlays(selections.ttsOverlays, sourceTimeSeconds)) {
         const rectPx = {
           x: overlay.rect.x * canvas.width,

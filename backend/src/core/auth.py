@@ -189,9 +189,8 @@ require_admin = require_feature("admin_manage_roles")
 
 
 def bypasses_daily_caps(user: CurrentUser) -> bool:
-    """Admin accounts skip every daily usage-cap guardrail (TTS/matting/
-    render -- see tts/service.py, matting/service.py, and
-    usage/service.py's assert_render_cap), so an
+    """Admin accounts skip every daily usage-cap guardrail (TTS/matting
+    -- see tts/service.py and matting/service.py), so an
     admin testing or demoing the product never gets stopped by an
     abuse-rate-limit meant for regular accounts. Reuses admin_manage_roles
     (the same feature require_admin gates on) rather than a dedicated

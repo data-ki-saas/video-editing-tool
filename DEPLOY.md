@@ -1,16 +1,14 @@
 # Deployment Guide
 
-This app is split across five deployed pieces, deliberately (see `README.md`
+This app is split across four deployed pieces, deliberately (see `README.md`
 for the full architecture diagram and the reasoning behind each split):
 
 | Platform | What lives there | Why not somewhere else |
 |---|---|---|
-| **Vercel** | `frontend/` (Next.js, App Router) | Standard Next.js host. Also holds the render-trigger and Creatomate-webhook routes — see `README.md`'s "Rendering pipeline". |
+| **Vercel** | `frontend/` (Next.js, App Router) | Standard Next.js host. Export is local in-browser, so no render service is needed — see `README.md`'s "Rendering". |
 | **Render** | `backend/` (FastAPI) | Owns Supabase's service-role key and the private uploads R2 bucket — no storage credential ever reaches the browser. |
-| **Render** | `worker/` (Node) | Streams a finished render from Creatomate into R2. Runs as a long-lived process on purpose — see "Why a separate worker service" in `README.md`; a Vercel serverless function isn't built for a multi-hundred-MB streamed transfer. |
-| **Supabase** | Postgres (`users`, `projects`, `assets`) + Auth | Only hosts Postgres/Auth — can't run either backend/worker itself. |
-| **Cloudflare R2** | Two buckets: private uploads, public finished-renders | S3-compatible object storage. Kept as two buckets because a Cloudflare custom domain makes an *entire* bucket publicly readable, and only one of these should be public. |
-| **Creatomate** | Video rendering (external SaaS, not deployed by you) | Not self-hosted — you only need an account + API key. |
+| **Supabase** | Postgres (`users`, `projects`, `assets`) + Auth | Only hosts Postgres/Auth — can't run the backend itself. |
+| **Cloudflare R2** | Two buckets: private uploads, public (cover thumbnails, library assets, shared recordings) | S3-compatible object storage. Kept as two buckets because a Cloudflare custom domain makes an *entire* bucket publicly readable, and only one of these should be public. |
 
 Deploy in this order — each later step needs credentials or a URL from an
 earlier one.
@@ -23,8 +21,6 @@ earlier one.
 - [ ] Cloudflare account with R2 enabled
 - [ ] Render account, connected to this repo
 - [ ] Vercel account, connected to this repo
-- [ ] A Creatomate account + API key (Settings > API Keys) and a project
-      public token (Settings > Preview SDK, or your project's dashboard)
 - [ ] A DeepSeek account + API key (platform.deepseek.com) — powers the
       niche-config generation feature (see README.md's "Niches" section);
       swap for Anthropic instead by setting `LLM_PROVIDER=anthropic`
@@ -127,9 +123,8 @@ earlier one.
    detects a secret-key prefix and refuses to run it client-side. If you see
    that error, re-check this exact value.
 
-   `SUPABASE_SERVICE_ROLE_KEY` is used in **three** places in this app
-   (backend, worker, and the frontend's webhook route) — the same value in
-   all three, not three different keys.
+   `SUPABASE_SERVICE_ROLE_KEY` is used only by the backend — never set it
+   on the frontend.
 
 ### 1a. Auto-deploying migrations on push (recommended, do this once)
 
@@ -168,7 +163,7 @@ the next push that touches `supabase/migrations/`.
    | Secret Access Key (shown once — save it immediately) | `<R2_SECRET_ACCESS_KEY>` |
    | Bucket name | `<R2_BUCKET_NAME>` |
 
-5. **After the backend's env vars are set** (step 6 below), apply a CORS
+5. **After the backend's env vars are set** (step 3 below), apply a CORS
    policy to this bucket — presigned GET URLs point straight at R2's own
    origin, so the backend's `CORS_ORIGINS`/CORSMiddleware setting has *no*
    effect on them; without this, the browser's client-side video editor
@@ -184,7 +179,7 @@ the next push that touches `supabase/migrations/`.
    public renders bucket, which needs no CORS policy of its own). Re-run it
    whenever `CORS_ORIGINS` changes (e.g. adding a new Vercel URL).
 
-### 2b. Finished-renders bucket (public, CDN-fronted)
+### 2b. Public bucket (CDN-fronted; cover thumbnails)
 
 1. Create a **second, separate** bucket, e.g. `<R2_RENDERS_BUCKET_NAME>`.
 2. **This bucket > Settings > Public access > Custom Domains** — connect a
@@ -194,10 +189,8 @@ the next push that touches `supabase/migrations/`.
    egress fees.
 3. **Create a separate API token** scoped to *only* this bucket, with
    read/write/delete permission — do not reuse the uploads bucket's token.
-   Give this same renders-bucket token to *both* the worker (writes a
-   finished render) and the backend (deletes one when its reel is
-   deleted) — the uploads bucket's own token is never used for the renders
-   bucket, and vice versa.
+   The backend uses it to write cover thumbnails — the uploads bucket's own token is never
+   used for the renders bucket, and vice versa.
 4. Collect:
 
    | Value | Placeholder used below |
@@ -211,27 +204,7 @@ the next push that touches `supabase/migrations/`.
 
 ---
 
-## 3. Creatomate
-
-1. Create an account, then collect:
-
-   | Value | Placeholder used below |
-   |---|---|
-   | Secret API key (Settings > API Keys) | `<CREATOMATE_API_KEY>` |
-   | Project public token (for the browser-side Preview SDK) | `<CREATOMATE_PUBLIC_TOKEN>` |
-
-2. Generate your **own** webhook secret — Creatomate has no signed-webhook
-   mechanism (checked their SDK/docs; there isn't one), so this is a value
-   *you* invent and embed in the webhook URL yourself:
-   ```
-   openssl rand -hex 32
-   ```
-   → `<CREATOMATE_WEBHOOK_SECRET>`. Nothing to configure on Creatomate's side
-   for this — it's generated and checked entirely within this app.
-
----
-
-## 4. Backend (Render)
+## 3. Backend (Render)
 
 1. **New > Blueprint**, connect this repo — Render auto-detects
    `render.yaml`'s `timeline-editor-backend` service (root dir `backend/`).
@@ -246,7 +219,7 @@ the next push that touches `supabase/migrations/`.
    | `R2_ACCESS_KEY_ID` | ✅ | `<R2_ACCESS_KEY_ID>` |
    | `R2_SECRET_ACCESS_KEY` | ✅ | `<R2_SECRET_ACCESS_KEY>` |
    | `R2_BUCKET_NAME` | ✅ | `<R2_BUCKET_NAME>` |
-   | `R2_RENDERS_ACCESS_KEY_ID` | ✅ | `<R2_RENDERS_ACCESS_KEY_ID>` (the renders-bucket token from step 2b below -- same one given to the worker; only used here to delete a render on reel delete, never to write) |
+   | `R2_RENDERS_ACCESS_KEY_ID` | ✅ | `<R2_RENDERS_ACCESS_KEY_ID>` (the renders-bucket token from step 2b above; used to write public media: thumbnails, library assets, shared recordings) |
    | `R2_RENDERS_SECRET_ACCESS_KEY` | ✅ | `<R2_RENDERS_SECRET_ACCESS_KEY>` |
    | `R2_RENDERS_BUCKET_NAME` | ✅ | `<R2_RENDERS_BUCKET_NAME>` |
    | `CORS_ORIGINS` | ✅ | `<YOUR_VERCEL_URL>` (exact scheme, no trailing slash; comma-separate multiple origins) |
@@ -264,17 +237,17 @@ the next push that touches `supabase/migrations/`.
    | `META_APP_ID` | required for the Facebook/Instagram posting feature | [Meta for Developers](https://developers.facebook.com/) > create an app (type "Business") > **App settings > Basic** — **a separate app from whatever one Supabase's own Facebook login button uses** (step 3b above): that one only requests an identity scope for signing in, this one requests `pages_manage_posts`/`instagram_content_publish` and posts on the user's behalf (see `META_APP_REVIEW.md` for the full permissions rationale). Add the "Facebook Login" product and set its **Valid OAuth Redirect URI** to exactly `<YOUR_RENDER_BACKEND_URL>/api/social/meta/callback` — note this is the ONLY redirect URI this feature needs; posting to Instagram rides along with the same Facebook connect (see `backend/src/social/providers/meta_provider.py`'s own comment), it never runs its own OAuth flow. While the app is in Development mode (the normal state for a POC, before Business Verification), add your own Facebook account as a **Test user/Tester** under **App roles** or every consent attempt will be blocked, and only a test Page/Instagram Business account you administer can be connected |
    | `META_APP_SECRET` | required for the Facebook/Instagram posting feature | Same **App settings > Basic** screen as above |
    | `SOCIAL_OAUTH_STATE_SECRET` | required for the YouTube/Meta posting features | Self-generated: `openssl rand -hex 32` — shared across every social provider's connect flow |
-   | `FRONTEND_PUBLIC_URL` | required for the YouTube/Meta posting features | This app's own production frontend URL — same value as the frontend's own `SITE_URL` (step 6) — lets the OAuth callback redirect the browser back to `/settings` once a platform is connected |
+   | `FRONTEND_PUBLIC_URL` | required for the YouTube/Meta posting features | This app's own production frontend URL — same value as the frontend's own `SITE_URL` (step 5) — lets the OAuth callback redirect the browser back to `/settings` once a platform is connected |
    | `BACKEND_PUBLIC_URL` | required for video background removal and the YouTube/Meta posting features | this same backend's own Render URL, e.g. `https://<your-backend>.onrender.com` (no trailing slash) -- lets it hand fal.ai/Google/Meta a callback/redirect URL pointing back at itself |
    | `FAL_API_KEY` | required for the background-removal feature (video AND photo cutaways) AND the "Generate from photo" avatar feature | [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys) — pay-per-use, calls VEED's video background removal, fal-ai/imageutils/rembg (photos), and fal-ai/image-editing/cartoonify (avatar photo generation) |
    | `FAL_WEBHOOK_SECRET` | required for VIDEO cutaway background removal only | any long random string you generate — appended as a query param on the callback URL handed to fal, and checked against fal's own signed-webhook headers when present; see `matting/providers/fal_veed_provider.py`'s own comment. A photo cutaway's own job is synchronous (no webhook), so this isn't needed for that path |
    | `MATTING_DAILY_CAP` | optional | `20` — real cost is a few cents/clip |
    | `AVATAR_GENERATE_DAILY_CAP` | optional | `10` — real cost now (fal.ai cartoonify, ~$0.10/image, only charged when a face was actually detected -- see below), so this is a budget guard as well as an abuse guard |
-   | `FACE_ANALYSIS_SERVICE_URL` | required for the "Generate from photo" avatar feature | `<YOUR_FACE_ANALYSIS_RENDER_URL>` (no trailing slash) — see step 4a below |
-   | `FACE_ANALYSIS_SERVICE_SECRET` | required for the "Generate from photo" avatar feature | Self-generated: `openssl rand -hex 32` — must exactly match the same-named env var set on the face-analysis service in step 4a |
+   | `FACE_ANALYSIS_SERVICE_URL` | required for the "Generate from photo" avatar feature | `<YOUR_FACE_ANALYSIS_RENDER_URL>` (no trailing slash) — see step 4 below |
+   | `FACE_ANALYSIS_SERVICE_SECRET` | required for the "Generate from photo" avatar feature | Self-generated: `openssl rand -hex 32` — must exactly match the same-named env var set on the face-analysis service in step 4 |
 
    The "Generate from photo" avatar feature (`backend/src/avatar_gen/`) calls
-   out to a separate `face-analysis/` service (step 4a below) over HTTPS
+   out to a separate `face-analysis/` service (step 4 below) over HTTPS
    rather than running mediapipe in-process here -- Render's native Python
    runtime has no apt/root access to install the Mesa/GLES/EGL system
    libraries mediapipe's compiled bindings need, which silently made every
@@ -308,7 +281,7 @@ the next push that touches `supabase/migrations/`.
 
 ---
 
-## 4a. Face analysis (Render, Docker)
+## 4. Face analysis (Render, Docker)
 
 A separate, minimal service (`face-analysis/`) that runs mediapipe's
 `FaceLandmarker` against an uploaded photo and returns a small JSON palette
@@ -317,20 +290,20 @@ A separate, minimal service (`face-analysis/`) that runs mediapipe's
 its own Docker-deployed service, not part of the main Render backend, purely
 because Render's *native* Python runtime can't install the Mesa/GLES/EGL
 system libraries mediapipe's compiled bindings need (no apt/root access, see
-step 4's own note on `libGLESv2.so.2`) -- owning the base image via Docker
+step 3's own note on `libGLESv2.so.2`) -- owning the base image via Docker
 fixes that. This previously ran on Google Cloud Run with an attached GPU;
 that GPU was dropped early on (a GCP GPU-quota wall) and the service has run
 CPU-only ever since, so there was no longer any reason to pay Cloud Run's
 per-request billing for what's just another small always-on web service --
 moved to Render (same free tier as the rest of this POC) instead.
 
-1. In the same Blueprint as the other two Render services (`render.yaml`'s
+1. In the same Blueprint as the backend's Render service (`render.yaml`'s
    `face-analysis` entry, `runtime: docker`, root dir `face-analysis/`),
    Render builds directly from `face-analysis/Dockerfile` -- no separate
    container registry or build pipeline to set up.
 2. **Environment variables**: `FACE_ANALYSIS_SERVICE_SECRET` (`openssl rand
    -hex 32` -- copy this exact value into the backend's own env var of the
-   same name, step 4 above). Leave `FACE_ANALYSIS_USE_GPU` unset/`false` --
+   same name, step 3 above). Leave `FACE_ANALYSIS_USE_GPU` unset/`false` --
    there's no GPU on Render, and the CPU delegate is the already-verified
    path.
 3. Deploy, then verify:
@@ -339,7 +312,7 @@ moved to Render (same free tier as the rest of this POC) instead.
    # -> {"status": "ok"}
    ```
 4. Copy this service's URL into the backend's `FACE_ANALYSIS_SERVICE_URL`
-   env var (step 4 above) and redeploy the backend.
+   env var (step 3 above) and redeploy the backend.
 5. Try "Generate from photo" in the editor with a real, clear, front-facing
    photo. If it still falls back to a generic look, check this service's
    Render logs first, then the backend's own logs (a face-analysis call
@@ -351,35 +324,7 @@ for nothing.
 
 ---
 
-## 5. Render-transfer worker (Render)
-
-1. In the same Blueprint (or a separate **New > Web Service**), Render
-   detects `render.yaml`'s `render-transfer-worker` service (root dir
-   `worker/`).
-2. Fill in:
-
-   | Variable | Required | Value |
-   |---|---|---|
-   | `WORKER_INTERNAL_SECRET` | ✅ | generate with `openssl rand -hex 32` — must match the frontend's `WORKER_INTERNAL_SECRET` exactly |
-   | `R2_ACCOUNT_ID` | ✅ | `<R2_ACCOUNT_ID>` |
-   | `R2_ACCESS_KEY_ID` | ✅ | `<R2_RENDERS_ACCESS_KEY_ID>` (the renders-bucket token, **not** the uploads one) |
-   | `R2_SECRET_ACCESS_KEY` | ✅ | `<R2_RENDERS_SECRET_ACCESS_KEY>` |
-   | `R2_RENDERS_BUCKET_NAME` | ✅ | `<R2_RENDERS_BUCKET_NAME>` |
-   | `R2_RENDERS_PUBLIC_URL` | ✅ | `<R2_RENDERS_PUBLIC_URL>` |
-   | `SUPABASE_URL` | ✅ | `<SUPABASE_URL>` |
-   | `SUPABASE_SERVICE_ROLE_KEY` | ✅ | `<SUPABASE_SERVICE_ROLE_KEY>` |
-
-3. Deploy, then verify:
-   ```
-   curl https://<your-worker>.onrender.com/health
-   # -> ok
-   ```
-4. Note this service's URL — it's `RENDER_WORKER_URL` in the frontend's env
-   vars (step 6).
-
----
-
-## 6. Frontend (Vercel)
+## 5. Frontend (Vercel)
 
 1. **Import project**, set **Root Directory** to `frontend`.
 2. Framework preset: Next.js (auto-detected).
@@ -392,18 +337,12 @@ for nothing.
    | `NEXT_PUBLIC_SUPABASE_URL` | `<SUPABASE_URL>` |
    | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `<SUPABASE_ANON_KEY>` |
    | `NEXT_PUBLIC_API_BASE_URL` | `<YOUR_RENDER_BACKEND_URL>` (e.g. `https://timeline-editor-backend.onrender.com`, no trailing slash) |
-   | `NEXT_PUBLIC_CREATOMATE_PUBLIC_TOKEN` | `<CREATOMATE_PUBLIC_TOKEN>` |
 
    **Secret (server-only — do NOT prefix with `NEXT_PUBLIC_`):**
 
    | Variable | Value |
    |---|---|
-   | `CREATOMATE_API_KEY` | `<CREATOMATE_API_KEY>` |
-   | `CREATOMATE_WEBHOOK_SECRET` | `<CREATOMATE_WEBHOOK_SECRET>` (from step 3) |
-   | `SUPABASE_SERVICE_ROLE_KEY` | `<SUPABASE_SERVICE_ROLE_KEY>` |
-   | `RENDER_WORKER_URL` | `<YOUR_RENDER_WORKER_URL>/transfer` (e.g. `https://render-transfer-worker.onrender.com/transfer`) |
-   | `WORKER_INTERNAL_SECRET` | same value as the worker's `WORKER_INTERNAL_SECRET` (step 5) |
-   | `SITE_URL` | see the pitfall below — set this once you know your production URL |
+   | `SITE_URL` | see the pitfall below — set this once you know your production URL (used for canonical URLs) |
 
 4. Deploy once first (without `SITE_URL`) to get your production URL
    assigned, then:
@@ -417,24 +356,19 @@ for nothing.
    - Sign up, land on `/dashboard`. Signing out and hitting `/dashboard`
      directly should redirect to `/login` (see `src/lib/supabase/middleware.ts`).
    - Upload a video from the dashboard, confirm it appears in the asset list.
-   - Trigger a render, confirm `projects.render_status` moves from
-     `planned` → `succeeded` → `completed` and `render_url` ends up pointing
-     at your `R2_RENDERS_PUBLIC_URL` domain, not Creatomate's.
+   - Export a reel from the editor and confirm the in-browser export
+     downloads a playable video.
 
 ---
 
-## 7. Post-deploy smoke test (all five pieces live)
+## 6. Post-deploy smoke test (all pieces live)
 
 - [ ] `GET /health` on the backend URL returns `{"status": "ok"}`
-- [ ] `GET /health` on the worker URL returns `ok`
 - [ ] Frontend loads; sign-up/login works; `/dashboard` redirects to `/login` when signed out
 - [ ] Creating a "New Reel" with a niche you haven't used before returns a generated form within a few seconds (confirms `LLM_PROVIDER`/`DEEPSEEK_API_KEY` work) and is instant the second time (confirms `niche_configs` caching)
 - [ ] Video upload succeeds end-to-end from the dashboard (frontend → backend → R2 uploads bucket + Supabase)
-- [ ] `POST /api/render` returns 202 with a `renderId`
-- [ ] Creatomate's dashboard shows the webhook delivery succeeded (check
-      "Recent Deliveries" or similar under your project/webhook settings)
-- [ ] `projects.render_status` reaches `completed` and `render_url` resolves
-      to a playable video served from your Cloudflare custom domain
+- [ ] Exporting a reel from the editor downloads a playable video (local in-browser export)
+
 ---
 
 ## Common pitfalls
@@ -443,12 +377,10 @@ for nothing.
    the JS bundle at *build* time; Render doesn't hot-reload env vars into a
    running instance. Both need a **fresh deploy after** changing a value —
    saving it in the dashboard alone does nothing until the next build/restart.
-2. **`SITE_URL` left unset in production.** Without it, the render-trigger
-   route falls back to Vercel's own `VERCEL_URL`, which isn't guaranteed
-   stable across deployments. A render can take minutes; if a redeploy
-   happens while one is in flight and `VERCEL_URL` shifted, the
-   already-dispatched `webhook_url` may point at a stale deployment.
-   Set `SITE_URL` explicitly to your production domain once you have one.
+2. **`SITE_URL` left unset in production.** Without it, canonical URLs fall
+   back to Vercel's own `VERCEL_URL`, which isn't guaranteed stable across
+   deployments. Set `SITE_URL` explicitly to your production domain once you
+   have one.
 3. **`Forbidden use of secret API key in browser`.** `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    has the *secret* key's value in it instead of the anon/publishable one —
    see step 1.4's table. The Supabase JS SDK detects a secret-key prefix and
@@ -461,30 +393,16 @@ for nothing.
    `CORS_ORIGINS` must exactly match the Vercel URL, scheme included, no
    trailing slash. Check the backend's startup log line
    (`CORS allow_origins=[...]`) to confirm what's actually configured.
-6. **Webhook secret mismatch.** `CREATOMATE_WEBHOOK_SECRET` is generated by
-   you, not Creatomate — if the webhook route returns 401 for every
-   delivery, re-check it's the *exact* value embedded in the `webhook_url`
-   the render-trigger route builds (it's a live query param, not something
-   configured separately in Creatomate's dashboard).
-7. **Public custom domain on the wrong bucket.** If asset URLs ever look
+6. **Public custom domain on the wrong bucket.** If asset URLs ever look
    like a permanent public link instead of a presigned URL with an
    `X-Amz-Signature` query string, the uploads bucket has public access
    enabled somewhere — it must stay private. Only the renders bucket (2b)
    should have a custom domain.
-8. **`R2_ENDPOINT_OVERRIDE` set in a real environment.** Backend-only, test
+7. **`R2_ENDPOINT_OVERRIDE` set in a real environment.** Backend-only, test
    suite-only. If set in Render's dashboard, R2 access silently points at
    the wrong (or no) host.
-9. **Cold starts on Render's free tier.** Both the backend and the worker
-   spin down when idle — the first request after idle can take 30–60s.
-   A render that finishes while the worker is asleep will still trigger it
-   (the webhook route's `fetch()` wakes it), just with that extra delay
-   before the transfer visibly starts.
-10. **Worker transfer never happens.** Check three things in order: (a) the
-   webhook route actually received the callback (its own logs), (b)
-   `RENDER_WORKER_URL`/`WORKER_INTERNAL_SECRET` are set on the frontend and
-   match the worker's `WORKER_INTERNAL_SECRET` exactly, (c) the worker's own
-   logs for a `transfer failed` line — a bad R2 token for the renders
-   bucket is the most common cause.
+8. **Cold starts on Render's free tier.** The backend spins down when
+   idle — the first request after idle can take 30–60s.
 
 ---
 
@@ -499,7 +417,7 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | Variable | Default | Where to get it |
 |---|---|---|
 | `MAX_UPLOAD_SIZE_MB` | `500` | Not fetched — pick a number, optional to set |
-| `CORS_ORIGINS` | `http://localhost:3000` | Your Vercel deployment URL (step 6) — Vercel project > **Settings > Domains**, or just the URL shown after your first deploy. Comma-separate if more than one. |
+| `CORS_ORIGINS` | `http://localhost:3000` | Your Vercel deployment URL (step 5) — Vercel project > **Settings > Domains**, or just the URL shown after your first deploy. Comma-separate if more than one. |
 | `SUPABASE_URL` | `""` | Supabase project > **Settings > API > Project URL** |
 | `SUPABASE_SERVICE_ROLE_KEY` | `""` | Supabase project > **Settings > API > Project API keys > `service_role`** (click "Reveal") |
 | `SUPABASE_JWT_SECRET` | `""` | Any non-empty value turns on local token verification. Use Supabase **Settings > API > JWT Settings > Legacy JWT Secret** if your project has one; on projects using asymmetric JWT Signing Keys (e.g. ES256) that value isn't actually checked (verification uses Supabase's public JWKS instead), so any placeholder works. Optional — left blank, `get_current_user` falls back to a slower `auth.get_user()` network call per request (see `core/auth.py`) |
@@ -507,7 +425,7 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | `R2_ACCESS_KEY_ID` | `""` | Cloudflare > **R2 > Manage API Tokens > Create API Token** (scope: uploads bucket, step 2a) — shown after creating the token |
 | `R2_SECRET_ACCESS_KEY` | `""` | Same token-creation screen as above — **shown once only**, copy it immediately |
 | `R2_BUCKET_NAME` | `""` | The name you gave the uploads bucket when you created it (step 2a) |
-| `R2_RENDERS_ACCESS_KEY_ID` | `""` | Same renders-bucket token as the worker's `R2_ACCESS_KEY_ID` below (step 2b) — deleting a project deletes its finished render too, which lives in this bucket |
+| `R2_RENDERS_ACCESS_KEY_ID` | `""` | The renders-bucket token (step 2b) — used to write public media (thumbnails, library assets, shared recordings) |
 | `R2_RENDERS_SECRET_ACCESS_KEY` | `""` | Same token-creation screen as above — shown once, copy immediately |
 | `R2_RENDERS_BUCKET_NAME` | `""` | The name you gave the renders bucket when you created it (step 2b) |
 | `R2_ENDPOINT_OVERRIDE` | `""` | **Don't set this** — tests only |
@@ -534,20 +452,6 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | `FACE_ANALYSIS_SERVICE_SECRET` | Self-generated: run `openssl rand -hex 32`. Set the *same* value on the backend (above) |
 | `FACE_ANALYSIS_USE_GPU` | Leave unset/`false` — Render has no GPU; CPU delegate is the verified path |
 
-### Render-transfer worker (Render), from `worker/.env.example`
-
-| Variable | Where to get it |
-|---|---|
-| `PORT` | Render sets this automatically — don't set it yourself |
-| `WORKER_INTERNAL_SECRET` | Self-generated: run `openssl rand -hex 32`. Set the *same* value on the frontend (below) |
-| `R2_ACCOUNT_ID` | Same value as the backend's `R2_ACCOUNT_ID` above (same Cloudflare account) |
-| `R2_ACCESS_KEY_ID` | Cloudflare > **R2 > Manage API Tokens > Create API Token**, scoped to the *renders* bucket (step 2b) — a different token from the backend's |
-| `R2_SECRET_ACCESS_KEY` | Same token-creation screen — shown once, copy immediately |
-| `R2_RENDERS_BUCKET_NAME` | The name you gave the renders bucket when you created it (step 2b) |
-| `R2_RENDERS_PUBLIC_URL` | The custom domain you connected under that bucket's **Settings > Public access > Custom Domains** (step 2b), e.g. `https://videos.yourapp.com` |
-| `SUPABASE_URL` | Same value as the backend's `SUPABASE_URL` above |
-| `SUPABASE_SERVICE_ROLE_KEY` | Same value as the backend's `SUPABASE_SERVICE_ROLE_KEY` above |
-
 ### Frontend (Vercel), from `frontend/.env.local.example`
 
 | Variable | Where to get it |
@@ -555,13 +459,7 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | `NEXT_PUBLIC_SUPABASE_URL` | Same value as the backend's `SUPABASE_URL` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase project > **Settings > API > Project API keys > `anon` `public`** — **not** the `service_role` key |
 | `NEXT_PUBLIC_API_BASE_URL` | The backend's Render URL — Render dashboard > `timeline-editor-backend` service > the URL shown at the top of its page, e.g. `https://timeline-editor-backend.onrender.com` |
-| `NEXT_PUBLIC_CREATOMATE_PUBLIC_TOKEN` | Creatomate dashboard > your project > **Preview SDK** (or **Project Settings**) — the *public* token, not the API key |
-| `CREATOMATE_API_KEY` | Creatomate dashboard > **Settings > API Keys** — the *secret* key |
-| `SITE_URL` | This app's own production URL, once you know it — Vercel project page after first deploy, or your custom domain if you attach one. Leave unset for the very first deploy (see step 6) |
-| `CREATOMATE_WEBHOOK_SECRET` | Self-generated: run `openssl rand -hex 32`. Nothing to configure on Creatomate's side — this is checked entirely by our own code |
-| `SUPABASE_SERVICE_ROLE_KEY` | Same value as the backend's `SUPABASE_SERVICE_ROLE_KEY` |
-| `RENDER_WORKER_URL` | The worker's Render URL + `/transfer` — Render dashboard > `render-transfer-worker` service > its URL, e.g. `https://render-transfer-worker.onrender.com/transfer` |
-| `WORKER_INTERNAL_SECRET` | The *same* value you generated and set on the worker above — don't generate a second one |
+| `SITE_URL` | This app's own production URL, once you know it — Vercel project page after first deploy, or your custom domain if you attach one. Leave unset for the very first deploy (see step 5) |
 
 ### Quick lookup: which dashboard, for everything
 
@@ -571,18 +469,15 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | Cloudflare > R2 (account overview) | `R2_ACCOUNT_ID` |
 | Cloudflare > R2 > uploads bucket > Manage API Tokens | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` |
 | Cloudflare > R2 > renders bucket > Manage API Tokens + Custom Domains | renders-bucket access/secret keys, `R2_RENDERS_BUCKET_NAME`, `R2_RENDERS_PUBLIC_URL` |
-| Creatomate > Settings > API Keys | `CREATOMATE_API_KEY` |
 | DeepSeek dashboard > API Keys | `DEEPSEEK_API_KEY` |
 | Pexels > API | `PEXELS_API_KEY` |
 | Render > face-analysis service page | `FACE_ANALYSIS_SERVICE_URL` (the service's own URL) |
 | Freesound > apiv2/apply | `FREESOUND_API_KEY` |
-| Creatomate > project > Preview SDK | `NEXT_PUBLIC_CREATOMATE_PUBLIC_TOKEN` |
 | Google Cloud Console > APIs & Services > Credentials | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` |
 | Meta for Developers > your app > App settings > Basic | `META_APP_ID`, `META_APP_SECRET` |
 | Render > timeline-editor-backend service page | `NEXT_PUBLIC_API_BASE_URL` (the service's own URL) |
-| Render > render-transfer-worker service page | `RENDER_WORKER_URL` (the service's own URL + `/transfer`) |
 | Vercel > project page (after first deploy) | `SITE_URL`, and `CORS_ORIGINS` on the backend |
-| Your own terminal (`openssl rand -hex 32`) | `CREATOMATE_WEBHOOK_SECRET`, `WORKER_INTERNAL_SECRET` |
+| Your own terminal (`openssl rand -hex 32`) | `SOCIAL_OAUTH_STATE_SECRET`, `FACE_ANALYSIS_SERVICE_SECRET` |
 
 ---
 
@@ -596,16 +491,9 @@ uv run uvicorn src.main:app --reload
 uv run pytest -v
 ```
 
-**Worker** (from `worker/`):
-```
-npm install
-cp .env.example .env   # fill in Supabase + renders-bucket R2 credentials
-npm start
-```
-
 **Frontend** (from `frontend/`):
 ```
 npm install
-cp .env.local.example .env.local   # fill in Supabase, Creatomate, and backend/worker URLs
+cp .env.local.example .env.local   # fill in Supabase and backend URL
 npm run dev
 ```

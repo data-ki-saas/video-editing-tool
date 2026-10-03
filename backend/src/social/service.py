@@ -36,9 +36,8 @@ def _verify_state(state: str) -> str:
     """Returns the user_id embedded in a connect-url's state param, or
     raises -- the OAuth callback has no bearer token/session of its own
     (Google redirects the browser here directly), so this signed value is
-    the only thing identifying who started the connect flow. Same
-    self-generated-shared-secret precedent as CREATOMATE_WEBHOOK_SECRET,
-    adapted for CSRF state instead of a webhook signature."""
+    the only thing identifying who started the connect flow. Self-generated
+    shared secret, used for CSRF state."""
     try:
         user_id, issued_at, signature = state.rsplit(":", 2)
     except ValueError:
@@ -158,10 +157,9 @@ async def _ensure_fresh_token(provider: str, account: social_repository.SocialAc
 
 async def _run_publish(post_id: str, provider: str, access_token: str, video_url: str, title: str, description: str) -> None:
     """Runs as a FastAPI background task, after the 202 response for
-    `publish` below has already been sent -- same accepted "basic version,
-    no durable queue" tradeoff the render-transfer-worker's own README
-    section documents, kept in-process rather than standing up a real queue
-    for a POC-scale feature."""
+    `publish` below has already been sent -- an accepted "basic version,
+    no durable queue" tradeoff: kept in-process rather than standing up a
+    real queue for a POC-scale feature."""
     try:
         provider_video_id = await get_social_provider(provider).publish_video(
             access_token=access_token, video_url=video_url, title=title, description=description

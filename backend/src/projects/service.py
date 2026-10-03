@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 _ALLOWED_THUMBNAIL_TYPES = {"image/jpeg": "jpg", "image/png": "png"}
 
 
-def _delete_assets_and_render(project_id: str, project: repository.ProjectRecord, user: CurrentUser) -> None:
+def _delete_assets_and_thumbnail(project_id: str, project: repository.ProjectRecord, user: CurrentUser) -> None:
     """Shared by delete_project and reset_project below: removes every
-    asset's object (and, separately, any finished render) from R2. Assets go
+    asset's object (and the cover image) from R2. Assets go
     through assets_service.delete_asset() one by one instead of a bulk
     delete so its content-hash dedup reference counting (a shared upload
     can't be deleted out from under another project still using it) is
@@ -28,24 +28,12 @@ def _delete_assets_and_render(project_id: str, project: repository.ProjectRecord
     for asset in assets_repository.list_assets_for_project(project_id, user.id):
         assets_service.delete_asset(asset.id, user)
 
-    # render_url is only ever set once transferRenderToR2 (worker/src/
-    # server.js) has actually finished writing the object -- absent means
-    # either no render was ever started, or one is still in flight/failed
-    # and never reached the renders bucket.
-    if project.render_id and project.render_url:
-        try:
-            r2_client.delete_render_object(project_id, project.render_id)
-        except Exception:
-            logger.exception(
-                "failed to delete R2 render object for project %s render %s", project_id, project.render_id
-            )
-
     _delete_thumbnail_object(project_id, project.thumbnail_url)
 
 
 def _delete_thumbnail_object(project_id: str, thumbnail_url: str | None) -> None:
     """Best-effort delete of the current cover image's R2 object, if any --
-    shared by _delete_assets_and_render (project delete/reset) and
+    shared by _delete_assets_and_thumbnail (project delete/reset) and
     upload_thumbnail/clear_thumbnail below (replacing or clearing a cover)."""
     if not thumbnail_url:
         return
@@ -68,24 +56,22 @@ def delete_project(project_id: str, user: CurrentUser) -> None:
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    _delete_assets_and_render(project_id, project, user)
+    _delete_assets_and_thumbnail(project_id, project, user)
     repository.delete_project(project_id)
 
 
 def reset_project(project_id: str, user: CurrentUser) -> None:
-    """Wipes a reel's assets and render state but keeps the row -- the
+    """Wipes a reel's assets and cover but keeps the row -- the
     "Reset" action beside "Delete" in ProjectList, for clearing a reel back
     to empty without losing the reel itself. Same R2 cleanup as
     delete_project above; the other half of the reset (blanking `timeline`,
-    which this never touches -- see repository.clear_render_state's own
-    comment) happens back in the frontend via the normal saveTimeline path
+    which this never touches -- the frontend saves that directly via Supabase) happens back in the frontend via the normal saveTimeline path
     once this call succeeds."""
     project = repository.get_project(project_id, user.id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    _delete_assets_and_render(project_id, project, user)
-    repository.clear_render_state(project_id)
+    _delete_assets_and_thumbnail(project_id, project, user)
     repository.clear_thumbnail(project_id)
 
 

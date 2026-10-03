@@ -6,8 +6,7 @@ class Settings(BaseSettings):
 
     # Shared secret backend/src/avatar_gen/photo_analysis.py sends as
     # `x-internal-secret` -- same header name/timing-safe-compare convention
-    # as worker/src/server.js's WORKER_INTERNAL_SECRET, just a separate
-    # secret (different caller). Generate with `openssl rand -hex 32`, same
+    # as this repo's other internal shared secrets. Generate with `openssl rand -hex 32`, same
     # precedent as this repo's other self-generated secrets.
     face_analysis_service_secret: str = ""
 

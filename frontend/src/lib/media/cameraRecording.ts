@@ -44,7 +44,7 @@ export function pickMediaRecorderMimeType(): string | null {
  * rewrap (no re-encode) when it's already mp4, otherwise a real mediabunny
  * transcode (whatever codec MediaRecorder used -> H.264/AAC in an mp4
  * container, the one combination every downstream consumer of a project
- * asset -- duration probing, Creatomate cloud render, thumbnailing --
+ * asset -- duration probing, local export, thumbnailing --
  * already assumes). */
 export async function toMp4Asset(blob: Blob, filename: string): Promise<File> {
   if (blob.type.startsWith("video/mp4")) {

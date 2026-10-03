@@ -5,10 +5,7 @@
  * signature shape, called from the same two places (CanvasPlayer.tsx's live
  * preview and localRender/exportTimeline.ts's frame-accurate export), so
  * both draw identical pixels with no drift between preview and final
- * render -- there is no separate "server-side" reproduction of this effect
- * (see this feature's own plan doc on why Creatomate's JSON compiler is
- * deliberately NOT touched: cloud render is disabled/paid-tier, the free
- * local pipeline is the one that matters).
+ * render -- there is no separate "server-side" reproduction of this effect.
  *
  * The "dolly" is never authored here directly -- it rides whichever
  * pan/zoom motion (a ZoomEffect, or an overlay's own start->end window) the

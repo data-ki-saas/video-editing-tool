@@ -188,8 +188,7 @@ async def handle_webhook(*, raw_body: bytes, headers: dict[str, str], query_secr
     record = matting_repository.get_by_id(event.provider_job_id)
     if record is None:
         # A stale/replayed delivery, or one for a job this app never
-        # recorded -- acknowledge rather than inviting a retry storm, same
-        # "no matching row" handling as the Creatomate webhook.
+        # recorded -- acknowledge rather than inviting a retry storm).
         logger.warning("matting webhook for unrecognized job id=%s", event.provider_job_id)
         return
 

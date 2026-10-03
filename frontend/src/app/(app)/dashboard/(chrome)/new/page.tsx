@@ -802,7 +802,7 @@ export default function NewReelPage() {
             <h1 className="text-xl font-semibold text-foreground">Review & generate</h1>
             <p className="text-sm text-muted">
               This builds a real starting reel — every clip, hook, and overlay stays fully editable afterward, where
-              you can also choose a free Edge Render or a paid Creatomate render.
+              you can also export it with the free Edge Render.
             </p>
           </div>
 

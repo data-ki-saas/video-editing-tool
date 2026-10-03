@@ -1,5 +1,5 @@
-This repo is split into `backend/` (FastAPI), `frontend/` (Next.js), and
-`worker/` (Node), same layout philosophy as the sibling `../data` project —
+This repo is split into `backend/` (FastAPI) and `frontend/` (Next.js),
+same layout philosophy as the sibling `../data` project —
 when in doubt about a pattern (backend module layering, portal auth
 structure, LLM provider abstraction, DEPLOY.md shape), check how `../data`
 already solved it before inventing something new. See root
@@ -32,14 +32,11 @@ casual creator" way, default to the latter.
 
 ## Conventions specific to this repo
 
-- **Secrets default to `backend/`**, not `frontend/`. The two exceptions —
-  `frontend/src/app/api/render/route.ts` (Creatomate API key) and
-  `.../api/webhooks/creatomate/route.ts` (Supabase service-role key) — exist
-  for specific, documented reasons (see their own file comments), not as a
-  precedent to hold more secrets in Next.js routes by default.
+- **Secrets default to `backend/`**, not `frontend/`.
 - **R2 has two buckets on purpose**: a private uploads bucket (presigned
-  URLs only, `R2_SIGNED_URL_EXPIRES_SECONDS`) and a public finished-renders
-  bucket (Cloudflare custom domain, fed by `worker/`). Never make the
+  URLs only, `R2_SIGNED_URL_EXPIRES_SECONDS`) and a public bucket
+  (Cloudflare custom domain) that holds public media (cover thumbnails, library assets, shared recordings) — export is
+  local in-browser, so nothing else writes finished videos there. Never make the
   uploads bucket public; never persist a resolved presigned URL into
   `projects.timeline` (it expires — see `lib/timeline/resolve.ts`'s
   `_appMeta[id].assetId` pattern instead).

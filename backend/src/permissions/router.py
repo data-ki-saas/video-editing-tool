@@ -36,10 +36,8 @@ async def my_permissions(user: CurrentUser = Depends(get_current_user)) -> MyPer
 
 @router.post("/permissions/assert", status_code=204)
 async def assert_feature(body: AssertFeatureRequest, user: CurrentUser = Depends(get_current_user)) -> None:
-    """Called by frontend/src/app/api/render/route.ts (a different runtime,
-    same permission source of truth) before it will trigger a Creatomate
-    render -- keeps the actual permission logic in one language instead of
-    reimplementing it in TypeScript."""
+    """Server-side feature-permission check, so the permission logic lives in
+    one language instead of being reimplemented in TypeScript."""
     service.assert_feature(user.role, user.role_label, user.features, body.feature)
 
 

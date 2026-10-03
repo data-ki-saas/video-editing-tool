@@ -1,14 +1,10 @@
 "use client";
 
 /**
- * Local-render counterpart to lib/timeline/gatherRenderClips.ts -- kept as
- * its own file rather than reusing that one because the two have genuinely
- * different needs: the cloud gatherer only sends durations over the wire (a
- * fresh presigned URL is resolved server-side from each assetId right
- * before the actual Creatomate call). The local exporter runs entirely in
+ * Gathers the clips the local exporter renders. It runs entirely in
  * this tab and already has a working URL for everything (assetUrlById), so
- * gatherLocalSequenceClips reuses the same duration probes and sequencing
- * math as the cloud path (getVideoDuration/buildSequenceClipInfos).
+ * gatherLocalSequenceClips uses the shared duration probes and sequencing
+ * math (getVideoDuration/buildSequenceClipInfos).
  *
  * gatherLocalMusicClips below has no such probing to do -- a MusicClip's
  * position/duration are fully authored already (see video_math.ts's own

@@ -217,7 +217,7 @@ const BACKGROUND_REMOVAL_SPINNER_RADIANS_PER_SECOND = 6;
  * real cutout isn't final yet" signal. `elapsedSeconds` drives the spin so
  * it animates during playback; a paused frame just redraws at whatever angle
  * that instant implies, same as every other elapsedSeconds-driven visual in
- * this file. Never called from exportTimeline.ts/compileCreatomateTimeline.ts
+ * this file. Never called from exportTimeline.ts
  * -- this is a GUI-only loading cue, not something that should ever bake
  * into rendered output. */
 function drawBackgroundRemovalSpinnerBadge(
@@ -368,9 +368,7 @@ export const CanvasPlayer = forwardRef<
     onTimeUpdate?: (seconds: number) => void;
     // The free/local Edge Render action, shown alongside Play/Loop/
     // Fullscreen below since it acts on the reel currently in this preview.
-    // Cloud (Creatomate) rendering has been removed from this toolbar
-    // entirely -- see this repo's own render-backend-decision notes; the
-    // buttons only render when this is set.
+    // The buttons only render when this is set.
     renderControls?: {
       canLocalRender: boolean;
       isLocalRendering: boolean;
@@ -971,17 +969,14 @@ export const CanvasPlayer = forwardRef<
     } else if (baseRect && currentEntryId && (matte || clipBackgroundRemovalById.get(currentEntryId))) {
       // Masked cutout over a new backdrop -- takes priority over both the
       // letterbox (next branch) and plain-crop (last branch) paths below,
-      // same priority compileCreatomateTimeline.ts's buildMediaSegments
-      // gives its own equivalent check, EXCEPT it defers to an active
-      // Split-Screen layout (handled above) -- an orthogonal overlay
-      // concept the backend never combines with canvasFillMode either, so
-      // there's no real conflict to resolve there, only here in the
-      // preview's own branch ordering.
+      // same priority the local exporter gives its own equivalent check,
+      // EXCEPT it defers to an active Split-Screen layout (handled above)
+      // -- an orthogonal overlay concept never combined with
+      // canvasFillMode either.
       //
       // No canvasFillMode of "crop" makes sense once the subject is cut
       // out (there must be SOME backdrop) -- defaults to solid
-      // DEFAULT_CANVAS_FILL_COLOR, same fallback
-      // compileCreatomateTimeline.ts's buildBackgroundRemovedSegment uses,
+      // DEFAULT_CANVAS_FILL_COLOR, same fallback the local exporter uses,
       // so the preview and the real render agree on the default backdrop.
       const rawFill = clipCanvasFillById.get(currentEntryId) ?? { mode: "crop" as const };
       const fill = rawFill.mode === "crop" ? { mode: "solid" as const, color: DEFAULT_CANVAS_FILL_COLOR, gradientColor: undefined as string | undefined } : rawFill;
@@ -1019,8 +1014,7 @@ export const CanvasPlayer = forwardRef<
         // SOURCE's alpha only, its own RGB is never read, see
         // backgroundSegmentation.ts's own module comment) before
         // compositing that onto the real canvas, on top of the backdrop
-        // just drawn -- the client-side equivalent of Creatomate's real
-        // maskMode: "luma".
+        // just drawn -- a luma-style mask.
         if (
           maskCompositeCanvasRef.current === null ||
           maskCompositeCanvasRef.current.width !== canvas.width ||
@@ -1180,7 +1174,7 @@ export const CanvasPlayer = forwardRef<
     // independent save/restore (not nested inside the outgoing clip's own
     // flip transform above) since the incoming clip can have a different
     // filter and its own flip state. A live-preview APPROXIMATION of
-    // Creatomate's real Fade/SlideLeft/WipeLeft animation classes, same
+    // the local exporter's Fade/SlideLeft/WipeLeft transitions, same
     // "closest same-primitives match available in a 2D canvas" spirit as
     // filterPresets.ts's own cssFilter disclaimer -- not pixel-identical to
     // the real render. Only drawn into the simple (non-Split-Screen)
@@ -2168,8 +2162,7 @@ export const CanvasPlayer = forwardRef<
             // single "frame" here is REPLACED outright by an already-
             // transparent cutout, since a still image's own alpha channel
             // needs no separate mask element at all (see
-            // compileCreatomateTimeline.ts's buildBackgroundRemovedImageSegment
-            // and backgroundSegmentation.ts's own module comment). The real
+            // backgroundSegmentation.ts's own module comment). The real
             // rembg cutout once ready, else an instant approximate one --
             // same two-stage staging as the video path, just producing a
             // full RGBA image instead of a bare alpha mask.

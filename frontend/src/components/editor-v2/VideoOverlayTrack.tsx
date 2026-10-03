@@ -177,7 +177,7 @@ function VideoOverlaySegment({
       // play from this overlay's own sourceStartSeconds (set via the flag
       // icon's OverlaySourceStartDialog). A drag can no longer stretch past
       // one play-through -- the modulo-based loop rendering in
-      // CanvasPlayer.tsx/exportTimeline.ts/compileCreatomateTimeline.ts now
+      // CanvasPlayer.tsx/exportTimeline.ts now
       // only matters as a graceful-degradation path for legacy timelines
       // that already overran before this clamp existed.
       const hasKnownSourceDuration = Number.isFinite(sourceDurationSeconds) && sourceDurationSeconds > 0;

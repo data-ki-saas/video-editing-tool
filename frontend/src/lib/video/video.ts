@@ -274,7 +274,7 @@ export async function getVideoDuration(url: string): Promise<number> {
 }
 
 /** Same probe as getVideoDuration, also returning the file's own real
- * pixel dimensions -- needed by gatherLocalRenderClips.ts/gatherRenderClips.ts
+ * pixel dimensions -- needed by gatherLocalRenderClips.ts
  * so a render can re-project the sequence's authored crop rect onto each
  * clip's own aspect ratio (video_math.ts's reprojectCropRect) instead of
  * reusing it verbatim against a differently-shaped clip. */

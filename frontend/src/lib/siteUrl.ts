@@ -1,7 +1,5 @@
-// The site's own public production URL -- reuses the SAME `SITE_URL` env var
-// api/render/route.ts already reads for Creatomate's webhook callback (see
-// DEPLOY.md's env var table), rather than a second, NEXT_PUBLIC_-prefixed
-// copy: every file importing this one (root layout, the marketing home
+// The site's own public production URL -- read from the `SITE_URL` env var (see
+// DEPLOY.md's env var table) rather than a NEXT_PUBLIC_-prefixed copy: every file importing this one (root layout, the marketing home
 // page, robots.ts, sitemap.ts) is a server component or a route handler, so
 // a plain (non-public) env var is safe to read here -- it's serialized into
 // the response Next.js builds server-side, never bundled into client JS.

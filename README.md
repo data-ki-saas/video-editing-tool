@@ -4,16 +4,11 @@ A Reel-format (9:16) video reel maker. Split into a `backend/` (FastAPI)
 and `frontend/` (Next.js) app, following the same structure as the sibling
 `data` project.
 
-- **frontend/** — Next.js App Router UI. Renders the timeline editor
-  (`@creatomate/preview`), triggers renders and receives Creatomate's webhook
-  (both hold their own server-only secrets — see "Rendering pipeline" below).
+- **frontend/** — Next.js App Router UI. Hosts the timeline editor and the
+  free in-browser export (see "Rendering" below).
 - **backend/** — FastAPI service. Owns Supabase (via the service-role key)
   and the private uploads R2 bucket, so no upload storage credential ever
   reaches the browser.
-- **worker/** — a small standalone Node service that mirrors a finished
-  Creatomate render into a *second*, publicly-served R2 bucket, so playback
-  comes from our own Cloudflare-fronted domain instead of Creatomate's
-  temporary hosted URL. See "Delivering finished videos" below.
 - **supabase/migrations/** — shared schema (`users`, `projects`, `assets`,
   `niche_configs`, `usage_events`), applied directly to the Supabase project
   every app points at.
@@ -28,13 +23,12 @@ fields matter for whichever business created that reel; see "Niches" below.
 | ----------------------------- | ---------- |
 | frontend                      | Vercel     |
 | backend                       | Render     |
-| render-transfer-worker        | Render     |
 | Postgres + Auth                | Supabase   |
 | upload storage (private)       | Cloudflare R2 |
-| finished-render storage (public, CDN) | Cloudflare R2 + custom domain |
+| cover thumbnails (public, CDN) | Cloudflare R2 + custom domain |
 
-`render.yaml` at the repo root defines the backend's and worker's Render
-services (`rootDir: backend` / `rootDir: worker`). The frontend deploys to
+`render.yaml` at the repo root defines the backend's Render service
+(`rootDir: backend`). The frontend deploys to
 Vercel with its project root set to `frontend/`.
 
 ## Setup
@@ -49,7 +43,7 @@ Vercel with its project root set to `frontend/`.
 3. Backend: copy `backend/.env.example` to `backend/.env`, fill in the
    Supabase (service role) and R2 values, then `cd backend && uv sync && uv run uvicorn src.main:app --reload`.
 4. Frontend: copy `frontend/.env.local.example` to `frontend/.env.local`,
-   fill in the Supabase (anon key), API base URL, and Creatomate values,
+   fill in the Supabase (anon key) and API base URL values,
    then `cd frontend && npm install && npm run dev`.
 
 The database trigger creates a `public.users` row whenever Supabase Auth creates a
@@ -107,112 +101,26 @@ The generated fields are a UI scaffold for the "New Reel" form only —
 enforced schema. If niche generation ever returns something malformed, the
 whole request fails with a 502 rather than silently caching a broken form.
 
-## Rendering pipeline
+## Rendering
 
-```
-browser --(final timeline JSON)--> POST /api/render (frontend, Vercel)
-                                        |
-                                        v
-                                Creatomate.startRender()  -- fire-and-forget,
-                                        |                    not the polling
-                                        |                    render() call
-                                        v
-                          projects.render_id / render_status = 'planned' saved
-                                        |
-                       ... Creatomate renders the video, minutes later ...
-                                        |
-                                        v
-        POST /api/webhooks/creatomate (frontend, Vercel) <-- Creatomate calls back
-                                        |
-                        projects.render_status = 'succeeded'
-                        projects.render_url = Creatomate's temporary URL
-                                        |
-                                        v
-                POST /transfer (render-transfer-worker, Render) -- fire-and-forget
-                                        |
-              downloads the MP4 from Creatomate, streams it into R2,
-              then sets render_status = 'completed', render_url = our own
-              Cloudflare-fronted URL
-```
+The only render path is the free, local in-browser export (Mediabunny /
+WebCodecs, `frontend/src/lib/localRender/`) — the finished video is produced
+on the user's own device, so there is no server-side render service.
 
-Two Next.js routes hold their own secrets rather than delegating to the
-FastAPI backend, a deliberate exception to "backend owns all secrets"
-elsewhere in this repo:
-
-- **`POST /api/render`** ([frontend/src/app/api/render/route.ts](frontend/src/app/api/render/route.ts)) —
-  authenticates via the cookie-based Supabase client, checks project
-  ownership, calls `Creatomate.Client.startRender()` with `CREATOMATE_API_KEY`.
-- **`POST /api/webhooks/creatomate`** ([frontend/src/app/api/webhooks/creatomate/route.ts](frontend/src/app/api/webhooks/creatomate/route.ts)) —
-  receives Creatomate's completion callback. This has no user session to
-  authenticate with (Creatomate is calling us, not the browser), so it uses
-  the Supabase **service-role** key instead — duplicated from `backend/`'s
-  copy, an accepted tradeoff of keeping this receiver here instead of in
-  FastAPI. **Security note:** Creatomate does not publish an HMAC-signature
-  scheme for webhooks (checked their Node SDK source and public docs — there
-  isn't one). Instead, `webhook_url` carries a `secret` query param we
-  generate ourselves (`CREATOMATE_WEBHOOK_SECRET`) and the receiver checks
-  with a timing-safe comparison. Treat that secret like an API key, and
-  rotate it if the URL is ever exposed somewhere it shouldn't be (logs,
-  error trackers, etc).
-
-`projects.render_status` moves through Creatomate's own states
-(`planned`/`waiting`/`rendering`/`succeeded`/`failed`) and then, only once the
-`worker/` transfer finishes, our own app-level `completed` — deliberately not
-the same thing as Creatomate's `succeeded`, since `succeeded` only means
-Creatomate finished rendering, not that the video lives anywhere we control
-yet.
-
-## Delivering finished videos
-
-Creatomate's hosted render URL isn't meant as permanent storage or a
-CDN you control — it's why the pipeline above always mirrors a finished
-render into R2 before calling it `completed`. Recommended DNS/bucket setup
-for that:
-
-1. **Use a second, separate R2 bucket for finished renders** — do not reuse
-   the private uploads bucket from "Asset URLs" above. A Cloudflare custom
-   domain makes an *entire* bucket publicly readable; finished renders are
-   meant to be shared/played back publicly, raw user uploads are not, and
-   R2 doesn't offer prefix-scoped public access to split one bucket safely.
-2. In Cloudflare: **R2 → your renders bucket → Settings → Public access →
-   Custom Domains**, and connect a subdomain, e.g. `videos.yourapp.com`.
-   Cloudflare adds the DNS record for you (a proxied `CNAME`, orange-clouded)
-   — you don't hand-write one. Once connected, every object in that bucket is
-   served from Cloudflare's edge under your own domain, cached globally, with
-   **zero egress fees** (R2 has no egress charge, and Cloudflare-to-Cloudflare
-   traffic never leaves their network).
-3. Scope the R2 API token the worker uses to *only* that bucket — it never
-   needs to touch the private uploads bucket, and vice versa.
-4. Point `R2_RENDERS_PUBLIC_URL` (worker/.env) at that custom domain. That's
-   the value stored in `projects.render_url` once a transfer finishes.
-
-**Why a separate worker service instead of doing the transfer inline in the
-webhook** (`worker/src/server.js`, a small standalone Node HTTP service,
-deployed as its own Render service via `render.yaml`'s `render-transfer-worker`):
-a finished render can be a multi-hundred-MB video. Streaming that from
-Creatomate's URL into R2 inside a Vercel serverless function risks hitting
-its execution-time and payload limits — Vercel functions are built for quick
-request/response cycles, not minutes-long file transfers. Render's worker
-runs as a long-lived process with no such ceiling, so the webhook route just
-fires a small JSON request at it (`{projectId, renderId, sourceUrl}`) and
-returns immediately; the worker does the actual streaming download → streaming
-multipart upload → final DB write on its own time.
-
-**Known limitation of this "basic" version, worth upgrading before this
-carries real traffic:** the worker acknowledges the transfer request before
-the transfer finishes, with no retry and no durable queue — a crash or
-redeploy mid-transfer loses that job silently (Creatomate's webhook itself
-won't refire once already acknowledged). A production version should push
-`{projectId, renderId, sourceUrl}` onto a durable queue (even a `pending_transfers`
-Postgres table polled by the worker would do) instead of a single in-memory
-HTTP request, so an interrupted transfer can be retried.
+The public renders bucket (a second, separate R2 bucket with a Cloudflare
+custom domain, `R2_RENDERS_*` in the backend) holds public media: **cover thumbnails**, library assets and shared recordings
+the backend writes (export is local, in the browser, so no finished renders land here).
+Keep it separate from the private uploads bucket from "Asset URLs" above: a
+Cloudflare custom domain makes an *entire* bucket publicly readable, and R2
+doesn't offer prefix-scoped public access to split one bucket safely.
 
 ## Abuse guardrails (not billing)
 
-Login-gating alone doesn't stop a signed-in user from running up render or
-storage costs. `usage_events` (one row per render/voiceover/upload) backs a
-plain fixed-daily-cap check in `app/api/render/route.ts` (`RENDER_DAILY_LIMIT`,
-currently 10/day) — a 429 past the cap, not a metering/billing system. No
+Login-gating alone doesn't stop a signed-in user from running up
+storage or third-party API costs. `usage_events` (one row per
+voiceover/upload/etc.) backs plain fixed-daily-cap checks in the backend
+(e.g. `MATTING_DAILY_CAP`, `AVATAR_GENERATE_DAILY_CAP`) — a 429 past the cap,
+not a metering/billing system. No
 plans or tiers exist; don't build them into a feature request unless
 explicitly asked for.
 

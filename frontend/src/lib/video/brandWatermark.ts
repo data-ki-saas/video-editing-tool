@@ -8,15 +8,7 @@
  * One shared draw function so CanvasPlayer's live preview and
  * lib/localRender/exportTimeline.ts's local render (both plain 2D canvas
  * compositing) can't drift from each other -- same "one source of truth"
- * discipline as textTemplates.ts. The cloud path
- * (compileCreatomateTimeline.ts) never touches a canvas, so it draws the
- * equivalent look with real Creatomate Text/backgroundColor properties
- * instead (buildBrandWatermarkElement there) -- it imports the same
- * TEXT/DURATION/PADDING_FRACTION/FONT_SIZE_FRACTION constants below rather
- * than hand-duplicating them, so the two can't silently drift apart the
- * way this app's own caption templates already learned NOT to (see
- * textTemplates.ts's TEXT_TEMPLATE_FONT_FRACTIONS/
- * STROKE_WIDTH_FONT_SIZE_FRACTIONS).
+ * discipline as textTemplates.ts.
  */
 export const BRAND_WATERMARK_TEXT = "Myreels.in";
 export const BRAND_WATERMARK_DURATION_SECONDS = 2;

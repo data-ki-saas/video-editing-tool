@@ -175,17 +175,6 @@ export interface Timeline {
   height: number;
   elements: TemplateElement[];
   _appMeta: Record<string, AppMetaEntry>;
-  // App-private, same underscore convention as _appMeta above (tolerated by
-  // Creatomate as an extra source-template key it doesn't recognize) --
-  // read back by api/render/route.ts to persist as projects.
-  // render_output_duration_seconds, since Creatomate's webhook payload
-  // itself never reports the render's actual duration (see
-  // webhooks/creatomate/route.ts's CreatomatePayload). Optional since the
-  // handful of non-render Timeline constructors (createEmptyReelTimeline,
-  // autoAssemble, resetProject's blank save) have no meaningful duration to
-  // report -- only compileCreatomateTimeline (the actual render path)
-  // always sets it.
-  _totalOutputDurationSeconds?: number;
   // Persists ThreePaneEditor's undo-able change list (see
   // lib/useEditHistory.ts) so reopening a reel resumes with the same
   // history and current selection, not a blank slate. Optional/absent on
@@ -242,24 +231,10 @@ export interface Project {
   // @/lib/niches's own comment on why `fields` never becomes real columns).
   attributes: Record<string, unknown>;
   timeline: Timeline;
-  render_id: string | null;
-  render_status: string | null;
-  render_url: string | null;
-  // render_error: set once render_status = 'failed' -- a human-readable
-  // reason from either Creatomate itself or the render-transfer worker (see
-  // app/api/webhooks/creatomate/route.ts and worker/src/server.js).
-  // render_started_at: when the current render attempt began -- these
-  // render_* fields are still written by the (dormant, untouched) cloud
-  // render pipeline (api/render/route.ts, the webhook, worker/), but no
-  // editor-v2 UI reads them anymore now that cloud rendering has no
-  // trigger in this editor -- see this repo's own render-backend-decision
-  // notes.
-  render_error: string | null;
-  render_started_at: string | null;
   // Cover/thumbnail picker (see components/editor-v2/CoverPicker.tsx) --
   // a standalone public R2 image the user downloads and attaches manually
   // when publishing to YouTube/TikTok/IG, not something embedded in the
-  // exported video. Backend-owned (like render_*), written via
+  // exported video. Backend-owned, written via
   // lib/api.ts's uploadThumbnail/clearThumbnail, NOT a direct Supabase
   // write like `timeline` -- see supabase/migrations/
   // 0011_add_project_thumbnail.sql for why.
@@ -382,7 +357,7 @@ export async function renameProject(projectId: string, name: string): Promise<vo
 
 // Routed through the FastAPI backend (not a direct Supabase delete like the
 // other functions above) -- a project owns R2 objects (every asset's
-// storage_key, plus a finished render) that Postgres's `assets` FK cascade
+// storage_key, plus the cover image) that Postgres's `assets` FK cascade
 // never reaches. src/projects/service.py cleans those up before removing the
 // row itself; deleting the row straight from here would silently orphan them.
 export async function deleteProject(projectId: string): Promise<void> {
@@ -391,8 +366,8 @@ export async function deleteProject(projectId: string): Promise<void> {
 
 // Clears a reel back to empty without deleting it -- the "Reset" action
 // beside "Delete" in ProjectList. resetProjectViaBackend handles the half
-// that needs backend secrets (R2 cleanup for every asset and any finished
-// render); blanking `timeline` itself is just a normal saveTimeline call,
+// that needs backend secrets (R2 cleanup for every asset and the cover
+// image); blanking `timeline` itself is just a normal saveTimeline call,
 // same as every other edit to that column, using the same default shape
 // the `timeline` column itself is created with (see supabase/migrations/
 // 0004_add_listing_fields_and_timeline_shape.sql).

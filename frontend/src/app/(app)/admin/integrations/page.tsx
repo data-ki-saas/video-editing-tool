@@ -16,10 +16,8 @@ type LogEntry = { date: string; note: string };
 // `scope` is which of this app's TWO deployed services (Render backend,
 // Vercel frontend) actually reads the variable at runtime -- see DEPLOY.md's
 // own per-service tables, which this mirrors. Not every integration lives on
-// the backend by default: Creatomate's own secret key is deliberately a
-// FRONTEND (Vercel) env var (see root CLAUDE.md's stated exception for
-// why), and Supabase's service-role key is needed on BOTH, so an
-// integration can list vars under either or both scopes.
+// the backend by default, so an integration can list vars under either or
+// both scopes.
 type EnvVar = { name: string; scope: "frontend" | "backend"; required: boolean };
 
 type Integration = {
@@ -42,23 +40,6 @@ type Integration = {
 
 const INTEGRATIONS: Integration[] = [
   {
-    name: "Creatomate",
-    purpose: "Server-side video rendering (final reel export) and the browser Preview SDK used by the editor.",
-    pricingNote: "Paid SaaS, credit/render-minute based. No self-hosted fallback -- see DEPLOY.md step 3.",
-    docsUrl: "https://creatomate.com/pricing",
-    // Deliberately FRONTEND (Vercel), not backend -- see root CLAUDE.md's
-    // stated exception for app/api/render/route.ts. The one integration on
-    // this whole page where that's true.
-    envVars: [
-      { name: "CREATOMATE_API_KEY", scope: "frontend", required: true },
-      { name: "CREATOMATE_WEBHOOK_SECRET", scope: "frontend", required: true },
-      { name: "NEXT_PUBLIC_CREATOMATE_PUBLIC_TOKEN", scope: "frontend", required: true },
-    ],
-    log: [
-      { date: "2026-08-24", note: "Chosen over self-hosted ffmpeg rendering -- see project memory \"Render backend decision\"." },
-    ],
-  },
-  {
     name: "DeepSeek",
     purpose: "Default LLM provider -- powers niche-config generation (New Reel form fields + voiceover script template).",
     pricingNote: "Pay-per-token API. Swappable for Anthropic via LLM_PROVIDER=anthropic (see backend/src/llm/).",
@@ -75,7 +56,7 @@ const INTEGRATIONS: Integration[] = [
     purpose:
       "AI background removal for cutaways/compositing -- the editor's \"Remove background\" toggle. VEED's video background-removal model (fast, no edge-refinement tier) handles a video cutaway; a completely different fal-hosted model, fal-ai/imageutils/rembg, handles a Ken Burns photo cutaway -- both billed through the same fal.ai account/API key (FAL_API_KEY), not two separate vendor relationships.",
     pricingNote:
-      "Pay-per-use, no subscription. VEED: $0.008/sec of video (fast tier, no edge refinement) -- a typical 3-8s cutaway costs $0.024-$0.064. rembg: ~$0.0011/compute-second per image (a rough per-image placeholder is used for the usage-ledger estimate -- see core/config.py's rembg_cost_cents_per_image, not a real measured rate). Chosen over cheaper per-second video options (e.g. Bria at $0.0042/sec) because VEED's dual H264 output (separate RGB + grayscale-matte streams) maps directly onto Creatomate's real maskMode: \"luma\" with no extra transcode step -- see project memory on the provider comparison.",
+      "Pay-per-use, no subscription. VEED: $0.008/sec of video (fast tier, no edge refinement) -- a typical 3-8s cutaway costs $0.024-$0.064. rembg: ~$0.0011/compute-second per image (a rough per-image placeholder is used for the usage-ledger estimate -- see core/config.py's rembg_cost_cents_per_image, not a real measured rate). Chosen over cheaper per-second video options (e.g. Bria at $0.0042/sec) because VEED's dual H264 output (separate RGB + grayscale-matte streams) maps directly onto the luma-mask compositing the editor uses, with no extra transcode step.",
     docsUrl: "https://fal.ai/models/veed/video-background-removal/fast",
     envVars: [
       { name: "FAL_API_KEY", scope: "backend", required: true },
@@ -89,7 +70,7 @@ const INTEGRATIONS: Integration[] = [
     log: [
       {
         date: "2026-08-31",
-        note: "Added -- VEED (video) first, rembg (Ken Burns photo cutaways) added same week. See backend/src/matting/ and compileCreatomateTimeline.ts's buildBackgroundRemovedSegment/buildBackgroundRemovedImageSegment.",
+        note: "Added -- VEED (video) first, rembg (Ken Burns photo cutaways) added same week. See backend/src/matting/.",
       },
     ],
   },
@@ -98,10 +79,6 @@ const INTEGRATIONS: Integration[] = [
     purpose: "Object storage -- private uploads bucket + public CDN-fronted finished-renders bucket.",
     pricingNote: "Usage-based storage, zero egress fees (the reason it was picked over S3 for the public renders bucket).",
     docsUrl: "https://developers.cloudflare.com/r2/pricing/",
-    // Backend-only from THIS app's own perspective -- the render-transfer
-    // worker (a separate deployed service, neither "frontend" nor
-    // "backend" here) holds its own copy of the renders-bucket credentials
-    // too (see DEPLOY.md step 5), not shown on this page.
     envVars: [
       { name: "R2_ACCOUNT_ID", scope: "backend", required: true },
       { name: "R2_ACCESS_KEY_ID", scope: "backend", required: true },
@@ -120,23 +97,17 @@ const INTEGRATIONS: Integration[] = [
     purpose: "Postgres database + Auth.",
     pricingNote: "Free tier in POC phase; check project usage before scaling.",
     docsUrl: "https://supabase.com/pricing",
-    // The service-role key is needed on BOTH sides -- backend for every
-    // normal DB read/write, frontend because
-    // app/api/webhooks/creatomate/route.ts writes the finished render's
-    // status straight from a Next.js API route (the OTHER stated exception
-    // in root CLAUDE.md, alongside Creatomate's own key above).
     envVars: [
       { name: "SUPABASE_URL", scope: "backend", required: true },
       { name: "SUPABASE_SERVICE_ROLE_KEY", scope: "backend", required: true },
       { name: "NEXT_PUBLIC_SUPABASE_URL", scope: "frontend", required: true },
       { name: "NEXT_PUBLIC_SUPABASE_ANON_KEY", scope: "frontend", required: true },
-      { name: "SUPABASE_SERVICE_ROLE_KEY", scope: "frontend", required: true },
     ],
     log: [],
   },
   {
     name: "Render",
-    purpose: "Hosts the FastAPI backend and the render-transfer worker.",
+    purpose: "Hosts the FastAPI backend.",
     pricingNote: "Free tier spins down when idle (cold starts up to 30-60s) -- see DEPLOY.md pitfall #9.",
     docsUrl: "https://render.com/pricing",
     // The hosting platform itself -- no credential of its own to configure
@@ -146,7 +117,7 @@ const INTEGRATIONS: Integration[] = [
   },
   {
     name: "Vercel",
-    purpose: "Hosts the Next.js frontend, including the render-trigger and Creatomate-webhook API routes.",
+    purpose: "Hosts the Next.js frontend.",
     pricingNote: "Free tier in POC phase.",
     docsUrl: "https://vercel.com/pricing",
     envVars: [],

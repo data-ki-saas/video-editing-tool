@@ -245,9 +245,8 @@ export function applySelectCutawayFilterPreset(
  * dialog panel reveals) and left undefined otherwise, so picking Blur/Crop
  * after previously picking Solid/Gradient doesn't need its own separate
  * "clear the color" action -- the color fields simply go unused again
- * whenever mode isn't "solid"/"gradient" (see canvasFillPresets.ts/
- * compileCreatomateTimeline.ts, which both only ever read them in that
- * case). */
+ * whenever mode isn't "solid"/"gradient" (see canvasFillPresets.ts, which only ever
+ * reads them in that case). */
 export function applySelectCanvasFillMode(
   selections: EditSelectionsSnapshot,
   entryId: string,

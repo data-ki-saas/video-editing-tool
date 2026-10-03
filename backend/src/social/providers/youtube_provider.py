@@ -165,12 +165,9 @@ class YouTubeProvider(SocialProvider):
 
         # Streams the video straight from our own R2 URL into YouTube's
         # upload session without ever buffering the whole file in this
-        # process's memory -- the same "don't hold a multi-hundred-MB video
-        # in RAM" concern this repo's worker/ service was built around (see
-        # README.md's "Delivering finished videos"). Single-request upload
-        # (no chunking/resume-on-failure) -- a v1 simplification, same
-        # accepted "basic version, worth upgrading before real traffic"
-        # tradeoff the render-transfer-worker's own README section states.
+        # process's memory -- a multi-hundred-MB video
+        # is never held in RAM. Single-request upload (no chunking/resume-on-
+        # failure) -- a v1 simplification, worth upgrading before real traffic.
         async with httpx.AsyncClient(timeout=None) as source_client:
             async with source_client.stream("GET", video_url) as source_response:
                 _raise_for_status(source_response)

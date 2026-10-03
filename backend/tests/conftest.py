@@ -52,8 +52,8 @@ def r2_settings(moto_r2_server, monkeypatch):
     monkeypatch.setattr(settings, "r2_bucket_name", "test-bucket")
     # Deliberately a distinct token from the uploads bucket's above, same as
     # in a real deploy (see DEPLOY.md step 2b) -- both point at the same moto
-    # server, just a different bucket, which is all delete_render_object cares
-    # about for these tests.
+    # server, just a different bucket, which is all upload_public_object
+    # cares about for these tests.
     monkeypatch.setattr(settings, "r2_renders_access_key_id", "test")
     monkeypatch.setattr(settings, "r2_renders_secret_access_key", "test")
     monkeypatch.setattr(settings, "r2_renders_bucket_name", "test-renders-bucket")
@@ -75,9 +75,6 @@ class FakeAssetsTable:
         owner_id: str,
         *,
         name: str = "Test Reel",
-        render_id: str | None = None,
-        render_status: str | None = None,
-        render_url: str | None = None,
         thumbnail_url: str | None = None,
         thumbnail_source: str | None = None,
         thumbnail_time_seconds: float | None = None,
@@ -87,9 +84,6 @@ class FakeAssetsTable:
             "id": project_id,
             "owner_id": owner_id,
             "name": name,
-            "render_id": render_id,
-            "render_status": render_status,
-            "render_url": render_url,
             "thumbnail_url": thumbnail_url,
             "thumbnail_source": thumbnail_source,
             "thumbnail_time_seconds": thumbnail_time_seconds,
@@ -103,9 +97,6 @@ class FakeAssetsTable:
         return projects_repository.ProjectRecord(
             id=row["id"],
             name=row["name"],
-            render_id=row["render_id"],
-            render_status=row["render_status"],
-            render_url=row["render_url"],
             thumbnail_url=row["thumbnail_url"],
             thumbnail_source=row["thumbnail_source"],
             thumbnail_time_seconds=row["thumbnail_time_seconds"],
@@ -115,13 +106,6 @@ class FakeAssetsTable:
         self.projects.pop(project_id, None)
         for asset_id in [aid for aid, row in self.assets.items() if row["project_id"] == project_id]:
             del self.assets[asset_id]
-
-    def clear_render_state(self, project_id: str) -> None:
-        row = self.projects.get(project_id)
-        if row is not None:
-            row["render_id"] = None
-            row["render_status"] = None
-            row["render_url"] = None
 
     def set_thumbnail(self, project_id: str, *, url: str, source: str, time_seconds: float | None) -> None:
         row = self.projects.get(project_id)

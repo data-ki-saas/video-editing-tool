@@ -8,11 +8,8 @@
  * share an English word.
  *
  * Same "single source of truth" shape as filterPresets.ts: a closed id
- * union + a catalog for the UI, kept free of the `creatomate` SDK import so
- * this file stays safe to import from client components (CanvasPlayer,
- * FrameStrip, the picker dialog) -- the SDK-class mapping for the real
- * Creatomate render lives in compileCreatomateTimeline.ts itself (server-only,
- * same split filterPresets.ts's own module comment documents).
+ * union + a catalog for the UI (CanvasPlayer, FrameStrip, the picker
+ * dialog).
  *
  * No duration or direction knobs on purpose -- one fixed duration and one
  * fixed direction per type (smart defaults over exposing every knob, per

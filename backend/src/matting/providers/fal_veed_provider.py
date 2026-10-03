@@ -70,8 +70,7 @@ class FalVeedProvider(MattingProvider):
                     # H264 splits into a separate RGB stream + a separate
                     # grayscale alpha/matte stream (two URLs in the response's
                     # `video` array) -- exactly the shape
-                    # compileCreatomateTimeline.ts's maskMode: "luma" path
-                    # needs, unlike vp9's single embedded-alpha stream (see
+                    # luma-mask compositing needs, unlike vp9's single embedded-alpha stream (see
                     # this app's own provider-choice writeup for why).
                     "output_codec": "h264",
                     # Off by default: this app only stores/uses the matte

@@ -26,34 +26,20 @@ class Settings(BaseSettings):
     # same shape as llm_provider above so a paid provider can be added later
     # without a rewrite.
     tts_provider: str = "edge"
-    # Abuse guardrail (see usage_events / RENDER_DAILY_LIMIT's frontend
-    # equivalent in api/render/route.ts), not billing/metering -- a fixed
+    # Abuse guardrail (see usage_events), not billing/metering -- a fixed
     # daily cap per user on voiceover generations.
     tts_daily_cap: int = 15
 
-    # The render daily cap's actual enforcement point is
-    # usage/service.py's assert_render_cap, called by
-    # frontend/src/app/api/render/route.ts via POST
-    # /api/usage/assert-render-cap before it will start a Creatomate render
-    # (the render call itself still happens in that Next.js route -- see
-    # this repo's root CLAUDE.md on why -- only the cap CHECK lives here).
-    # Also feeds GET /api/usage/summary, so this is the one place this
-    # number is ever set.
-    render_daily_cap: int = 10
-
     # Abuse guardrail on FILING a support ticket (not replying to one --
     # see tickets/service.py's create_ticket) -- same fixed-daily-cap
-    # precedent as tts_daily_cap/render_daily_cap above, backed by the same
+    # precedent as tts_daily_cap above, backed by the same
     # usage_events table (event_type='ticket_filed', see supabase/migrations/
     # 0029's widened check constraint).
     tickets_daily_cap: int = 10
 
     # This server's own publicly reachable base URL -- needed so
     # matting/service.py and social/client.py can hand a provider/OAuth
-    # flow a callback/redirect URL pointing back at itself (POST
-    # /api/render never needed this, since Creatomate's webhook is handled
-    # by the Next.js frontend instead -- see
-    # frontend/src/app/api/webhooks/creatomate/route.ts). No trailing slash.
+    # flow a callback/redirect URL pointing back at itself ). No trailing slash.
     backend_public_url: str = ""
 
     # Which MattingProvider src.matting.client.get_matting_provider()
@@ -97,8 +83,7 @@ class Settings(BaseSettings):
     # backend/src/metering/pricing.py) -- hand-maintained placeholders, not
     # live provider rates. Cross-reference frontend/src/app/admin/integrations
     # page.tsx's pricingNote text and keep both in sync by hand, same
-    # precedent as render_daily_cap mirroring RENDER_DAILY_LIMIT above.
-    creatomate_cost_cents_per_second: float = 2.5
+    # precedent as tts_daily_cap.
     # VEED's fast/no-refine tier, per fal.ai's published per-30-frames rate
     # at 30fps ($0.008/30 frames = $0.008/sec) -- an actual published rate,
     # unlike most of this block's placeholders.
@@ -132,22 +117,15 @@ class Settings(BaseSettings):
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
     r2_bucket_name: str = ""
-    # The finished-renders bucket is public (fed by worker/, see its own
-    # README) and secured by a SEPARATE API token from the uploads bucket
-    # above (see DEPLOY.md step 2b). Originally only used so
-    # projects/service.py could delete a project's render object on reel
-    # delete -- worker/ owned every write here. The thumbnail/cover picker
-    # is the one exception: projects/service.py's upload_thumbnail writes a
-    # cover image straight to this bucket itself (the token already has
-    # write permission, per DEPLOY.md), since that upload is a synchronous
-    # request/response, not a Creatomate render worker/ mirrors after the
-    # fact.
+    # The finished-renders bucket is public and secured by a SEPARATE API
+    # token from the uploads bucket above (see DEPLOY.md step 2b). Used so
+    # upload_thumbnail can write a cover image straight to it.
     r2_renders_access_key_id: str = ""
     r2_renders_secret_access_key: str = ""
     r2_renders_bucket_name: str = ""
-    # Same value as the worker's R2_RENDERS_PUBLIC_URL env var -- lets the
+    # Public base URL (custom domain) of the renders bucket -- lets the
     # backend construct a public URL for an object it just wrote (uploaded
-    # thumbnails), the same way worker/src/server.js does for renders.
+    # thumbnails).
     r2_renders_public_url: str = ""
     # Overrides the computed R2 endpoint — set only in tests, to point boto3's
     # S3 client at a local mock server instead of real R2.
@@ -188,7 +166,7 @@ class Settings(BaseSettings):
     # consent screen (CSRF protection, and carries which user started the
     # connect flow, since the callback has no session/bearer token to read
     # one from -- Google redirects the browser there directly). Self-
-    # generated, same precedent as CREATOMATE_WEBHOOK_SECRET/
+    # generated, same precedent as
     # FAL_WEBHOOK_SECRET: `openssl rand -hex 32`.
     social_oauth_state_secret: str = ""
     # This app's own frontend origin -- lets social/service.py's OAuth

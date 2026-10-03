@@ -178,9 +178,7 @@ export function computeMaxCoverageCropFraction(sourceAspectRatio: number, target
  * (see canvasFillPresets.ts) -- letterboxed empty space is filled by a
  * blurred cover-fit duplicate, a solid color, or a gradient rather than left
  * black. Only meaningful for the two canvas-based draw paths (CanvasPlayer,
- * lib/localRender/exportTimeline.ts): compileCreatomateTimeline.ts never
- * calls this -- Creatomate's own `fit: "contain"` does the identical math
- * natively.
+ * lib/localRender/exportTimeline.ts).
  */
 export function computeContainFitRect(sourceAspectRatio: number, canvasAspectRatio: number): CropRect {
   if (!(sourceAspectRatio > 0) || !(canvasAspectRatio > 0)) return FULL_FRAME_CROP_RECT;
@@ -670,9 +668,8 @@ export const MIN_VIDEO_OVERLAY_DURATION_SECONDS = 0.2;
  * lib/localRender/exportTimeline.ts) -- by design, never requests a fal.ai
  * job at all, at add-time OR render-time, so `matteAssetId`/`progress` stay
  * permanently absent/null for this mode. Not supported by
- * compileCreatomateTimeline.ts's Creatomate render path (same as the
- * VideoOverlayClip case it was first built for) -- Edge Render is the
- * priority path, so that's an accepted gap, not a bug. */
+ * the local exporter's matte path (same as the VideoOverlayClip case it
+ * was first built for). */
 export type BackgroundRemovalMode = "ai" | "chromaKey";
 export type BackgroundRemovalState = {
   enabled: boolean;
@@ -848,8 +845,7 @@ export const AUDIO_TRANSITION_RAMP_SECONDS = 0.03;
 /**
  * Samples the three-way audio mix (base track / video-overlay's own audio /
  * TTS narration) at one instant -- the single formula every ducking call
- * site below is built from, so live preview, offline export, and (should it
- * ever reach the Creatomate compiler) a real render can't disagree on it.
+ * site below is built from, so live preview and offline export can't disagree on it.
  *
  * The mixer spec: a video overlay's `audioBalance` and a TTS overlay's
  * `volume` (both already 0..1 fractions of "full") are each the level that
@@ -930,13 +926,13 @@ export function computeAudioMixBreakpoints(
  * The base clip's own destination rect (null when it's fully covered, i.e.
  * Full-Screen) and the overlay's own destination rect, for a given layout --
  * the ONE place this geometry is computed, shared by CanvasPlayer's
- * drawImage destination rects and compileCreatomateTimeline's element
+ * drawImage destination rects and the exporter's own
  * positioning, so preview and render can never disagree on where a seam
  * falls or which side is which.
  *
  * `baseRect: null` for Full-Screen does NOT need special-case handling
  * anywhere that draws in back-to-front order: the overlay's own element is
- * drawn AFTER the base (CanvasPlayer) / on a later track (Creatomate), at
+ * drawn AFTER the base, at
  * full opacity, filling the entire frame -- it already fully covers the
  * base whether or not the base was drawn underneath it. Skipping the base
  * draw for Full-Screen is a pure performance optimization, never required
@@ -974,8 +970,8 @@ export function computeOverlayRects(layout: VideoOverlayLayout): { baseRect: Cro
  * overflow the crop is taken from, instead of always dead-centering it --
  * only ever one of the two actually matters for a given source/target
  * ratio pair (whichever dimension is being cropped), the other is ignored
- * since that axis keeps its full extent. Mirrors Creatomate's `fit:
- * "cover"` exactly when panX/panY are left at 0.5 and zoom at 1, so the
+ * since that axis keeps its full extent. Matches CSS
+ * `object-fit: cover` exactly when panX/panY are left at 0.5 and zoom at 1, so the
  * live preview and the real render agree on how footage of a different
  * aspect ratio than its destination box gets cropped.
  *
@@ -1126,7 +1122,7 @@ export interface TtsOverlay {
   voice: string;
   assetId: string;
   // The CURRENT effective duration -- what every consumer (CanvasPlayer's
-  // audio scheduling, ttsOverlayEndTimeSeconds, compileCreatomateTimeline,
+  // audio scheduling, ttsOverlayEndTimeSeconds,
   // exportTimeline) actually plays/renders. Starts out equal to
   // sourceDurationSeconds right after generation, but TtsOverlayTrack's own
   // end-edge drag can shrink (or grow back) this value to trim the
@@ -1437,7 +1433,7 @@ export interface MusicClip {
 export const MIN_MUSIC_CLIP_DURATION_SECONDS = 0.5;
 
 /** A MusicClip with its source asset's URL resolved -- what the render
- * pipelines (exportTimeline.ts, compileCreatomateTimeline.ts) and
+ * pipeline (exportTimeline.ts) and
  * CanvasPlayer.tsx's live preview actually schedule, as opposed to the
  * plain authored MusicClip persisted on EditSelectionsSnapshot. */
 export interface ResolvedMusicClip extends MusicClip {
@@ -1519,16 +1515,16 @@ export function findClosestTimestampIndex(timestamps: number[], targetSeconds: n
  */
 export interface SequenceClipInfo {
   // The originating SequenceEntry.id, when this info was built from real
-  // sequence clips (gatherRenderClips.ts/gatherLocalRenderClips.ts) --
+  // sequence clips (gatherLocalRenderClips.ts) --
   // absent for background-music tracks (BackgroundTrackStrip.tsx) and
   // CanvasPlayer's own live-preview loader, neither of which has (or needs)
   // a per-entry filter to look up. Carried onto RenderSegment.entryId by
-  // buildRenderSegments below so the compiler can resolve each rendered
+  // buildRenderSegments below so the exporter can resolve each rendered
   // segment back to the cutaway it came from.
   id?: string;
   // Always a real string -- a "text" kind clip with no imageAssetId of its
   // own is given a synthetic assetId (its own entry id) by the gatherer
-  // functions (gatherRenderClips.ts/gatherLocalRenderClips.ts) purely so
+  // function (gatherLocalRenderClips.ts) purely so
   // every OTHER per-clip map keyed by assetId (filters, canvas fill, etc.)
   // stays a simple non-nullable lookup; nothing ever fetches `url` for it
   // (both render loops branch on `kind === "text"` before any decode/fetch
@@ -1545,7 +1541,7 @@ export interface SequenceClipInfo {
   // reusing that rect's raw fractions against a differently-shaped clip
   // (which stretches rather than crops -- see that function's own doc
   // comment). Probed client-side alongside durationSeconds -- see
-  // lib/localRender/gatherLocalRenderClips.ts and lib/timeline/gatherRenderClips.ts.
+  // lib/localRender/gatherLocalRenderClips.ts.
   width?: number;
   height?: number;
 }
@@ -1607,9 +1603,8 @@ export type SequenceEntry =
       // source_asset_id (= this entry's assetId), not by entry id, so the
       // same clip reused across multiple cutaways shares one matting job.
       // `matteAssetId` is null while the async job is still running/queued
-      // -- compileCreatomateTimeline.ts falls back to a plain (non-masked)
-      // segment until it's populated (see buildBackgroundRemovedSegment's
-      // own comment).
+      // -- the exporter falls back to a plain (non-masked) segment until
+      // it's populated.
       backgroundRemoval?: BackgroundRemovalState | null;
     }
   | {
@@ -1641,7 +1636,7 @@ export type SequenceEntry =
       // provider (rembg via fal.ai) rather than VEED's async video job, so
       // matteAssetId is often populated almost immediately rather than
       // after a real poll loop -- but the field shape, and how
-      // compileCreatomateTimeline.ts/CanvasPlayer consume it, is identical
+      // exportTimeline.ts/CanvasPlayer consume it, is identical
       // either way.
       backgroundRemoval?: BackgroundRemovalState | null;
       // "Make it 3D" toggle (lib/video/camera3D.ts) -- layers auto-derived
@@ -1739,8 +1734,7 @@ export function totalSequenceDuration(clips: SequenceClipInfo[]): number {
 // The background-music volume every reel started with before
 // Timeline.backgroundVolume existed -- read as that field's fallback
 // wherever it's absent (CanvasPlayer.tsx's live preview,
-// lib/localRender/exportTimeline.ts's offline mix,
-// compileCreatomateTimeline.ts's actual render), so an old reel's rendered
+// lib/localRender/exportTimeline.ts's offline mix), so an old reel's rendered
 // loudness doesn't change out from under it just by opening it again.
 export const DEFAULT_BACKGROUND_VOLUME = 0.5;
 // Same role for Timeline.mainAudioVolume -- the main sequence's own audio
@@ -1773,7 +1767,7 @@ export function resolveSequencePosition(
 
 /**
  * CanvasPlayer-only cut-transition support. Unlike buildRenderSegments (the
- * Creatomate/local-export OUTPUT timeline, which is free to shift its own
+ * local-export OUTPUT timeline, which is free to shift its own
  * outputStartSeconds since it's a separate axis from the ORIGINAL timeline
  * ZoomEffect/overlay/text/TTS ranges are authored against), CanvasPlayer
  * conflates "which clip's frame to show" and "evaluate every authored-range
@@ -1838,8 +1832,8 @@ export function buildVirtualCutTransitionSkipRanges(
 
 /**
  * One contiguous stretch of the OUTPUT (post-trim) render timeline, all
- * from a single physical clip -- what the Creatomate compiler emits one
- * `Video` element per (lib/timeline/compileCreatomateTimeline.ts).
+ * from a single physical clip -- what the local exporter renders one
+ * run of per segment (lib/localRender/exportTimeline.ts).
  * `zoomEffects`/flip toggles/overlay time ranges are all authored against
  * the ORIGINAL (pre-trim) concatenated-sequence timeline -- the same one
  * `sourceStartSeconds` here is in -- since that's what CanvasPlayer's own
@@ -1853,15 +1847,13 @@ export interface RenderSegment {
   assetId: string;
   /** The originating SequenceClipInfo.id (in turn SequenceEntry.id) --
    * absent when built from clips with no entry id (background music).
-   * Lets the compiler look up this segment's own colorFilterId even after
+   * Lets the exporter look up this segment's own colorFilterId even after
    * a trim has split one cutaway into several segments. */
   entryId?: string;
   /** Which kind of clip this segment came from -- determines whether the
-   * compiler emits a Creatomate Video (with trimStart/trimDuration) or an
-   * Image (no source trim, since a still image has no timeline of its own)
-   * for it. See lib/timeline/compileCreatomateTimeline.ts. "text" is a Text
-   * Slide (textSlideRenderer.ts) -- deferred/guarded in the Creatomate
-   * compiler for now, see that file's own comment. */
+   * exporter draws a video frame (with a source trim) or a still image (no
+   * source trim, since a still image has no timeline of its own) for it.
+   * "text" is a Text Slide (textSlideRenderer.ts). */
   kind: "video" | "image" | "text";
   // The originating SequenceClipInfo's own real pixel dimensions, when
   // known -- see that field's own doc comment (reprojectCropRect needs
@@ -1870,7 +1862,7 @@ export interface RenderSegment {
   width?: number;
   height?: number;
   sourceStartSeconds: number;
-  /** This clip's own local offset where this segment begins -- Creatomate's Video.trimStart. */
+  /** This clip's own local offset where this segment begins -- the segment's source trim start. */
   clipLocalStartSeconds: number;
   /** Also this segment's duration in OUTPUT time -- trimming removes stretches, it never changes playback speed. */
   durationSeconds: number;
@@ -1891,7 +1883,7 @@ export interface RenderSegment {
  * when there's nothing before it or no transition is set. Clamped so the
  * overlap never exceeds either neighbor's own duration (a very short clip
  * either side of the cut shouldn't produce a negative remaining duration).
- * Shared by buildRenderSegments below (the Creatomate/local-export OUTPUT
+ * Shared by buildRenderSegments below (the local-export OUTPUT
  * timeline) and CanvasPlayer's own transition-blend math (which uses the
  * SAME clamp against the ORIGINAL, unshifted SequenceClipInfo list -- see
  * resolveCutTransitionBlend) so every consumer agrees on exactly the same
@@ -1941,7 +1933,7 @@ export function totalRenderOutputDuration(segments: RenderSegment[]): number {
 
 // A segment shorter than this (typically left over when a trim edge lands
 // almost exactly on a clip boundary) is dropped rather than emitted as a
-// near-zero-duration render element, which Creatomate would likely reject.
+// near-zero-duration render element.
 const MIN_SEGMENT_DURATION_SECONDS = 0.02;
 
 /** The complement of `trimRanges` within [0, totalDurationSeconds) -- the

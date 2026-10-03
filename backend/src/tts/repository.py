@@ -11,8 +11,7 @@ _EVENT_TYPE = "voiceover"
 
 def count_recent_voiceover_events(user_id: str) -> int | None:
     """Count of this user's voiceover usage_events in the last 24h, or None
-    if the read itself failed -- callers must fail OPEN on None (same as the
-    frontend's isUnderRenderRateLimit in api/render/route.ts), since a
+    if the read itself failed -- callers must fail OPEN on None, since a
     usage_events hiccup shouldn't block the TTS feature entirely."""
     since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
     try:

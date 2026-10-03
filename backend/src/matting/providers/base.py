@@ -19,8 +19,7 @@ class MattingProvider(ABC):
 
     - create_matte: takes a source VIDEO (an already-uploaded project asset)
       and returns a grayscale luma-matte video, frame-aligned with the
-      source, that Creatomate's own maskMode: "luma" (see
-      compileCreatomateTimeline.ts's buildBackgroundRemovedSegment) uses to
+      source, that the editor's luma-mask compositing uses to
       mask that clip against a new backdrop.
     - create_image_cutout: takes a source PHOTO and returns a real-alpha PNG
       cutout directly -- no separate mask needed, since a still image's own

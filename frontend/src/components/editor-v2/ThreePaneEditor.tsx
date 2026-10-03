@@ -2,13 +2,7 @@
 
 /**
  * Top-level layout for the client-side video editor -- the one and only
- * editor, rendered directly by /dashboard/[projectId]. The pre-editor-v2
- * Creatomate-based dashboard (VideoEditor.tsx/QuickCreate.tsx and their
- * EditorPanelContext/useRenderStatus plumbing) has been removed entirely --
- * nothing routed to it any more. The Creatomate render backend itself
- * (api/render/route.ts, the webhook, worker/) is untouched: editor-v2 has
- * no render pipeline of its own yet, so that's still what a future "render
- * this reel" action would hook into.
+ * editor, rendered directly by /dashboard/[projectId].
  *
  * The global nav bar (app/(app)/layout.tsx's GlobalTopNav) sits above this
  * whole page; this component itself is just three horizontal bands that
@@ -759,9 +753,7 @@ export function ThreePaneEditor({
   // component already has in scope could be up to r2_signed_url_expires_seconds
   // old (whatever they were when this project was last opened/refreshed),
   // and a slow local export (see exportTimeline.ts) can easily outlast a
-  // stale URL otherwise. Mirrors the cloud render's own "resolve fresh URLs
-  // right before the actual operation" approach (api/render/route.ts's
-  // resolveAssetSources), just done client-side instead of server-side.
+  // stale URL otherwise.
   const refreshAssets = useCallback(async (): Promise<Asset[]> => {
     try {
       const data = await listAssets(projectId);
@@ -1468,7 +1460,7 @@ export function ThreePaneEditor({
   // matteAssetId starting null; requestBackgroundRemoval/
   // pollBackgroundRemoval run in the background and a second pushChange
   // patches the real matteAssetId in once VEED's job completes (or leaves
-  // it null on failure/timeout, which compileCreatomateTimeline.ts and
+  // it null on failure/timeout, which the exporter and
   // CanvasPlayer both already treat as "not ready yet, render/preview
   // as a normal clip"). NOT stale-safe against edits made during that wait
   // (`selections` here is the closure's value at poll-completion time, not
@@ -2976,9 +2968,8 @@ export function ThreePaneEditor({
   });
 
   // The free Edge Render button in CanvasPlayer's preview toolbar -- renders
-  // entirely in this tab (lib/localRender/exportTimeline.ts), no server/
-  // Creatomate involved (cloud rendering has been removed from this editor;
-  // see the render-backend-decision notes). Gathers each clip's real
+  // entirely in this tab (lib/localRender/exportTimeline.ts), no server
+  // involved. Gathers each clip's real
   // duration/dimensions fresh via the local-only gatherer
   // (gatherLocalRenderClips.ts), which needs each clip's actual URL, not
   // just its duration.
@@ -2999,9 +2990,7 @@ export function ThreePaneEditor({
     // a slow connection, so a URL that was still fine when this project was
     // opened can easily expire mid-render otherwise. This is exactly what
     // caused overlay images to silently fail to load partway through a slow
-    // export. Mirrors the cloud render's own "resolve fresh URLs right
-    // before the actual operation" approach (api/render/route.ts's
-    // resolveAssetSources), just done client-side instead of server-side.
+    // export.
     //
     // Deliberately calls listAssets directly instead of refreshAssets() --
     // refreshAssets() also does setAssets(data), and a presigned URL gets a

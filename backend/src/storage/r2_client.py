@@ -29,8 +29,7 @@ def get_r2_client():
 def get_r2_renders_client():
     """Separate client/credentials from get_r2_client() above -- the renders
     bucket uses its own API token (see settings.r2_renders_access_key_id),
-    same R2 account. Only used to delete a render object on project delete;
-    worker/src/server.js owns writing to this bucket."""
+    same R2 account. Used to write cover thumbnails."""
     return boto3.client(
         "s3",
         endpoint_url=settings.r2_endpoint_url,
@@ -78,20 +77,10 @@ def copy_object(source_key: str, dest_key: str) -> None:
     )
 
 
-def delete_render_object(project_id: str, render_id: str) -> None:
-    """Matches the key format worker/src/server.js's transferRenderToR2 wrote
-    it under -- see that function's own `key` line. Only called once a
-    render has actually landed in the renders bucket (render_url set)."""
-    key = f"renders/{project_id}/{render_id}.mp4"
-    get_r2_renders_client().delete_object(Bucket=settings.r2_renders_bucket_name, Key=key)
-
-
 def upload_public_object(local_path: Path, key: str, content_type: str) -> str:
     """Writes straight to the PUBLIC renders bucket and returns its public
     URL -- used only by the thumbnail/cover picker (projects/service.py's
-    upload_thumbnail), which needs a synchronous upload+URL, unlike every
-    other write to this bucket (worker/src/server.js's async render
-    mirror)."""
+    upload_thumbnail), which needs a synchronous upload+URL, ."""
     get_r2_renders_client().upload_file(
         str(local_path),
         settings.r2_renders_bucket_name,

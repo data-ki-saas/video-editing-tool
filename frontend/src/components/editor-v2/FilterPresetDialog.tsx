@@ -11,8 +11,7 @@
  * current frame on the left via a plain CSS `filter` style on the same
  * <img>, the identical approximation CanvasPlayer's live preview applies via
  * `ctx.filter` (see lib/video/filterPresets.ts's own module comment for why
- * this is an approximation of Creatomate's real colorFilter/colorFilterValue/
- * colorOverlay combination, not a literal render of it).
+ * this is an approximation, not a literal render of the real filter).
  */
 import { useState } from "react";
 import { FILTER_PRESET_OPTIONS, type FilterPresetId } from "@/lib/video/filterPresets";

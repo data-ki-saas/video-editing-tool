@@ -7,10 +7,6 @@
  * video_math.ts's computeMaxCoverageCropRect) and stays the default for
  * every clip that never touches this control -- absent/null reads as "crop"
  * everywhere via getCanvasFillMode, so no existing reel's render changes.
- *
- * Same server-safe/client-safe split as filterPresets.ts: this file never
- * imports the `creatomate` SDK package -- compileCreatomateTimeline.ts wires
- * these modes to real Blur/Shape SDK properties itself.
  */
 export type CanvasFillMode = "crop" | "blur" | "solid" | "gradient";
 
