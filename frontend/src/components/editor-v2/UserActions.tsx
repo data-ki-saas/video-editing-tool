@@ -57,6 +57,7 @@
  * sequence, and gets its own rail too, the Cutaways rail (CutawayTrack.tsx),
  * stacked directly above the Cut and Trim rail.
  */
+import Link from "next/link";
 import { CropToolIcon } from "@/components/icons/UIIcons";
 import { CoverIcon } from "./icons/PlayerIcons";
 import { CLIP_RECT_OPTIONS, ClipRectIcon } from "./ClipRectIcon";
@@ -152,6 +153,18 @@ function AvatarPersonIcon({ className }: { className?: string }) {
   );
 }
 
+// A magic wand with a spark -- "Reel Wizard" 's identity (guided, generates a
+// whole starting reel), distinct from every Base/Overlays glyph.
+function WizardIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M4 20 15 9" />
+      <path d="m14 6 4 4" />
+      <path d="M18 3v3M16.5 4.5h3M20 12v2M19 13h2" />
+    </svg>
+  );
+}
+
 // Small notification-style count badge, pinned to the bottom of a tab
 // trigger once it has at least one item -- the at-a-glance equivalent of
 // Clip's own preview swatch (also bottom-pinned via mt-auto) for the tabs
@@ -219,6 +232,21 @@ export function UserActions({
   const selectedClipRectOption = CLIP_RECT_OPTIONS.find((option) => option.id === selectedClipRectId) ?? null;
   return (
     <div className="flex h-full items-stretch gap-4 overflow-x-auto pt-4">
+      {/* WIZARD -- emerald; opens the guided new-reel flow (it creates its own draft reel, so it navigates rather than opening a modal on this one) */}
+      <div className="relative flex h-full gap-3">
+        <GroupLabel colorClassName="text-emerald-600 dark:text-emerald-400">Wizard</GroupLabel>
+        <Link
+          href="/dashboard/new"
+          title="Reel Wizard -- answer a few questions and get a starting reel assembled for you"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-emerald-600 dark:text-emerald-400 hover:bg-background"
+        >
+          <WizardIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            New Reel
+          </span>
+        </Link>
+      </div>
+
       {/* BASE -- blue family, lightest to darkest: Clip, Thumbnail, Cutaway, Text Slide */}
       <div className="relative flex h-full gap-3">
         <GroupLabel colorClassName="text-blue-600 dark:text-blue-400">Base</GroupLabel>

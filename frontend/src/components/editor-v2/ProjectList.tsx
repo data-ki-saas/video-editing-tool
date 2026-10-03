@@ -81,7 +81,7 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
     <div className="flex h-full flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-medium text-foreground">Reels</h2>
-        <Link href="/dashboard/new" className="shrink-0 text-xs text-accent hover:underline">
+        <Link href="/dashboard" className="shrink-0 text-xs text-accent hover:underline">
           + New
         </Link>
       </div>
