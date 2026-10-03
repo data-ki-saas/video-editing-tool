@@ -11,7 +11,9 @@ from src.core.config import settings
 from src.permissions.features import FEATURE_KEYS
 from src.projects import repository as projects_repository
 from src.recordings import repository as recordings_repository
+from src.storage import quota
 from src.tickets import repository as tickets_repository
+from src.usage import limits
 
 # Full access by default so existing router/service tests (written before
 # the permissions module existed) keep exercising real behavior rather than
@@ -60,6 +62,15 @@ def r2_settings(moto_r2_server, monkeypatch):
     # Doesn't need to be a real public URL in tests -- upload_public_object/
     # thumbnail_key_from_url only need it to round-trip consistently.
     monkeypatch.setattr(settings, "r2_renders_public_url", f"{moto_r2_server}/test-renders-bucket")
+
+
+@pytest.fixture(autouse=True)
+def usage_enforcement_stubs(monkeypatch):
+    """The reserve_usage / user_storage_usage SQL functions (migration 0043)
+    need a real Supabase; by default every test sees an empty, unlimited
+    account. Tests of the enforcement itself override these two seams."""
+    monkeypatch.setattr(limits, "_call_reserve", lambda **kwargs: {"status": "ok", "user_count": 1})
+    monkeypatch.setattr(quota, "_fetch_usage", lambda user_id: (0, 0))
 
 
 class FakeAssetsTable:
@@ -173,7 +184,6 @@ def fake_assets_table(monkeypatch):
     monkeypatch.setattr(repository, "count_assets_with_storage_key", table.count_with_storage_key)
     monkeypatch.setattr(projects_repository, "get_project", table.get_project)
     monkeypatch.setattr(projects_repository, "delete_project", table.delete_project)
-    monkeypatch.setattr(projects_repository, "clear_render_state", table.clear_render_state)
     monkeypatch.setattr(projects_repository, "set_thumbnail", table.set_thumbnail)
     monkeypatch.setattr(projects_repository, "clear_thumbnail", table.clear_thumbnail)
     return table

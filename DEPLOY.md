@@ -371,6 +371,34 @@ for nothing.
 
 ---
 
+## Spend safety checklist (do before opening signups)
+
+The app enforces per-user caps, site-wide caps and a site-wide cost budget
+(`backend/src/usage/limits.py`, migration `0043`). Those only hold if the
+provider accounts are also configured so a bug or leaked key can't bill past
+them. None of this can be set from code:
+
+- **fal.ai** — keep the account on **prepaid credit with auto-recharge OFF**.
+  When the balance hits zero fal locks the account instead of billing more,
+  so the worst case is the balance you chose to load. Set a spend/usage alert
+  in the fal dashboard. Rotate `FAL_API_KEY` if it was ever pasted anywhere.
+- **Cloudflare R2** — has **no spend cap**. Set a billing notification
+  (Billing > Notifications) well under what you'd tolerate. Add a bucket
+  **lifecycle rule** on the uploads bucket: expire the `avatars-tmp/` prefix
+  after 1 day and abort incomplete multipart uploads after 1 day (the temp
+  cartoonify source is deleted in code, but a crash between upload and
+  cleanup would otherwise leave it forever).
+- **Supabase Auth** — per-user caps are meaningless if anyone can mint
+  accounts for free. Turn on **Confirm email**, enable **CAPTCHA protection**
+  (Cloudflare Turnstile) for sign-up, and make sure **Anonymous sign-ins** is
+  **off**. Review the Auth rate-limit settings.
+- **Roles** — only `paid_user`/`admin` carry `matting_generate` and
+  `avatar_generate`. Re-check `/admin/roles` before adding either feature to a
+  role that new signups receive (`free_user` must not have them).
+- **Watch it** — `/admin/usage` lists `cap_warnings`. Entries ending in
+  `_site` or `_budget` mean a site-wide limit was hit: someone is either
+  growing fast or abusing; look before raising the limit.
+
 ## Common pitfalls
 
 1. **"Env var set but not applied."** Vercel bakes `NEXT_PUBLIC_*` vars into
@@ -442,6 +470,15 @@ yourself (a random secret); everything else comes from a specific dashboard.
 | `SOCIAL_OAUTH_STATE_SECRET` | `""` | Self-generated: `openssl rand -hex 32` |
 | `FRONTEND_PUBLIC_URL` | `""` | This app's own production frontend URL — same value as the frontend's `SITE_URL` below |
 | `AVATAR_GENERATE_DAILY_CAP` | `10` | Not fetched — pick a number, optional to set |
+| `MATTING_DAILY_CAP` | `20` | Per-user background removals per rolling 24h (atomic, see `usage/limits.py`) |
+| `MATTING_GLOBAL_DAILY_CAP` | `200` | **Site-wide** background removals per 24h, across all accounts |
+| `AVATAR_GENERATE_GLOBAL_DAILY_CAP` | `100` | **Site-wide** avatar generations (fal.ai cartoonify) per 24h |
+| `PAID_PROVIDER_DAILY_BUDGET_CENTS` | `500` | **Site-wide** estimated fal.ai spend per 24h, in cents — the number that bounds the bill no matter how many accounts exist. Admins are subject to it too |
+| `MATTING_MAX_SOURCE_SECONDS` | `60` | Longest clip one background-removal job may bill for (VEED bills per second) |
+| `STORAGE_QUOTA_MB` / `MAX_OBJECTS_PER_USER` | `2048` / `1000` | Per-user private-bucket footprint (assets + recordings + ticket attachments) |
+| `LIBRARY_MAX_VIDEO_MB` / `LIBRARY_MAX_VIDEOS_PER_USER` | `200` / `50` | Public-bucket library limits |
+| `MAX_AVATARS_PER_USER` | `30` | Saved avatars (generate + duplicate + import all count) |
+| `TICKET_MESSAGES_DAILY_CAP` / `LIBRARY_PROMOTIONS_DAILY_CAP` | `30` / `5` | Support replies / public avatar-library publishes per user per day |
 | `FACE_ANALYSIS_SERVICE_URL` | `""` | The face-analysis Render service's own URL (below) |
 | `FACE_ANALYSIS_SERVICE_SECRET` | `""` | Self-generated: `openssl rand -hex 32` — same value set on the face-analysis service below |
 

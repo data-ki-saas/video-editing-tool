@@ -64,6 +64,40 @@ class Settings(BaseSettings):
     # able to be quite as generous as when this really did cost nothing.
     avatar_generate_daily_cap: int = 10
 
+    # --- Hard ceilings that hold no matter how many accounts exist ----------
+    # Per-user caps above only bound ONE account; anyone can sign up again.
+    # These bound the whole site (see usage/limits.py + migration 0043's
+    # reserve_usage, which enforces them atomically before any spend).
+    # Site-wide fal.ai-backed jobs per rolling 24h:
+    matting_global_daily_cap: int = 200
+    avatar_generate_global_daily_cap: int = 100
+    # Site-wide ESTIMATED paid-provider spend per rolling 24h, in cents,
+    # summed across every cost-bearing event type (matting + cartoonify).
+    # $5/day by default. A reservation that would push past it is refused
+    # with 503 -- raise it deliberately once real traffic justifies it.
+    paid_provider_daily_budget_cents: float = 500.0
+    # Longest source clip a single background-removal job may bill for
+    # (VEED bills per output second, so this is the per-job cost ceiling:
+    # 60s * $0.008 = $0.48).
+    matting_max_source_seconds: int = 60
+
+    # --- Storage (Cloudflare R2) ceilings, per user -------------------------
+    # Private uploads bucket footprint (assets + recordings + ticket
+    # attachments) and object count. Admins bypass; see storage/quota.py.
+    storage_quota_mb: int = 2048
+    max_objects_per_user: int = 1000
+    # Public renders bucket (library): finished reels are short, so a tighter
+    # per-file bound than max_upload_size_mb, plus a per-user count.
+    library_max_video_mb: int = 200
+    library_max_videos_per_user: int = 50
+    # Saved/imported/duplicated avatars per user (each owns R2 objects).
+    max_avatars_per_user: int = 30
+    # Support replies per user per day -- filing a ticket has its own cap
+    # (tickets_daily_cap) but replies (up to 5 attachments each) had none.
+    ticket_messages_daily_cap: int = 30
+    # Publishing an avatar to the PUBLIC asset library, per user per day.
+    library_promotions_daily_cap: int = 5
+
     # The standalone face-analysis/ service (Render, Docker-deployed) --
     # moved out of this backend because Render's native Python runtime can't
     # load mediapipe's compiled bindings (missing libGLESv2.so.2/libEGL.so.1,

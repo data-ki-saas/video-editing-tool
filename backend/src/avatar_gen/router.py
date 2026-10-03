@@ -53,7 +53,9 @@ async def duplicate_generated(
 
 
 @router.post("/{design_id}/rebake", response_model=GeneratedAvatarDetail)
-async def rebake_generated(design_id: str, user: CurrentUser = Depends(get_current_user)) -> GeneratedAvatarDetail:
+async def rebake_generated(
+    design_id: str, user: CurrentUser = Depends(require_feature("avatar_generate"))
+) -> GeneratedAvatarDetail:
     """Re-applies the current atlas-baking code to this avatar's cached
     fal.ai source in place -- no new row, no fal.ai spend. Meant to be
     called (by us, e.g. via a support/admin action) after a baking bug fix

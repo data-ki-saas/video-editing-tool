@@ -54,6 +54,12 @@ def list_for_user(user_id: str) -> list[LibraryVideoRecord]:
     return [LibraryVideoRecord(**row) for row in result.data or []]
 
 
+def count_for_user(user_id: str) -> int:
+    """Live row count -- backs library/service.py's per-user video ceiling."""
+    result = get_supabase_client().table(_TABLE).select("id", count="exact").eq("user_id", user_id).execute()
+    return result.count or 0
+
+
 def get_by_id(video_id: str) -> LibraryVideoRecord | None:
     """Unscoped by user_id -- only used by the public share view
     (GET /api/library/public/{id}), where the video's own hard-to-guess

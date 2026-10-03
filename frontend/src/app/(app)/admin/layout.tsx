@@ -12,6 +12,7 @@ const ADMIN_NAV_ITEMS = [
   { href: "/admin/integrations", label: "Integrations" },
   { href: "/admin/tools", label: "Tools" },
   { href: "/admin/usage", label: "Usage" },
+  { href: "/admin/pricing", label: "Pricing" },
 ];
 
 // Replaces the old /admin landing page's four action cards -- always

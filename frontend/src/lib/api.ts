@@ -2144,3 +2144,125 @@ export async function configureR2Cors(): Promise<ConfigureR2CorsResult> {
   const body = await handleResponse<{ bucket: string; origins: string[] }>(response);
   return { bucket: body.bucket, origins: body.origins };
 }
+
+export interface PriceHistoryEntry {
+  unitPriceCents: number;
+  effectiveFrom: string;
+}
+
+export interface PricedResource {
+  key: string;
+  label: string;
+  unitLabel: string;
+  /** Raw usage quantity per priced unit (1 second / image, 1000 tokens). */
+  per: number;
+  /** null = no price set yet, i.e. free. */
+  unitPriceCents: number | null;
+  effectiveFrom: string | null;
+  providerCostCents: number | null;
+  history: PriceHistoryEntry[];
+}
+
+type PricingWire = {
+  resources: {
+    key: string;
+    label: string;
+    unit_label: string;
+    per: number;
+    unit_price_cents: number | null;
+    effective_from: string | null;
+    provider_cost_cents: number | null;
+    history: { unit_price_cents: number; effective_from: string }[];
+  }[];
+};
+
+function mapPricing(body: PricingWire): PricedResource[] {
+  return body.resources.map((r) => ({
+    key: r.key,
+    label: r.label,
+    unitLabel: r.unit_label,
+    per: r.per,
+    unitPriceCents: r.unit_price_cents,
+    effectiveFrom: r.effective_from,
+    providerCostCents: r.provider_cost_cents,
+    history: r.history.map((h) => ({ unitPriceCents: h.unit_price_cents, effectiveFrom: h.effective_from })),
+  }));
+}
+
+/** GET /api/admin/pricing -- every consumption item with its current price and
+ * recent price history. Gated by the pricing_manage feature. */
+export async function getAdminPricing(): Promise<PricedResource[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/admin/pricing`, { headers: await authHeader() });
+  return mapPricing(await handleResponse<PricingWire>(response));
+}
+
+/** PUT /api/admin/pricing/{key} -- takes effect for all usage recorded from
+ * this moment on; past usage keeps the price it was charged at. */
+export async function setResourcePrice(key: string, unitPriceCents: number): Promise<PricedResource[]> {
+  const response = await apiFetch(`${API_BASE_URL}/api/admin/pricing/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { ...(await authHeader()), "Content-Type": "application/json" },
+    body: JSON.stringify({ unit_price_cents: unitPriceCents }),
+  });
+  return mapPricing(await handleResponse<PricingWire>(response));
+}
+
+export interface BillingLine {
+  key: string;
+  label: string;
+  unitLabel: string;
+  unitPriceCents: number | null;
+  quantity: number;
+  units: number;
+  chargeCents: number;
+}
+
+export interface BillingStatement {
+  month: string;
+  lines: BillingLine[];
+  totalCents: number;
+  unpricedEvents: number;
+  currentPrices: { key: string; label: string; unitLabel: string; unitPriceCents: number | null }[];
+}
+
+/** GET /api/usage/billing?month=YYYY-MM -- the signed-in user's own monthly
+ * statement (UTC calendar month; omit `month` for the current one). */
+export async function getBillingStatement(month?: string): Promise<BillingStatement> {
+  const query = month ? `?month=${encodeURIComponent(month)}` : "";
+  const response = await apiFetch(`${API_BASE_URL}/api/usage/billing${query}`, { headers: await authHeader() });
+  const body = await handleResponse<{
+    month: string;
+    lines: {
+      key: string;
+      label: string;
+      unit_label: string;
+      unit_price_cents: number | null;
+      quantity: number;
+      units: number;
+      charge_cents: number;
+    }[];
+    total_cents: number;
+    unpriced_events: number;
+    current_prices: { key: string; label: string; unit_label: string; unit_price_cents: number | null }[];
+  }>(response);
+  return {
+    month: body.month,
+    lines: body.lines.map((l) => ({
+      key: l.key,
+      label: l.label,
+      unitLabel: l.unit_label,
+      unitPriceCents: l.unit_price_cents,
+      quantity: l.quantity,
+      units: l.units,
+      chargeCents: l.charge_cents,
+    })),
+    totalCents: body.total_cents,
+    unpricedEvents: body.unpriced_events,
+    currentPrices: body.current_prices.map((p) => ({
+      key: p.key,
+      label: p.label,
+      unitLabel: p.unit_label,
+      unitPriceCents: p.unit_price_cents,
+    })),
+  };
+}

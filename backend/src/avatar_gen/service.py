@@ -24,8 +24,8 @@ from src.avatar_gen.schemas import GeneratedAvatarCreateResponse, GeneratedAvata
 from src.core.auth import CurrentUser, bypasses_daily_caps
 from src.core.config import settings
 from src.metering import repository as metering_repository
-from src.metering import service as metering_service
 from src.storage import r2_client
+from src.usage import limits
 
 logger = logging.getLogger(__name__)
 
@@ -233,17 +233,25 @@ async def _cartoonify_and_crop(
     *, user_id: str, photo_bytes: bytes, original_palette: FacePalette
 ) -> (
     tuple[
-        bytes,
-        bytes,
-        dict[str, dict],
-        tuple[float, float],
-        tuple[float, float] | None,
-        tuple[float, float] | None,
-        tuple[float, float],
+        bool,
+        tuple[
+            bytes,
+            bytes,
+            dict[str, dict],
+            tuple[float, float],
+            tuple[float, float] | None,
+            tuple[float, float] | None,
+            tuple[float, float],
+        ]
+        | None,
     ]
-    | None
 ):
-    """The fal.ai path: stage the real photo in R2 (fal needs a fetchable
+    """Returns `(fal_called, result)`. `fal_called` is True from the moment the
+    paid cartoonify request is attempted -- even if it then times out or its
+    output is unusable (result None) -- because fal.ai may have billed it
+    regardless, and the caller must meter that spend either way.
+
+    The fal.ai path: stage the real photo in R2 (fal needs a fetchable
     URL, not raw bytes -- same reason matting/service.py presigns a URL
     before calling fal's rembg), cartoonify it, then re-run face analysis on
     the CARTOONIFIED result (not the original) since the crop boxes must be
@@ -260,6 +268,7 @@ async def _cartoonify_and_crop(
     `source_cartoon_key` so a LATER baking-code fix can be re-applied via
     rebake_generated_avatar without paying for another fal.ai call or asking
     the user to re-upload their photo."""
+    fal_called = False
     temp_key = f"avatars-tmp/{user_id}/{uuid.uuid4().hex}.jpg"
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         tmp.write(photo_bytes)
@@ -268,6 +277,7 @@ async def _cartoonify_and_crop(
         r2_client.upload_file(tmp_path, temp_key, "image/jpeg")
         source_url = r2_client.presigned_get_url(temp_key)
 
+        fal_called = True
         cartoon_url = await cartoonify_image(image_url=source_url)
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.get(cartoon_url)
@@ -277,12 +287,12 @@ async def _cartoonify_and_crop(
         cartoon_palette = analyze_photo(cartoon_bytes)
         if not cartoon_palette.detected:
             logger.warning("fal.ai cartoonify output had no detectable face for user=%s; falling back", user_id)
-            return None
+            return fal_called, None
 
-        return (cartoon_bytes, *build_atlas_png_from_photo(cartoon_bytes, cartoon_palette))
+        return fal_called, (cartoon_bytes, *build_atlas_png_from_photo(cartoon_bytes, cartoon_palette))
     except Exception:
         logger.exception("fal.ai cartoonify path failed for user=%s; falling back to parametric drawing", user_id)
-        return None
+        return fal_called, None
     finally:
         tmp_path.unlink(missing_ok=True)
         try:
@@ -428,6 +438,19 @@ def rebake_generated_avatar(design_id: str, user: CurrentUser) -> GeneratedAvata
     return resolve_avatar_record(updated)
 
 
+def assert_avatar_room(user: CurrentUser) -> None:
+    """Every saved avatar owns R2 objects (atlas + cached source), and
+    generating, duplicating and importing all create one -- without a ceiling
+    a script could loop duplicate/import forever. Admins bypass."""
+    if bypasses_daily_caps(user):
+        return
+    if repository.count_for_user(user.id) >= settings.max_avatars_per_user:
+        raise HTTPException(
+            status_code=429,
+            detail=f"You can keep up to {settings.max_avatars_per_user} avatars -- delete one to add another.",
+        )
+
+
 async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, file_content_type: str | None, photo_bytes: bytes) -> GeneratedAvatarCreateResponse:
     if file_content_type not in _ALLOWED_PHOTO_TYPES:
         raise HTTPException(status_code=400, detail="Only .jpg/.png photos are supported")
@@ -436,24 +459,21 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
     if len(photo_bytes) > settings.max_upload_size_bytes:
         raise HTTPException(status_code=413, detail=f"Photo exceeds the {settings.max_upload_size_mb} MB upload limit")
 
-    # Admin accounts skip the guardrail entirely -- see core/auth.py's
-    # bypasses_daily_caps. Fails OPEN on a usage_events read error, same
-    # precedent as matting/service.py's own cap check -- generation here
-    # costs no external vendor money, so this is purely an abuse guard, not a
-    # budget guard, and can afford to be lenient on a read failure.
-    if not bypasses_daily_caps(user):
-        recent = repository.count_recent_generate_events(user.id)
-        if recent is not None and recent >= settings.avatar_generate_daily_cap:
-            metering_service.record_cap_hit(
-                user_id=user.id,
-                feature="avatar_generate",
-                cap_value=settings.avatar_generate_daily_cap,
-                count_at_trigger=recent + 1,
-            )
-            raise HTTPException(
-                status_code=429,
-                detail=f"You've reached the limit of {settings.avatar_generate_daily_cap} avatar generations per day. Try again tomorrow.",
-            )
+    assert_avatar_room(user)
+
+    # Atomic reserve-then-spend (see usage/limits.py), claimed BEFORE the face
+    # service or fal.ai is touched. Reserves the worst case (a cartoonify
+    # call) even though a photo with no detectable face never reaches fal --
+    # cheaper to over-reserve than to let concurrent requests race the cap.
+    limits.reserve(
+        user=user,
+        event_type="avatar_generate",
+        feature="avatar_generate",
+        noun="avatar generations",
+        user_cap=settings.avatar_generate_daily_cap,
+        global_cap=settings.avatar_generate_global_daily_cap,
+        cost_cents=settings.cartoonify_cost_cents_per_image,
+    )
 
     palette = analyze_photo(photo_bytes)
 
@@ -466,7 +486,24 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
     eyes_pivot: tuple[float, float] | None = None
     neck_pivot: tuple[float, float] | None = None
     source_cartoon_key: str | None = None
-    fal_result = await _cartoonify_and_crop(user_id=user.id, photo_bytes=photo_bytes, original_palette=palette) if palette.detected else None
+    fal_called, fal_result = (
+        await _cartoonify_and_crop(user_id=user.id, photo_bytes=photo_bytes, original_palette=palette)
+        if palette.detected
+        else (False, None)
+    )
+
+    # Metered the moment the paid call has happened -- not at the end, where a
+    # later R2/DB failure (or an unusable fal output that falls back to the
+    # free parametric path) would have left real spend off the ledger.
+    metering_repository.record_event(
+        user_id=user.id,
+        event_type="avatar_generate",
+        provider="fal_ai" if fal_called else "local",
+        quantity=1,
+        unit="images",
+        cost_estimate_cents=settings.cartoonify_cost_cents_per_image if fal_called else 0,
+        metadata={"output_used": fal_result is not None},
+    )
 
     design_id = f"gen-{uuid.uuid4().hex}"
     atlas_key = f"avatars/{user.id}/{design_id}/atlas.png"
@@ -544,20 +581,6 @@ async def generate_avatar_from_photo(*, user: CurrentUser, name: str | None, fil
             logger.exception("failed to clean up orphaned avatar atlas %r", atlas_key)
         raise HTTPException(status_code=502, detail="Couldn't save the generated avatar -- try again") from exc
 
-    repository.record_generate_event(user.id)
-    # Real external cost when the fal.ai path actually ran (see
-    # cartoonify_cost_cents_per_image's own comment); the parametric fallback
-    # is still genuinely free, so cost_estimate_cents reflects which path
-    # this specific generation actually took, not a flat guess either way.
-    metering_repository.record_event(
-        user_id=user.id,
-        event_type="avatar_generate",
-        provider="fal_ai" if used_fal else "local",
-        quantity=1,
-        unit="images",
-        cost_estimate_cents=settings.cartoonify_cost_cents_per_image if used_fal else 0,
-    )
-
     detail = resolve_avatar_record(record)
     return GeneratedAvatarCreateResponse(**detail.model_dump(), face_detected=palette.detected)
 
@@ -629,6 +652,7 @@ def duplicate_generated_avatar(design_id: str, user: CurrentUser, name: str | No
     record = repository.get(design_id, user.id)
     if record is None:
         raise HTTPException(status_code=404, detail="Avatar not found")
+    assert_avatar_room(user)
 
     new_design_id = f"gen-{uuid.uuid4().hex}"
     new_atlas_key = f"avatars/{user.id}/{new_design_id}/atlas.png"

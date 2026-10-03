@@ -11,7 +11,8 @@ from src.assets import repository
 from src.assets.schemas import AssetInfo
 from src.core.auth import CurrentUser
 from src.core.config import settings
-from src.storage import r2_client
+from src.metering import repository as metering_repository
+from src.storage import quota, r2_client
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,14 @@ def _to_asset_info(record: repository.AssetRecord) -> AssetInfo:
 
 
 def store_asset_bytes(
-    *, project_id: str, user: CurrentUser, filename: str, content_type: str, kind: str, body: bytes
+    *,
+    project_id: str,
+    user: CurrentUser,
+    filename: str,
+    content_type: str,
+    kind: str,
+    body: bytes,
+    enforce_quota: bool = True,
 ) -> AssetInfo:
     """Dedup-by-content-hash + R2 write + DB insert, shared by every path
     that turns some bytes into a project asset -- a direct upload
@@ -48,13 +56,21 @@ def store_asset_bytes(
     (stock_media/service.py) both call this rather than each reimplementing
     the same dedup/cleanup logic. Callers are responsible for their own
     content-type/extension validation and for confirming the caller owns
-    `project_id` first -- this function only handles the storage side."""
+    `project_id` first -- this function only handles the storage side.
+
+    `enforce_quota=False` is only for storing the RESULT of work that was
+    already paid for (a finished background-removal matte): the quota was
+    checked before that spend started, and refusing to save it now would
+    burn the money for nothing."""
     if not body:
         raise HTTPException(status_code=400, detail="File is empty")
     if len(body) > settings.max_upload_size_bytes:
         raise HTTPException(
             status_code=413, detail=f"File exceeds the {settings.max_upload_size_mb} MB upload limit"
         )
+
+    if enforce_quota:
+        quota.assert_can_store(user, adding_bytes=len(body))
 
     content_hash = hashlib.md5(body).hexdigest()
 
@@ -130,9 +146,18 @@ async def upload_asset(project_id: str, file: UploadFile, user: CurrentUser) -> 
         raise HTTPException(status_code=400, detail="Only .mp4, .jpg, .png, and .mp3 files are supported")
 
     body = await file.read()
-    return store_asset_bytes(
+    asset = store_asset_bytes(
         project_id=project_id, user=user, filename=file.filename, content_type=file.content_type, kind=kind, body=body
     )
+    metering_repository.record_consumption(
+        user_id=user.id,
+        project_id=project_id,
+        event_type="upload",
+        quantity=len(body) / (1024 * 1024),
+        unit="megabytes",
+        external_ref=asset.id,
+    )
+    return asset
 
 
 def list_assets(project_id: str, user: CurrentUser) -> list[AssetInfo]:

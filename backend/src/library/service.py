@@ -5,10 +5,11 @@ from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
 
-from src.core.auth import CurrentUser
+from src.core.auth import CurrentUser, bypasses_daily_caps
 from src.core.config import settings
 from src.library import repository
 from src.library.schemas import LibraryVideo, LibraryVideosResponse
+from src.metering import repository as metering_repository
 from src.projects import repository as projects_repository
 from src.storage import r2_client
 
@@ -54,11 +55,19 @@ async def save_video(
     if not video_extension:
         raise HTTPException(status_code=400, detail="Only .mp4 and .webm videos are supported")
 
+    # This writes to the PUBLIC bucket, served to anyone with the URL, so it
+    # gets a tighter ceiling than private uploads. Admins bypass.
+    if not bypasses_daily_caps(user) and repository.count_for_user(user.id) >= settings.library_max_videos_per_user:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Your library is full ({settings.library_max_videos_per_user} videos) -- delete one to save another.",
+        )
+
     video_body = await video.read()
     if not video_body:
         raise HTTPException(status_code=400, detail="Video file is empty")
-    if len(video_body) > settings.max_upload_size_bytes:
-        raise HTTPException(status_code=413, detail=f"File exceeds the {settings.max_upload_size_mb} MB upload limit")
+    if len(video_body) > settings.library_max_video_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"Library videos are limited to {settings.library_max_video_mb} MB")
 
     video_key = f"library/{user.id}/{uuid.uuid4().hex}.{video_extension}"
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
@@ -98,6 +107,14 @@ async def save_video(
         video_url=video_url,
         thumbnail_url=thumbnail_url,
         duration_seconds=duration_seconds,
+    )
+    metering_repository.record_consumption(
+        user_id=user.id,
+        project_id=project_id,
+        event_type="library_save",
+        quantity=len(video_body) / (1024 * 1024),
+        unit="megabytes",
+        external_ref=record.id,
     )
     return _record_to_schema(record)
 

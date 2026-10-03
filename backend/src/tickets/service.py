@@ -9,7 +9,7 @@ from fastapi import HTTPException, UploadFile
 from src.core.auth import CurrentUser, bypasses_daily_caps
 from src.core.config import settings
 from src.metering import service as metering_service
-from src.storage import r2_client
+from src.storage import quota, r2_client
 from src.tickets import repository
 from src.tickets.schemas import (
     AssignableAdmin,
@@ -19,6 +19,7 @@ from src.tickets.schemas import (
     TicketSummary,
     TriageRequest,
 )
+from src.usage import limits
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def _validate_attachment_count(files: list[UploadFile]) -> None:
         raise HTTPException(status_code=400, detail=f"You can attach at most {MAX_ATTACHMENTS} files")
 
 
-async def _store_attachment(*, ticket_id: str, message_id: str, file: UploadFile) -> None:
+async def _store_attachment(*, ticket_id: str, message_id: str, file: UploadFile, user: CurrentUser) -> None:
     if file.content_type not in _ALLOWED_ATTACHMENT_TYPES or not file.filename:
         raise HTTPException(status_code=400, detail=f"Unsupported attachment type: {file.content_type}")
 
@@ -52,6 +53,7 @@ async def _store_attachment(*, ticket_id: str, message_id: str, file: UploadFile
         raise HTTPException(status_code=400, detail=f"{file.filename} is empty")
     if len(body) > MAX_ATTACHMENT_SIZE_BYTES:
         raise HTTPException(status_code=413, detail=f"{file.filename} exceeds the 2 MB attachment limit")
+    quota.assert_can_store(user, adding_bytes=len(body))
 
     safe_filename = _UNSAFE_FILENAME_CHARS.sub("_", file.filename)
     storage_key = f"tickets/{ticket_id}/{uuid.uuid4().hex}-{safe_filename}"
@@ -218,7 +220,7 @@ async def create_ticket(
     )
     message = repository.create_message(ticket_id=ticket.id, author_id=user.id, is_admin_reply=False, is_internal=False, body=body)
     for file in files:
-        await _store_attachment(ticket_id=ticket.id, message_id=message.id, file=file)
+        await _store_attachment(ticket_id=ticket.id, message_id=message.id, file=file, user=user)
 
     # Recorded only after everything above actually succeeded -- a failed
     # filing attempt shouldn't count against the cap.
@@ -249,11 +251,22 @@ async def add_message(*, ticket_id: str, user: CurrentUser, body: str, files: li
     if not body and not files:
         raise HTTPException(status_code=400, detail="Write a message or attach a file")
 
+    # Replies (up to 5 attachments each) had no limit at all -- only filing a
+    # ticket did. Staff replies are exempt; only the filer's are throttled.
+    if not is_admin_reply:
+        limits.reserve(
+            user=user,
+            event_type="ticket_message",
+            feature="ticket_message",
+            noun="support replies",
+            user_cap=settings.ticket_messages_daily_cap,
+        )
+
     message = repository.create_message(
         ticket_id=ticket_id, author_id=user.id, is_admin_reply=is_admin_reply, is_internal=is_internal, body=body
     )
     for file in files:
-        await _store_attachment(ticket_id=ticket_id, message_id=message.id, file=file)
+        await _store_attachment(ticket_id=ticket_id, message_id=message.id, file=file, user=user)
 
     # A resolved ticket must not silently stay resolved once the owner has
     # something new to say -- an admin's own message never changes state.

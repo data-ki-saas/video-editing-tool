@@ -23,10 +23,16 @@ interface ChangelogEntry {
 const ENTRIES: ChangelogEntry[] = [
   {
     date: "2026-10-03",
+    title: "See what you use, and a monthly bill",
+    description:
+      "Your Usage page now shows the charges so far this month, and a new Monthly billing page lists everything you used — voiceovers, background removal, avatars and AI assistance — with the price each was charged at. Browse previous months any time.",
+    isLatest: true,
+  },
+  {
+    date: "2026-10-03",
     title: "Guided tour, help icons and a Starter Reel",
     description:
       "New accounts now open with a ready-made Starter Reel to explore and a short guided tour of the editor. The editor also has little ? icons beside the Reels list, Assets, the toolbar groups, the timeline, the Edits list and the export button — click one for a quick explanation. Replay the tour any time from the ? beside Reels.",
-    isLatest: true,
   },
   {
     date: "2026-10-01",

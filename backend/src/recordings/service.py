@@ -16,7 +16,8 @@ from src.core.auth import CurrentUser
 from src.core.config import settings
 from src.recordings import repository
 from src.recordings.schemas import RecordingInfo
-from src.storage import r2_client
+from src.metering import repository as metering_repository
+from src.storage import quota, r2_client
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,7 @@ async def upload_recording(
         )
 
     body = await file.read()
+    quota.assert_can_store(user, adding_bytes=len(body))
 
     if kind == "video":
         probed_duration = _probe_video_duration_seconds(body)
@@ -150,6 +152,13 @@ async def upload_recording(
             logger.exception("failed to clean up orphaned R2 object %r after a failed recording insert", storage_key)
         raise HTTPException(status_code=502, detail="Recording metadata insert failed") from exc
 
+    metering_repository.record_consumption(
+        user_id=user.id,
+        event_type="recording_upload",
+        quantity=len(body) / (1024 * 1024),
+        unit="megabytes",
+        external_ref=record.id,
+    )
     return _to_recording_info(record)
 
 
@@ -181,6 +190,19 @@ async def replace_content(
         raise HTTPException(status_code=400, detail="Only .mp4 video or .jpg photo recordings are supported")
 
     body = await file.read()
+    # Net growth only: this swaps the row's object for a new one.
+    quota.assert_can_store(user, adding_bytes=max(0, len(body) - existing.size_bytes), adding_objects=0)
+
+    if kind == "video":
+        probed_duration = _probe_video_duration_seconds(body)
+        if probed_duration is not None:
+            if probed_duration > MAX_RECORDING_DURATION_SECONDS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Videos are limited to {MAX_RECORDING_DURATION_SECONDS // 60} minutes",
+                )
+            duration_seconds = probed_duration
+
     new_storage_key = _write_to_r2(
         user_id=user.id, filename=file.filename, content_type=file.content_type, body=body
     )

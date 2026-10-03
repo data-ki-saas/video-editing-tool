@@ -3,12 +3,34 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.core.supabase_client import get_supabase_client
+from src.pricing import catalog as pricing_catalog
+from src.pricing import repository as pricing_repository
 
 logger = logging.getLogger(__name__)
 
 _TABLE = "usage_ledger"
 _CAP_WARNINGS_TABLE = "cap_warnings"
 _TOPUPS_TABLE = "provider_topups"
+
+
+def _price_snapshot(event_type: str, provider: str, quantity: float, unit: str) -> tuple[str | None, float | None, float | None]:
+    """The admin-set price in force RIGHT NOW, frozen onto this ledger row --
+    a later price change never touches it, and this event is never charged at
+    a price set after it happened. (None, None, None) = not a priced item.
+    A price lookup failure leaves unit price/charge NULL (flagged as
+    "unpriced" on the billing statement) rather than guessing a number or
+    losing the usage row."""
+    resource_key = pricing_catalog.resolve_key(event_type, provider, unit)
+    if resource_key is None:
+        return None, None, None
+    try:
+        price = pricing_repository.get_current_price(resource_key)
+    except Exception:
+        logger.exception("price lookup failed for resource=%s -- recording the event unpriced", resource_key)
+        return resource_key, None, None
+    unit_price = 0.0 if price is None else price  # never priced = free
+    item = pricing_catalog.get_item(resource_key)
+    return resource_key, unit_price, pricing_catalog.compute_charge_cents(quantity, item.per, unit_price)
 
 
 def record_event(
@@ -28,6 +50,7 @@ def record_event(
     record_voiceover_event -- a failure here shouldn't fail a feature that
     already succeeded/was already kicked off."""
     try:
+        resource_key, unit_price_cents, charge_cents = _price_snapshot(event_type, provider, quantity, unit)
         get_supabase_client().table(_TABLE).insert(
             {
                 "user_id": user_id,
@@ -40,10 +63,31 @@ def record_event(
                 "cost_estimate_cents": cost_estimate_cents,
                 "status": status,
                 "metadata": metadata or {},
+                "resource_key": resource_key,
+                "unit_price_cents": unit_price_cents,
+                "charge_cents": charge_cents,
             }
         ).execute()
     except Exception:
         logger.exception("failed to record usage ledger event type=%s user=%s", event_type, user_id)
+
+
+def record_consumption(
+    *, user_id: str, event_type: str, quantity: float, unit: str, project_id: str | None = None, external_ref: str | None = None
+) -> None:
+    """Meters consumption that costs us no provider money (uploads, imports,
+    saves) so it can still be priced by an admin. Same best-effort contract
+    as record_event: it never fails the operation that already succeeded."""
+    record_event(
+        user_id=user_id,
+        project_id=project_id,
+        event_type=event_type,
+        provider="internal",
+        external_ref=external_ref,
+        quantity=quantity,
+        unit=unit,
+        cost_estimate_cents=0,
+    )
 
 
 def fetch_recent_events(days: int) -> list[dict]:

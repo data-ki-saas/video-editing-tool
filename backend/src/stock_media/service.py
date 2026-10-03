@@ -7,6 +7,7 @@ from src.assets import repository as assets_repository
 from src.assets.schemas import AssetInfo
 from src.assets.service import store_asset_bytes
 from src.core.auth import CurrentUser
+from src.metering import repository as metering_repository
 from src.stock_media import freesound_client, pexels_client
 from src.stock_media.schemas import StockMediaKind, StockSearchResponse, StockSearchResult
 
@@ -161,7 +162,7 @@ async def import_stock_asset(
         logger.exception("stock media download failed: kind=%s source_id=%s", kind, source_id)
         raise HTTPException(status_code=502, detail="Failed to download the selected item") from exc
 
-    return store_asset_bytes(
+    asset = store_asset_bytes(
         project_id=project_id,
         user=user,
         filename=f"{filename}{extension}",
@@ -169,3 +170,7 @@ async def import_stock_asset(
         kind=asset_kind,
         body=response.content,
     )
+    metering_repository.record_consumption(
+        user_id=user.id, project_id=project_id, event_type="stock_import", quantity=1, unit="items", external_ref=asset.id
+    )
+    return asset

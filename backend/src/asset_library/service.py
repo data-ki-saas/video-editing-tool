@@ -13,9 +13,11 @@ from src.assets.schemas import AssetInfo
 from src.assets.service import store_asset_bytes
 from src.avatar_gen import repository as avatar_gen_repository
 from src.avatar_gen.schemas import GeneratedAvatarDetail
-from src.avatar_gen.service import resolve_avatar_record
+from src.avatar_gen.service import assert_avatar_room, resolve_avatar_record
 from src.core.auth import CurrentUser
+from src.core.config import settings
 from src.storage import r2_client
+from src.usage import limits
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +80,16 @@ def promote_avatar(
     if record is None:
         raise HTTPException(status_code=404, detail="Avatar not found")
 
+    # Publishing writes a permanent public object and a public row, so it is
+    # rate-limited per user (same atomic reservation as the paid features).
+    limits.reserve(
+        user=user,
+        event_type="library_publish",
+        feature="library_publish",
+        noun="library publications",
+        user_cap=settings.library_promotions_daily_cap,
+    )
+
     # The library is public and permanent, so the atlas needs a copy in the
     # PUBLIC renders bucket with a real, never-expiring URL -- unlike
     # avatar_designs' own private atlas_key, which is only ever resolved to a
@@ -138,6 +150,7 @@ def import_avatar(library_asset_id: str, user: CurrentUser) -> GeneratedAvatarDe
     promotion = repository.get(library_asset_id)
     if promotion is None or promotion.asset_type != "avatar":
         raise HTTPException(status_code=404, detail="Library avatar not found")
+    assert_avatar_room(user)
 
     try:
         response = httpx.get(promotion.thumbnail_url, timeout=30)

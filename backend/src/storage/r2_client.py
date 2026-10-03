@@ -64,6 +64,13 @@ def download_object(key: str) -> bytes:
     return response["Body"].read()
 
 
+def download_to_path(key: str, local_path: Path) -> None:
+    """Streams a private object to disk (not into memory) -- for probing a
+    large source clip's metadata without holding up to max_upload_size_mb in
+    RAM."""
+    get_r2_client().download_file(settings.r2_bucket_name, key, str(local_path))
+
+
 def copy_object(source_key: str, dest_key: str) -> None:
     """Server-side copy within the private uploads bucket -- used by
     avatar_gen/service.py's duplicate_generated_avatar to give a saved

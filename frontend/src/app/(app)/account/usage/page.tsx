@@ -2,16 +2,23 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getUsageSummary, type UsageSummaryItem } from "@/lib/api";
+import { getBillingStatement, getUsageSummary, type UsageSummaryItem } from "@/lib/api";
 
 export default function UsagePage() {
   const [items, setItems] = useState<UsageSummaryItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [monthTotalCents, setMonthTotalCents] = useState<number | null>(null);
 
   useEffect(() => {
     getUsageSummary()
       .then((body) => setItems(body.items))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  }, []);
+
+  useEffect(() => {
+    getBillingStatement()
+      .then((statement) => setMonthTotalCents(statement.totalCents))
+      .catch(() => undefined);
   }, []);
 
   return (
@@ -22,6 +29,16 @@ export default function UsagePage() {
         </Link>
         <h1 className="text-2xl font-semibold">Usage</h1>
       </div>
+
+      {monthTotalCents !== null && (
+        <Link
+          href="/account/billing"
+          className="flex items-baseline justify-between rounded-lg border border-border p-4 hover:bg-surface"
+        >
+          <span className="text-sm">Charges so far this month</span>
+          <span className="font-semibold">${(monthTotalCents / 100).toFixed(2)} · Monthly billing →</span>
+        </Link>
+      )}
 
       <section className="flex flex-col gap-4">
         <p className="text-sm text-muted">
