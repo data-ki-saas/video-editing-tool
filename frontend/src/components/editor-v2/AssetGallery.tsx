@@ -51,6 +51,7 @@ import { MusicNoteIcon } from "@/components/icons/UIIcons";
 import { PauseIcon } from "./icons/PlayerIcons";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 import { AssetPreviewPopup } from "./AssetPreviewPopup";
+import { HelpTip } from "./HelpTip";
 
 // SVG circumference for the progress ring (r=16 in a 36x36 viewBox) --
 // shared by the ring's own stroke-dasharray and its progress-driven offset.
@@ -342,7 +343,27 @@ export function AssetGallery({
   return (
     <div className="flex h-full flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium text-foreground">Assets</h2>
+        <h2 className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+          Assets
+          <HelpTip id="assets" title="Your assets">
+            <p>These are the raw clips, photos and audio for this reel. Start here:</p>
+            <ul className="list-disc pl-4">
+              <li>
+                <strong className="text-foreground">+ Asset</strong> &ndash; upload from your phone or computer
+              </li>
+              <li>
+                <strong className="text-foreground">+ Stock</strong> &ndash; search free stock footage and photos
+              </li>
+              <li>
+                <strong className="text-foreground">+ Library</strong> &ndash; reuse things you saved earlier
+              </li>
+            </ul>
+            <p>
+              <strong className="text-foreground">Right-click</strong> any tile to add it to the reel as a cutaway,
+              overlay or music.
+            </p>
+          </HelpTip>
+        </h2>
         <div className="flex shrink-0 gap-2">
           <button type="button" onClick={onBrowseStock} className="text-xs text-accent hover:underline">
             + Stock

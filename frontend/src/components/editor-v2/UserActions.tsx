@@ -61,6 +61,7 @@ import { CropToolIcon } from "@/components/icons/UIIcons";
 import { CoverIcon } from "./icons/PlayerIcons";
 import { CLIP_RECT_OPTIONS, ClipRectIcon } from "./ClipRectIcon";
 import { NEW_CUTAWAY_DRAG_TYPE } from "./CutawayTrack";
+import { HelpTip } from "./HelpTip";
 
 function TextGlyphIcon({ className }: { className?: string }) {
   return (
@@ -181,11 +182,26 @@ function CountBadge({ count }: { count: number }) {
 // tiny uppercase convention AssetGallery.tsx's own section headers use.
 // `colorClassName` ties the label to its group's own fixed hue (see this
 // file's module comment), so the label doubles as that group's color key.
-function GroupLabel({ children, colorClassName }: { children: React.ReactNode; colorClassName: string }) {
+// `help` adds a "?" popover beside the label (see HelpTip.tsx) -- the label
+// text itself stays click-through, only the "?" takes pointer events.
+function GroupLabel({
+  children,
+  colorClassName,
+  help,
+}: {
+  children: React.ReactNode;
+  colorClassName: string;
+  help?: { id: string; title: string; body: React.ReactNode };
+}) {
   return (
-    <p className={`pointer-events-none absolute -top-4 left-0 whitespace-nowrap text-[9px] font-medium uppercase tracking-wide ${colorClassName}`}>
-      {children}
-    </p>
+    <div className={`absolute -top-4 left-0 flex items-center gap-1 whitespace-nowrap ${colorClassName}`}>
+      <p className="pointer-events-none text-[9px] font-medium uppercase tracking-wide">{children}</p>
+      {help && (
+        <HelpTip id={help.id} title={help.title} className="h-3 w-3 text-[8px]">
+          {help.body}
+        </HelpTip>
+      )}
+    </div>
   );
 }
 
@@ -235,7 +251,21 @@ export function UserActions({
     <div className="flex h-full items-stretch gap-4 overflow-x-auto pt-4">
       {/* WIZARD -- emerald; opens the guided new-reel flow as a modal (it creates its own draft reel, then navigates to it on finish) */}
       <div className="relative flex h-full gap-3">
-        <GroupLabel colorClassName="text-emerald-600 dark:text-emerald-400">Wizard</GroupLabel>
+        <GroupLabel
+          colorClassName="text-emerald-600 dark:text-emerald-400"
+          help={{
+            id: "tools-wizard",
+            title: "Reel Wizard",
+            body: (
+              <p>
+                Not sure where to begin? Answer a few questions about your business and the wizard assembles a
+                starting reel for you. You can then tweak anything it made.
+              </p>
+            ),
+          }}
+        >
+          Wizard
+        </GroupLabel>
         <button
           type="button"
           onClick={onOpenNewReelWizard}
@@ -251,7 +281,35 @@ export function UserActions({
 
       {/* BASE -- blue family, lightest to darkest: Clip, Thumbnail, Cutaway, Text Slide */}
       <div className="relative flex h-full gap-3">
-        <GroupLabel colorClassName="text-blue-600 dark:text-blue-400">Base</GroupLabel>
+        <GroupLabel
+          colorClassName="text-blue-600 dark:text-blue-400"
+          help={{
+            id: "tools-base",
+            title: "Base: the story of your reel",
+            body: (
+              <>
+                <p>These build the main video, one clip after another.</p>
+                <ul className="list-disc pl-4">
+                  <li>
+                    <strong className="text-foreground">Clip</strong> &ndash; choose the frame shape (vertical for
+                    Reels/Shorts, wide for YouTube)
+                  </li>
+                  <li>
+                    <strong className="text-foreground">Thumbnail</strong> &ndash; pick the cover image
+                  </li>
+                  <li>
+                    <strong className="text-foreground">Cutaway</strong> &ndash; add another video or an animated photo
+                  </li>
+                  <li>
+                    <strong className="text-foreground">Text Slide</strong> &ndash; a full-screen title card
+                  </li>
+                </ul>
+              </>
+            ),
+          }}
+        >
+          Base
+        </GroupLabel>
         <button
           type="button"
           onClick={onOpenClipRectDialog}
@@ -324,7 +382,27 @@ export function UserActions({
 
       {/* OVERLAYS -- amber family, lightest to darkest: Video Overlay, Image Overlay, Text, TTS, Avatar */}
       <div className="relative flex h-full gap-3">
-        <GroupLabel colorClassName="text-amber-600 dark:text-amber-400">Overlays</GroupLabel>
+        <GroupLabel
+          colorClassName="text-amber-600 dark:text-amber-400"
+          help={{
+            id: "tools-overlays",
+            title: "Overlays: layer things on top",
+            body: (
+              <>
+                <p>
+                  Overlays sit on top of your main video for a stretch of time without changing its length &mdash; a
+                  second video or photo, captions, a voiceover, or an animated character.
+                </p>
+                <p>
+                  After adding one, drag it on the timeline below to move it, or drag its edges to change how long it
+                  shows.
+                </p>
+              </>
+            ),
+          }}
+        >
+          Overlays
+        </GroupLabel>
         <button
           type="button"
           onClick={onOpenVideoOverlayPicker}

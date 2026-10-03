@@ -174,6 +174,7 @@ import { FeedbackArea, type ActivityLogEntry } from "./FeedbackArea";
 import type { CanvasPlayerHandle } from "./CanvasPlayer";
 import { LocalRenderPopup } from "./LocalRenderPopup";
 import { CoverPicker } from "./CoverPicker";
+import { GuidedTour } from "./GuidedTour";
 
 const THUMBNAIL_INTERVAL_SECONDS = 1;
 // A text slide's own placeholder filmstrip tile -- small, fixed size, just
@@ -3255,7 +3256,7 @@ export function ThreePaneEditor({
         />
       </section>
 
-      <section className="min-h-0 flex-[7] overflow-hidden border-b border-border">
+      <section data-tour="timeline" className="min-h-0 flex-[7] overflow-hidden border-b border-border">
         <Playground
           musicClips={displayedMusicClips}
           assetNameById={assetNameById}
@@ -3386,6 +3387,7 @@ export function ThreePaneEditor({
         />
       </section>
 
+      <GuidedTour />
       {isCoverPickerOpen && (
         <CoverPicker
           projectId={projectId}

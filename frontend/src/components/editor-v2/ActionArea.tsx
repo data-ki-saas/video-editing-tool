@@ -79,6 +79,7 @@ import type { TextTemplateId } from "@/lib/video/textTemplates";
 import type { AvatarActionId } from "@/lib/video/avatar/topology";
 import type { AvatarDesignOverrides } from "@/lib/video/avatar/design";
 import type { RefObject } from "react";
+import { HelpTip } from "./HelpTip";
 
 function ActiveTransformationsList({
   selections,
@@ -604,11 +605,11 @@ export function ActionArea({
 
   return (
     <div className="flex h-full gap-4 overflow-x-auto p-4">
-      <div className="w-40 shrink-0 overflow-hidden border-r border-border pr-4">
+      <div data-tour="reels" className="w-40 shrink-0 overflow-hidden border-r border-border pr-4">
         <ProjectList activeProjectId={projectId} />
       </div>
 
-      <div className="w-56 shrink-0 overflow-hidden border-r border-border pr-4">
+      <div data-tour="assets" className="w-56 shrink-0 overflow-hidden border-r border-border pr-4">
         <AssetGallery
           assets={assets}
           isLoading={!assetsLoaded}
@@ -628,7 +629,7 @@ export function ActionArea({
         />
       </div>
 
-      <div className="w-[30rem] shrink-0 overflow-hidden border-r border-border pr-4">
+      <div data-tour="tools" className="w-[30rem] shrink-0 overflow-hidden border-r border-border pr-4">
         <UserActions
           onOpenNewReelWizard={() => setIsNewReelWizardOpen(true)}
           selectedClipRectId={selectedClipRectId}
@@ -652,7 +653,7 @@ export function ActionArea({
         />
       </div>
 
-      <div className="flex flex-1 items-center justify-start px-2">
+      <div data-tour="preview" className="flex flex-1 items-center justify-start px-2">
         {sequenceClips.length > 0 ? (
           // CanvasPlayer sizes its own visible panel from the canvas's real
           // intrinsic aspect ratio (already correct -- see its own module
@@ -705,13 +706,22 @@ export function ActionArea({
         )}
       </div>
 
-      <div className="w-64 shrink-0 overflow-hidden border-l border-border pl-4">
-        <ActiveTransformationsList
-          selections={selections}
-          videoDurationSeconds={videoDurationSeconds}
-          onEditTtsOverlay={onEditTtsOverlay}
-          onDeleteTtsOverlay={onDeleteTtsOverlay}
-        />
+      <div data-tour="edits" className="flex w-64 shrink-0 flex-col gap-2 overflow-hidden border-l border-border pl-4">
+        <h2 className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-foreground">
+          Edits
+          <HelpTip id="edits" title="Your edits so far">
+            <p>A running list of everything you&apos;ve added or changed in this reel, newest first.</p>
+            <p>It&apos;s empty until you make your first edit &mdash; try right-clicking a video in Assets and choosing Cutaway.</p>
+          </HelpTip>
+        </h2>
+        <div className="min-h-0 flex-1">
+          <ActiveTransformationsList
+            selections={selections}
+            videoDurationSeconds={videoDurationSeconds}
+            onEditTtsOverlay={onEditTtsOverlay}
+            onDeleteTtsOverlay={onDeleteTtsOverlay}
+          />
+        </div>
       </div>
 
       {isNewReelWizardOpen && <NewReelWizard onClose={() => setIsNewReelWizardOpen(false)} />}

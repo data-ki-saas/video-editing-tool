@@ -19,6 +19,8 @@ import { clearLastProjectId } from "@/lib/lastProject";
 import { InlineEditableText } from "@/components/InlineEditableText";
 import { TrashIcon, ResetIcon } from "@/components/icons/UIIcons";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
+import { HelpTip } from "./HelpTip";
+import { startEditorTour } from "./GuidedTour";
 
 export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
   const router = useRouter();
@@ -95,7 +97,30 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
   return (
     <div className="flex h-full flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-medium text-foreground">Reels</h2>
+        <h2 className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+          Reels
+          <HelpTip id="reels" title="Your reels">
+            {(close) => (
+              <>
+                <p>Every video you&apos;re working on lives here. Click one to open it; your changes save automatically.</p>
+                <p>
+                  <strong className="text-foreground">Starter Reel</strong> is a ready-made example &mdash; poke around
+                  in it freely. Use <strong className="text-foreground">+ New</strong> to start a blank reel of your own.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    close();
+                    startEditorTour();
+                  }}
+                  className="self-start rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground hover:opacity-90"
+                >
+                  Take the guided tour
+                </button>
+              </>
+            )}
+          </HelpTip>
+        </h2>
         <button
           type="button"
           onClick={() => void handleCreateBlank()}

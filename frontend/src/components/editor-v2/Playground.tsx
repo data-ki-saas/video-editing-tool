@@ -72,6 +72,7 @@ import { FrameStrip, type VideoOverlayThumbnailFrames } from "./FrameStrip";
 import { MainAudioTrackStrip } from "./MainAudioTrackStrip";
 import { TimeRulerStrip } from "./TimeRulerStrip";
 import { VolumeBadge } from "./VolumeBadge";
+import { HelpTip } from "./HelpTip";
 import { MicrophoneIcon, MusicNoteIcon } from "@/components/icons/UIIcons";
 import type { CutawaySegment } from "./CutawayTrack";
 import { useSyncedHorizontalScroll } from "@/lib/useSyncedHorizontalScroll";
@@ -407,6 +408,18 @@ export function Playground({
 
   return (
     <div className="flex h-full flex-col overflow-y-auto bg-surface px-2">
+      <div className="flex shrink-0 items-center gap-1.5 py-1 text-xs font-medium text-foreground">
+        Timeline
+        <HelpTip id="timeline" title="The timeline">
+          <p>This is your whole reel laid out left to right, one picture per second.</p>
+          <ul className="list-disc pl-4">
+            <li>Click anywhere to jump there; the preview above follows.</li>
+            <li>Drag a clip or overlay to move it, or drag its edges to shorten or lengthen it.</li>
+            <li>Right-click a clip for options like filters and transitions.</li>
+            <li>The bottom rows are your voice/sound and background music, each with its own volume.</li>
+          </ul>
+        </HelpTip>
+      </div>
       {/* One shared panel (shared bg-neutral-950) -- the frame strip and the
           two audio rails all represent one continuous timeline (see this
           file's own module comment) and should read as one panel, not

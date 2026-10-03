@@ -144,6 +144,7 @@ import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import { loadCrossOriginImage } from "@/lib/crossOriginImage";
 import { ReelLoader } from "@/components/ReelLoader";
 import { PlayIcon, PauseIcon, LoopIcon, ExpandIcon, CollapseIcon, LocalRenderIcon } from "./icons/PlayerIcons";
+import { HelpTip } from "./HelpTip";
 import { SpeakerFullIcon, SpeakerMutedIcon } from "@/components/icons/UIIcons";
 
 /** `m:ss` for the fullscreen scrub bar's own time labels -- reels are always
@@ -3008,12 +3009,20 @@ export const CanvasPlayer = forwardRef<
                 type="button"
                 onClick={renderControls.onLocalRenderClick}
                 disabled={localRenderDisabled}
+                data-tour="export"
                 aria-label="Edge Render"
                 title={localRenderTitle}
                 className="shrink-0 rounded-full p-2 text-accent hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <LocalRenderIcon className="h-5 w-5" />
               </button>
+              <HelpTip id="export" title="Saving your finished video">
+                <p>
+                  Press the <strong className="text-foreground">Edge Render</strong> button to export your reel as an
+                  MP4 to upload to YouTube or Instagram.
+                </p>
+                <p>It runs right in your browser, so it needs Chrome or Microsoft Edge.</p>
+              </HelpTip>
               <div className="mx-1 h-6 w-px shrink-0 bg-border" />
             </>
           )}

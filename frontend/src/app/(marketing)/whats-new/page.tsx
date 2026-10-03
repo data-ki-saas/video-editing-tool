@@ -22,11 +22,17 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-10-03",
+    title: "Guided tour, help icons and a Starter Reel",
+    description:
+      "New accounts now open with a ready-made Starter Reel to explore and a short guided tour of the editor. The editor also has little ? icons beside the Reels list, Assets, the toolbar groups, the timeline, the Edits list and the export button — click one for a quick explanation. Replay the tour any time from the ? beside Reels.",
+    isLatest: true,
+  },
+  {
     date: "2026-10-01",
     title: "Meet Aria and Pappu, two new avatars",
     description:
       "Two new ready-made avatars join Maya: Aria, with fuller long hair, expressive eyes with lashes and shaped lips, and Pappu, with short styled hair, a stronger jaw and heavier brows. Both blink, talk and react just like Maya, and now break into a real smile when the mood is happy — pick them from the avatar gallery.",
-    isLatest: true,
   },
   {
     date: "2026-09-30",
