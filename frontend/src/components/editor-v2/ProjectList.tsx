@@ -14,7 +14,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { listProjects, deleteProject, resetProject, renameProject, type Project } from "@/lib/projects";
+import { listProjects, createProject, deleteProject, resetProject, renameProject, type Project } from "@/lib/projects";
 import { clearLastProjectId } from "@/lib/lastProject";
 import { InlineEditableText } from "@/components/InlineEditableText";
 import { TrashIcon, ResetIcon } from "@/components/icons/UIIcons";
@@ -24,6 +24,7 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
 
   useEffect(() => {
@@ -68,6 +69,20 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
     }
   }
 
+  // A blank reel straight into its own editor -- the guided flow lives on
+  // the editor's "New Reel" wizard tab instead. (Bare /dashboard can't be
+  // used here: it resumes into the last-opened reel.)
+  async function handleCreateBlank() {
+    setCreating(true);
+    try {
+      const draft = await createProject({ name: "New Reel" });
+      router.push(`/dashboard/${draft.id}`);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "Failed to create a new reel");
+      setCreating(false);
+    }
+  }
+
   function handleRename(project: Project, name: string) {
     const previousName = project.name;
     setProjects((prev) => prev?.map((p) => (p.id === project.id ? { ...p, name } : p)) ?? prev);
@@ -81,9 +96,14 @@ export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
     <div className="flex h-full flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-medium text-foreground">Reels</h2>
-        <Link href="/dashboard" className="shrink-0 text-xs text-accent hover:underline">
-          + New
-        </Link>
+        <button
+          type="button"
+          onClick={() => void handleCreateBlank()}
+          disabled={creating}
+          className="shrink-0 text-xs text-accent hover:underline disabled:opacity-50"
+        >
+          {creating ? "Creating…" : "+ New"}
+        </button>
       </div>
 
       <ul className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
