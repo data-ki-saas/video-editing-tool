@@ -1,7 +1,11 @@
+import logging
+
 import httpx
 
 from src.core.config import settings
 from src.core.supabase_client import get_supabase_client
+
+logger = logging.getLogger(__name__)
 
 _ROLE_SELECT = "key, display_name, description, is_system, is_default, badge_color, role_features(feature_key)"
 
@@ -149,8 +153,10 @@ def create_impersonation_session(email: str) -> dict:
             "Authorization": f"Bearer {settings.supabase_service_role_key}",
             "Content-Type": "application/json",
         },
-        json={"type": "magiclink", "token": link.properties.hashed_token},
+        json={"type": "magiclink", "token_hash": link.properties.hashed_token},
         timeout=10,
     )
-    response.raise_for_status()
+    if response.status_code >= 400:
+        logger.error("impersonation verify failed: %s %s", response.status_code, response.text)
+        response.raise_for_status()
     return response.json()
