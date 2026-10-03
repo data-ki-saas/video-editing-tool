@@ -66,19 +66,32 @@ export async function startImpersonation(userId: string): Promise<void> {
   resetPermissionsCache();
 }
 
-/** Restores the admin's own session stashed by startImpersonation() above. */
-export async function stopImpersonation(): Promise<void> {
+/** Restores the admin's own session stashed by startImpersonation() above.
+ * Returns "restored" when back as admin, or "signed-out" when the stashed
+ * admin tokens could no longer be used (expired/revoked) -- in that case the
+ * impersonated session is dropped so the user is never left stuck as the
+ * target and has to sign back in. */
+export async function stopImpersonation(): Promise<"restored" | "signed-out"> {
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return;
-  const stored = JSON.parse(raw) as StoredImpersonation;
-
   const supabase = createClient();
-  const { error } = await supabase.auth.setSession({
-    access_token: stored.adminAccessToken,
-    refresh_token: stored.adminRefreshToken,
-  });
-  if (error) throw error;
+
+  let restored = false;
+  try {
+    if (raw) {
+      const stored = JSON.parse(raw) as StoredImpersonation;
+      const { error } = await supabase.auth.setSession({
+        access_token: stored.adminAccessToken,
+        refresh_token: stored.adminRefreshToken,
+      });
+      restored = !error;
+    }
+  } catch {
+    restored = false;
+  }
+
+  if (!restored) await supabase.auth.signOut();
 
   localStorage.removeItem(STORAGE_KEY);
   resetPermissionsCache();
+  return restored ? "restored" : "signed-out";
 }

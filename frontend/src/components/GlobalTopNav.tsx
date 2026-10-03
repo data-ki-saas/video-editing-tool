@@ -75,10 +75,11 @@ export function GlobalTopNav() {
   async function handleStopImpersonation() {
     setStopping(true);
     try {
-      await stopImpersonation();
-      router.push("/admin/users");
-      router.refresh();
+      const result = await stopImpersonation();
+      setImpersonation(null);
       setIsMenuOpen(false);
+      router.push(result === "restored" ? "/admin/users" : "/");
+      router.refresh();
     } finally {
       setStopping(false);
     }
