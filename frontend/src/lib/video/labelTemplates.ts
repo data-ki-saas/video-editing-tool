@@ -21,6 +21,7 @@
  * width its text needs, shrinking uniformly if the text would overflow.
  */
 import { easeInOut, type CropRect, type TextOverlay } from "./video_math";
+import type { HeadlineStyle } from "./headlineTemplates";
 
 export const LABEL_TEMPLATE_PREFIX = "label:";
 
@@ -53,6 +54,10 @@ export interface LabelSpec {
   layout: LabelLayout;
   corners: LabelCorners;
   parts: LabelPartSpec[];
+  /** Set for big, background-less animated text (headlineTemplates.ts draws
+   * it, not drawLabel). Such a spec has one part: its `fg` is the text colour,
+   * its `bg` is only the tint of its segment on the label track. */
+  headline?: HeadlineStyle;
 }
 
 const part = (bg: string, fg: string, placeholder: string, scale = 1, bold = true): LabelPartSpec => ({
@@ -62,6 +67,24 @@ const part = (bg: string, fg: string, placeholder: string, scale = 1, bold = tru
   scale,
   bold,
 });
+
+function headline(
+  id: string,
+  name: string,
+  animation: HeadlineStyle["animation"],
+  textColor: string,
+  trackColor: string,
+  look: { stroke?: string | null; glow?: string | null }
+): LabelSpec {
+  return {
+    id,
+    name,
+    layout: "single",
+    corners: "square",
+    parts: [part(trackColor, textColor, "Big text")],
+    headline: { animation, stroke: look.stroke ?? null, glow: look.glow ?? null },
+  };
+}
 
 // Palette kept to a handful of colours that stay legible over any footage.
 const BLUE = "#2563eb";
@@ -140,6 +163,14 @@ export const LABEL_SPECS: LabelSpec[] = [
     corners: "round",
     parts: [part(RED, WHITE, "Title"), part(WHITE, INK, "Description", 0.72, false)],
   },
+  // Big transparent text -- no backing shape, animated entrance.
+  headline("big-pop", "Big · Pop", "pop", WHITE, BLUE, { stroke: INK }),
+  headline("big-slide", "Big · Slide up", "slide-up", WHITE, INK, { stroke: INK }),
+  headline("big-typewriter", "Big · Typewriter", "typewriter", WHITE, GREEN, { stroke: INK }),
+  headline("big-words", "Big · Word by word", "word-stagger", YELLOW, RED, { stroke: INK }),
+  headline("big-wave", "Big · Bouncy letters", "letter-wave", WHITE, BLUE, { stroke: INK }),
+  headline("big-zoom", "Big · Slow zoom", "zoom-drift", WHITE, INK, { stroke: null }),
+  headline("big-neon", "Big · Neon glow", "glow-pulse", "#f0abfc", "#a21caf", { glow: "#e879f9" }),
 ];
 
 export function labelTemplateId(specId: string): string {
@@ -178,7 +209,11 @@ export function describeLabelText(text: string): string {
 export const DEFAULT_LABEL_RECT: CropRect = { x: 0.05, y: 0.74, width: 0.9, height: 0.07 };
 export const DEFAULT_STACKED_LABEL_RECT: CropRect = { x: 0.05, y: 0.7, width: 0.9, height: 0.12 };
 
+// Big headline text: a tall box across the middle of the frame.
+export const DEFAULT_HEADLINE_RECT: CropRect = { x: 0.05, y: 0.35, width: 0.9, height: 0.3 };
+
 export function defaultLabelRect(spec: LabelSpec): CropRect {
+  if (spec.headline) return DEFAULT_HEADLINE_RECT;
   return spec.layout === "stacked" ? DEFAULT_STACKED_LABEL_RECT : DEFAULT_LABEL_RECT;
 }
 

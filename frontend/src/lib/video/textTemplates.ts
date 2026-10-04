@@ -20,6 +20,7 @@
  */
 import { easeInOut, type TtsWordTiming } from "./video_math";
 import { drawLabel, getLabelSpec } from "./labelTemplates";
+import { drawHeadline } from "./headlineTemplates";
 
 export type TextTemplateId =
   | "bold-pop"
@@ -458,6 +459,11 @@ export function getTextTemplateRenderer(templateId: string): TextTemplateRendere
   // templateId -- delegated here so every existing call site (CanvasPlayer,
   // exportTimeline, TextOverlayCanvas) draws them with no changes of its own.
   const labelSpec = getLabelSpec(templateId);
+  if (labelSpec?.headline) {
+    const style = labelSpec.headline;
+    const fill = labelSpec.parts[0].fg;
+    return ({ ctx, text, rectPx, progress }) => drawHeadline(style, fill, ctx, text, rectPx, progress);
+  }
   if (labelSpec) return ({ ctx, text, rectPx, progress }) => drawLabel(labelSpec, ctx, text, rectPx, progress);
   return (TEXT_TEMPLATE_RENDERERS as Record<string, TextTemplateRenderer>)[templateId];
 }

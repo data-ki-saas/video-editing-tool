@@ -23,10 +23,16 @@ interface ChangelogEntry {
 const ENTRIES: ChangelogEntry[] = [
   {
     date: "2026-10-04",
+    title: "Big animated text with no background",
+    description:
+      "The Label picker now has large, see-through text styles: Pop, Slide up, Typewriter, Word by word, Bouncy letters, Slow zoom and Neon glow. Type your words, drag the box over the frame, and watch the animation loop in the preview before you add it.",
+    isLatest: true,
+  },
+  {
+    date: "2026-10-04",
     title: "Labels: pills, capsules and price tags",
     description:
       "The Text button is now Label. Pick a pill, capsule or rectangle — including two-tone ones like a price on blue beside a name on white, or a title stacked over a description — and type straight into it; it resizes to fit your words. Choose how long it shows on the time bar, and slide labels along their own timeline row to move them.",
-    isLatest: true,
   },
   {
     date: "2026-10-03",

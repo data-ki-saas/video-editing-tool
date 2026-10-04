@@ -19,7 +19,8 @@
  * open TextOverlayDialog (see ActionArea.tsx) -- this dialog only ever deals
  * in `label:` templates.
  */
-import { useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { HEADLINE_STROKE_EM } from "@/lib/video/headlineTemplates";
 import { TextOverlayCanvas } from "./TextOverlayCanvas";
 import { OverlayRectOverlay } from "./OverlayRectOverlay";
 import { CropRectOverlay } from "./CropRectOverlay";
@@ -43,6 +44,7 @@ import {
 } from "@/lib/video/labelTemplates";
 
 const PREVIEW_PROGRESS = 0.6;
+const PREVIEW_LOOP_SECONDS = 3;
 const MAX_PART_LENGTH = 40;
 
 /** One label drawn in CSS -- the picker's own view of a LabelSpec (the canvas
@@ -73,6 +75,8 @@ function LabelView({
 
   const stacked = spec.layout === "stacked" && visible.length > 1;
   const radius = spec.corners === "full" ? "9999px" : spec.corners === "round" ? `${LABEL_ROUND_RADIUS_EM}em` : "0";
+  // Headline specs are bare text: no backing, bigger type, outline/glow.
+  const headline = spec.headline;
 
   return (
     <div
@@ -80,27 +84,44 @@ function LabelView({
         display: "inline-flex",
         flexDirection: stacked ? "column" : "row",
         alignItems: "stretch",
-        fontSize: fontSizePx,
-        borderRadius: radius,
-        overflow: "hidden",
-        boxShadow: "0 2px 6px rgba(0,0,0,0.35)",
+        fontSize: headline ? fontSizePx * 1.5 : fontSizePx,
+        borderRadius: headline ? 0 : radius,
+        overflow: headline ? "visible" : "hidden",
+        boxShadow: headline ? "none" : "0 2px 6px rgba(0,0,0,0.35)",
         maxWidth: "100%",
       }}
     >
       {visible.map(({ partSpec, index, value }) => {
-        const partStyle: CSSProperties = {
-          background: partSpec.bg,
-          color: partSpec.fg,
-          fontSize: `${partSpec.scale}em`,
-          fontWeight: partSpec.bold ? 700 : 400,
-          lineHeight: LABEL_LINE_EM,
-          padding: `${LABEL_PAD_Y_EM}em ${LABEL_PAD_X_EM}em`,
-          textAlign: "center",
-          whiteSpace: "pre",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        };
+        const partStyle: CSSProperties = headline
+          ? {
+              color: partSpec.fg,
+              fontWeight: 700,
+              lineHeight: LABEL_LINE_EM,
+              textAlign: "center",
+              whiteSpace: "pre",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              ...(headline.stroke
+                ? { WebkitTextStroke: `${HEADLINE_STROKE_EM}em ${headline.stroke}`, paintOrder: "stroke fill" }
+                : {}),
+              textShadow: headline.glow
+                ? `0 0 0.3em ${headline.glow}, 0 0 0.6em ${headline.glow}`
+                : "0 0.04em 0.08em rgba(0,0,0,0.45)",
+            }
+          : {
+              background: partSpec.bg,
+              color: partSpec.fg,
+              fontSize: `${partSpec.scale}em`,
+              fontWeight: partSpec.bold ? 700 : 400,
+              lineHeight: LABEL_LINE_EM,
+              padding: `${LABEL_PAD_Y_EM}em ${LABEL_PAD_X_EM}em`,
+              textAlign: "center",
+              whiteSpace: "pre",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            };
         const shownText = value.trim() === "" && (nothingTyped || editable) ? partSpec.placeholder : value;
 
         if (!editable) {
@@ -327,6 +348,22 @@ export function LabelDialog({
     setValues((prev) => prev.map((existing, index) => (index === partIndex ? value : existing)));
   }
 
+  // Headline styles are animated, so their on-frame preview loops through the
+  // label's own 0..1 progress; the pill/capsule labels just hold a still.
+  const [loopProgress, setLoopProgress] = useState(PREVIEW_PROGRESS);
+  const animated = spec.headline !== undefined;
+  useEffect(() => {
+    if (!animated) return;
+    let frame = 0;
+    const startedAt = performance.now();
+    const tick = (now: number) => {
+      setLoopProgress((((now - startedAt) / 1000) % PREVIEW_LOOP_SECONDS) / PREVIEW_LOOP_SECONDS);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [animated]);
+
   const activeValues = values.slice(0, spec.parts.length);
   const hasText = activeValues.some((value) => value.trim() !== "");
   const canSave = hasText && range !== null && range.end - range.start >= MIN_LABEL_DURATION_SECONDS - 1e-6;
@@ -382,7 +419,7 @@ export function LabelDialog({
                   <TextOverlayCanvas
                     text={previewText}
                     templateId={labelTemplateId(spec.id)}
-                    progress={PREVIEW_PROGRESS}
+                    progress={animated ? loopProgress : PREVIEW_PROGRESS}
                     className="h-full w-full"
                   />
                 }
