@@ -182,6 +182,7 @@ export function TextOverlayDialog({
                       templateId={option.id}
                       progress={PREVIEW_PROGRESS}
                       className="aspect-video w-full bg-neutral-900"
+                      backgroundUrl={previewFrameUrl}
                     />
                     <span className="bg-background px-1 py-0.5 text-center text-[10px] text-foreground">{option.name}</span>
                   </button>

@@ -403,16 +403,30 @@ export function LabelDialog({
                 {LABEL_SPECS.map((option) => {
                   const selected = option.id === spec.id;
                   const tileClassName =
-                    "flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 overflow-hidden rounded-md border-2 bg-neutral-700 px-2 py-2.5 " +
+                    "flex min-h-[4.5rem] flex-col items-center justify-center gap-1.5 overflow-hidden rounded-md border-2 bg-neutral-700 bg-cover bg-center px-2 py-2.5 " +
                     (selected ? "border-accent" : "border-transparent hover:border-border");
-                  const caption = <span className="text-[10px] text-neutral-200">{option.name}</span>;
+                  // Each tile sits on the frame under the playhead (the red
+                  // line on the time bar), so a label is judged against the
+                  // footage it will actually appear over.
+                  const tileStyle: CSSProperties | undefined = previewFrameUrl
+                    ? { backgroundImage: `url("${previewFrameUrl}")` }
+                    : undefined;
+                  const caption = (
+                    <span className="rounded-sm bg-black/60 px-1.5 text-[10px] text-neutral-100">{option.name}</span>
+                  );
                   return selected ? (
-                    <div key={option.id} className={tileClassName}>
+                    <div key={option.id} className={tileClassName} style={tileStyle}>
                       <LabelView spec={option} values={values} editable onChange={setValue} />
                       {caption}
                     </div>
                   ) : (
-                    <button key={option.id} type="button" onClick={() => selectSpec(option)} className={tileClassName}>
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => selectSpec(option)}
+                      className={tileClassName}
+                      style={tileStyle}
+                    >
                       <LabelView spec={option} values={values} />
                       {caption}
                     </button>

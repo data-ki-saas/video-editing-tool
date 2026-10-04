@@ -20,6 +20,7 @@ export function TextOverlayCanvas({
   templateId,
   progress,
   className,
+  backgroundUrl,
 }: {
   text: string;
   // A plain string, not the narrower TextTemplateId union -- callers
@@ -29,6 +30,10 @@ export function TextOverlayCanvas({
   templateId: string;
   progress: number;
   className?: string;
+  // A frame to sit behind the text (gallery tiles pass the frame under the
+  // playhead, so a style is judged against the footage it will cover). Purely
+  // CSS -- the canvas itself stays transparent, same as in real playback.
+  backgroundUrl?: string | null;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -65,5 +70,15 @@ export function TextOverlayCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- draw() is freshly defined every render and always closes over the latest text/template/progress
   }, [text, templateId, progress]);
 
-  return <canvas ref={canvasRef} className={className} />;
+  return (
+    <canvas
+      ref={canvasRef}
+      className={className}
+      style={
+        backgroundUrl
+          ? { backgroundImage: `url("${backgroundUrl}")`, backgroundSize: "cover", backgroundPosition: "center" }
+          : undefined
+      }
+    />
+  );
 }
