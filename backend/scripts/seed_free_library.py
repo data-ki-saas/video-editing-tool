@@ -173,11 +173,10 @@ def _description(hit: dict, kind: str) -> str:
     return f"Free {what} from Pixabay by {hit.get('user', 'unknown')} -- {hit.get('pageURL', '')} (Pixabay Content License)"
 
 
-def _gather_props(client: httpx.Client, category: Category) -> list[tuple[dict, bytes, str]]:
+def _gather_props(client: httpx.Client, category: Category, seen: set[int], need: int) -> list[tuple[dict, bytes, str]]:
     picked: list[tuple[dict, bytes, str]] = []
-    seen: set[int] = set()
     for query in category.queries:
-        if len(picked) >= ITEMS_PER_CATEGORY:
+        if len(picked) >= need:
             break
         for image_type in ("vector", "illustration"):
             found = False
@@ -196,11 +195,10 @@ def _gather_props(client: httpx.Client, category: Category) -> list[tuple[dict, 
     return picked
 
 
-def _gather_clips(client: httpx.Client, category: Category) -> list[tuple[dict, bytes, bytes, str]]:
+def _gather_clips(client: httpx.Client, category: Category, seen: set[int], need: int) -> list[tuple[dict, bytes, bytes, str]]:
     picked: list[tuple[dict, bytes, bytes, str]] = []
-    seen: set[int] = set()
     for query in category.queries:
-        if len(picked) >= ITEMS_PER_CATEGORY:
+        if len(picked) >= need:
             break
         for hit in _search(client, _PIXABAY_VIDEOS, query, order="popular"):
             if hit["id"] in seen or hit["duration"] > _MAX_CLIP_SECONDS:
@@ -285,16 +283,29 @@ def main() -> None:
 
     promoted_by = None if args.dry_run else (args.promoted_by or _default_promoter())
     totals: dict[str, int] = {}
+    # A Pixabay clip can match several categories' queries (glitter vs. dust
+    # particles, say) and row ids come from the Pixabay id, so dedupe across
+    # ALL categories -- and count what's already seeded, so a re-run only
+    # tops each category up to ITEMS_PER_CATEGORY instead of adding more.
+    existing = repository.list_public(None) if not args.dry_run else []
+    seen: set[int] = {int(record.id.rsplit("-", 1)[1]) for record in existing if record.id.startswith("seed-pixabay-")}
+    existing_count: dict[str, int] = {}
+    for record in existing:
+        if record.id.startswith("seed-pixabay-") and record.category:
+            existing_count[record.category] = existing_count.get(record.category, 0) + 1
     with httpx.Client(timeout=30) as client:
         for category in CATEGORIES:
             if args.only and category.slug != args.only:
                 continue
-            logger.info("== %s", category.slug)
+            need = ITEMS_PER_CATEGORY - existing_count.get(category.slug, 0)
+            logger.info("== %s (need %d more)", category.slug, need)
+            if need <= 0:
+                continue
             if category.kind == "image":
-                items = [(hit, png, None, query) for hit, png, query in _gather_props(client, category)]
+                items = [(hit, png, None, query) for hit, png, query in _gather_props(client, category, seen, need)]
             else:
-                items = _gather_clips(client, category)
-            for index, (hit, media, thumbnail, query) in enumerate(items, start=1):
+                items = _gather_clips(client, category, seen, need)
+            for index, (hit, media, thumbnail, query) in enumerate(items, start=existing_count.get(category.slug, 0) + 1):
                 row_id = f"seed-pixabay-{category.kind}-{hit['id']}"
                 title = _title(query, 1) if category.kind == "image" else _title(query, index)
                 logger.info("  %s  %s  (%s KB)", row_id, title, len(media) // 1024)
@@ -306,8 +317,8 @@ def main() -> None:
                 else:
                     _publish(row_id, category.slug, "video", title, _description(hit, "video"),
                              media, "video/mp4", ".mp4", thumbnail, ".jpg", float(hit["duration"]), promoted_by)
-            totals[category.slug] = len(items)
-    logger.info("picked: %s", totals)
+            totals[category.slug] = existing_count.get(category.slug, 0) + len(items)
+    logger.info("totals: %s", totals)
     for slug, count in totals.items():
         if count < ITEMS_PER_CATEGORY:
             logger.warning("%s: only %d of %d found -- add queries to CATEGORIES", slug, count, ITEMS_PER_CATEGORY)
