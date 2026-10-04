@@ -1695,7 +1695,47 @@ export async function exportVideoLocally(
         }
       }
 
-      // Picture-in-Picture IMAGE overlays draw AFTER video PiP overlays, so
+      // Avatar overlays -- mirrors CanvasPlayer.tsx's own avatar-overlay
+      // loop exactly (same order relative to the PiP image-overlay loop
+      // below (props paint in front of the avatar) and the text-overlay loop, same per-clip derivations),
+      // just reading from compiledAvatarsById (built once, up front, above)
+      // instead of a React ref, and driven by sourceTimeSeconds instead of
+      // a live elapsedSeconds clock.
+      for (const clip of findActiveAvatarOverlays(selections.avatarOverlays, sourceTimeSeconds)) {
+        const compiled = compiledAvatarsById.get(avatarCompileCacheKey(clip.avatarId, clip.designOverrides));
+        if (!compiled) continue;
+        const localElapsed = sourceTimeSeconds - clip.startTimeSeconds;
+        // Posture/gesture/gaze/mood resolution -- see resolveAvatarRenderState's
+        // own doc comment for the full precedence. Same call shape as
+        // CanvasPlayer.tsx's live-preview loop, so export and preview never
+        // disagree on which action/mouth shape is active at a given instant.
+        const { activation, mouthShapeId, expressionBias, expressionShapeIds, handPoseShapeIds } = resolveAvatarRenderState(
+          clip,
+          selections.ttsOverlays,
+          compiled.design.expressionBias,
+          compiled.topology,
+          sourceTimeSeconds,
+          localElapsed
+        );
+        const seed = ambientEffectSeed(clip.id);
+        const pose = computeLayeredAvatarPose(compiled.topology, activation, localElapsed, seed, expressionBias, compiled.accessories);
+        const destX = clip.rect.x * canvas.width;
+        const destY = clip.rect.y * canvas.height;
+        const destWidth = clip.rect.width * canvas.width;
+        const destHeight = clip.rect.height * canvas.height;
+        const eyeShapeId = computeEyeShapeId(activation.postureActionId, localElapsed, seed);
+        drawAvatar(
+          ctx,
+          compiled,
+          pose,
+          { x: destX, y: destY, width: destWidth, height: destHeight },
+          mouthShapeId,
+          clip.framing ?? "full",
+          { ...expressionShapeIds, ...handPoseShapeIds, eyes: eyeShapeId }
+        );
+      }
+
+      // Picture-in-Picture IMAGE overlays (incl. props) draw AFTER video PiP overlays AND avatars, so
       // an image PiP wins visually if it happens to overlap a video PiP box
       // -- same "image wins" convention as the exclusive layer above.
       for (const pip of findActivePictureInPictureOverlays(selections.overlayImages, sourceTimeSeconds)) {
@@ -1738,46 +1778,6 @@ export async function exportVideoLocally(
         if (pip.ambientEffect && !pip.camera3D) {
           drawAmbientEffect(ctx, pip.ambientEffect, destX, destY, destWidth, destHeight, sourceTimeSeconds - pip.startTimeSeconds, ambientEffectSeed(pip.startTimeSeconds));
         }
-      }
-
-      // Avatar overlays -- mirrors CanvasPlayer.tsx's own avatar-overlay
-      // loop exactly (same order relative to the PiP image-overlay loop
-      // above and the text-overlay loop below, same per-clip derivations),
-      // just reading from compiledAvatarsById (built once, up front, above)
-      // instead of a React ref, and driven by sourceTimeSeconds instead of
-      // a live elapsedSeconds clock.
-      for (const clip of findActiveAvatarOverlays(selections.avatarOverlays, sourceTimeSeconds)) {
-        const compiled = compiledAvatarsById.get(avatarCompileCacheKey(clip.avatarId, clip.designOverrides));
-        if (!compiled) continue;
-        const localElapsed = sourceTimeSeconds - clip.startTimeSeconds;
-        // Posture/gesture/gaze/mood resolution -- see resolveAvatarRenderState's
-        // own doc comment for the full precedence. Same call shape as
-        // CanvasPlayer.tsx's live-preview loop, so export and preview never
-        // disagree on which action/mouth shape is active at a given instant.
-        const { activation, mouthShapeId, expressionBias, expressionShapeIds, handPoseShapeIds } = resolveAvatarRenderState(
-          clip,
-          selections.ttsOverlays,
-          compiled.design.expressionBias,
-          compiled.topology,
-          sourceTimeSeconds,
-          localElapsed
-        );
-        const seed = ambientEffectSeed(clip.id);
-        const pose = computeLayeredAvatarPose(compiled.topology, activation, localElapsed, seed, expressionBias, compiled.accessories);
-        const destX = clip.rect.x * canvas.width;
-        const destY = clip.rect.y * canvas.height;
-        const destWidth = clip.rect.width * canvas.width;
-        const destHeight = clip.rect.height * canvas.height;
-        const eyeShapeId = computeEyeShapeId(activation.postureActionId, localElapsed, seed);
-        drawAvatar(
-          ctx,
-          compiled,
-          pose,
-          { x: destX, y: destY, width: destWidth, height: destHeight },
-          mouthShapeId,
-          clip.framing ?? "full",
-          { ...expressionShapeIds, ...handPoseShapeIds, eyes: eyeShapeId }
-        );
       }
 
       for (const overlay of findActiveTextOverlays(selections.textOverlays, sourceTimeSeconds)) {

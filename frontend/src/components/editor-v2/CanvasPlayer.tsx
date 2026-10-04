@@ -1523,7 +1523,50 @@ export const CanvasPlayer = forwardRef<
       }
     }
 
-    // Picture-in-Picture IMAGE overlays draw AFTER video PiP overlays, so
+    // Avatar overlays (lib/video/avatar/) draw after every video PiP
+    // overlay above -- own rail, multiple-at-once (see findActiveAvatarOverlays'
+    // own doc comment in video_math.ts), no exclusive/PiP layering to
+    // reason about. Each one is a synchronous read of avatarCompiledByIdRef
+    // (populated by its own compile effect further below) -- a not-yet-
+    // compiled avatarId just isn't drawn this frame, same "skip a
+    // still-loading asset rather than block/throw" tolerance as a video
+    // overlay's own not-yet-extracted frames above.
+    for (const clip of findActiveAvatarOverlays(avatarOverlays, elapsedSeconds)) {
+      const compiled = avatarCompiledByIdRef.current[avatarCompileCacheKey(clip.avatarId, clip.designOverrides)];
+      if (!compiled) continue;
+      const localElapsed = elapsedSeconds - clip.startTimeSeconds;
+      // Posture action (director-authored actionTimeline beat, or the
+      // undirected TTS-driven talk/idle default), gesture/gaze (this clip's
+      // own timelines merged with tag-derived beats from whichever TTS
+      // overlay overlaps it), and mood-adjusted expressionBias -- see
+      // resolveAvatarRenderState's own doc comment for the full precedence.
+      const { activation, mouthShapeId, expressionBias, expressionShapeIds, handPoseShapeIds } = resolveAvatarRenderState(
+        clip,
+        ttsOverlays,
+        compiled.design.expressionBias,
+        compiled.topology,
+        elapsedSeconds,
+        localElapsed
+      );
+      const seed = ambientEffectSeed(clip.id);
+      const pose = computeLayeredAvatarPose(compiled.topology, activation, localElapsed, seed, expressionBias, compiled.accessories);
+      const destX = clip.rect.x * canvas.width;
+      const destY = clip.rect.y * canvas.height;
+      const destWidth = clip.rect.width * canvas.width;
+      const destHeight = clip.rect.height * canvas.height;
+      const eyeShapeId = computeEyeShapeId(activation.postureActionId, localElapsed, seed);
+      drawAvatar(
+        ctx,
+        compiled,
+        pose,
+        { x: destX, y: destY, width: destWidth, height: destHeight },
+        mouthShapeId,
+        clip.framing ?? "full",
+        { ...expressionShapeIds, ...handPoseShapeIds, eyes: eyeShapeId }
+      );
+    }
+
+    // Picture-in-Picture IMAGE overlays (incl. props) draw AFTER video PiP overlays AND avatars, so
     // an image PiP wins visually if it happens to overlap a video PiP box
     // -- same "image wins" convention as the exclusive layer above.
     for (const pip of findActivePictureInPictureOverlays(overlayImages, elapsedSeconds)) {
@@ -1569,49 +1612,6 @@ export const CanvasPlayer = forwardRef<
       if (pip.ambientEffect && !pip.camera3D) {
         drawAmbientEffect(ctx, pip.ambientEffect, destX, destY, destWidth, destHeight, elapsedSeconds - pip.startTimeSeconds, ambientEffectSeed(pip.startTimeSeconds));
       }
-    }
-
-    // Avatar overlays (lib/video/avatar/) draw after every image/video PiP
-    // overlay above -- own rail, multiple-at-once (see findActiveAvatarOverlays'
-    // own doc comment in video_math.ts), no exclusive/PiP layering to
-    // reason about. Each one is a synchronous read of avatarCompiledByIdRef
-    // (populated by its own compile effect further below) -- a not-yet-
-    // compiled avatarId just isn't drawn this frame, same "skip a
-    // still-loading asset rather than block/throw" tolerance as a video
-    // overlay's own not-yet-extracted frames above.
-    for (const clip of findActiveAvatarOverlays(avatarOverlays, elapsedSeconds)) {
-      const compiled = avatarCompiledByIdRef.current[avatarCompileCacheKey(clip.avatarId, clip.designOverrides)];
-      if (!compiled) continue;
-      const localElapsed = elapsedSeconds - clip.startTimeSeconds;
-      // Posture action (director-authored actionTimeline beat, or the
-      // undirected TTS-driven talk/idle default), gesture/gaze (this clip's
-      // own timelines merged with tag-derived beats from whichever TTS
-      // overlay overlaps it), and mood-adjusted expressionBias -- see
-      // resolveAvatarRenderState's own doc comment for the full precedence.
-      const { activation, mouthShapeId, expressionBias, expressionShapeIds, handPoseShapeIds } = resolveAvatarRenderState(
-        clip,
-        ttsOverlays,
-        compiled.design.expressionBias,
-        compiled.topology,
-        elapsedSeconds,
-        localElapsed
-      );
-      const seed = ambientEffectSeed(clip.id);
-      const pose = computeLayeredAvatarPose(compiled.topology, activation, localElapsed, seed, expressionBias, compiled.accessories);
-      const destX = clip.rect.x * canvas.width;
-      const destY = clip.rect.y * canvas.height;
-      const destWidth = clip.rect.width * canvas.width;
-      const destHeight = clip.rect.height * canvas.height;
-      const eyeShapeId = computeEyeShapeId(activation.postureActionId, localElapsed, seed);
-      drawAvatar(
-        ctx,
-        compiled,
-        pose,
-        { x: destX, y: destY, width: destWidth, height: destHeight },
-        mouthShapeId,
-        clip.framing ?? "full",
-        { ...expressionShapeIds, ...handPoseShapeIds, eyes: eyeShapeId }
-      );
     }
 
     // Text overlays draw last, always on top of every overlay above.
