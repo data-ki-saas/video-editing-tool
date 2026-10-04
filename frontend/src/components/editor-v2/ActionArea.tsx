@@ -44,7 +44,7 @@ import { getAvatarLibraryEntry } from "@/lib/video/avatar/library";
 import { CutawayDialog } from "./CutawayDialog";
 import { TextSlideDialog } from "./TextSlideDialog";
 import type { CutawaySegment } from "./CutawayTrack";
-import type { TextSlideStyle, TextSlideLayout } from "@/lib/video/transformations";
+import type { TextSlideStyle, TextSlideLayout, ImageOverlayPlacement } from "@/lib/video/transformations";
 import type { TextSlideTransitionId } from "@/lib/video/textSlideTransitions";
 import { ClipRectangleDialog } from "./ClipRectangleDialog";
 import { FilterPresetDialog } from "./FilterPresetDialog";
@@ -344,7 +344,7 @@ export function ActionArea({
   onUploaded: (asset: Asset) => void;
   onUploadingChange?: (isUploading: boolean) => void;
   onAssetDeleted: (assetId: string) => void;
-  onAddImageOverlay: (asset: Asset) => void;
+  onAddImageOverlay: (asset: Asset, placement?: ImageOverlayPlacement) => void;
   onAddToSequence: (asset: Asset) => void;
   onAddVideoOverlay: (asset: Asset, options?: { removeBackground?: boolean; chromaKeyColor?: string }) => void;
   onOpenVideoOverlayPickerForAsset: (asset: Asset) => void;
@@ -779,6 +779,7 @@ export function ActionArea({
         <PropsDialog
           projectId={projectId}
           onImported={onUploaded}
+          frameAspectRatio={frameAspectRatio}
           onPlace={onAddImageOverlay}
           onImportingChange={onUploadingChange}
           onClose={() => setIsPropsDialogOpen(false)}

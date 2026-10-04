@@ -796,6 +796,10 @@ export interface ImageOverlayClip {
   faceEffect?: FaceEffectId | null;
   // Same "Pulse with music" toggle as VideoOverlayClip.audioReactive above.
   audioReactive?: boolean;
+  // Set for props (PropsDialog): the picture-in-picture box was sized to the
+  // artwork's own shape so nothing is cropped, and resizing it keeps that
+  // shape instead of letting a free corner drag re-crop the artwork.
+  lockAspect?: boolean;
 }
 
 /** Cache key for a still frame captured at one overlay placement's own

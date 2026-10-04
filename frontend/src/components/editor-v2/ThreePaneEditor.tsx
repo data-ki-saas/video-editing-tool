@@ -84,6 +84,7 @@ import {
   applyTrimTrackClick,
   applyDeleteTrimRange,
   applyAddImageOverlay,
+  type ImageOverlayPlacement,
   applyChangeImageOverlayLayout,
   applyToggleImageSplitScreenOrientation,
   applyToggleImageSplitScreenSides,
@@ -1448,8 +1449,8 @@ export function ThreePaneEditor({
   // places it on its own rail at the current playhead, defaulting to a
   // Picture-in-Picture layout the user can switch afterward, exact parity
   // with handleAddVideoOverlay below (see video_math.ts's ImageOverlayClip).
-  function handleAddImageOverlay(asset: Asset) {
-    const { label, state } = applyAddImageOverlay(selections, asset.id, currentTimeSeconds, videoDurationSeconds);
+  function handleAddImageOverlay(asset: Asset, placement?: ImageOverlayPlacement) {
+    const { label, state } = applyAddImageOverlay(selections, asset.id, currentTimeSeconds, videoDurationSeconds, placement);
     pushChange(label, state);
     setIsImageOverlayPickerOpen(false);
   }

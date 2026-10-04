@@ -513,6 +513,13 @@ export function applyTrimCutawayHead(
 const DEFAULT_OVERLAY_DURATION_SECONDS = 3;
 const DEFAULT_OVERLAY_RECT: CropRect = { x: 0.3, y: 0.3, width: 0.4, height: 0.4 };
 
+/** Optional starting box for a new image overlay -- props pass one sized to
+ * the artwork's own shape (so cover-fit never crops it) plus lockAspect. */
+export interface ImageOverlayPlacement {
+  rect: CropRect;
+  lockAspect?: boolean;
+}
+
 /** Adds a new image overlay at the current playhead, defaulting to
  * Picture-in-Picture at DEFAULT_OVERLAY_RECT -- from AssetGallery's
  * right-click "Overlay" action on an image asset, or the Image Overlay
@@ -524,7 +531,8 @@ export function applyAddImageOverlay(
   selections: EditSelectionsSnapshot,
   assetId: string,
   currentTimeSeconds: number,
-  videoDurationSeconds: number
+  videoDurationSeconds: number,
+  placement?: ImageOverlayPlacement
 ): TransformationResult {
   const startTimeSeconds = currentTimeSeconds;
   const endTimeSeconds = Math.min(
@@ -537,8 +545,9 @@ export function applyAddImageOverlay(
     assetId,
     startTimeSeconds,
     endTimeSeconds,
-    layout: { type: "picture-in-picture", rect: DEFAULT_OVERLAY_RECT },
+    layout: { type: "picture-in-picture", rect: placement?.rect ?? DEFAULT_OVERLAY_RECT },
     framing: DEFAULT_OVERLAY_FRAMING,
+    ...(placement?.lockAspect ? { lockAspect: true } : {}),
   };
   return {
     label: "Added image overlay",

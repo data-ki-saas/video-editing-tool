@@ -20,6 +20,34 @@
  */
 import { useEffect, useState } from "react";
 import { importLibraryAssetToProject, listLibraryAssets, type Asset, type LibraryAssetSummary } from "@/lib/api";
+import type { ImageOverlayPlacement } from "@/lib/video/transformations";
+
+// A freshly-placed prop takes up to this share of the frame's width/height,
+// whichever its own shape hits first.
+const PROP_MAX_FRACTION = 0.5;
+
+function loadImageAspectRatio(url: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : null);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+/** A box matching the artwork's own shape (so the overlay's cover-fit never
+ * crops it), centered, in the frame's normalized coordinates. */
+function propRect(imageAspect: number, frameAspect: number): ImageOverlayPlacement["rect"] {
+  // Normalized height/width that renders as imageAspect on a frameAspect frame.
+  const heightPerWidth = frameAspect / imageAspect;
+  let width = PROP_MAX_FRACTION;
+  let height = width * heightPerWidth;
+  if (height > PROP_MAX_FRACTION) {
+    height = PROP_MAX_FRACTION;
+    width = height / heightPerWidth;
+  }
+  return { x: (1 - width) / 2, y: (1 - height) / 2, width, height };
+}
 
 // A light checkerboard, so a prop's transparent areas read as "see-through"
 // rather than as a flat dark tile.
@@ -33,17 +61,20 @@ const CHECKERBOARD_STYLE: React.CSSProperties = {
 
 export function PropsDialog({
   projectId,
+  frameAspectRatio,
   onImported,
   onPlace,
   onImportingChange,
   onClose,
 }: {
   projectId: string;
+  // The video frame's width/height, to size a prop's box to its own shape.
+  frameAspectRatio: number | null;
   // The imported file lands in this project's asset gallery first...
   onImported: (asset: Asset) => void;
   // ...then is placed on the timeline at the playhead (ThreePaneEditor's
-  // handleAddImageOverlay).
-  onPlace: (asset: Asset) => void;
+  // handleAddImageOverlay), in a box shaped like the artwork so it isn't cropped.
+  onPlace: (asset: Asset, placement?: ImageOverlayPlacement) => void;
   onImportingChange?: (isImporting: boolean) => void;
   onClose: () => void;
 }) {
@@ -73,9 +104,13 @@ export function PropsDialog({
     setError(null);
     onImportingChange?.(true);
     importLibraryAssetToProject(prop.id, projectId)
-      .then((asset) => {
+      .then(async (asset) => {
+        const imageAspect = (await loadImageAspectRatio(asset.url)) ?? (await loadImageAspectRatio(prop.thumbnailUrl ?? ""));
         onImported(asset);
-        onPlace(asset);
+        onPlace(
+          asset,
+          imageAspect ? { rect: propRect(imageAspect, frameAspectRatio ?? 9 / 16), lockAspect: true } : undefined
+        );
         onClose();
       })
       .catch((err) => {
