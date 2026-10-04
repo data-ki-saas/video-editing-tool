@@ -35,6 +35,8 @@ import { LibraryAssetDialog } from "./LibraryAssetDialog";
 import { UserActions } from "./UserActions";
 import { NewReelWizard } from "@/components/wizard/NewReelWizard";
 import { TextOverlayDialog } from "./TextOverlayDialog";
+import { LabelDialog } from "./LabelDialog";
+import { describeLabelText, isLabelTemplateId } from "@/lib/video/labelTemplates";
 import { TtsOverlayDialog } from "./TtsOverlayDialog";
 import { AvatarFramingDialog, type AvatarDirectedLayers } from "./AvatarFramingDialog";
 import { getAvatarLibraryEntry } from "@/lib/video/avatar/library";
@@ -129,7 +131,10 @@ function ActiveTransformationsList({
     );
   }
   for (const overlay of selections.textOverlays) {
-    rows.push(`Text "${overlay.text}" ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
+    const description = isLabelTemplateId(overlay.templateId)
+      ? `Label "${describeLabelText(overlay.text)}"`
+      : `Text "${overlay.text}"`;
+    rows.push(`${description} ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`);
   }
   for (const overlay of selections.videoOverlays) {
     rows.push(
@@ -258,7 +263,9 @@ export function ActionArea({
   onOpenTextDialog,
   isTextDialogOpen,
   editingTextOverlay,
+  editingTextOverlayIndex,
   onSaveTextOverlay,
+  onSaveLabel,
   onRequestEditTextOverlay,
   onDeleteTextOverlay,
   onCloseTextDialog,
@@ -416,8 +423,13 @@ export function ActionArea({
   onCloseTransitionDialog: () => void;
   onOpenTextDialog: () => void;
   isTextDialogOpen: boolean;
+  // The "Label" button opens LabelDialog (a new label when this is null, or
+  // the label being edited); only a legacy free-text caption (a non-`label:`
+  // template, e.g. one from the new-reel wizard) still opens TextOverlayDialog.
   editingTextOverlay: TextOverlay | null;
+  editingTextOverlayIndex: number | null;
   onSaveTextOverlay: (text: string, templateId: string, rect: CropRect) => void;
+  onSaveLabel: (text: string, templateId: string, rect: CropRect, startTimeSeconds: number, endTimeSeconds: number) => void;
   // TextOverlayDialog's own "Already on this reel" list -- re-points the
   // still-open dialog at a different existing caption (same handler
   // TextOverlayTrack's "Edit text" already uses).
@@ -643,7 +655,7 @@ export function ActionArea({
           onOpenImageOverlayPicker={onOpenImageOverlayPicker}
           imageOverlayCount={overlayImages.length}
           onOpenTextDialog={onOpenTextDialog}
-          textOverlayCount={textOverlays.length}
+          textOverlayCount={textOverlays.filter((overlay) => isLabelTemplateId(overlay.templateId)).length}
           onOpenTtsDialog={onOpenTtsDialog}
           ttsOverlayCount={ttsOverlays.length}
           onOpenAvatarDialog={onOpenAvatarDialog}
@@ -757,7 +769,30 @@ export function ActionArea({
         />
       )}
 
-      {isTextDialogOpen && (
+      {isTextDialogOpen && (!editingTextOverlay || isLabelTemplateId(editingTextOverlay.templateId)) && (
+        <LabelDialog
+          editingOverlay={editingTextOverlay}
+          editingIndex={editingTextOverlayIndex}
+          textOverlays={selections.textOverlays}
+          previewFrameUrl={previewFrameUrl}
+          frameAspectRatio={frameAspectRatio}
+          cropRect={overlayPreviewCropRect}
+          currentTimeSeconds={currentTimeSeconds}
+          videoDurationSeconds={videoDurationSeconds}
+          onSave={onSaveLabel}
+          onDelete={
+            editingTextOverlayIndex !== null
+              ? () => {
+                  onDeleteTextOverlay(editingTextOverlayIndex);
+                  onCloseTextDialog();
+                }
+              : undefined
+          }
+          onClose={onCloseTextDialog}
+        />
+      )}
+
+      {isTextDialogOpen && editingTextOverlay && !isLabelTemplateId(editingTextOverlay.templateId) && (
         <TextOverlayDialog
           editingOverlay={editingTextOverlay}
           textOverlays={selections.textOverlays}

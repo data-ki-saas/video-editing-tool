@@ -22,11 +22,17 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-10-04",
+    title: "Labels: pills, capsules and price tags",
+    description:
+      "The Text button is now Label. Pick a pill, capsule or rectangle — including two-tone ones like a price on blue beside a name on white, or a title stacked over a description — and type straight into it; it resizes to fit your words. Choose how long it shows on the time bar, and slide labels along their own timeline row to move them.",
+    isLatest: true,
+  },
+  {
     date: "2026-10-03",
     title: "Karaoke captions on a single line",
     description:
       "Karaoke captions now show one clean line of words around the one being spoken instead of a wrapped block, and a new Text size slider in the narration dialog lets you make them bigger or smaller.",
-    isLatest: true,
   },
   {
     date: "2026-10-03",

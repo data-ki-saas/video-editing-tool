@@ -63,10 +63,14 @@ import { CLIP_RECT_OPTIONS, ClipRectIcon } from "./ClipRectIcon";
 import { NEW_CUTAWAY_DRAG_TYPE } from "./CutawayTrack";
 import { HelpTip } from "./HelpTip";
 
-function TextGlyphIcon({ className }: { className?: string }) {
+// A capsule split into two colour blocks (one filled, one outlined) -- the
+// "Label" button's identity, echoing the two-tone price/name labels it adds.
+function LabelGlyphIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className={className}>
-      <path d="M5 6h14M12 6v13" />
+      <rect x="2.5" y="7.5" width="19" height="9" rx="4.5" />
+      <path d="M10 7.5v9" />
+      <path d="M4.5 12h3" />
     </svg>
   );
 }
@@ -380,7 +384,7 @@ export function UserActions({
         </button>
       </div>
 
-      {/* OVERLAYS -- amber family, lightest to darkest: Video Overlay, Image Overlay, Text, TTS, Avatar */}
+      {/* OVERLAYS -- amber family, lightest to darkest: Video Overlay, Image Overlay, Label, TTS, Avatar */}
       <div className="relative flex h-full gap-3">
         <GroupLabel
           colorClassName="text-amber-600 dark:text-amber-400"
@@ -391,7 +395,7 @@ export function UserActions({
               <>
                 <p>
                   Overlays sit on top of your main video for a stretch of time without changing its length &mdash; a
-                  second video or photo, captions, a voiceover, or an animated character.
+                  second video or photo, price/name labels, a voiceover, or an animated character.
                 </p>
                 <p>
                   After adding one, drag it on the timeline below to move it, or drag its edges to change how long it
@@ -430,12 +434,12 @@ export function UserActions({
         <button
           type="button"
           onClick={onOpenTextDialog}
-          title="Add text"
+          title="Add a label -- a pill, capsule or tag (e.g. a price and a name) with your own text, shown for as long as you choose"
           className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-600 dark:text-amber-500 hover:bg-background"
         >
-          <TextGlyphIcon className="h-4 w-4" />
+          <LabelGlyphIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-            Text
+            Label
           </span>
           <CountBadge count={textOverlayCount} />
         </button>

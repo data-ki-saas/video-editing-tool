@@ -14,6 +14,7 @@
 import { useRef } from "react";
 import { ContextMenu, useContextMenu } from "./ContextMenu";
 import type { TextOverlay } from "@/lib/video/video_math";
+import { isLabelTemplateId } from "@/lib/video/labelTemplates";
 
 const MIN_DURATION_SECONDS = 0.2;
 
@@ -122,11 +123,15 @@ export function TextOverlayTrack({
   onEdit: (overlayIndex: number) => void;
   onDelete: (overlayIndex: number) => void;
 }) {
-  if (textOverlays.length === 0) return null;
+  // Labels (labelTemplates.ts) have their own single shared row -- see
+  // LabelTrack.tsx -- so they're skipped here; `index` still counts them, so
+  // every callback keeps addressing the full textOverlays array.
+  if (!textOverlays.some((overlay) => !isLabelTemplateId(overlay.templateId))) return null;
 
   return (
     <div className="flex flex-col gap-0.5">
-      {textOverlays.map((overlay, index) => (
+      {textOverlays.map((overlay, index) =>
+        isLabelTemplateId(overlay.templateId) ? null : (
         <TextOverlaySegment
           key={index}
           overlay={overlay}
@@ -136,7 +141,8 @@ export function TextOverlayTrack({
           onEdit={() => onEdit(index)}
           onDelete={() => onDelete(index)}
         />
-      ))}
+        )
+      )}
     </div>
   );
 }

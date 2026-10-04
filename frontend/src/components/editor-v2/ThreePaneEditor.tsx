@@ -102,6 +102,8 @@ import {
   applyTrimCutawayHead,
   applyTrimCutawayTail,
   applyAddTextOverlay,
+  applyAddLabelOverlay,
+  applyEditLabelOverlay,
   applyEditTextOverlay,
   applyTextOverlayRectCommit,
   applyTextOverlayRangeChange,
@@ -2443,7 +2445,9 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
-  // "Text" button in UserActions -- opens the dialog fresh (no pre-fill).
+  // "Label" button in UserActions (formerly "Text") -- opens LabelDialog fresh
+  // (no pre-fill). Editing an existing legacy caption still reaches
+  // TextOverlayDialog via handleRequestEditTextOverlay below.
   function handleOpenTextDialog() {
     setEditingTextOverlayIndex(null);
     setIsTextDialogOpen(true);
@@ -2470,6 +2474,18 @@ export function ThreePaneEditor({
       editingTextOverlayIndex !== null
         ? applyEditTextOverlay(selections, editingTextOverlayIndex, text, templateId, rect)
         : applyAddTextOverlay(selections, text, templateId, currentTimeSeconds, videoDurationSeconds, rect);
+    pushChange(label, state);
+    setIsTextDialogOpen(false);
+    setEditingTextOverlayIndex(null);
+  }
+
+  // LabelDialog's Add/Save -- same add-vs-edit dispatch as handleSaveTextOverlay,
+  // but the time range also comes from the dialog (its bottom time bar).
+  function handleSaveLabel(text: string, templateId: string, rect: CropRect, startTimeSeconds: number, endTimeSeconds: number) {
+    const { label, state } =
+      editingTextOverlayIndex !== null
+        ? applyEditLabelOverlay(selections, editingTextOverlayIndex, text, templateId, rect, startTimeSeconds, endTimeSeconds)
+        : applyAddLabelOverlay(selections, text, templateId, startTimeSeconds, endTimeSeconds, rect);
     pushChange(label, state);
     setIsTextDialogOpen(false);
     setEditingTextOverlayIndex(null);
@@ -3174,7 +3190,9 @@ export function ThreePaneEditor({
           onOpenTextDialog={handleOpenTextDialog}
           isTextDialogOpen={isTextDialogOpen}
           editingTextOverlay={editingTextOverlayIndex !== null ? displayedTextOverlays[editingTextOverlayIndex] : null}
+          editingTextOverlayIndex={editingTextOverlayIndex}
           onSaveTextOverlay={handleSaveTextOverlay}
+          onSaveLabel={handleSaveLabel}
           onRequestEditTextOverlay={handleRequestEditTextOverlay}
           onDeleteTextOverlay={handleDeleteTextOverlay}
           onCloseTextDialog={handleCloseTextDialog}

@@ -19,6 +19,7 @@
  * wrapping/auto-shrink the export uses, not a preview-only fix.
  */
 import { easeInOut, type TtsWordTiming } from "./video_math";
+import { drawLabel, getLabelSpec } from "./labelTemplates";
 
 export type TextTemplateId =
   | "bold-pop"
@@ -453,6 +454,11 @@ export const TEXT_TEMPLATE_RENDERERS: Record<TextTemplateId, TextTemplateRendere
  * TextTemplateId` at every call site; returns undefined for an unknown id,
  * which every caller already treats as "skip this overlay." */
 export function getTextTemplateRenderer(templateId: string): TextTemplateRenderer | undefined {
+  // "Label" overlays (labelTemplates.ts) are TextOverlays with a `label:`
+  // templateId -- delegated here so every existing call site (CanvasPlayer,
+  // exportTimeline, TextOverlayCanvas) draws them with no changes of its own.
+  const labelSpec = getLabelSpec(templateId);
+  if (labelSpec) return ({ ctx, text, rectPx, progress }) => drawLabel(labelSpec, ctx, text, rectPx, progress);
   return (TEXT_TEMPLATE_RENDERERS as Record<string, TextTemplateRenderer>)[templateId];
 }
 

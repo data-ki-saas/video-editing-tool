@@ -108,6 +108,7 @@ import { ZoomEffectsTrack } from "./ZoomEffectsTrack";
 import { FlipTrack } from "./FlipTrack";
 import { TrimTrack } from "./TrimTrack";
 import { TextOverlayTrack } from "./TextOverlayTrack";
+import { LabelTrack } from "./LabelTrack";
 import { TtsOverlayTrack } from "./TtsOverlayTrack";
 import { AvatarOverlayTrack } from "./AvatarOverlayTrack";
 import { VideoOverlayTrack } from "./VideoOverlayTrack";
@@ -1263,6 +1264,17 @@ export function FrameStrip({
         />
 
         <TextOverlayTrack
+          textOverlays={textOverlays}
+          videoDurationSeconds={durationSeconds}
+          onChangeRange={onChangeTextOverlayRange}
+          onCommitRange={onCommitTextOverlayRange}
+          onEdit={onRequestEditTextOverlay}
+          onDelete={onDeleteTextOverlay}
+        />
+
+        {/* Labels share one row (they never overlap) and can be dragged
+            along it -- see LabelTrack.tsx. */}
+        <LabelTrack
           textOverlays={textOverlays}
           videoDurationSeconds={durationSeconds}
           onChangeRange={onChangeTextOverlayRange}

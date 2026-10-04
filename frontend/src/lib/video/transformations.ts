@@ -1583,6 +1583,43 @@ export function applyDeleteTextOverlay(
   };
 }
 
+/** Adds a Label (labelTemplates.ts) -- stored as a TextOverlay with a
+ * `label:` templateId, so it needs no field of its own. Unlike
+ * applyAddTextOverlay, the time range comes from LabelDialog's own time bar
+ * (already clamped to a free gap on the single Label row). */
+export function applyAddLabelOverlay(
+  selections: EditSelectionsSnapshot,
+  text: string,
+  templateId: string,
+  startTimeSeconds: number,
+  endTimeSeconds: number,
+  rect: CropRect
+): TransformationResult {
+  const newOverlay: TextOverlay = { text, templateId, startTimeSeconds, endTimeSeconds, rect };
+  return {
+    label: "Added label",
+    state: { ...selections, textOverlays: [...selections.textOverlays, newOverlay] },
+  };
+}
+
+/** Changes an existing label's text/style/position/time range -- from
+ * LabelDialog's "Save". */
+export function applyEditLabelOverlay(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  text: string,
+  templateId: string,
+  rect: CropRect,
+  startTimeSeconds: number,
+  endTimeSeconds: number
+): TransformationResult {
+  const overlay = selections.textOverlays[overlayIndex];
+  if (!overlay) return { label: "Edited label", state: selections };
+  const nextOverlays = [...selections.textOverlays];
+  nextOverlays[overlayIndex] = { ...overlay, text, templateId, rect, startTimeSeconds, endTimeSeconds };
+  return { label: "Edited label", state: { ...selections, textOverlays: nextOverlays } };
+}
+
 /** Adds a new TTS narration overlay -- from TtsOverlayDialog's "Add". Unlike
  * applyAddTextOverlay, the whole overlay (including its own generated
  * assetId/durationSeconds/wordTimings and its authored startTimeSeconds) is
