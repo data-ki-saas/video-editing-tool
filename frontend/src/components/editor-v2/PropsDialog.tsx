@@ -70,6 +70,12 @@ async function measurePropArtwork(url: string): Promise<PropArtwork | null> {
       }
     }
     if (maxX < 0) return null;
+    // One scan pixel of margin each side: the downscaled scan can round the
+    // bounds in by up to that much, which would shave the artwork's edge.
+    minX = Math.max(0, minX - 1);
+    minY = Math.max(0, minY - 1);
+    maxX = Math.min(scanWidth - 1, maxX + 1);
+    maxY = Math.min(scanHeight - 1, maxY + 1);
     // Back to source pixels.
     const bx = (minX / scanWidth) * width;
     const by = (minY / scanHeight) * height;

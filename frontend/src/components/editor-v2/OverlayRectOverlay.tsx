@@ -32,6 +32,7 @@ export function OverlayRectOverlay({
   borderColorClassName = "border-cyan-400",
   handleColorClassName = "bg-cyan-400",
   bottomOverhangFraction = 0,
+  lockAspect = false,
 }: {
   rect: CropRect;
   imageUrl?: string;
@@ -69,6 +70,9 @@ export function OverlayRectOverlay({
    * short of the rig's bottom), so the VISIBLE content can still touch the
    * bottom of the video. 0 (the default) keeps the rect inside the frame. */
   bottomOverhangFraction?: number;
+  /** Resizing keeps the rect's current shape (a prop sized to its artwork,
+   * where a free corner drag would re-crop it). */
+  lockAspect?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isInteractive = Boolean(onChange && onCommit);
@@ -98,6 +102,14 @@ export function OverlayRectOverlay({
           x: Math.min(Math.max(startRect.x + dxFraction, 0), 1 - startRect.width),
           y: Math.min(Math.max(startRect.y + dyFraction, 0), 1 - startRect.height * (1 - bottomOverhangFraction)),
         };
+      }
+
+      if (lockAspect) {
+        const heightPerWidth = startRect.height / startRect.width;
+        const minWidth = Math.max(MIN_SIZE_FRACTION, MIN_SIZE_FRACTION / heightPerWidth);
+        const maxWidth = Math.min(1 - startRect.x, (1 - startRect.y) / heightPerWidth);
+        const lockedWidth = Math.min(Math.max(startRect.width + dxFraction, minWidth), Math.max(maxWidth, minWidth));
+        return { ...startRect, width: lockedWidth, height: lockedWidth * heightPerWidth };
       }
 
       const width = Math.min(Math.max(startRect.width + dxFraction, MIN_SIZE_FRACTION), 1 - startRect.x);
