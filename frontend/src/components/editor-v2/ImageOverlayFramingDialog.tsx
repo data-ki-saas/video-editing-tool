@@ -603,7 +603,7 @@ export function ImageOverlayFramingDialog({
                     // eslint-disable-next-line @next/next/no-img-element -- a short-lived thumbnail data URL, not a Next-optimizable static asset
                     <img src={baseFrameUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover" />
                   )}
-                  <PipFrame rect={pipRect} onChange={setPipRect} lockAspect={overlay.lockAspect} allowOffscreen={overlay.lockAspect} borderColorClassName={overlayBorderColorClassName}>
+                  <PipFrame rect={pipRect} onChange={setPipRect} lockAspect={overlay.lockAspect} allowOffscreen borderColorClassName={overlayBorderColorClassName}>
                     <CoverFramingRegion
                       styleRect={{ left: 0, top: 0, width: "100%", height: "100%" }}
                       frameUrl={effectiveOverlayFrameUrl}

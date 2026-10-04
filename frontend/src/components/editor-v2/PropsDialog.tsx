@@ -100,6 +100,17 @@ async function measurePropArtwork(url: string): Promise<PropArtwork | null> {
   }
 }
 
+/** Fallback when the pixel scan can't read the file (e.g. a cross-origin
+ * fetch is blocked): an <img> can still load it and report its shape. */
+function loadImageAspectRatio(url: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : null);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
 /** A box matching the artwork's own shape (so the overlay's cover-fit never
  * crops it), centered, in the frame's normalized coordinates. */
 function propRect(imageAspect: number, frameAspect: number): ImageOverlayPlacement["rect"] {
@@ -171,10 +182,16 @@ export function PropsDialog({
     importLibraryAssetToProject(prop.id, projectId)
       .then(async (asset) => {
         const artwork = (await measurePropArtwork(asset.url)) ?? (prop.thumbnailUrl ? await measurePropArtwork(prop.thumbnailUrl) : null);
+        const frameAspect = frameAspectRatio ?? 9 / 16;
+        const fallbackAspect = artwork ? null : ((await loadImageAspectRatio(asset.url)) ?? (await loadImageAspectRatio(prop.thumbnailUrl ?? "")));
         onImported(asset);
         onPlace(
           asset,
-          artwork ? { rect: propRect(artwork.aspect, frameAspectRatio ?? 9 / 16), framing: artwork.framing, lockAspect: true } : undefined
+          artwork
+            ? { rect: propRect(artwork.aspect, frameAspect), framing: artwork.framing, lockAspect: true }
+            : fallbackAspect
+              ? { rect: propRect(fallbackAspect, frameAspect), lockAspect: true }
+              : undefined
         );
         onClose();
       })
