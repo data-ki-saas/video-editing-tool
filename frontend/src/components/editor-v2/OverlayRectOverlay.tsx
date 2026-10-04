@@ -31,6 +31,7 @@ export function OverlayRectOverlay({
   onCommit,
   borderColorClassName = "border-cyan-400",
   handleColorClassName = "bg-cyan-400",
+  bottomOverhangFraction = 0,
 }: {
   rect: CropRect;
   imageUrl?: string;
@@ -63,9 +64,17 @@ export function OverlayRectOverlay({
    * violet instead. */
   borderColorClassName?: string;
   handleColorClassName?: string;
+  /** Share of the rect's own height that may hang past the frame's bottom
+   * edge -- for content that doesn't fill its rect (an avatar's feet stop
+   * short of the rig's bottom), so the VISIBLE content can still touch the
+   * bottom of the video. 0 (the default) keeps the rect inside the frame. */
+  bottomOverhangFraction?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isInteractive = Boolean(onChange && onCommit);
+  // How far the rect currently hangs below the frame, as a share of its own
+  // height -- the resize handle is lifted by that much so it stays grabbable.
+  const hangingBelowPercent = Math.max(0, ((rect.y + rect.height - 1) / rect.height) * 100);
 
   function startDrag(e: React.PointerEvent, mode: "move" | "resize") {
     if (!isInteractive) return;
@@ -87,12 +96,15 @@ export function OverlayRectOverlay({
         return {
           ...startRect,
           x: Math.min(Math.max(startRect.x + dxFraction, 0), 1 - startRect.width),
-          y: Math.min(Math.max(startRect.y + dyFraction, 0), 1 - startRect.height),
+          y: Math.min(Math.max(startRect.y + dyFraction, 0), 1 - startRect.height * (1 - bottomOverhangFraction)),
         };
       }
 
       const width = Math.min(Math.max(startRect.width + dxFraction, MIN_SIZE_FRACTION), 1 - startRect.x);
-      const height = Math.min(Math.max(startRect.height + dyFraction, MIN_SIZE_FRACTION), 1 - startRect.y);
+      const height = Math.min(
+        Math.max(startRect.height + dyFraction, MIN_SIZE_FRACTION),
+        (1 - startRect.y) / (1 - bottomOverhangFraction)
+      );
       return { ...startRect, width, height };
     }
 
@@ -159,7 +171,8 @@ export function OverlayRectOverlay({
           <div
             onPointerDown={(e) => startDrag(e, "resize")}
             onClick={stopClickBubble}
-            className={`pointer-events-auto absolute -bottom-1.5 -right-1.5 z-10 h-3 w-3 cursor-nwse-resize rounded-full border border-white ${handleColorClassName}`}
+            style={hangingBelowPercent > 0 ? { bottom: `${hangingBelowPercent}%` } : undefined}
+            className={`pointer-events-auto absolute ${hangingBelowPercent > 0 ? "bottom-0" : "-bottom-1.5"} -right-1.5 z-10 h-3 w-3 cursor-nwse-resize rounded-full border border-white ${handleColorClassName}`}
           />
         )}
       </div>

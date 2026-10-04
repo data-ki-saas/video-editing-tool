@@ -517,6 +517,8 @@ const DEFAULT_OVERLAY_RECT: CropRect = { x: 0.3, y: 0.3, width: 0.4, height: 0.4
  * the artwork's own shape (so cover-fit never crops it) plus lockAspect. */
 export interface ImageOverlayPlacement {
   rect: CropRect;
+  // Crops the overlay to the artwork's visible part (props are often padded).
+  framing?: OverlayFraming;
   lockAspect?: boolean;
 }
 
@@ -546,7 +548,7 @@ export function applyAddImageOverlay(
     startTimeSeconds,
     endTimeSeconds,
     layout: { type: "picture-in-picture", rect: placement?.rect ?? DEFAULT_OVERLAY_RECT },
-    framing: DEFAULT_OVERLAY_FRAMING,
+    framing: placement?.framing ?? DEFAULT_OVERLAY_FRAMING,
     ...(placement?.lockAspect ? { lockAspect: true } : {}),
   };
   return {

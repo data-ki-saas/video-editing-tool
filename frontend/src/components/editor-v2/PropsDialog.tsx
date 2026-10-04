@@ -21,18 +21,77 @@
 import { useEffect, useState } from "react";
 import { importLibraryAssetToProject, listLibraryAssets, type Asset, type LibraryAssetSummary } from "@/lib/api";
 import type { ImageOverlayPlacement } from "@/lib/video/transformations";
+import { DEFAULT_OVERLAY_FRAMING, type OverlayFraming } from "@/lib/video/video_math";
 
 // A freshly-placed prop takes up to this share of the frame's width/height,
 // whichever its own shape hits first.
 const PROP_MAX_FRACTION = 0.5;
 
-function loadImageAspectRatio(url: string): Promise<number | null> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve(img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : null);
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
+const ALPHA_VISIBLE_THRESHOLD = 16;
+const ALPHA_SCAN_MAX_EDGE = 256;
+
+interface PropArtwork {
+  // Aspect ratio (width/height) of the visible artwork alone.
+  aspect: number;
+  // Pan/zoom that crops the overlay's cover-fit to just that artwork.
+  framing: OverlayFraming;
+}
+
+/** The artwork's visible (non-transparent) bounds. Library props are often
+ * padded with empty margin, which would otherwise leave dead space the box
+ * can't shed -- e.g. a car that can never be dragged down to touch the
+ * frame's bottom edge. Returns null when the file can't be read. */
+async function measurePropArtwork(url: string): Promise<PropArtwork | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const bitmap = await createImageBitmap(await response.blob());
+    const { width, height } = bitmap;
+    if (width <= 0 || height <= 0) return null;
+    const scale = Math.min(1, ALPHA_SCAN_MAX_EDGE / Math.max(width, height));
+    const scanWidth = Math.max(1, Math.round(width * scale));
+    const scanHeight = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = scanWidth;
+    canvas.height = scanHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(bitmap, 0, 0, scanWidth, scanHeight);
+    const { data } = ctx.getImageData(0, 0, scanWidth, scanHeight);
+    let minX = scanWidth, minY = scanHeight, maxX = -1, maxY = -1;
+    for (let y = 0; y < scanHeight; y++) {
+      for (let x = 0; x < scanWidth; x++) {
+        if (data[(y * scanWidth + x) * 4 + 3] > ALPHA_VISIBLE_THRESHOLD) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX < 0) return null;
+    // Back to source pixels.
+    const bx = (minX / scanWidth) * width;
+    const by = (minY / scanHeight) * height;
+    const bw = ((maxX + 1 - minX) / scanWidth) * width;
+    const bh = ((maxY + 1 - minY) / scanHeight) * height;
+    const aspect = bw / bh;
+    // Same cover-fit math as computeCoverFitSourceRect, solved for the window
+    // that is exactly the artwork's bounds.
+    const sourceAspect = width / height;
+    const coverWidth = sourceAspect > aspect ? height * aspect : width;
+    return {
+      aspect,
+      framing: {
+        ...DEFAULT_OVERLAY_FRAMING,
+        zoom: coverWidth / bw,
+        panX: width - bw > 0.5 ? bx / (width - bw) : 0.5,
+        panY: height - bh > 0.5 ? by / (height - bh) : 0.5,
+      },
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** A box matching the artwork's own shape (so the overlay's cover-fit never
@@ -105,11 +164,11 @@ export function PropsDialog({
     onImportingChange?.(true);
     importLibraryAssetToProject(prop.id, projectId)
       .then(async (asset) => {
-        const imageAspect = (await loadImageAspectRatio(asset.url)) ?? (await loadImageAspectRatio(prop.thumbnailUrl ?? ""));
+        const artwork = (await measurePropArtwork(asset.url)) ?? (prop.thumbnailUrl ? await measurePropArtwork(prop.thumbnailUrl) : null);
         onImported(asset);
         onPlace(
           asset,
-          imageAspect ? { rect: propRect(imageAspect, frameAspectRatio ?? 9 / 16), lockAspect: true } : undefined
+          artwork ? { rect: propRect(artwork.aspect, frameAspectRatio ?? 9 / 16), framing: artwork.framing, lockAspect: true } : undefined
         );
         onClose();
       })

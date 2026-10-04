@@ -310,6 +310,30 @@ function AvatarPreviewCanvas({
   return <canvas ref={canvasRef} className={className} />;
 }
 
+/** Share of a rect's height left empty BELOW the drawn avatar (the rig has
+ * padding under the feet, and the portrait framing under the hands) -- found
+ * by drawing the idle pose offscreen and scanning for its lowest opaque row.
+ * Lets the rect hang past the frame's bottom so the character itself can
+ * touch the bottom of the video. */
+async function measureAvatarBottomSlack(avatarId: string, designOverrides: AvatarDesignOverrides, framing: "full" | "bust"): Promise<number> {
+  const compiled = await getCompiledAvatarForClip(avatarId, designOverrides);
+  const height = 400;
+  const canvas = document.createElement("canvas");
+  canvas.width = 200;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return 0;
+  const pose = computeAvatarPose(compiled.topology, "idle", 0, 0, compiled.design.expressionBias, compiled.accessories);
+  drawAvatar(ctx, compiled, pose, { x: 0, y: 0, width: canvas.width, height }, computeMouthShapeId("idle", 0), framing);
+  const { data } = ctx.getImageData(0, 0, canvas.width, height);
+  for (let y = height - 1; y >= 0; y--) {
+    for (let x = 0; x < canvas.width; x++) {
+      if (data[(y * canvas.width + x) * 4 + 3] > 24) return Math.min(0.5, (height - 1 - y) / height);
+    }
+  }
+  return 0;
+}
+
 /** What "Direct with AI" now produces -- the original posture-only
  * actionTimeline plus the layered-motion redesign's gesture/gaze/mood
  * timelines (each may be empty, e.g. an avatar whose topology declares no
@@ -399,6 +423,23 @@ export function AvatarFramingDialog({
   // an explicit tie to one of `ttsOverlays` by its own id. See
   // AvatarOverlayClip.ttsOverlayId's own doc comment (video_math.ts).
   const [ttsOverlayId, setTtsOverlayId] = useState<string | null | undefined>(editingOverlay?.ttsOverlayId);
+
+  // How much of the rect's height may hang below the frame (see
+  // measureAvatarBottomSlack). Re-measured when the character, its
+  // customization or its framing changes; 0 until the first measurement.
+  const [bottomOverhang, setBottomOverhang] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    if (!avatarId) return;
+    measureAvatarBottomSlack(avatarId, pendingOverrides, framing)
+      .then((slack) => {
+        if (!cancelled) setBottomOverhang(slack);
+      })
+      .catch((err) => console.error("Avatar bounds measurement failed for avatarId=%s", avatarId, err));
+    return () => {
+      cancelled = true;
+    };
+  }, [avatarId, pendingOverrides, framing]);
 
   // Re-syncs if a different overlay is opened for editing (or the dialog is
   // reopened fresh for "Add") while already mounted -- same convention as
@@ -821,6 +862,7 @@ export function AvatarFramingDialog({
                 onCommit={setRect}
                 borderColorClassName="border-teal-400"
                 handleColorClassName="bg-teal-400"
+                bottomOverhangFraction={bottomOverhang}
                 renderInner={
                   <AvatarPreviewCanvas
                     avatarId={avatarId}

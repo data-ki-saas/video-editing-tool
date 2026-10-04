@@ -658,7 +658,7 @@ export function ImageOverlayFramingDialog({
               <input
                 type="range"
                 min={isPictureInPicture ? MIN_PICTURE_IN_PICTURE_ZOOM : 1}
-                max={3}
+                max={overlay.lockAspect ? 8 : 3} // a prop is auto-zoomed onto its artwork, which can exceed 3x
                 step={0.05}
                 value={activeFraming.zoom}
                 onChange={(e) => setActiveFraming({ ...activeFraming, zoom: Number(e.target.value) })}
