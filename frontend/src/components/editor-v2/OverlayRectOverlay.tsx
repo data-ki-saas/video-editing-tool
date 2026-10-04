@@ -20,6 +20,10 @@ import { useRef, type ReactNode } from "react";
 import type { CropRect, OverlayFraming } from "@/lib/video/video_math";
 
 const MIN_SIZE_FRACTION = 0.05;
+// With allowOffscreen: how much of the rect must stay inside the frame, and
+// the largest it may grow to (as a multiple of the frame's width/height).
+const MIN_VISIBLE_FRACTION = 0.25;
+const MAX_OFFSCREEN_SIZE_FRACTION = 2;
 
 export function OverlayRectOverlay({
   rect,
@@ -33,6 +37,7 @@ export function OverlayRectOverlay({
   handleColorClassName = "bg-cyan-400",
   bottomOverhangFraction = 0,
   lockAspect = false,
+  allowOffscreen = false,
 }: {
   rect: CropRect;
   imageUrl?: string;
@@ -73,12 +78,19 @@ export function OverlayRectOverlay({
   /** Resizing keeps the rect's current shape (a prop sized to its artwork,
    * where a free corner drag would re-crop it). */
   lockAspect?: boolean;
+  /** The rect may be dragged partly past any frame edge (a prop whose
+   * artwork has transparent padding or a soft shadow can then still sit
+   * flush with the edge). A sliver (MIN_VISIBLE_FRACTION of the rect) always
+   * stays inside so it can be grabbed again. */
+  allowOffscreen?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isInteractive = Boolean(onChange && onCommit);
-  // How far the rect currently hangs below the frame, as a share of its own
-  // height -- the resize handle is lifted by that much so it stays grabbable.
+  // How far the rect currently hangs below/right of the frame, as a share of
+  // its own size -- the resize handle is lifted by that much so it stays
+  // grabbable.
   const hangingBelowPercent = Math.max(0, ((rect.y + rect.height - 1) / rect.height) * 100);
+  const hangingRightPercent = allowOffscreen ? Math.max(0, ((rect.x + rect.width - 1) / rect.width) * 100) : 0;
 
   function startDrag(e: React.PointerEvent, mode: "move" | "resize") {
     if (!isInteractive) return;
@@ -96,6 +108,14 @@ export function OverlayRectOverlay({
       const dxFraction = (clientX - startX) / containerRect.width;
       const dyFraction = (clientY - startY) / containerRect.height;
 
+      if (mode === "move" && allowOffscreen) {
+        return {
+          ...startRect,
+          x: Math.min(Math.max(startRect.x + dxFraction, -startRect.width * (1 - MIN_VISIBLE_FRACTION)), 1 - startRect.width * MIN_VISIBLE_FRACTION),
+          y: Math.min(Math.max(startRect.y + dyFraction, -startRect.height * (1 - MIN_VISIBLE_FRACTION)), 1 - startRect.height * MIN_VISIBLE_FRACTION),
+        };
+      }
+
       if (mode === "move") {
         return {
           ...startRect,
@@ -107,7 +127,9 @@ export function OverlayRectOverlay({
       if (lockAspect) {
         const heightPerWidth = startRect.height / startRect.width;
         const minWidth = Math.max(MIN_SIZE_FRACTION, MIN_SIZE_FRACTION / heightPerWidth);
-        const maxWidth = Math.min(1 - startRect.x, (1 - startRect.y) / heightPerWidth);
+        const maxWidth = allowOffscreen
+          ? Math.min(MAX_OFFSCREEN_SIZE_FRACTION, MAX_OFFSCREEN_SIZE_FRACTION / heightPerWidth)
+          : Math.min(1 - startRect.x, (1 - startRect.y) / heightPerWidth);
         const lockedWidth = Math.min(Math.max(startRect.width + dxFraction, minWidth), Math.max(maxWidth, minWidth));
         return { ...startRect, width: lockedWidth, height: lockedWidth * heightPerWidth };
       }
@@ -183,8 +205,11 @@ export function OverlayRectOverlay({
           <div
             onPointerDown={(e) => startDrag(e, "resize")}
             onClick={stopClickBubble}
-            style={hangingBelowPercent > 0 ? { bottom: `${hangingBelowPercent}%` } : undefined}
-            className={`pointer-events-auto absolute ${hangingBelowPercent > 0 ? "bottom-0" : "-bottom-1.5"} -right-1.5 z-10 h-3 w-3 cursor-nwse-resize rounded-full border border-white ${handleColorClassName}`}
+            style={{
+              ...(hangingBelowPercent > 0 ? { bottom: `${hangingBelowPercent}%` } : null),
+              ...(hangingRightPercent > 0 ? { right: `${hangingRightPercent}%` } : null),
+            }}
+            className={`pointer-events-auto absolute ${hangingBelowPercent > 0 ? "bottom-0" : "-bottom-1.5"} ${hangingRightPercent > 0 ? "right-0" : "-right-1.5"} z-10 h-3 w-3 cursor-nwse-resize rounded-full border border-white ${handleColorClassName}`}
           />
         )}
       </div>

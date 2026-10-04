@@ -222,6 +222,10 @@ function SplitScreenDivider({
 
 const PIP_MOVE_RIM_PX = 10;
 const PIP_MIN_SIZE_FRACTION = 0.08;
+// allowOffscreen (props): how much of the box must stay in frame, and its max
+// size as a multiple of the frame -- same values as OverlayRectOverlay.tsx.
+const PIP_MIN_VISIBLE_FRACTION = 0.25;
+const PIP_MAX_OFFSCREEN_SIZE_FRACTION = 2;
 
 /** The Picture-in-Picture box itself -- identical to
  * VideoOverlayFramingDialog.tsx's own PipFrame. */
@@ -229,16 +233,23 @@ function PipFrame({
   rect,
   onChange,
   lockAspect = false,
+  allowOffscreen = false,
   borderColorClassName,
   children,
 }: {
   rect: CropRect;
   onChange: (next: CropRect) => void;
   lockAspect?: boolean;
+  // The box may hang partly past any frame edge (see OverlayRectOverlay.tsx).
+  allowOffscreen?: boolean;
   borderColorClassName: string;
   children: ReactNode;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Lifts the resize handle back inside the frame when the box hangs past
+  // its bottom/right edge, so it stays grabbable.
+  const hangingBelowPercent = allowOffscreen ? Math.max(0, ((rect.y + rect.height - 1) / rect.height) * 100) : 0;
+  const hangingRightPercent = allowOffscreen ? Math.max(0, ((rect.x + rect.width - 1) / rect.width) * 100) : 0;
 
   function startDrag(e: React.PointerEvent, mode: "move" | "resize") {
     e.preventDefault();
@@ -254,6 +265,13 @@ function PipFrame({
       const dxFraction = (clientX - startX) / containerRect.width;
       const dyFraction = (clientY - startY) / containerRect.height;
       if (mode === "move") {
+        if (allowOffscreen) {
+          return {
+            ...startRect,
+            x: Math.min(Math.max(startRect.x + dxFraction, -startRect.width * (1 - PIP_MIN_VISIBLE_FRACTION)), 1 - startRect.width * PIP_MIN_VISIBLE_FRACTION),
+            y: Math.min(Math.max(startRect.y + dyFraction, -startRect.height * (1 - PIP_MIN_VISIBLE_FRACTION)), 1 - startRect.height * PIP_MIN_VISIBLE_FRACTION),
+          };
+        }
         return {
           ...startRect,
           x: Math.min(Math.max(startRect.x + dxFraction, 0), 1 - startRect.width),
@@ -265,7 +283,9 @@ function PipFrame({
         // the room left on both axes.
         const heightPerWidth = startRect.height / startRect.width;
         const minWidth = Math.max(PIP_MIN_SIZE_FRACTION, PIP_MIN_SIZE_FRACTION / heightPerWidth);
-        const maxWidth = Math.min(1 - startRect.x, (1 - startRect.y) / heightPerWidth);
+        const maxWidth = allowOffscreen
+          ? Math.min(PIP_MAX_OFFSCREEN_SIZE_FRACTION, PIP_MAX_OFFSCREEN_SIZE_FRACTION / heightPerWidth)
+          : Math.min(1 - startRect.x, (1 - startRect.y) / heightPerWidth);
         const width = Math.min(Math.max(startRect.width + dxFraction, minWidth), Math.max(maxWidth, minWidth));
         return { ...startRect, width, height: width * heightPerWidth };
       }
@@ -301,7 +321,11 @@ function PipFrame({
         <div
           onPointerDown={(e) => startDrag(e, "resize")}
           title="Drag to resize"
-          className="pointer-events-auto absolute -bottom-1.5 -right-1.5 z-10 h-3 w-3 cursor-nwse-resize rounded-full border border-white bg-fuchsia-400"
+          style={{
+            ...(hangingBelowPercent > 0 ? { bottom: `${hangingBelowPercent}%` } : null),
+            ...(hangingRightPercent > 0 ? { right: `${hangingRightPercent}%` } : null),
+          }}
+          className={`pointer-events-auto absolute ${hangingBelowPercent > 0 ? "bottom-0" : "-bottom-1.5"} ${hangingRightPercent > 0 ? "right-0" : "-right-1.5"} z-10 h-3 w-3 cursor-nwse-resize rounded-full border border-white bg-fuchsia-400`}
         />
       </div>
     </div>
@@ -579,7 +603,7 @@ export function ImageOverlayFramingDialog({
                     // eslint-disable-next-line @next/next/no-img-element -- a short-lived thumbnail data URL, not a Next-optimizable static asset
                     <img src={baseFrameUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover" />
                   )}
-                  <PipFrame rect={pipRect} onChange={setPipRect} lockAspect={overlay.lockAspect} borderColorClassName={overlayBorderColorClassName}>
+                  <PipFrame rect={pipRect} onChange={setPipRect} lockAspect={overlay.lockAspect} allowOffscreen={overlay.lockAspect} borderColorClassName={overlayBorderColorClassName}>
                     <CoverFramingRegion
                       styleRect={{ left: 0, top: 0, width: "100%", height: "100%" }}
                       frameUrl={effectiveOverlayFrameUrl}

@@ -464,6 +464,7 @@ const FrameTile = memo(function FrameTile({
             cssFilter={getFilterPresetOption(overlay.colorFilterId ?? null).cssFilter}
             framing={overlay.framing}
             lockAspect={overlay.lockAspect}
+            allowOffscreen={overlay.lockAspect}
             borderColorClassName="border-fuchsia-400"
             handleColorClassName="bg-fuchsia-400"
             onChange={onImageOverlayRectChange ? (next) => onImageOverlayRectChange(overlayIndex, next) : undefined}
