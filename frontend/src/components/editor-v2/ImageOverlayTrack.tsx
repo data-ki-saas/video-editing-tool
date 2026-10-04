@@ -146,6 +146,7 @@ function ImageOverlaySegment({
   }
 
   function startBodyDrag(e: React.PointerEvent) {
+    if (e.button !== 0) return; // a right-click must reach onContextMenu, not count as a click that opens the framing dialog
     e.preventDefault();
     const track = rootRef.current?.parentElement;
     if (!track || videoDurationSeconds <= 0) return;
@@ -221,10 +222,18 @@ function ImageOverlaySegment({
     <div
       ref={rootRef}
       onPointerDown={startBodyDrag}
-      onContextMenu={(e) =>
-        openContextMenu(e, [...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }])
-      }
-      title="Drag the middle to move, an edge to trim; right-click to change layout or remove"
+      onContextMenu={(e) => {
+        const edit: ContextMenuAction = { label: "Edit", onSelect: () => onOpenFraming(resolveClickedTimeSeconds(e.clientX)) };
+        // A prop is a cut-out placed in the scene: full-screen/split-screen
+        // layouts make no sense for it, so it gets just Edit + Remove.
+        openContextMenu(
+          e,
+          overlay.lockAspect
+            ? [edit, { label: "Remove", danger: true, onSelect: onDelete }]
+            : [edit, ...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }]
+        );
+      }}
+      title="Drag the middle to move, an edge to trim; right-click to edit or remove"
       className={`absolute top-0 flex h-5 cursor-grab items-center gap-1 overflow-hidden rounded-sm border px-1 ${LAYOUT_COLOR_CLASSNAMES[overlay.layout.type]}`}
       style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
     >

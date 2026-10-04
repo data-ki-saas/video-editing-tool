@@ -204,6 +204,7 @@ function VideoOverlaySegment({
   }
 
   function startBodyDrag(e: React.PointerEvent) {
+    if (e.button !== 0) return; // a right-click must reach onContextMenu, not count as a click that opens the framing dialog
     e.preventDefault();
     const track = rootRef.current?.parentElement;
     if (!track || videoDurationSeconds <= 0) return;
