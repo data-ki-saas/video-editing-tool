@@ -23,16 +23,22 @@ interface ChangelogEntry {
 const ENTRIES: ChangelogEntry[] = [
   {
     date: "2026-10-04",
+    title: "Props: drop a car, a cup or a rocket launcher into your scene",
+    description:
+      "There's a new Props button in the Overlays group, and behind it a shelf of free, see-through artwork: a car, a motorcycle, a coffee cup, a post box, a signboard, a rocket launcher and more. Click one and it lands at your playhead on its own timeline row. Drag it into place, resize it, and slide its ends to choose how long it stays.",
+    isLatest: true,
+  },
+  {
+    date: "2026-10-04",
     title: "Big animated text with no background",
     description:
-      "The Label picker now has large, see-through text styles: Pop, Slide up, Typewriter, Word by word, Bouncy letters, Slow zoom and Neon glow. Type your words, drag the box over the frame, and watch the animation loop in the preview before you add it.",
-    isLatest: true,
+      "Labels can now be big, bold and see-through: Pop, Slide up, Typewriter, Word by word, Bouncy letters, Slow zoom and Neon glow. Type your words, drag the box over the frame, and watch the animation loop in the preview before you add it.",
   },
   {
     date: "2026-10-04",
     title: "Labels: pills, capsules and price tags",
     description:
-      "The Text button is now Label. Pick a pill, capsule or rectangle — including two-tone ones like a price on blue beside a name on white, or a title stacked over a description — and type straight into it; it resizes to fit your words. Choose how long it shows on the time bar, and slide labels along their own timeline row to move them.",
+      "The Text button is now Label. Pick a pill, capsule or rectangle — including two-tone ones, like a price on blue beside a name on white, or a title stacked over a description — and just type into it. It grows to fit your words. Choose how long it shows on the time bar, and slide it along its own row to move it.",
   },
   {
     date: "2026-10-03",

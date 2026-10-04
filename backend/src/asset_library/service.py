@@ -41,6 +41,7 @@ def _to_summary(record: repository.LibraryAssetRecord) -> LibraryAssetSummary:
         media_url=record.media_url,
         media_mime_type=record.media_mime_type,
         media_duration_seconds=record.media_duration_seconds,
+        category=record.category,
         created_at=record.created_at,
     )
 
@@ -65,10 +66,10 @@ def _validate_promotion_fields(title: str, description: str | None, liability_wa
     return trimmed_title, trimmed_description
 
 
-def list_library(asset_type: str | None) -> list[LibraryAssetSummary]:
+def list_library(asset_type: str | None, category: str | None = None) -> list[LibraryAssetSummary]:
     if asset_type is not None and asset_type not in _ALLOWED_ASSET_TYPES:
         raise HTTPException(status_code=400, detail="Unknown asset type")
-    return [_to_summary(record) for record in repository.list_public(asset_type)]
+    return [_to_summary(record) for record in repository.list_public(asset_type, category)]
 
 
 def promote_avatar(

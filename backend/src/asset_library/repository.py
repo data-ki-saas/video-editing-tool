@@ -11,7 +11,7 @@ _TABLE = "public_library_assets"
 _COLUMNS = (
     "id, asset_type, promoted_by, title, description, thumbnail_url, "
     "avatar_skin, avatar_design, media_url, media_mime_type, "
-    "media_duration_seconds, liability_waiver_accepted_at, created_at"
+    "media_duration_seconds, liability_waiver_accepted_at, created_at, category"
 )
 
 
@@ -30,6 +30,7 @@ class LibraryAssetRecord:
     media_duration_seconds: float | None
     liability_waiver_accepted_at: str
     created_at: str
+    category: str | None
 
 
 def create_avatar_promotion(
@@ -49,10 +50,12 @@ def create_avatar_promotion(
     return LibraryAssetRecord(**result.data[0])
 
 
-def list_public(asset_type: str | None) -> list[LibraryAssetRecord]:
+def list_public(asset_type: str | None, category: str | None = None) -> list[LibraryAssetRecord]:
     query = get_supabase_client().table(_TABLE).select(_COLUMNS)
     if asset_type is not None:
         query = query.eq("asset_type", asset_type)
+    if category is not None:
+        query = query.eq("category", category)
     result = query.order("created_at", desc=True).execute()
     return [LibraryAssetRecord(**row) for row in result.data]
 

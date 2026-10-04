@@ -173,6 +173,10 @@ class Settings(BaseSettings):
     # Pexels (https://www.pexels.com/api/) -- stock photo/video search.
     pexels_api_key: str = ""
 
+    # Pixabay (https://pixabay.com/api/docs/) -- only used by
+    # scripts/seed_free_library.py to seed the shared asset library.
+    pixabay_api_key: str = ""
+
     # Freesound (https://freesound.org/apiv2/apply/) -- stock background-
     # music search. Results are filtered server-side to CC0-licensed tracks
     # only (see stock_media/freesound_client.py), so a key with basic token

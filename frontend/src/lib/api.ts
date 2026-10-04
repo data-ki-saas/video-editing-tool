@@ -602,6 +602,10 @@ export interface LibraryAssetSummary {
   mediaUrl: string | null;
   mediaMimeType: string | null;
   mediaDurationSeconds: number | null;
+  // "props" for the placeable artwork PropsDialog lists; effect-clip
+  // categories ("fire-smoke", ...) for the seeded video entries; null for
+  // avatars and user-promoted entries.
+  category: string | null;
   createdAt: string;
 }
 
@@ -614,6 +618,7 @@ interface LibraryAssetSummaryWire {
   media_url: string | null;
   media_mime_type: string | null;
   media_duration_seconds: number | null;
+  category: string | null;
   created_at: string;
 }
 
@@ -627,6 +632,7 @@ function toLibraryAssetSummary(wire: LibraryAssetSummaryWire): LibraryAssetSumma
     mediaUrl: wire.media_url,
     mediaMimeType: wire.media_mime_type,
     mediaDurationSeconds: wire.media_duration_seconds,
+    category: wire.category,
     createdAt: wire.created_at,
   };
 }
@@ -634,9 +640,10 @@ function toLibraryAssetSummary(wire: LibraryAssetSummaryWire): LibraryAssetSumma
 /** GET /api/asset-library -- the public catalog, optionally filtered to one
  * kind (LibraryAssetDialog's own kind tabs). Only "avatar" ever returns
  * results today -- see LibraryAssetType's own comment. */
-export async function listLibraryAssets(assetType?: LibraryAssetType): Promise<LibraryAssetSummary[]> {
+export async function listLibraryAssets(assetType?: LibraryAssetType, category?: string): Promise<LibraryAssetSummary[]> {
   const url = new URL(`${API_BASE_URL}/api/asset-library`);
   if (assetType) url.searchParams.set("asset_type", assetType);
+  if (category) url.searchParams.set("category", category);
 
   const response = await apiFetch(url.toString(), { headers: await authHeader() });
   const wire = await handleResponse<LibraryAssetSummaryWire[]>(response);

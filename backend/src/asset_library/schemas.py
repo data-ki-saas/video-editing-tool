@@ -21,6 +21,9 @@ class LibraryAssetSummary(BaseModel):
     media_url: str | None = None
     media_mime_type: str | None = None
     media_duration_seconds: float | None = None
+    # "props" for the placeable artwork the editor's Props dialog lists;
+    # null for avatars and user-promoted entries.
+    category: str | None = None
     created_at: str
 
 

@@ -3,7 +3,7 @@ import { SITE_URL } from "@/lib/siteUrl";
 
 const TITLE = "Documentation";
 const DESCRIPTION =
-  "How Reel Creator works: getting started, adding assets, editing actions, and generating your reel — including free, instant, browser-based rendering.";
+  "How Reel Creator works, in plain English: start a reel, drop in your footage, add props, labels, zooms and effects, then render it free in your browser.";
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -63,146 +63,173 @@ function VideoExample({ title, shareUrl, children }: { title: string; shareUrl: 
   );
 }
 
+// Voice for everything below: talk to the creator like a friend who edits for
+// a living -- "you", concrete scenes ("a coffee cup on the table"), short
+// sentences, a little humor, and no editing jargon without saying what it
+// does. Say what they'll see happen, not how it works under the hood. When a
+// feature ships, add its Topic here in that same voice (and a What's New
+// entry); don't let this drift back into spec-sheet language.
 export default function DocsPage() {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-14 px-4 py-16">
       <div className="flex flex-col gap-2">
         <h1 className="text-3xl font-semibold">Documentation</h1>
         <p className="text-muted">
-          Everything you need to go from a blank project to a finished, share-ready reel.
+          You&apos;ve got raw footage on your phone and a reel in your head. This is how you get from
+          one to the other &mdash; no editing degree required.
         </p>
       </div>
 
-      <Category title="Editing">
+      <Category title="Getting your reel started">
         <Topic title="Getting started">
-          From your dashboard, click <strong>New Reel</strong> and tell us what kind of business
-          it&apos;s for — real estate, a hotel, an auto dealership, a garment or gift shop, a
-          hardware store, or anything else. Fill in a few details and you&apos;ll land straight in
-          the editor.
+          From your dashboard, hit <strong>New Reel</strong> and tell us what it&apos;s for &mdash; a
+          property listing, a hotel, a car showroom, a saree shop, a gift store, a hardware
+          counter, or something we haven&apos;t thought of yet. Answer a few quick questions and
+          you&apos;re dropped straight into the editor with a head start, not a blank screen.
         </Topic>
         <Topic title="Adding assets">
-          Upload your own photos, videos, and music, or search free stock photos and music
-          without ever leaving the editor. Right-click (or long-press) any asset to add it to
-          your reel: a video clip joins your sequence and plays after whatever&apos;s already
-          there, a photo becomes an overlay on top of your video, and a music track becomes your
-          background music. Add more than one video clip and they play back-to-back; add more
-          than one music track and they play one after another, looping for as long as your video
-          runs.
+          Bring your own photos, videos and music, or hunt through free stock photos and music
+          without leaving the editor. Then right-click (or long-press) anything to put it to work:
+          a video clip joins your sequence and plays after whatever&apos;s already there, a photo
+          lands on top of your video as an overlay, and a music track becomes your soundtrack. Add
+          several clips and they play back to back. Add several songs and they take turns,
+          looping for as long as your video runs.
         </Topic>
         <Topic title="Teleprompter">
-          Recording yourself straight from the app? Tap the script icon to open the teleprompter,
-          paste in what you want to say, and it scrolls on its own — right near the camera lens,
-          not off to the side — so you can read your script while still looking at the camera. It
-          picks a comfortable reading pace automatically, and hiding it between takes keeps your
-          script ready without starting over.
+          Filming yourself in the app? Tap the script icon, paste in what you want to say, and the
+          words scroll by on their own &mdash; right beside the camera lens, so you can read and still
+          look like you&apos;re talking straight to your audience. It finds a comfortable pace for
+          you, and tucking it away between takes doesn&apos;t lose your place.
         </Topic>
       </Category>
 
-      <Category title="Actions">
+      <Category title="Shaping the video">
         <Topic title="Clip (aspect ratio)">
-          Pick the shape of your finished video — widescreen, portrait, square, cinematic, and
-          more — then drag the frame to choose exactly what stays visible.
+          Decide what shape your reel is &mdash; tall for Reels and Shorts, widescreen, square,
+          cinematic &mdash; then drag the frame around to choose exactly what stays in view.
         </Topic>
         <Topic title="Zoom & pan">
-          Drag the frame at any point in your video to set up a smooth zoom or pan there. It eases
-          in and back out on its own — no keyframes to manage by hand.
+          Want to push in on the good part? Drag the frame at that moment in your video and a smooth
+          zoom or pan is set up for you. It eases in, then eases back out by itself, so there are no
+          keyframes to babysit.
         </Topic>
+        <Topic title="Flip & mirror">
+          Flip your footage sideways or upside down from any point on the timeline, and flip it back
+          later if you only needed it for a moment.
+        </Topic>
+        <Topic title="Trim">
+          Got a stretch you&apos;d rather nobody saw &mdash; the fumbled intro, the long pause? Cut it
+          out. It&apos;s gone from playback, not just hidden.
+        </Topic>
+        <Topic title="Undo & redo">
+          Every change can be undone and redone, so go ahead and try the wild idea. You can always
+          step back.
+        </Topic>
+      </Category>
+
+      <Category title="Layering things on top">
+        <Topic title="Overlays">
+          Put a photo on top of your video for exactly as long as you want it there, then drag it to
+          wherever it looks best on the frame. Each overlay gets its own row on the timeline, so
+          you can see at a glance what&apos;s showing when.
+        </Topic>
+        <Topic title="Props">
+          Some things are easier to add than to film. Open <strong>Props</strong> and you&apos;ll find a
+          shelf of ready-made, see-through artwork &mdash; a car, a motorcycle, a coffee cup, a post
+          box, a signboard, even a rocket launcher &mdash; free to use. Click one and it appears at
+          your playhead on its own timeline row, with nothing but the object itself (no box around
+          it). Drag it into the scene, stretch it to size, and slide its ends to choose how long it
+          sticks around. Because a prop is a regular overlay under the hood, everything else works
+          on it too: filters, Make it 3D, ambient effects.
+        </Topic>
+        <Topic title="Labels">
+          Need a price tag, a name badge or a shop title? Hit <strong>Label</strong> and pick a pill,
+          a capsule or a rectangle &mdash; including two-tone ones, like a price on blue beside a name
+          on white, or a headline stacked over a smaller description. Type straight into it and the
+          label grows or shrinks to fit your words. Prefer something louder? The big, see-through
+          animated styles &mdash; Pop, Slide up, Typewriter, Word by word, Bouncy letters, Slow zoom and
+          Neon glow &mdash; loop in the preview so you can watch them perform before you commit. Choose
+          how long a label shows on the time bar, and slide it along its own row to move it. Come
+          back any time to change the wording, style or position.
+        </Topic>
+      </Category>
+
+      <Category title="Making it look expensive">
         <Topic title="Make it 3D">
-          Turn Make it 3D on for any photo cutaway and it becomes a real camera move — the
-          photo&apos;s own subject lifts off its background as the camera pushes in, pans, and
-          tilts, genuine depth rather than a flat zoom.
+          Flip on Make it 3D for a photo cutaway and the picture stops being a picture. The subject
+          lifts away from its background while the camera pushes in, pans and tilts &mdash; real depth,
+          not a flat zoom. Your still photo suddenly feels like a shot.
         </Topic>
         <VideoExample
           title="3D Ken Burns, pulsing with the beat"
           shareUrl={`${SITE_URL}/share/2cd5793b-5db8-4902-a2af-6075f1ef98f3`}
         >
-          Make it 3D turns the same cutaway into a real camera move — the photo&apos;s own subject
-          lifts off its background as the camera pushes in and pans, genuine depth rather than a
-          flat zoom — combined here with Pulse with music for both effects at once.
+          Same photo, now a proper camera move: the subject floats off its background as the camera
+          glides in. Here it&apos;s paired with Pulse with music, so the whole thing breathes with
+          the beat.
         </VideoExample>
         <Topic title="Ambient effects">
-          Layer a soft ambient effect onto any photo or overlay — light sweep, sparkle, drifting
-          leaves, rain, mist, sun rays, or crackers — from the Ambience option when adding it.
+          Give a photo or overlay some atmosphere: a light sweep, sparkle, drifting leaves, rain,
+          mist, sun rays or crackers. Pick one from the Ambience option when you add it, and the
+          mood changes without touching anything else.
         </Topic>
         <VideoExample
           title="Ken Burns with animated sparkle"
           shareUrl={`${SITE_URL}/share/e9fb44f2-2593-4b19-97fb-6c7ec7af5dea`}
         >
-          A photo cutaway animated with a Ken Burns zoom/pan, with the Sparkle ambient effect
-          layered softly on top — one of a full library of effects (light sweep, sparkle, leaves,
-          rain, mist, sun rays, crackers) you can add to any photo or overlay.
+          A photo with a slow Ken Burns drift and a soft Sparkle floating across it. It&apos;s one of
+          a whole set of ambient effects (light sweep, leaves, rain, mist, sun rays, crackers) you
+          can add to any photo or overlay.
         </VideoExample>
         <Topic title="Face effects">
-          For a photo with a detected face, add a glowing ring locked to the head — a Torus
-          spinning just above it, or a Halo glowing softly behind it. Pick one from the Face
-          effect option when adding the photo, and combine it freely with Make it 3D or Ambience.
+          If your photo has a face in it, we&apos;ll find it and let you crown it &mdash; a Torus
+          spinning just above the head, or a soft Halo glowing behind it. Choose one from the Face
+          effect option when you add the photo, and mix it freely with Make it 3D or Ambience.
         </Topic>
         <Topic title="Pulse with music">
-          Turn on Pulse with music on any photo cutaway or overlay and it subtly grows and shrinks
-          in time with your background track — an automatic way to make your reel feel more alive
-          and in sync with the beat, with nothing to keyframe by hand.
+          Switch on Pulse with music and a photo or overlay gently swells and settles in time with
+          your soundtrack. It&apos;s the easiest way to make a reel feel alive, and there&apos;s
+          nothing to line up by hand.
         </Topic>
         <VideoExample
           title="Ken Burns that pulses with the beat"
           shareUrl={`${SITE_URL}/share/05bac439-f4eb-4cb1-a668-59116add98ab`}
         >
-          The same kind of Ken Burns cutaway, this time with Pulse with music turned on — it
-          gently grows and shrinks in time with the background track automatically, no
-          keyframing required.
+          A Ken Burns cutaway with Pulse with music on. Watch it grow and shrink along with the
+          track &mdash; all automatic, no keyframes anywhere.
         </VideoExample>
         <Topic title="Filters">
           Right-click (or long-press) any cutaway or overlay and choose Filter to give it its own
-          look — Original, Black &amp; White, Vivid, Vintage, Warm, Cool, or High Contrast. Each
-          clip keeps its own filter, independent of the rest of your reel.
-        </Topic>
-        <Topic title="Flip & mirror">
-          Flip your footage horizontally or vertically starting from any point in the video, and
-          flip it back later if you only want it for a stretch.
-        </Topic>
-        <Topic title="Trim">
-          Cut out any stretch of video you don&apos;t want. It&apos;s removed from playback
-          entirely, not just hidden.
-        </Topic>
-        <Topic title="Overlays">
-          Place a photo on top of your video for however long you want it visible, and drag it
-          wherever it should sit on the frame.
-        </Topic>
-        <Topic title="Text captions">
-          Type a caption, pick a style, and drag it into place. It appears for whatever stretch of
-          the video you choose, and you can come back and edit the wording, style, or position
-          any time.
-        </Topic>
-        <Topic title="Undo & redo">
-          Every change you make while editing can be undone or redone, so it&apos;s always safe to
-          experiment.
+          look: Original, Black &amp; White, Vivid, Vintage, Warm, Cool or High Contrast. Every clip
+          keeps its own filter, so a vintage photo can sit next to a vivid one without a fight.
         </Topic>
       </Category>
 
-      <Category title="Generation">
+      <Category title="Creating the final reel">
         <Topic title="Edge Render (free)">
-          Hit the Edge Render button to generate your reel right in your browser — no upload to a
-          rendering service, no cost, and no daily limit. It plays and downloads as soon as
-          it&apos;s done. Edge Render needs a Chromium browser (Chrome or Microsoft Edge) and
-          doesn&apos;t yet support auto-captions.
+          Press Edge Render and your reel is built right inside your browser. Nothing is uploaded to
+          a rendering service, it costs nothing, and there&apos;s no daily limit &mdash; it plays and
+          downloads the moment it&apos;s ready. You&apos;ll need Chrome or Microsoft Edge, and
+          auto-captions aren&apos;t supported in this mode yet.
         </Topic>
         <Topic title="High-quality render (coming soon)">
-          A second, higher-quality cloud render is on the way — full support for every editing
-          feature including auto-captions, rendered on our servers rather than your device.
+          A second, higher-quality render is on its way. It runs on our servers instead of your
+          device and will support every feature, auto-captions included.
         </Topic>
         <Topic title="Limits">
           {/* Placeholder -- keep in sync with README.md's "Abuse guardrails" if the cap changes. */}
-          To keep things running smoothly for everyone during early access, there&apos;s a daily
-          limit on how many high-quality cloud renders an account can start. If you hit it,
-          you&apos;ll see a clear message telling you when to try again — Edge Render has no such
-          limit.
+          While we&apos;re in early access, there&apos;s a daily cap on how many high-quality cloud
+          renders an account can start, so things stay snappy for everyone. If you hit it,
+          you&apos;ll get a clear message saying when to come back. Edge Render doesn&apos;t have a
+          cap at all.
         </Topic>
       </Category>
 
       <Category title="Sharing">
         <Topic title="Post to YouTube">
-          Connect your YouTube account once from Settings, then post any saved reel with a single
-          click — right from your Library or straight after a render. Your reel&apos;s saved name
-          becomes the video title, no extra dialog needed.
+          Connect your YouTube account once in Settings, and from then on a saved reel is one click
+          from being live &mdash; from your Library, or straight after a render. Your reel&apos;s name
+          becomes the video title, so there&apos;s no extra form to fill in.
         </Topic>
       </Category>
     </main>

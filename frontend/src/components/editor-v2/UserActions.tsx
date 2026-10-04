@@ -131,6 +131,17 @@ function PhotoOverlayIcon({ className }: { className?: string }) {
   );
 }
 
+// A little crate/cube -- "Props" 's identity: a physical thing you set down in
+// the scene, distinct from Image Overlay's photo-frame glyph.
+function PropsIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M12 3 20.5 7.5v9L12 21 3.5 16.5v-9L12 3Z" />
+      <path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" />
+    </svg>
+  );
+}
+
 // Speech bubble with a small waveform inside -- "TTS Narration" 's identity,
 // tinted violet to read as its own distinct family from Text's plain/
 // untinted glyph, Video Overlay's amber, and Image Overlay's sky.
@@ -221,6 +232,7 @@ export function UserActions({
   videoOverlayCount,
   onOpenImageOverlayPicker,
   imageOverlayCount,
+  onOpenPropsDialog,
   onOpenTextDialog,
   textOverlayCount,
   onOpenTtsDialog,
@@ -241,6 +253,7 @@ export function UserActions({
   videoOverlayCount: number;
   onOpenImageOverlayPicker: () => void;
   imageOverlayCount: number;
+  onOpenPropsDialog: () => void;
   onOpenTextDialog: () => void;
   textOverlayCount: number;
   onOpenTtsDialog: () => void;
@@ -384,7 +397,7 @@ export function UserActions({
         </button>
       </div>
 
-      {/* OVERLAYS -- amber family, lightest to darkest: Video Overlay, Image Overlay, Label, TTS, Avatar */}
+      {/* OVERLAYS -- amber family, lightest to darkest: Video Overlay, Image Overlay, Props, Label, TTS, Avatar */}
       <div className="relative flex h-full gap-3">
         <GroupLabel
           colorClassName="text-amber-600 dark:text-amber-400"
@@ -430,6 +443,17 @@ export function UserActions({
             Image Overlay
           </span>
           <CountBadge count={imageOverlayCount} />
+        </button>
+        <button
+          type="button"
+          onClick={onOpenPropsDialog}
+          title="Props -- ready-made see-through artwork (a car, a cup, a post box...) to drop into your scene, each on its own timeline row"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-500 dark:text-amber-400 hover:bg-background"
+        >
+          <PropsIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            Props
+          </span>
         </button>
         <button
           type="button"

@@ -32,6 +32,7 @@ import { AssetGallery } from "./AssetGallery";
 import { UploadDialog } from "./UploadDialog";
 import { StockMediaDialog } from "./StockMediaDialog";
 import { LibraryAssetDialog } from "./LibraryAssetDialog";
+import { PropsDialog } from "./PropsDialog";
 import { UserActions } from "./UserActions";
 import { NewReelWizard } from "@/components/wizard/NewReelWizard";
 import { TextOverlayDialog } from "./TextOverlayDialog";
@@ -583,6 +584,10 @@ export function ActionArea({
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isStockDialogOpen, setIsStockDialogOpen] = useState(false);
   const [isLibraryDialogOpen, setIsLibraryDialogOpen] = useState(false);
+  // Local -- PropsDialog imports the artwork and places it through the
+  // existing onUploaded/onAddImageOverlay handlers, so nothing outside this
+  // component needs to know whether it's open.
+  const [isPropsDialogOpen, setIsPropsDialogOpen] = useState(false);
   // Local, unlike the other three dialogs' open/close state -- selecting a
   // ratio applies it (via onSelectClipRect, already a ThreePaneEditor-level
   // handler) and closes itself in the same click, so nothing outside this
@@ -641,7 +646,7 @@ export function ActionArea({
         />
       </div>
 
-      <div data-tour="tools" className="w-[30rem] shrink-0 overflow-hidden border-r border-border pr-4">
+      <div data-tour="tools" className="w-[32.5rem] shrink-0 overflow-hidden border-r border-border pr-4">
         <UserActions
           onOpenNewReelWizard={() => setIsNewReelWizardOpen(true)}
           selectedClipRectId={selectedClipRectId}
@@ -654,6 +659,7 @@ export function ActionArea({
           videoOverlayCount={videoOverlays.length}
           onOpenImageOverlayPicker={onOpenImageOverlayPicker}
           imageOverlayCount={overlayImages.length}
+          onOpenPropsDialog={() => setIsPropsDialogOpen(true)}
           onOpenTextDialog={onOpenTextDialog}
           textOverlayCount={textOverlays.filter((overlay) => isLabelTemplateId(overlay.templateId)).length}
           onOpenTtsDialog={onOpenTtsDialog}
@@ -766,6 +772,16 @@ export function ActionArea({
           onImportedAvatar={(name) => window.alert(`Added "${name}" to your avatars`)}
           onImportingChange={onUploadingChange}
           onClose={() => setIsLibraryDialogOpen(false)}
+        />
+      )}
+
+      {isPropsDialogOpen && (
+        <PropsDialog
+          projectId={projectId}
+          onImported={onUploaded}
+          onPlace={onAddImageOverlay}
+          onImportingChange={onUploadingChange}
+          onClose={() => setIsPropsDialogOpen(false)}
         />
       )}
 

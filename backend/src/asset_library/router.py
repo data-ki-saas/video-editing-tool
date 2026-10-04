@@ -10,8 +10,10 @@ router = APIRouter(prefix="/api/asset-library", tags=["asset-library"])
 
 
 @router.get("", response_model=list[LibraryAssetSummary])
-async def list_library(asset_type: str | None = None, user: CurrentUser = Depends(get_current_user)) -> list[LibraryAssetSummary]:
-    return service.list_library(asset_type)
+async def list_library(
+    asset_type: str | None = None, category: str | None = None, user: CurrentUser = Depends(get_current_user)
+) -> list[LibraryAssetSummary]:
+    return service.list_library(asset_type, category)
 
 
 @router.post("/avatars/{design_id}/promote", response_model=LibraryAssetSummary, status_code=201)
