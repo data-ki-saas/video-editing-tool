@@ -22,6 +22,7 @@ import { useEffect, useMemo, useState } from "react";
 import { importLibraryAssetToProject, listLibraryAssets, uploadAsset, type Asset, type LibraryAssetSummary } from "@/lib/api";
 import type { ImageOverlayPlacement } from "@/lib/video/transformations";
 import { DEFAULT_OVERLAY_FRAMING, type OverlayFraming } from "@/lib/video/video_math";
+import { PeepsTab } from "./PeepsTab";
 import { rasterizeSvgToPng, VectorsTab } from "./VectorsTab";
 
 // A freshly-placed prop takes up to this share of the frame's width/height,
@@ -126,9 +127,9 @@ function propRect(imageAspect: number, frameAspect: number): ImageOverlayPlaceme
   return { x: (1 - width) / 2, y: (1 - height) / 2, width, height };
 }
 
-type Tab = "props" | "icons" | "vectors";
+type Tab = "props" | "icons" | "vectors" | "peeps";
 
-const TAB_LABELS: Record<Tab, string> = { props: "Props", icons: "Icons", vectors: "Vectors" };
+const TAB_LABELS: Record<Tab, string> = { props: "Props", icons: "Icons", vectors: "Vectors", peeps: "Peeps" };
 
 // Google Material icons (src/lib/materialIcons.json, built by
 // scripts/build-material-icons.mjs) load lazily, only once the Icons tab opens.
@@ -214,8 +215,8 @@ export function PropsDialog({
   }
 
   // Shared by the Icons and Vectors tabs: upload the rasterized PNG, then
-  // place it as a square, aspect-locked prop.
-  function placeRasterized(key: string, filePromise: Promise<File>) {
+  // place it as an aspect-locked prop (square unless told otherwise).
+  function placeRasterized(key: string, filePromise: Promise<File>, aspect = 1) {
     if (placingId) return;
     setPlacingId(key);
     setError(null);
@@ -224,7 +225,7 @@ export function PropsDialog({
       .then((file) => uploadAsset(projectId, file))
       .then((asset) => {
         onImported(asset);
-        onPlace(asset, { rect: propRect(1, frameAspectRatio ?? 9 / 16), lockAspect: true });
+        onPlace(asset, { rect: propRect(aspect, frameAspectRatio ?? 9 / 16), lockAspect: true });
         onClose();
       })
       .catch((err) => {
@@ -293,7 +294,7 @@ export function PropsDialog({
         </p>
 
         <div className="mb-3 flex gap-1 border-b border-border">
-          {(["props", "icons", "vectors"] as const).map((id) => (
+          {(["props", "icons", "vectors", "peeps"] as const).map((id) => (
             <button
               key={id}
               type="button"
@@ -309,7 +310,9 @@ export function PropsDialog({
 
         {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
 
-        {tab === "vectors" ? (
+        {tab === "peeps" ? (
+          <PeepsTab placingKey={placingId} onPlace={(file, key, aspect) => placeRasterized(key, Promise.resolve(file), aspect)} />
+        ) : tab === "vectors" ? (
           <VectorsTab placingKey={placingId} onPlace={(file, key) => placeRasterized(key, Promise.resolve(file))} />
         ) : tab === "icons" ? (
           <>
