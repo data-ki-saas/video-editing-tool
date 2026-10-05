@@ -22,6 +22,7 @@ import { Avatar, Style } from "@dicebear/core";
 import openPeeps from "@dicebear/styles/open-peeps.json";
 
 const RASTER_SIZE = 1408; // 2x the style's 704 canvas, so scaled-up peeps stay crisp
+const RASTER_MAX_SIDE = 2400; // cap for the long side of tall poses (full body / sitting)
 const ALPHA_VISIBLE_THRESHOLD = 16;
 
 const style = new Style(openPeeps);
@@ -39,6 +40,24 @@ const CLOTHES_SWATCHES = [...colors.clothing.values, "#ffffff", "#2b2b2b", "#d64
 const INK_SWATCHES = ["#000000", "#2c1b18", "#4a312c", "#724133", "#1e2a5a", "#4b1d52", "#1f3d2b"];
 
 type PartKey = "head" | "face" | "beard" | "glasses" | "mask";
+type PoseKey = "bust" | "half" | "sitting" | "full";
+
+interface Pose {
+  key: PoseKey;
+  label: string;
+  // Canvas window (in the style's 704 coordinates) framing the pose.
+  viewBox: string;
+  legs: boolean;
+}
+
+const POSES: Pose[] = [
+  { key: "bust", label: "Bust", viewBox: "0 0 704 704", legs: false },
+  { key: "half", label: "Half body", viewBox: "-60 0 820 1250", legs: false },
+  { key: "sitting", label: "Sitting", viewBox: "-60 0 820 1980", legs: true },
+  { key: "full", label: "Full body", viewBox: "-60 0 820 2150", legs: true },
+];
+
+const PANTS_SWATCHES = ["#3b4a6b", "#2b2b2b", "#6b7a8f", "#8a6a4a", "#556b2f", "#a33b3b", "#d9d2c0"];
 
 interface Peep {
   head: string;
@@ -48,8 +67,10 @@ interface Peep {
   mask: string | null;
   skin: string;
   clothes: string;
+  pants: string;
   ink: string;
   flip: boolean;
+  pose: PoseKey;
 }
 
 interface PartTab {
@@ -80,13 +101,63 @@ function randomPeep(): Peep {
     mask: null,
     skin: pick(SKIN_SWATCHES),
     clothes: pick(CLOTHES_SWATCHES),
+    pants: pick(PANTS_SWATCHES),
     ink: INK_SWATCHES[0],
     flip: false,
+    pose: "bust",
   };
 }
 
-/** The peep as an SVG document. `viewBox` crops thumbnails to one part. */
+// DiceBear's open-peeps art is a head-and-torso drawn to the waist (y ~1227) but
+// clipped to a 704 square, which is the "bust" framing. The other poses drop the
+// clip to reveal the waist-down torso; sitting / full body also draw legs below it.
+const HEM_Y = 1227;
+const LEG_CENTER_X = 385; // the torso's horizontal centre line
+const SHOE_FILL = "#ffffff";
+
+function legsSvg(pose: PoseKey, pants: string, ink: string): string {
+  const cx = LEG_CENTER_X;
+  const strokeOf = (width: number) => `stroke="${ink}" stroke-width="${width}" stroke-linejoin="round" stroke-linecap="round"`;
+  const stroke = strokeOf(12);
+  const top = HEM_Y - 40; // tuck under the shirt hem
+  if (pose === "full") {
+    const leg = (side: -1 | 1) => {
+      const inner = cx + side * 12;
+      const outer = cx + side * 240;
+      const hemInner = cx + side * 30;
+      const hemOuter = cx + side * 220;
+      const bottom = top + 780;
+      const shoeOuter = cx + side * 250;
+      const shoeToe = cx + side * 8;
+      return (
+        `<path d="M${inner} ${top} L${outer} ${top} L${hemOuter} ${bottom} L${hemInner} ${bottom} Z" fill="${pants}" ${stroke}/>` +
+        `<path d="M${hemInner - side * 6} ${bottom - 6} L${hemOuter + side * 6} ${bottom - 6} L${shoeOuter} ${bottom + 50} Q${shoeOuter + side * 6} ${bottom + 90} ${shoeOuter - side * 40} ${bottom + 90} L${shoeToe} ${bottom + 90} Q${shoeToe - side * 6} ${bottom + 20} ${hemInner - side * 6} ${bottom - 6} Z" fill="${SHOE_FILL}" ${stroke}/>`
+      );
+    };
+    return leg(-1) + leg(1);
+  }
+  // Sitting, front view: foreshortened thighs toward the viewer, shins dropping from the knees, on a stool.
+  const seatY = top + 150;
+  const kneeY = top + 250;
+  const floorY = kneeY + 420;
+  const stool =
+    `<rect x="${cx - 320}" y="${seatY}" width="640" height="46" rx="14" fill="#c8a27a" ${stroke}/>` +
+    `<path d="M${cx - 280} ${seatY + 46} L${cx - 300} ${floorY + 90} M${cx + 280} ${seatY + 46} L${cx + 300} ${floorY + 90}" fill="none" ${strokeOf(20)}/>`;
+  const thighs = `<path d="M${cx - 250} ${top} L${cx + 250} ${top} L${cx + 262} ${kneeY} Q${cx + 262} ${kneeY + 50} ${cx + 215} ${kneeY + 50} L${cx - 215} ${kneeY + 50} Q${cx - 262} ${kneeY + 50} ${cx - 262} ${kneeY} Z" fill="${pants}" ${stroke}/>`;
+  const shin = (side: -1 | 1) => {
+    const a = cx + side * 40;
+    const b = cx + side * 230;
+    return (
+      `<path d="M${a} ${kneeY + 40} L${b} ${kneeY + 40} L${b - side * 14} ${floorY} L${a + side * 14} ${floorY} Z" fill="${pants}" ${stroke}/>` +
+      `<path d="M${a + side * 6} ${floorY - 6} L${b - side * 20} ${floorY - 6} L${b + side * 14} ${floorY + 36} Q${b + side * 18} ${floorY + 76} ${b - side * 24} ${floorY + 76} L${a - side * 10} ${floorY + 76} Q${a - side * 16} ${floorY + 10} ${a + side * 6} ${floorY - 6} Z" fill="${SHOE_FILL}" ${stroke}/>`
+    );
+  };
+  return stool + shin(-1) + shin(1) + thighs;
+}
+
+/** The peep as an SVG document. `viewBox` crops thumbnails to one part (always the bust framing). */
 function peepSvg(peep: Peep, size: number, viewBox?: string): string {
+  const pose = viewBox ? POSES[0] : (POSES.find((p) => p.key === peep.pose) ?? POSES[0]);
   const svg = new Avatar(style, {
     seed: "peep", // every choice below is explicit, so the seed decides nothing visible
     size,
@@ -104,7 +175,19 @@ function peepSvg(peep: Peep, size: number, viewBox?: string): string {
     inkColor: peep.ink,
     headContrastColor: peep.ink, // the few hair styles drawn in this colour match the lines
   } as ConstructorParameters<typeof Avatar>[1]).toString();
-  return viewBox ? svg.replace('viewBox="0 0 704 704"', `viewBox="${viewBox}"`) : svg;
+  if (viewBox) return svg.replace('viewBox="0 0 704 704"', `viewBox="${viewBox}"`);
+  if (pose.key === "bust") return svg;
+  const [, , vbWidth, vbHeight] = pose.viewBox.split(" ").map(Number);
+  let out = svg
+    .replace('viewBox="0 0 704 704"', `viewBox="${pose.viewBox}"`)
+    .replace(/ width="[^"]*" height="[^"]*"/, ` width="${Math.round((size * vbWidth) / vbHeight)}" height="${size}"`)
+    .replace(/ clip-path="url\(#clip-[^)]*\)"/, "");
+  if (pose.legs) {
+    const legs = legsSvg(pose.key, peep.pants, peep.ink);
+    const mirrored = peep.flip ? `<g transform="translate(704, 0) scale(-1, 1)">${legs}</g>` : legs;
+    out = out.replace("</defs>", `</defs>${mirrored}`);
+  }
+  return out;
 }
 
 function svgDataUrl(svg: string): string {
@@ -114,19 +197,25 @@ function svgDataUrl(svg: string): string {
 /** Transparent PNG of the peep, cropped to its visible pixels, plus that crop's aspect ratio. */
 async function rasterizePeep(peep: Peep): Promise<{ file: File; aspect: number }> {
   const img = new Image();
-  img.src = svgDataUrl(peepSvg(peep, RASTER_SIZE));
+  const pose = POSES.find((p) => p.key === peep.pose) ?? POSES[0];
+  const [, , vbWidth, vbHeight] = pose.viewBox.split(" ").map(Number);
+  // Tall poses are rasterized smaller than 2x so the canvas stays a sane size.
+  const scale = Math.min(RASTER_SIZE / 704, RASTER_MAX_SIDE / Math.max(vbWidth, vbHeight));
+  const rasterW = Math.round(vbWidth * scale);
+  const rasterH = Math.round(vbHeight * scale);
+  img.src = svgDataUrl(peepSvg(peep, rasterH));
   await img.decode();
   const canvas = document.createElement("canvas");
-  canvas.width = RASTER_SIZE;
-  canvas.height = RASTER_SIZE;
+  canvas.width = rasterW;
+  canvas.height = rasterH;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not draw this peep");
-  ctx.drawImage(img, 0, 0, RASTER_SIZE, RASTER_SIZE);
-  const { data } = ctx.getImageData(0, 0, RASTER_SIZE, RASTER_SIZE);
-  let minX = RASTER_SIZE, minY = RASTER_SIZE, maxX = -1, maxY = -1;
-  for (let y = 0; y < RASTER_SIZE; y++) {
-    for (let x = 0; x < RASTER_SIZE; x++) {
-      if (data[(y * RASTER_SIZE + x) * 4 + 3] > ALPHA_VISIBLE_THRESHOLD) {
+  ctx.drawImage(img, 0, 0, rasterW, rasterH);
+  const { data } = ctx.getImageData(0, 0, rasterW, rasterH);
+  let minX = rasterW, minY = rasterH, maxX = -1, maxY = -1;
+  for (let y = 0; y < rasterH; y++) {
+    for (let x = 0; x < rasterW; x++) {
+      if (data[(y * rasterW + x) * 4 + 3] > ALPHA_VISIBLE_THRESHOLD) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -229,7 +318,7 @@ export function PeepsTab({
         </div>
         <button
           type="button"
-          onClick={() => setPeep((previous) => ({ ...randomPeep(), skin: previous.skin, ink: previous.ink, flip: previous.flip }))}
+          onClick={() => setPeep((previous) => ({ ...randomPeep(), skin: previous.skin, ink: previous.ink, flip: previous.flip, pose: previous.pose }))}
           className="rounded-md border border-border px-2 py-1 text-xs hover:border-accent"
         >
           🎲 Surprise me
@@ -261,7 +350,25 @@ export function PeepsTab({
         <div className="flex flex-col gap-1.5 rounded-md border border-border p-2">
           <SwatchRow label="Skin" value={peep.skin} swatches={SKIN_SWATCHES} onChange={(skin) => update({ skin })} />
           <SwatchRow label="Clothes" value={peep.clothes} swatches={CLOTHES_SWATCHES} onChange={(clothes) => update({ clothes })} />
+          {POSES.find((p) => p.key === peep.pose)?.legs && (
+            <SwatchRow label="Pants" value={peep.pants} swatches={PANTS_SWATCHES} onChange={(pants) => update({ pants })} />
+          )}
           <SwatchRow label="Lines & hair" value={peep.ink} swatches={INK_SWATCHES} onChange={(ink) => update({ ink })} />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="w-20 shrink-0 text-[11px] text-muted">Framing</span>
+          {POSES.map((pose) => (
+            <button
+              key={pose.key}
+              type="button"
+              onClick={() => update({ pose: pose.key })}
+              aria-pressed={peep.pose === pose.key}
+              className={`rounded-full border px-2.5 py-0.5 text-[11px] ${peep.pose === pose.key ? "border-accent bg-accent text-accent-foreground" : "border-border text-muted hover:text-foreground"}`}
+            >
+              {pose.label}
+            </button>
+          ))}
         </div>
 
         <div className="flex flex-wrap gap-1">
