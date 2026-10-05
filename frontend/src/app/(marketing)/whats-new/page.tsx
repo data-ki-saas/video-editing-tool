@@ -25,7 +25,7 @@ const ENTRIES: ChangelogEntry[] = [
     date: "2026-10-05",
     title: "Props: icons, vectors and build-your-own characters",
     description:
-      "The Props popup now has three new tabs. Icons holds Google's Material icons; Vectors searches a huge free library of line and solid vectors, with outline colour, thickness, flip and rotate; and Peeps lets you build a hand-drawn character — pick the hair, face, beard, glasses and mask, choose skin and clothes colours, pick a framing (bust, half body, sitting or full body, with pants colour), or hit Surprise me. Then add it like any other prop: drag, resize, and slide its ends on the time bar. The popup also has a fresh thin blue border.",
+      "The Props popup now has three new tabs. Icons holds Google's Material icons; Vectors searches a huge free library of line and solid vectors, with outline colour, thickness, flip and rotate; and Peeps lets you build a hand-drawn character — pick the hair, face, beard, glasses and mask, choose skin and clothes colours, pick a framing (bust, half body, sitting or full body) and dress the whole figure — hands, legs (straight, wide, slim, shorts, skirt), shoes and pants colour, or hit Surprise me. Then add it like any other prop: drag, resize, and slide its ends on the time bar. The popup also has a fresh thin blue border.",
     isLatest: true,
   },
   {
