@@ -184,7 +184,6 @@ export function PropsDialog({
   const [tab, setTab] = useState<Tab>("props");
   // Props are a shared catalog, so only admins can add to or prune it.
   const isAdmin = useIsAdmin() === true;
-  const [managing, setManaging] = useState(false);
   const [uploadingProp, setUploadingProp] = useState(false);
   const propFileInput = useRef<HTMLInputElement>(null);
   const [icons, setIcons] = useState<Record<string, string> | null>(null);
@@ -451,14 +450,6 @@ export function PropsDialog({
               >
                 {uploadingProp ? "Uploading…" : "+ Upload props"}
               </button>
-              <button
-                type="button"
-                onClick={() => setManaging((value) => !value)}
-                aria-pressed={managing}
-                className={`rounded-md border px-2 py-1 text-xs ${managing ? "border-accent" : "border-border hover:border-accent"}`}
-              >
-                {managing ? "Done" : "Delete props"}
-              </button>
               <span className="text-[10px] text-muted">Admin: transparent PNG cut-outs. Changes are shared with everyone.</span>
             </div>
           )}
@@ -470,19 +461,23 @@ export function PropsDialog({
             <div className="grid grid-cols-4 gap-2">
               {props.map((prop) => (
                 <div key={prop.id} className="relative">
-                {managing && (
+                {isAdmin && (
+                  // Floats over the artwork's bottom-right corner (just above the title row).
                   <button
                     type="button"
                     onClick={() => void handleDeleteProp(prop)}
                     aria-label={`Delete ${prop.title}`}
-                    className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[11px] text-white shadow"
+                    title="Delete this prop for everyone"
+                    className="absolute bottom-8 right-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-white shadow hover:bg-red-700"
                   >
-                    ✕
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+                      <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+                    </svg>
                   </button>
                 )}
                 <button
                   type="button"
-                  onClick={() => (managing ? void handleDeleteProp(prop) : handlePlace(prop))}
+                  onClick={() => handlePlace(prop)}
                   disabled={placingId !== null}
                   title={prop.description ?? prop.title}
                   className="flex w-full flex-col overflow-hidden rounded-md border border-border bg-background text-left hover:border-accent disabled:opacity-60"

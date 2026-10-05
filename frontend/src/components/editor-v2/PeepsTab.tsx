@@ -36,6 +36,7 @@ const GLASSES = Object.keys(components.accessories.variants);
 const MASKS = Object.keys(components.mask.variants);
 
 // Body parts the artwork doesn't have; drawn by legsSvg / handSvg / footSvg below.
+const GESTURES = ["none", "wave", "thumbsUp", "peace", "point", "hips", "crossed", "cheer"];
 const HANDS = ["relaxed", "fist", "open"];
 const LEGS = ["straight", "wide", "slim", "shorts", "skirt"];
 const SHOES = ["sneakers", "boots", "barefoot"];
@@ -44,7 +45,7 @@ const SKIN_SWATCHES = colors.skin.values;
 const CLOTHES_SWATCHES = [...colors.clothing.values, "#ffffff", "#2b2b2b", "#d64545"];
 const INK_SWATCHES = ["#000000", "#2c1b18", "#4a312c", "#724133", "#1e2a5a", "#4b1d52", "#1f3d2b"];
 
-type PartKey = "head" | "face" | "beard" | "glasses" | "mask" | "hands" | "legs" | "shoes";
+type PartKey = "head" | "face" | "beard" | "glasses" | "mask" | "gesture" | "hands" | "legs" | "shoes";
 type PoseKey = "bust" | "half" | "sitting" | "full";
 
 interface Pose {
@@ -57,9 +58,9 @@ interface Pose {
 
 const POSES: Pose[] = [
   { key: "bust", label: "Bust", viewBox: "0 0 704 704", legs: false },
-  { key: "half", label: "Half body", viewBox: "-60 0 820 1250", legs: false },
-  { key: "sitting", label: "Sitting", viewBox: "-60 0 820 2070", legs: true },
-  { key: "full", label: "Full body", viewBox: "-60 0 820 2150", legs: true },
+  { key: "half", label: "Half body", viewBox: "-260 0 1240 1250", legs: false },
+  { key: "sitting", label: "Sitting", viewBox: "-260 0 1240 2070", legs: true },
+  { key: "full", label: "Full body", viewBox: "-260 0 1240 2150", legs: true },
 ];
 
 const PANTS_SWATCHES = ["#3b4a6b", "#2b2b2b", "#6b7a8f", "#8a6a4a", "#556b2f", "#a33b3b", "#d9d2c0"];
@@ -74,6 +75,7 @@ interface Peep {
   clothes: string;
   pants: string;
   hands: string;
+  gesture: string;
   legs: string;
   shoes: string;
   ink: string;
@@ -100,6 +102,7 @@ const PART_TABS: PartTab[] = [
   { key: "beard", label: "Beard", variants: BEARDS, optional: true, viewBox: "200 300 420 420" },
   { key: "glasses", label: "Glasses", variants: GLASSES, optional: true, viewBox: "200 280 420 320" },
   { key: "mask", label: "Mask", variants: MASKS, optional: true, viewBox: "200 300 420 420" },
+  { key: "gesture", label: "Gesture", variants: GESTURES, optional: false, viewBox: "-260 380 1240 900", thumbPose: "half", poses: ["half", "sitting", "full"] },
   { key: "hands", label: "Hands", variants: HANDS, optional: false, viewBox: "-70 1150 280 280", thumbPose: "half", poses: ["half", "sitting", "full"] },
   { key: "legs", label: "Legs", variants: LEGS, optional: false, viewBox: "-60 1180 900 780", thumbPose: "full", poses: ["sitting", "full"] },
   { key: "shoes", label: "Shoes", variants: SHOES, optional: false, viewBox: "-60 1700 900 400", thumbPose: "full", poses: ["full"] },
@@ -118,6 +121,7 @@ function randomPeep(): Peep {
     clothes: pick(CLOTHES_SWATCHES),
     pants: pick(PANTS_SWATCHES),
     hands: HANDS[0],
+    gesture: GESTURES[0],
     legs: LEGS[0],
     shoes: SHOES[0],
     ink: INK_SWATCHES[0],
@@ -141,6 +145,7 @@ const HAND_SPOTS = [
 ];
 
 interface BodyLook {
+  gesture: string;
   skin: string;
   pants: string;
   ink: string;
@@ -185,9 +190,160 @@ function handSvg(look: BodyLook, hx: number, width: number): string {
   return fill + outline + detail;
 }
 
-function handsSvg(look: BodyLook): string {
-  return HAND_SPOTS.map((spot) => handSvg(look, spot.x, spot.width)).join("");
+/** The hanging hands, except on sides where a gesture arm replaces them. */
+function handsSvg(look: BodyLook, skipSides: ("L" | "R")[]): string {
+  return HAND_SPOTS.map((spot, i) => (skipSides.includes(i === 0 ? "L" : "R") ? "" : handSvg(look, spot.x, spot.width))).join("");
 }
+
+// --- Arm gestures -----------------------------------------------------------
+// The artwork's arms only ever hang at the sides. For a gesture, the original
+// forearm on that side is masked away (below the sleeve hem) and a new arm +
+// hand is drawn, built from fat round-capped strokes: every limb is first drawn
+// wide in ink, then narrower in skin on top, which gives the same heavy
+// outlined, merged look as the artwork. Everything is authored for the
+// viewer's-left arm and mirrored (about the stubs' axis, x = 364) for the right.
+const ARM_MIRROR_X = 728;
+const SLEEVE_HEM_Y = 962; // just under the sleeve's hem line; front-layer forearms start here (the mask follows the slanted hem itself)
+const ARM_WIDTH = 92;
+
+type Pt = [number, number];
+interface Limb {
+  pts: Pt[];
+  w: number;
+  cap?: "round" | "butt";
+}
+
+interface GestureDef {
+  sides: ("L" | "R")[];
+  // Raised arms tuck behind the sleeve; arms across the body must sit in front of the shirt.
+  layer: "behind" | "front";
+}
+
+const GESTURE_DEFS: Record<string, GestureDef> = {
+  wave: { sides: ["L"], layer: "behind" },
+  thumbsUp: { sides: ["L"], layer: "behind" },
+  peace: { sides: ["L"], layer: "behind" },
+  point: { sides: ["L"], layer: "behind" },
+  cheer: { sides: ["L", "R"], layer: "behind" },
+  hips: { sides: ["L", "R"], layer: "front" },
+  crossed: { sides: ["L", "R"], layer: "front" },
+};
+
+const pathOf = (pts: Pt[]) => pts.map(([px, py], i) => `${i === 0 ? "M" : "L"}${px.toFixed(1)} ${py.toFixed(1)}`).join(" ");
+
+/** Limbs as one merged shape: all the ink first, then all the skin over it. */
+function limbsSvg(limbs: Limb[], skin: string, ink: string): string {
+  const stroke = (l: Limb, color: string, width: number) => {
+    const pts = l.pts.length === 1 ? [l.pts[0], [l.pts[0][0] + 0.01, l.pts[0][1]] as Pt] : l.pts;
+    return `<path d="${pathOf(pts)}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linejoin="round" stroke-linecap="${l.cap ?? "round"}"/>`;
+  };
+  return limbs.map((l) => stroke(l, ink, l.w + 2 * LINE)).join("") + limbs.map((l) => stroke(l, skin, l.w)).join("");
+}
+
+const linesSvg = (lines: Pt[][], ink: string) =>
+  lines.map((pts) => `<path d="${pathOf(pts)}" fill="none" ${inkStroke(ink, 9)}/>`).join("");
+
+interface HandShape {
+  limbs: Limb[];
+  lines: Pt[][];
+}
+
+/** A hand in its own coordinates: wrist at the origin, fingers pointing up (-y). */
+function raisedHand(kind: string): HandShape {
+  switch (kind) {
+    case "thumbsUp":
+      return {
+        limbs: [
+          { pts: [[0, -22], [0, -72]], w: 116 },
+          { pts: [[-34, -72], [-34, -152]], w: 34 },
+        ],
+        lines: [[[-6, -30], [48, -30]], [[-6, -48], [48, -48]], [[-6, -66], [48, -66]]],
+      };
+    case "peace":
+      return {
+        limbs: [
+          { pts: [[0, -22], [0, -62]], w: 104 },
+          { pts: [[-18, -62], [-38, -168]], w: 26 },
+          { pts: [[18, -62], [38, -168]], w: 26 },
+          { pts: [[-46, -34], [-22, -54]], w: 24 },
+        ],
+        lines: [[[-4, -36], [44, -36]], [[-4, -52], [44, -52]]],
+      };
+    case "point":
+      return {
+        limbs: [
+          { pts: [[0, -22], [0, -62]], w: 104 },
+          { pts: [[-18, -62], [-18, -182]], w: 28 },
+          { pts: [[-50, -42], [-30, -64]], w: 24 },
+        ],
+        lines: [[[2, -34], [46, -34]], [[2, -52], [46, -52]]],
+      };
+    default: // open palm (wave / cheer)
+      return {
+        limbs: [
+          { pts: [[0, -22], [0, -70]], w: 130 },
+          ...[-45, -15, 15, 45].map((fx): Limb => ({ pts: [[fx, -76], [fx * 1.14, -168]], w: 24 })),
+          { pts: [[-58, -40], [-94, -104]], w: 26 },
+        ],
+        lines: [],
+      };
+  }
+}
+
+/** Puts a hand's local shape at `wrist`, tilted to continue the forearm's direction. */
+function placeHand(shape: HandShape, wrist: Pt, angleDeg: number): HandShape {
+  const rad = (angleDeg * Math.PI) / 180;
+  const map = ([px, py]: Pt): Pt => [wrist[0] + px * Math.cos(rad) - py * Math.sin(rad), wrist[1] + px * Math.sin(rad) + py * Math.cos(rad)];
+  return { limbs: shape.limbs.map((l) => ({ ...l, pts: l.pts.map(map) })), lines: shape.lines.map((l) => l.map(map)) };
+}
+
+/** The gesture arm for the viewer's-left side, as a skin-and-ink SVG fragment. */
+function leftArmSvg(gesture: string, look: BodyLook): string {
+  const { skin, ink } = look;
+  if (gesture === "hips" || gesture === "crossed") {
+    const limbs: Limb[] =
+      gesture === "hips"
+        ? [
+            { pts: [[62, SLEEVE_HEM_Y], [62, 1004], [-30, 1064], [150, 1130]], w: 98, cap: "butt" },
+            { pts: [[160, 1134]], w: 104 },
+          ]
+        : [
+            { pts: [[62, SLEEVE_HEM_Y], [48, 1050], [470, 905]], w: 94, cap: "butt" },
+            { pts: [[500, 898]], w: 104 },
+          ];
+    const lines: Pt[][] =
+      gesture === "hips"
+        ? [[[136, 1100], [190, 1112]], [[134, 1122], [190, 1134]], [[136, 1144], [186, 1154]]]
+        : [[[486, 868], [530, 884]], [[484, 890], [530, 904]], [[488, 912], [528, 924]]];
+    return limbsSvg(limbs, skin, ink) + linesSvg(lines, ink);
+  }
+  const elbow: Pt = [-10, 975];
+  const wrist: Pt = gesture === "wave" ? [-118, 700] : gesture === "thumbsUp" ? [-84, 770] : gesture === "peace" ? [-100, 745] : gesture === "point" ? [-76, 735] : [-150, 720];
+  const angle = (Math.atan2(wrist[0] - elbow[0], elbow[1] - wrist[1]) * 180) / Math.PI;
+  const hand = placeHand(raisedHand(gesture === "cheer" || gesture === "wave" ? "open" : gesture), wrist, angle);
+  const limbs: Limb[] = [{ pts: [[40, 900], elbow, wrist], w: ARM_WIDTH }, ...hand.limbs];
+  return limbsSvg(limbs, skin, ink) + linesSvg(hand.lines, ink);
+}
+
+function gestureSvg(gesture: string, look: BodyLook): string {
+  const def = GESTURE_DEFS[gesture];
+  if (!def) return "";
+  const left = leftArmSvg(gesture, look);
+  return def.sides
+    .map((side) => (side === "L" ? left : `<g transform="translate(${ARM_MIRROR_X} 0) scale(-1 1)">${left}</g>`))
+    .join("");
+}
+
+/** SVG <mask> definition hiding the artwork's hanging forearm on the given sides. */
+function armCutMaskDef(sides: ("L" | "R")[]): string {
+  const cuts = sides.map((side) =>
+    side === "L"
+      ? `<polygon points="-400,944 -30,944 0,950 60,974 100,983 122,986 90,1320 -400,1320" fill="black"/>`
+      : `<polygon points="1200,946 690,954 660,966 611,986 660,1320 1200,1320" fill="black"/>`,
+  );
+  return `<mask id="peep-armcut" maskUnits="userSpaceOnUse" x="-600" y="-200" width="2000" height="3000"><rect x="-600" y="-200" width="2000" height="3000" fill="white"/>${cuts.join("")}</mask>`;
+}
+
 
 interface Foot {
   // The ankle's inner / outer x and the y where the leg meets the shoe.
@@ -325,15 +481,35 @@ function peepSvg(peep: Peep, size: number, viewBox?: string, thumbPose?: PoseKey
     .replace('viewBox="0 0 704 704"', `viewBox="${frame}"`)
     .replace(/ width="[^"]*" height="[^"]*"/, ` width="${Math.round((size * vbWidth) / vbHeight)}" height="${size}"`)
     .replace(/ clip-path="url\(#clip-[^)]*\)"/, "");
-  const look: BodyLook = { skin: peep.skin, pants: peep.pants, ink: peep.ink, hands: peep.hands, legs: peep.legs, shoes: peep.shoes };
-  // Hands go on top of the torso (its arm stubs have no hands), just before the head
-  // parts; inside DiceBear's own flip group, so they mirror with the figure.
-  out = out.replace("<use ", `${handsSvg(look)}<use `);
-  if (pose.legs) {
-    const legs = legsSvg(pose.key, look);
-    const mirrored = peep.flip ? `<g transform="translate(704, 0) scale(-1, 1)">${legs}</g>` : legs;
-    out = out.replace("</defs>", `</defs>${mirrored}`);
+  const look: BodyLook = {
+    gesture: peep.gesture,
+    skin: peep.skin,
+    pants: peep.pants,
+    ink: peep.ink,
+    hands: peep.hands,
+    legs: peep.legs,
+    shoes: peep.shoes,
+  };
+  const gesture = GESTURE_DEFS[peep.gesture];
+  let behind = "";
+  let front = "";
+  if (gesture) {
+    // Hide the artwork's hanging forearm on the gesture's side(s): the torso paths are
+    // everything between the defs and the first head-part <use>.
+    const bodyStart = out.indexOf("<path", out.indexOf("</defs>"));
+    const bodyEnd = out.indexOf("<use ", bodyStart);
+    out = `${out.slice(0, bodyStart)}<g mask="url(#peep-armcut)">${out.slice(bodyStart, bodyEnd)}</g>${out.slice(bodyEnd)}`;
+    out = out.replace("</defs>", `${armCutMaskDef(gesture.sides)}</defs>`);
+    if (gesture.layer === "behind") behind = gestureSvg(peep.gesture, look);
+    else front = gestureSvg(peep.gesture, look);
   }
+  // Hands (the artwork's arms just end in open stubs) go on top of the torso, just before
+  // the head parts; inside DiceBear's own flip group, so they mirror with the figure.
+  out = out.replace("<use ", `${handsSvg(look, gesture?.sides ?? [])}${front}<use `);
+  // Legs and tucked-behind arms sit beneath the torso, outside that group, so they get
+  // the same mirror by hand.
+  const underlay = behind + (pose.legs ? legsSvg(pose.key, look) : "");
+  if (underlay) out = out.replace("</defs>", `</defs>${peep.flip ? `<g transform="translate(704, 0) scale(-1, 1)">${underlay}</g>` : underlay}`);
   return out;
 }
 
