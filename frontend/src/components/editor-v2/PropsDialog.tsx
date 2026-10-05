@@ -18,10 +18,11 @@
  * ImageOverlayPickerDialog): a prop is cheap to delete, and this app's
  * driving vision favors direct manipulation over confirmation dialogs.
  */
-import { useEffect, useState } from "react";
-import { importLibraryAssetToProject, listLibraryAssets, type Asset, type LibraryAssetSummary } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { importLibraryAssetToProject, listLibraryAssets, uploadAsset, type Asset, type LibraryAssetSummary } from "@/lib/api";
 import type { ImageOverlayPlacement } from "@/lib/video/transformations";
 import { DEFAULT_OVERLAY_FRAMING, type OverlayFraming } from "@/lib/video/video_math";
+import { rasterizeSvgToPng, VectorsTab } from "./VectorsTab";
 
 // A freshly-placed prop takes up to this share of the frame's width/height,
 // whichever its own shape hits first.
@@ -125,6 +126,27 @@ function propRect(imageAspect: number, frameAspect: number): ImageOverlayPlaceme
   return { x: (1 - width) / 2, y: (1 - height) / 2, width, height };
 }
 
+type Tab = "props" | "icons" | "vectors";
+
+const TAB_LABELS: Record<Tab, string> = { props: "Props", icons: "Icons", vectors: "Vectors" };
+
+// Google Material icons (src/lib/materialIcons.json, built by
+// scripts/build-material-icons.mjs) load lazily, only once the Icons tab opens.
+const ICON_RASTER_SIZE = 512;
+const ICON_PAGE_SIZE = 150;
+const ICON_COLOR_SWATCHES = ["#ffffff", "#000000", "#ef4444", "#f97316", "#facc15", "#22c55e", "#3b82f6", "#a855f7", "#ec4899"];
+
+function iconSvgMarkup(inner: string, color: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON_RASTER_SIZE}" height="${ICON_RASTER_SIZE}" viewBox="0 0 24 24" fill="${color}">${inner}</svg>`;
+}
+
+/** Rasterizes the glyph, in the chosen colour, to a transparent PNG -- which
+ * then travels the exact same upload -> image-overlay path as any prop, so it
+ * renders identically in the preview and all export paths. */
+function renderIconPng(name: string, inner: string, color: string): Promise<File> {
+  return rasterizeSvgToPng(iconSvgMarkup(inner, color), `icon-${name}.png`);
+}
+
 // A light checkerboard, so a prop's transparent areas read as "see-through"
 // rather than as a flat dark tile.
 const CHECKERBOARD_STYLE: React.CSSProperties = {
@@ -157,6 +179,60 @@ export function PropsDialog({
   const [props, setProps] = useState<LibraryAssetSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [placingId, setPlacingId] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("props");
+  const [icons, setIcons] = useState<Record<string, string> | null>(null);
+  const [iconQuery, setIconQuery] = useState("");
+  const [iconColor, setIconColor] = useState("#ffffff");
+  const [iconLimit, setIconLimit] = useState(ICON_PAGE_SIZE);
+
+  useEffect(() => {
+    if (tab !== "icons" || icons) return;
+    let cancelled = false;
+    import("@/lib/materialIcons.json")
+      .then((module) => {
+        if (!cancelled) setIcons(module.default as Record<string, string>);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError("Failed to load icons");
+        setIcons({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, icons]);
+
+  const matchingIconNames = useMemo(() => {
+    if (!icons) return [];
+    const terms = iconQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return Object.keys(icons).filter((name) => terms.every((term) => name.includes(term)));
+  }, [icons, iconQuery]);
+
+  function handlePlaceIcon(name: string) {
+    if (!icons) return;
+    placeRasterized(name, renderIconPng(name, icons[name], iconColor));
+  }
+
+  // Shared by the Icons and Vectors tabs: upload the rasterized PNG, then
+  // place it as a square, aspect-locked prop.
+  function placeRasterized(key: string, filePromise: Promise<File>) {
+    if (placingId) return;
+    setPlacingId(key);
+    setError(null);
+    onImportingChange?.(true);
+    filePromise
+      .then((file) => uploadAsset(projectId, file))
+      .then((asset) => {
+        onImported(asset);
+        onPlace(asset, { rect: propRect(1, frameAspectRatio ?? 9 / 16), lockAspect: true });
+        onClose();
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Could not add this icon or vector");
+        setPlacingId(null);
+      })
+      .finally(() => onImportingChange?.(false));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -204,7 +280,7 @@ export function PropsDialog({
 
   return (
     <div role="dialog" aria-modal="true" aria-label="Props" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div onClick={(e) => e.stopPropagation()} className="flex h-[70vh] w-full max-w-2xl flex-col rounded-lg bg-surface p-4 shadow-lg">
+      <div onClick={(e) => e.stopPropagation()} className="flex h-[70vh] w-full max-w-2xl flex-col rounded-lg border border-accent bg-surface p-4 shadow-lg">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-sm font-semibold">Props -- drop something into your scene</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-foreground">
@@ -216,8 +292,107 @@ export function PropsDialog({
           its ends to choose how long it stays.
         </p>
 
+        <div className="mb-3 flex gap-1 border-b border-border">
+          {(["props", "icons", "vectors"] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={`-mb-px border-b-2 px-3 py-1 text-xs font-medium ${
+                tab === id ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"
+              }`}
+            >
+              {TAB_LABELS[id]}
+            </button>
+          ))}
+        </div>
+
         {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
 
+        {tab === "vectors" ? (
+          <VectorsTab placingKey={placingId} onPlace={(file, key) => placeRasterized(key, Promise.resolve(file))} />
+        ) : tab === "icons" ? (
+          <>
+            <div className="mb-2 flex items-center gap-2">
+              <input
+                type="search"
+                value={iconQuery}
+                onChange={(e) => {
+                  setIconQuery(e.target.value);
+                  setIconLimit(ICON_PAGE_SIZE);
+                }}
+                placeholder="Search Google Material icons (e.g. star, heart, arrow)"
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs"
+              />
+              <div className="flex items-center gap-1">
+                {ICON_COLOR_SWATCHES.map((swatch) => (
+                  <button
+                    key={swatch}
+                    type="button"
+                    onClick={() => setIconColor(swatch)}
+                    aria-label={`Colour ${swatch}`}
+                    style={{ backgroundColor: swatch }}
+                    className={`h-5 w-5 rounded-full border ${iconColor === swatch ? "ring-2 ring-accent ring-offset-1" : "border-border"}`}
+                  />
+                ))}
+                <input
+                  type="color"
+                  value={iconColor}
+                  onChange={(e) => setIconColor(e.target.value)}
+                  aria-label="Custom colour"
+                  className="h-6 w-6 cursor-pointer rounded border border-border bg-transparent p-0"
+                />
+              </div>
+            </div>
+            <p className="mb-2 text-[11px] text-muted">
+              Pick a colour, then click an icon to place it like a prop -- drag it, resize it, slide its ends. To change its
+              colour later, delete it and add it again.
+            </p>
+            <div className="flex-1 overflow-y-auto">
+              {icons === null ? (
+                <p className="text-center text-xs text-muted">Loading…</p>
+              ) : matchingIconNames.length === 0 ? (
+                <p className="text-center text-xs text-muted">No icons match.</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-6 gap-2 sm:grid-cols-8">
+                    {matchingIconNames.slice(0, iconLimit).map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => handlePlaceIcon(name)}
+                        disabled={placingId !== null}
+                        title={name.replace(/_/g, " ")}
+                        className="flex aspect-square items-center justify-center rounded-md border border-border p-2 hover:border-accent disabled:opacity-60"
+                        style={CHECKERBOARD_STYLE}
+                      >
+                        {placingId === name ? (
+                          <span className="text-[10px] text-black">…</span>
+                        ) : (
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill={iconColor}
+                            className="h-full w-full drop-shadow-[0_0_1px_rgba(0,0,0,0.6)]"
+                            dangerouslySetInnerHTML={{ __html: icons[name] }}
+                          />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  {matchingIconNames.length > iconLimit && (
+                    <button
+                      type="button"
+                      onClick={() => setIconLimit((n) => n + ICON_PAGE_SIZE)}
+                      className="mx-auto mt-3 block rounded-md border border-border px-3 py-1 text-xs text-muted hover:text-foreground"
+                    >
+                      Show more ({matchingIconNames.length - iconLimit} left)
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </>
+        ) : (
         <div className="flex-1 overflow-y-auto">
           {props === null ? (
             <p className="text-center text-xs text-muted">Loading…</p>
@@ -248,6 +423,7 @@ export function PropsDialog({
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );

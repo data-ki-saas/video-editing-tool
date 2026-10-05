@@ -22,11 +22,17 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-10-05",
+    title: "Props: thousands of icons and vectors, in any colour",
+    description:
+      "The Props popup now has two new tabs. Icons holds Google's Material icons; Vectors searches a huge free library of line and solid vectors. Pick a colour first — for vectors you can also set the outline colour and thickness, flip them and rotate them — then click one to place it like any other prop: drag, resize, and slide its ends on the time bar. The popup also has a fresh thin blue border.",
+    isLatest: true,
+  },
+  {
     date: "2026-10-04",
     title: "Props: drop a car, a cup or a rocket launcher into your scene",
     description:
       "There's a new Props button in the Overlays group, and behind it a shelf of free, see-through artwork: a car, a motorcycle, a coffee cup, a post box, a signboard, a rocket launcher and more. Click one and it lands at your playhead on its own timeline row. Drag it into place, resize it, and slide its ends to choose how long it stays.",
-    isLatest: true,
   },
   {
     date: "2026-10-04",

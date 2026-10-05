@@ -21,6 +21,7 @@
     "three": "^0.185.1"
   },
   "devDependencies": {
+    "@material-design-icons/svg": "^0.14.15",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
