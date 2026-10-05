@@ -1,3 +1,4 @@
+import io
 import logging
 import tempfile
 import uuid
@@ -5,6 +6,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import HTTPException
+from PIL import Image, UnidentifiedImageError
 
 from src.asset_library import repository
 from src.asset_library.schemas import LibraryAssetSummary
@@ -29,6 +31,8 @@ _EXTENSION_BY_MIME = {"video/mp4": ".mp4", "image/jpeg": ".jpg", "image/png": ".
 _MAX_DESCRIPTION_LINES = 4
 _MAX_DESCRIPTION_CHARS = 480
 _MAX_TITLE_CHARS = 80
+_MAX_PROP_UPLOAD_BYTES = 10 * 1024 * 1024
+_MAX_PROP_EDGE = 1024
 
 
 def _to_summary(record: repository.LibraryAssetRecord) -> LibraryAssetSummary:
@@ -235,3 +239,75 @@ def import_media_to_project(library_asset_id: str, project_id: str, user: Curren
         kind=promotion.asset_type,
         body=response.content,
     )
+
+
+def upload_prop(raw: bytes, filename: str, title: str, user: CurrentUser) -> LibraryAssetSummary:
+    """Adds a placeable prop to the shared "props" catalog. Must be a real
+    cut-out (PNG/WebP/GIF with transparency): a prop on an opaque background
+    would paste a rectangle over the video. Re-encoded as a PNG capped at
+    _MAX_PROP_EDGE, same as scripts/seed_free_library.py's seeded props."""
+    if not raw:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+    if len(raw) > _MAX_PROP_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Prop images must be 10 MB or smaller")
+    try:
+        image = Image.open(io.BytesIO(raw))
+        image.load()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(status_code=400, detail="That file isn't a readable image") from exc
+    image = image.convert("RGBA")
+    alpha = image.getchannel("A")
+    if alpha.getextrema()[0] >= 250:
+        raise HTTPException(status_code=400, detail="This image has no transparent background -- use a PNG cut-out")
+    bounds = alpha.point(lambda value: 255 if value > 16 else 0).getbbox()
+    if bounds is None:
+        raise HTTPException(status_code=400, detail="This image is fully transparent")
+    image = image.crop(bounds)
+    if max(image.size) > _MAX_PROP_EDGE:
+        scale = _MAX_PROP_EDGE / max(image.size)
+        image = image.resize((max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.LANCZOS)
+    out = io.BytesIO()
+    image.save(out, format="PNG", optimize=True)
+
+    trimmed_title = (title.strip() or Path(filename).stem.replace("_", " ").replace("-", " ").strip() or "Prop")[:_MAX_TITLE_CHARS]
+    row_id = f"prop-{uuid.uuid4().hex}"
+    key = f"library-assets/props/{row_id}.png"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        tmp.write(out.getvalue())
+        tmp_path = Path(tmp.name)
+    try:
+        url = r2_client.upload_public_object(tmp_path, key, "image/png")
+    except Exception as exc:
+        logger.exception("upload_prop failed to write public object")
+        raise HTTPException(status_code=502, detail="Couldn't save this prop -- try again") from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    try:
+        created = repository.create_prop(id=row_id, promoted_by=user.id, title=trimmed_title, media_url=url)
+    except Exception as exc:
+        logger.exception("upload_prop failed to save library row")
+        try:
+            r2_client.delete_public_object(key)
+        except Exception:
+            logger.exception("failed to clean up orphaned prop %r", key)
+        raise HTTPException(status_code=502, detail="Couldn't save this prop -- try again") from exc
+    return _to_summary(created)
+
+
+def delete_prop(library_asset_id: str) -> None:
+    """Removes a prop from the shared catalog (row + its public R2 files).
+    Projects that already placed it keep working: import-to-project copied
+    the bytes into that project's own assets."""
+    record = repository.get(library_asset_id)
+    if record is None or record.category != "props" or record.asset_type != "image":
+        raise HTTPException(status_code=404, detail="Prop not found")
+    repository.delete(library_asset_id)
+    for url in {record.media_url, record.thumbnail_url}:
+        key = r2_client.thumbnail_key_from_url(url) if url else None
+        if key is None:
+            continue
+        try:
+            r2_client.delete_public_object(key)
+        except Exception:
+            logger.exception("failed to delete public prop object %r", key)

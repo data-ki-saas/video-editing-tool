@@ -50,6 +50,25 @@ def create_avatar_promotion(
     return LibraryAssetRecord(**result.data[0])
 
 
+def create_prop(*, id: str, promoted_by: str, title: str, media_url: str) -> LibraryAssetRecord:
+    payload = {
+        "id": id,
+        "asset_type": "image",
+        "promoted_by": promoted_by,
+        "title": title,
+        "thumbnail_url": media_url,
+        "media_url": media_url,
+        "media_mime_type": "image/png",
+        "category": "props",
+    }
+    result = get_supabase_client().table(_TABLE).insert(payload).execute()
+    return LibraryAssetRecord(**result.data[0])
+
+
+def delete(library_asset_id: str) -> None:
+    get_supabase_client().table(_TABLE).delete().eq("id", library_asset_id).execute()
+
+
 def list_public(asset_type: str | None, category: str | None = None) -> list[LibraryAssetRecord]:
     query = get_supabase_client().table(_TABLE).select(_COLUMNS)
     if asset_type is not None:

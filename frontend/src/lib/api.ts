@@ -650,6 +650,30 @@ export async function listLibraryAssets(assetType?: LibraryAssetType, category?:
   return wire.map(toLibraryAssetSummary);
 }
 
+/** POST /api/asset-library/props -- admin-only. Adds a transparent-PNG cut-out
+ * to the shared "props" catalog every user's Props dialog lists. */
+export async function uploadLibraryProp(file: File, title: string): Promise<LibraryAssetSummary> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("title", title);
+  const response = await apiFetch(`${API_BASE_URL}/api/asset-library/props`, {
+    method: "POST",
+    headers: await authHeader(),
+    body: formData,
+  });
+  return toLibraryAssetSummary(await handleResponse<LibraryAssetSummaryWire>(response));
+}
+
+/** DELETE /api/asset-library/props/{id} -- admin-only; removes the prop from
+ * the shared catalog for everyone (already-placed copies are unaffected). */
+export async function deleteLibraryProp(libraryAssetId: string): Promise<void> {
+  const response = await apiFetch(`${API_BASE_URL}/api/asset-library/props/${encodeURIComponent(libraryAssetId)}`, {
+    method: "DELETE",
+    headers: await authHeader(),
+  });
+  await throwIfNotOk(response);
+}
+
 /** POST /api/asset-library/avatars/{id}/promote -- copies one of this user's
  * own generated avatars into the public library, permanently and for anyone
  * to use, gated on the caller having checked the liability-waiver box

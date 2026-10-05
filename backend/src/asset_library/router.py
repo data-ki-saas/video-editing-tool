@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Form, UploadFile
 
 from src.asset_library import service
 from src.asset_library.schemas import LibraryAssetSummary, PromoteAvatarRequest
 from src.assets.schemas import AssetInfo
 from src.avatar_gen.schemas import GeneratedAvatarDetail
-from src.core.auth import CurrentUser, get_current_user
+from src.core.auth import CurrentUser, get_current_user, require_admin
 
 router = APIRouter(prefix="/api/asset-library", tags=["asset-library"])
 
@@ -36,3 +36,16 @@ async def import_library_asset_to_project(
     library_asset_id: str, project_id: str, user: CurrentUser = Depends(get_current_user)
 ) -> AssetInfo:
     return service.import_media_to_project(library_asset_id, project_id, user)
+
+
+# Props are a shared catalog every user sees, so adding/removing them is
+# admin-only (the editor's Props dialog only shows these controls to admins,
+# but this is the actual gate).
+@router.post("/props", response_model=LibraryAssetSummary, status_code=201)
+async def upload_prop(file: UploadFile, title: str = Form(default=""), user: CurrentUser = Depends(require_admin)) -> LibraryAssetSummary:
+    return service.upload_prop(await file.read(), file.filename or "", title, user)
+
+
+@router.delete("/props/{library_asset_id}", status_code=204)
+async def delete_prop(library_asset_id: str, user: CurrentUser = Depends(require_admin)) -> None:
+    service.delete_prop(library_asset_id)

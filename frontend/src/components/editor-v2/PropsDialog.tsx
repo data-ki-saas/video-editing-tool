@@ -18,10 +18,11 @@
  * ImageOverlayPickerDialog): a prop is cheap to delete, and this app's
  * driving vision favors direct manipulation over confirmation dialogs.
  */
-import { useEffect, useMemo, useState } from "react";
-import { importLibraryAssetToProject, listLibraryAssets, uploadAsset, type Asset, type LibraryAssetSummary } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { deleteLibraryProp, importLibraryAssetToProject, listLibraryAssets, uploadAsset, uploadLibraryProp, type Asset, type LibraryAssetSummary } from "@/lib/api";
 import type { ImageOverlayPlacement } from "@/lib/video/transformations";
 import { DEFAULT_OVERLAY_FRAMING, type OverlayFraming } from "@/lib/video/video_math";
+import { useIsAdmin } from "@/lib/useIsAdmin";
 import { PeepsTab } from "./PeepsTab";
 import { rasterizeSvgToPng, VectorsTab } from "./VectorsTab";
 
@@ -181,6 +182,11 @@ export function PropsDialog({
   const [error, setError] = useState<string | null>(null);
   const [placingId, setPlacingId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("props");
+  // Props are a shared catalog, so only admins can add to or prune it.
+  const isAdmin = useIsAdmin() === true;
+  const [managing, setManaging] = useState(false);
+  const [uploadingProp, setUploadingProp] = useState(false);
+  const propFileInput = useRef<HTMLInputElement>(null);
   const [icons, setIcons] = useState<Record<string, string> | null>(null);
   const [iconQuery, setIconQuery] = useState("");
   const [iconColor, setIconColor] = useState("#ffffff");
@@ -250,6 +256,36 @@ export function PropsDialog({
       cancelled = true;
     };
   }, []);
+
+  async function handleUploadProps(files: FileList | null) {
+    if (!files || files.length === 0 || uploadingProp) return;
+    setUploadingProp(true);
+    setError(null);
+    const added: LibraryAssetSummary[] = [];
+    const failures: string[] = [];
+    for (const file of Array.from(files)) {
+      try {
+        added.push(await uploadLibraryProp(file, file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ")));
+      } catch (err) {
+        failures.push(`${file.name}: ${err instanceof Error ? err.message : "upload failed"}`);
+      }
+    }
+    if (added.length > 0) setProps((previous) => [...added.reverse(), ...(previous ?? [])]);
+    if (failures.length > 0) setError(failures.join("; "));
+    setUploadingProp(false);
+    if (propFileInput.current) propFileInput.current.value = "";
+  }
+
+  async function handleDeleteProp(prop: LibraryAssetSummary) {
+    if (!window.confirm(`Delete "${prop.title}" for everyone? This can't be undone.`)) return;
+    setError(null);
+    try {
+      await deleteLibraryProp(prop.id);
+      setProps((previous) => (previous ?? []).filter((item) => item.id !== prop.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't delete this prop");
+    }
+  }
 
   function handlePlace(prop: LibraryAssetSummary) {
     if (placingId) return;
@@ -397,6 +433,35 @@ export function PropsDialog({
           </>
         ) : (
         <div className="flex-1 overflow-y-auto">
+          {isAdmin && (
+            <div className="mb-2 flex items-center gap-2">
+              <input
+                ref={propFileInput}
+                type="file"
+                accept="image/png,image/webp,image/gif"
+                multiple
+                className="hidden"
+                onChange={(e) => void handleUploadProps(e.target.files)}
+              />
+              <button
+                type="button"
+                onClick={() => propFileInput.current?.click()}
+                disabled={uploadingProp}
+                className="rounded-md border border-border px-2 py-1 text-xs hover:border-accent disabled:opacity-60"
+              >
+                {uploadingProp ? "Uploading…" : "+ Upload props"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setManaging((value) => !value)}
+                aria-pressed={managing}
+                className={`rounded-md border px-2 py-1 text-xs ${managing ? "border-accent" : "border-border hover:border-accent"}`}
+              >
+                {managing ? "Done" : "Delete props"}
+              </button>
+              <span className="text-[10px] text-muted">Admin: transparent PNG cut-outs. Changes are shared with everyone.</span>
+            </div>
+          )}
           {props === null ? (
             <p className="text-center text-xs text-muted">Loading…</p>
           ) : props.length === 0 ? (
@@ -404,13 +469,23 @@ export function PropsDialog({
           ) : (
             <div className="grid grid-cols-4 gap-2">
               {props.map((prop) => (
+                <div key={prop.id} className="relative">
+                {managing && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteProp(prop)}
+                    aria-label={`Delete ${prop.title}`}
+                    className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-[11px] text-white shadow"
+                  >
+                    ✕
+                  </button>
+                )}
                 <button
-                  key={prop.id}
                   type="button"
-                  onClick={() => handlePlace(prop)}
+                  onClick={() => (managing ? void handleDeleteProp(prop) : handlePlace(prop))}
                   disabled={placingId !== null}
                   title={prop.description ?? prop.title}
-                  className="flex flex-col overflow-hidden rounded-md border border-border bg-background text-left hover:border-accent disabled:opacity-60"
+                  className="flex w-full flex-col overflow-hidden rounded-md border border-border bg-background text-left hover:border-accent disabled:opacity-60"
                 >
                   <span className="flex aspect-square w-full items-center justify-center p-2" style={CHECKERBOARD_STYLE}>
                     {prop.thumbnailUrl && (
@@ -422,6 +497,7 @@ export function PropsDialog({
                     {placingId === prop.id ? "Adding…" : prop.title}
                   </span>
                 </button>
+                </div>
               ))}
             </div>
           )}
