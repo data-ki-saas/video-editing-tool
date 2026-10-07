@@ -28,7 +28,7 @@
  * text to match, live, in this same preview.
  *
  * The "Already on this reel" list (same rationale as
- * VideoOverlayPickerDialog.tsx's own) is the only way to switch which
+ * OverlayPickerDialog.tsx's own) is the only way to switch which
  * caption this dialog is editing without first closing it and hunting for
  * the right segment on TextOverlayTrack -- clicking a row there both jumps
  * the live preview to it AND re-points this same open dialog at it

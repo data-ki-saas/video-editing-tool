@@ -490,16 +490,14 @@ export function ThreePaneEditor({
   const [imageFramingDialogOverlayIndex, setImageFramingDialogOverlayIndex] = useState<number | null>(null);
   // Same as framingDialogBaseTimeSeconds above, for ImageOverlayFramingDialog.
   const [imageFramingDialogBaseTimeSeconds, setImageFramingDialogBaseTimeSeconds] = useState(0);
-  // "Video Overlay"/"Image Overlay" tabs' own small asset-picker dialogs --
-  // see VideoOverlayPickerDialog.tsx/ImageOverlayPickerDialog.tsx. Picking a
-  // tile adds that asset instantly (same as AssetGallery's right-click
-  // "Overlay") and closes the picker itself.
-  const [isVideoOverlayPickerOpen, setIsVideoOverlayPickerOpen] = useState(false);
+  // "Overlay" tab's asset-picker dialog (photos and videos together) -- see
+  // OverlayPickerDialog.tsx. Confirming a tile adds that asset and closes the
+  // picker itself.
+  const [isOverlayPickerOpen, setIsOverlayPickerOpen] = useState(false);
   // Set by AssetGallery's right-click "Overlay" on a specific video tile --
   // same "preselect instead of requiring a second click" pattern as
   // cutawayDialogPreselectedAssetId below.
-  const [videoOverlayPickerPreselectedAssetId, setVideoOverlayPickerPreselectedAssetId] = useState<string | null>(null);
-  const [isImageOverlayPickerOpen, setIsImageOverlayPickerOpen] = useState(false);
+  const [overlayPickerPreselectedAssetId, setOverlayPickerPreselectedAssetId] = useState<string | null>(null);
 
   // Named points on the main sequence's own timeline (MarkerTrack.tsx) --
   // cosmetic/not undo-tracked, same tier as selectedBackgroundTrackId (see
@@ -1446,8 +1444,8 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
-  // Right-click "Overlay" on an image asset in AssetGallery, or a tile
-  // picked from ImageOverlayPickerDialog (the "Image Overlay" tab) --
+  // Right-click "Overlay" on an image asset in AssetGallery, or a photo
+  // confirmed in OverlayPickerDialog (the "Overlay" tab) --
   // places it on its own rail at the current playhead, defaulting to a
   // Picture-in-Picture layout the user can switch afterward, exact parity
   // with handleAddVideoOverlay below (see video_math.ts's ImageOverlayClip).
@@ -1457,7 +1455,7 @@ export function ThreePaneEditor({
   // cover-fit would crop the sides off a wide picture (or the top and bottom
   // off a tall one). Not locked, so it can still be resized freely to crop.
   async function handleAddImageOverlay(asset: Asset, placement?: ImageOverlayPlacement) {
-    setIsImageOverlayPickerOpen(false);
+    setIsOverlayPickerOpen(false);
     let effectivePlacement = placement;
     if (!effectivePlacement) {
       const imageAspect = await loadImageAspectRatio(asset.url);
@@ -1554,8 +1552,8 @@ export function ThreePaneEditor({
     }
   }
 
-  // Right-click "Overlay" on a video asset in AssetGallery, or a tile
-  // picked from VideoOverlayPickerDialog (the "Video Overlay" tab) --
+  // Right-click "Overlay" on a video asset in AssetGallery, or a video
+  // confirmed in OverlayPickerDialog (the "Overlay" tab) --
   // places it on its own rail at the current playhead, defaulting to a
   // Full-Screen layout the user can switch afterward (see
   // VideoOverlayTrack.tsx). Needs the source asset's own probed duration to
@@ -1582,8 +1580,8 @@ export function ThreePaneEditor({
       options?.chromaKeyColor
     );
     pushChange(label, state);
-    setIsVideoOverlayPickerOpen(false);
-    setVideoOverlayPickerPreselectedAssetId(null);
+    setIsOverlayPickerOpen(false);
+    setOverlayPickerPreselectedAssetId(null);
 
     // Chroma key never fires a fal.ai request, here or anywhere else -- it
     // keys itself out locally, both in the live preview
@@ -1599,14 +1597,14 @@ export function ThreePaneEditor({
   }
 
   // AssetGallery's right-click "Overlay" on a video asset -- opens the same
-  // picker dialog the "Video Overlay" tab uses, with this tile preselected,
+  // picker dialog the "Overlay" tab uses, with this tile preselected,
   // instead of adding instantly. (Adding instantly used to be the behavior
   // here, with a separate "Overlay (remove background)" menu entry for AI
   // matting -- replaced by always routing through the picker now that it
   // also offers chroma key, so there's one place to make that choice.)
-  function handleOpenVideoOverlayPickerForAsset(asset: Asset) {
-    setVideoOverlayPickerPreselectedAssetId(asset.id);
-    setIsVideoOverlayPickerOpen(true);
+  function handleOpenOverlayPickerForAsset(asset: Asset) {
+    setOverlayPickerPreselectedAssetId(asset.id);
+    setIsOverlayPickerOpen(true);
   }
 
   // Request/poll/refresh cycle for a real fal.ai/VEED matting job -- "ai"
@@ -3153,7 +3151,7 @@ export function ThreePaneEditor({
           onAddImageOverlay={handleAddImageOverlay}
           onAddToSequence={handleAddToSequence}
           onAddVideoOverlay={handleAddVideoOverlay}
-          onOpenVideoOverlayPickerForAsset={handleOpenVideoOverlayPickerForAsset}
+          onOpenOverlayPickerForAsset={handleOpenOverlayPickerForAsset}
           onAddMusicClip={handleAddMusicClip}
           onOpenCutawayDialogForAsset={handleOpenCutawayDialogForAsset}
           usedAssetIds={usedAssetIds}
@@ -3236,17 +3234,14 @@ export function ThreePaneEditor({
           onSaveTextSlide={handleSaveTextSlide}
           onCloseTextSlideDialog={handleCloseTextSlideDialog}
           onDeleteTextSlide={handleDeleteCutaway}
-          isVideoOverlayPickerOpen={isVideoOverlayPickerOpen}
-          videoOverlayPickerPreselectedAssetId={videoOverlayPickerPreselectedAssetId}
-          onOpenVideoOverlayPicker={() => setIsVideoOverlayPickerOpen(true)}
-          onCloseVideoOverlayPicker={() => {
-            setIsVideoOverlayPickerOpen(false);
-            setVideoOverlayPickerPreselectedAssetId(null);
+          isOverlayPickerOpen={isOverlayPickerOpen}
+          overlayPickerPreselectedAssetId={overlayPickerPreselectedAssetId}
+          onOpenOverlayPicker={() => setIsOverlayPickerOpen(true)}
+          onCloseOverlayPicker={() => {
+            setIsOverlayPickerOpen(false);
+            setOverlayPickerPreselectedAssetId(null);
           }}
           onDeleteVideoOverlay={handleDeleteVideoOverlay}
-          isImageOverlayPickerOpen={isImageOverlayPickerOpen}
-          onOpenImageOverlayPicker={() => setIsImageOverlayPickerOpen(true)}
-          onCloseImageOverlayPicker={() => setIsImageOverlayPickerOpen(false)}
           onDeleteImageOverlay={handleDeleteImageOverlay}
           previewFrameUrl={previewFrameUrl}
           frameAspectRatio={frameAspectRatio}

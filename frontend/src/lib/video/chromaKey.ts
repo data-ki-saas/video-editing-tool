@@ -59,7 +59,7 @@ export function hexToRgb(hex: string): { r: number; g: number; b: number } {
   return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
 }
 
-// The inverse of hexToRgb -- used by CutawayDialog's/VideoOverlayPickerDialog's
+// The inverse of hexToRgb -- used by CutawayDialog's/OverlayPickerDialog's
 // eyedropper to turn a sampled photo pixel back into the hex string
 // chromaKeyColor is persisted as.
 export function rgbToHex(r: number, g: number, b: number): string {

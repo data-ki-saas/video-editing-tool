@@ -54,8 +54,7 @@ import type { CutTransitionId } from "@/lib/video/cutTransitionPresets";
 import type { CanvasFillMode } from "@/lib/video/canvasFillPresets";
 import { VideoOverlayFramingDialog } from "./VideoOverlayFramingDialog";
 import { ImageOverlayFramingDialog } from "./ImageOverlayFramingDialog";
-import { VideoOverlayPickerDialog } from "./VideoOverlayPickerDialog";
-import { ImageOverlayPickerDialog } from "./ImageOverlayPickerDialog";
+import { OverlayPickerDialog } from "./OverlayPickerDialog";
 import { OverlaySourceStartDialog } from "./OverlaySourceStartDialog";
 import { CanvasPlayer, type CanvasPlayerHandle } from "./CanvasPlayer";
 import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
@@ -218,7 +217,7 @@ export function ActionArea({
   onAddImageOverlay,
   onAddToSequence,
   onAddVideoOverlay,
-  onOpenVideoOverlayPickerForAsset,
+  onOpenOverlayPickerForAsset,
   onAddMusicClip,
   onOpenCutawayDialogForAsset,
   usedAssetIds,
@@ -297,14 +296,11 @@ export function ActionArea({
   onSaveTextSlide,
   onCloseTextSlideDialog,
   onDeleteTextSlide,
-  isVideoOverlayPickerOpen,
-  videoOverlayPickerPreselectedAssetId,
-  onOpenVideoOverlayPicker,
-  onCloseVideoOverlayPicker,
+  isOverlayPickerOpen,
+  overlayPickerPreselectedAssetId,
+  onOpenOverlayPicker,
+  onCloseOverlayPicker,
   onDeleteVideoOverlay,
-  isImageOverlayPickerOpen,
-  onOpenImageOverlayPicker,
-  onCloseImageOverlayPicker,
   onDeleteImageOverlay,
   previewFrameUrl,
   frameAspectRatio,
@@ -347,7 +343,7 @@ export function ActionArea({
   onAddImageOverlay: (asset: Asset, placement?: ImageOverlayPlacement) => void;
   onAddToSequence: (asset: Asset) => void;
   onAddVideoOverlay: (asset: Asset, options?: { removeBackground?: boolean; chromaKeyColor?: string }) => void;
-  onOpenVideoOverlayPickerForAsset: (asset: Asset) => void;
+  onOpenOverlayPickerForAsset: (asset: Asset) => void;
   onAddMusicClip: (asset: Asset) => void;
   onOpenCutawayDialogForAsset: (asset: Asset) => void;
   usedAssetIds: Set<string>;
@@ -500,20 +496,15 @@ export function ActionArea({
   ) => void;
   onCloseTextSlideDialog: () => void;
   onDeleteTextSlide: (segment: CutawaySegment) => void;
-  isVideoOverlayPickerOpen: boolean;
+  isOverlayPickerOpen: boolean;
   // Set by AssetGallery's right-click "Overlay" on a specific video tile --
-  // see VideoOverlayPickerDialog's own preselectedAssetId prop comment.
-  videoOverlayPickerPreselectedAssetId: string | null;
-  onOpenVideoOverlayPicker: () => void;
-  onCloseVideoOverlayPicker: () => void;
-  // VideoOverlayPickerDialog's own "Already on this reel" list -- deletes
-  // a row's overlay outright.
+  // see OverlayPickerDialog's own preselectedAssetId prop comment.
+  overlayPickerPreselectedAssetId: string | null;
+  onOpenOverlayPicker: () => void;
+  onCloseOverlayPicker: () => void;
+  // OverlayPickerDialog's own "Already on this reel" list -- deletes a
+  // row's overlay outright (video and photo rows each have their own handler).
   onDeleteVideoOverlay: (overlayIndex: number) => void;
-  isImageOverlayPickerOpen: boolean;
-  onOpenImageOverlayPicker: () => void;
-  onCloseImageOverlayPicker: () => void;
-  // ImageOverlayPickerDialog's own "Already on this reel" list -- same as
-  // onDeleteVideoOverlay above.
   onDeleteImageOverlay: (overlayIndex: number) => void;
   // The actual current frame (closest thumbnail to the playhead) and its
   // aspect ratio, for TextOverlayDialog's live preview -- see that dialog's
@@ -568,7 +559,7 @@ export function ActionArea({
   // Current playhead position -- TtsOverlayDialog needs this as a freshly-
   // added overlay's own startTimeSeconds (see that dialog's own comment).
   currentTimeSeconds: number;
-  // VideoOverlayPickerDialog/ImageOverlayPickerDialog's own "Already on
+  // OverlayPickerDialog's own "Already on
   // this reel" list -- jumps the live preview to an existing overlay's
   // start time when its row is clicked.
   onSeek: (seconds: number) => void;
@@ -638,7 +629,7 @@ export function ActionArea({
           onDeleted={onAssetDeleted}
           onAddImageOverlay={onAddImageOverlay}
           onAddToSequence={onAddToSequence}
-          onOpenVideoOverlayPickerForAsset={onOpenVideoOverlayPickerForAsset}
+          onOpenOverlayPickerForAsset={onOpenOverlayPickerForAsset}
           onAddMusicClip={onAddMusicClip}
           onOpenCutawayDialogForAsset={onOpenCutawayDialogForAsset}
           usedAssetIds={usedAssetIds}
@@ -655,10 +646,8 @@ export function ActionArea({
           cutawayCount={sequenceClips.filter((entry) => entry.kind !== "text").length}
           onOpenTextSlideDialog={onOpenTextSlideDialog}
           textSlideCount={sequenceClips.filter((entry) => entry.kind === "text").length}
-          onOpenVideoOverlayPicker={onOpenVideoOverlayPicker}
-          videoOverlayCount={videoOverlays.length}
-          onOpenImageOverlayPicker={onOpenImageOverlayPicker}
-          imageOverlayCount={overlayImages.length}
+          onOpenOverlayPicker={onOpenOverlayPicker}
+          overlayCount={videoOverlays.length + overlayImages.length}
           onOpenPropsDialog={() => setIsPropsDialogOpen(true)}
           onOpenTextDialog={onOpenTextDialog}
           textOverlayCount={textOverlays.filter((overlay) => isLabelTemplateId(overlay.templateId)).length}
@@ -1008,35 +997,24 @@ export function ActionArea({
         />
       )}
 
-      {isVideoOverlayPickerOpen && (
-        <VideoOverlayPickerDialog
+      {isOverlayPickerOpen && (
+        <OverlayPickerDialog
           assets={assets}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
           videoOverlays={selections.videoOverlays}
-          videoDurationSeconds={videoDurationSeconds}
-          preselectedAssetId={videoOverlayPickerPreselectedAssetId}
-          onPick={onAddVideoOverlay}
-          onLocateOverlay={(overlayIndex) => {
-            const overlay = selections.videoOverlays[overlayIndex];
-            if (overlay) onSeek(overlay.startTimeSeconds);
-          }}
-          onDeleteOverlay={onDeleteVideoOverlay}
-          onClose={onCloseVideoOverlayPicker}
-        />
-      )}
-
-      {isImageOverlayPickerOpen && (
-        <ImageOverlayPickerDialog
-          assets={assets}
           overlayImages={selections.overlayImages}
           videoDurationSeconds={videoDurationSeconds}
-          onPick={onAddImageOverlay}
-          onLocateOverlay={(overlayIndex) => {
-            const overlay = selections.overlayImages[overlayIndex];
+          preselectedAssetId={overlayPickerPreselectedAssetId}
+          onPickVideo={onAddVideoOverlay}
+          onPickImage={onAddImageOverlay}
+          onLocateOverlay={(kind, overlayIndex) => {
+            const overlay = kind === "video" ? selections.videoOverlays[overlayIndex] : selections.overlayImages[overlayIndex];
             if (overlay) onSeek(overlay.startTimeSeconds);
           }}
-          onDeleteOverlay={onDeleteImageOverlay}
-          onClose={onCloseImageOverlayPicker}
+          onDeleteOverlay={(kind, overlayIndex) =>
+            kind === "video" ? onDeleteVideoOverlay(overlayIndex) : onDeleteImageOverlay(overlayIndex)
+          }
+          onClose={onCloseOverlayPicker}
         />
       )}
 

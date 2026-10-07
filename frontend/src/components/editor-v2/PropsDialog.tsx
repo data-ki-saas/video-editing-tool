@@ -15,7 +15,7 @@
  * dragged, resized, filtered, switched to 3D etc. exactly like any photo.
  *
  * One click does the whole thing (no select-then-confirm step, unlike
- * ImageOverlayPickerDialog): a prop is cheap to delete, and this app's
+ * OverlayPickerDialog): a prop is cheap to delete, and this app's
  * driving vision favors direct manipulation over confirmation dialogs.
  */
 import { useEffect, useMemo, useRef, useState } from "react";

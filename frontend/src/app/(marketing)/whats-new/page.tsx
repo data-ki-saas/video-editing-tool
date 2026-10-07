@@ -23,10 +23,16 @@ interface ChangelogEntry {
 const ENTRIES: ChangelogEntry[] = [
   {
     date: "2026-10-07",
+    title: "One Overlay button for videos and photos",
+    description:
+      "Video Overlay and Image Overlay are now a single Overlay button, just like Cutaway. Pick any video or photo in one place — background removal options appear when you choose a video — and see everything already on your reel, photos and videos together, in one list. A photo overlay now also starts in a box shaped like the photo, so wide pictures aren't cropped.",
+    isLatest: true,
+  },
+  {
+    date: "2026-10-07",
     title: "Props: search millions of transparent PNGs",
     description:
       "The Props popup has a new PNG tab. Type anything — a rocket, a coffee cup, a dog — and it searches Wikimedia Commons for openly licensed cut-outs with a see-through background. Click one to drop it into your scene like any other prop: drag, resize, and slide its ends on the time bar. Each result shows its licence, and some ask for a credit if you publish.",
-    isLatest: true,
   },
   {
     date: "2026-10-05",

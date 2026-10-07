@@ -87,7 +87,7 @@ export function AssetGallery({
   onDeleted,
   onAddImageOverlay,
   onAddToSequence,
-  onOpenVideoOverlayPickerForAsset,
+  onOpenOverlayPickerForAsset,
   onAddMusicClip,
   onOpenCutawayDialogForAsset,
   usedAssetIds,
@@ -109,11 +109,11 @@ export function AssetGallery({
   onDeleted: (assetId: string) => void;
   onAddImageOverlay: (asset: Asset) => void;
   onAddToSequence: (asset: Asset) => void;
-  // Opens VideoOverlayPickerDialog (the same "Video Overlay" tab dialog)
+  // Opens OverlayPickerDialog (the same "Overlay" tab dialog)
   // with this asset preselected, instead of adding instantly -- the picker
   // is where layout/background-removal choices (including chroma key) get
   // made, see that component's own comment.
-  onOpenVideoOverlayPickerForAsset: (asset: Asset) => void;
+  onOpenOverlayPickerForAsset: (asset: Asset) => void;
   onAddMusicClip: (asset: Asset) => void;
   onOpenCutawayDialogForAsset: (asset: Asset) => void;
   usedAssetIds: Set<string>;
@@ -253,13 +253,13 @@ export function AssetGallery({
                 ? [
                     { label: "View", onSelect: () => setPreviewAsset(asset) },
                     { label: "Cutaway", onSelect: () => onAddToSequence(asset) },
-                    // Opens the "Video Overlay" tab's own picker dialog
-                    // (VideoOverlayPickerDialog.tsx) with this tile
+                    // Opens the "Overlay" tab's own picker dialog
+                    // (OverlayPickerDialog.tsx) with this tile
                     // preselected, rather than adding instantly -- that
                     // dialog is where background-removal mode (none/chroma
                     // key/AI) gets chosen, so there's no separate "(remove
                     // background)" menu entry anymore.
-                    { label: "Overlay", onSelect: () => onOpenVideoOverlayPickerForAsset(asset) },
+                    { label: "Overlay", onSelect: () => onOpenOverlayPickerForAsset(asset) },
                   ]
                 : asset.kind === "audio"
                   ? [{ label: "Add", onSelect: () => onAddMusicClip(asset) }]

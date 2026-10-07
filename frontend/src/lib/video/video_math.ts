@@ -719,7 +719,7 @@ export interface VideoOverlayClip {
   // own doc comment) -- keys out this overlay's own footage (e.g. a
   // green-screen talking-head clip) so the Ken Burns/base track beneath it
   // shows through instead of a solid color. Set via
-  // VideoOverlayPickerDialog.tsx's "Remove background" toggle at add-time,
+  // OverlayPickerDialog.tsx's "Remove background" toggle at add-time,
   // or VideoOverlayFramingDialog.tsx's own Background-removal row
   // afterward; either way ThreePaneEditor's
   // requestAndPollVideoOverlayBackgroundRemoval patches in the real
@@ -780,7 +780,7 @@ export interface ImageOverlayClip {
   // Same AI/chroma-key background removal as VideoOverlayClip.backgroundRemoval
   // above -- settable via ImageOverlayFramingDialog.tsx's own
   // Background-removal row (there's no add-time picker toggle for this one,
-  // unlike VideoOverlayPickerDialog's; ThreePaneEditor's
+  // unlike OverlayPickerDialog's; ThreePaneEditor's
   // requestAndPollImageOverlayBackgroundRemoval patches in the real
   // matteAssetId once the job completes, same staging as the video overlay/
   // Cutaway paths).
@@ -1468,7 +1468,7 @@ export function computeProgress(startTimeSeconds: number, endTimeSeconds: number
 
 /** "1:05–1:42"-style summary of a time range -- shared by ActionArea's own
  * ActiveTransformationsList and every "existing overlays" list the overlay
- * picker dialogs show (VideoOverlayPickerDialog/ImageOverlayPickerDialog/
+ * picker dialogs show (OverlayPickerDialog,
  * TextOverlayDialog), so the two never drift apart into two different mm:ss
  * conventions. */
 export function formatTimeRange(startTimeSeconds: number, endTimeSeconds: number): string {

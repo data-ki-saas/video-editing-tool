@@ -9,7 +9,7 @@
  * choice the instant it's clicked rather than needing a save step, so once
  * something's selected this tab also grows a small preview swatch of it at
  * the bottom. The other tabs pin their own at-a-glance state to the same
- * bottom spot: Cutaway/Video Overlay/Image Overlay/Text show a count badge
+ * bottom spot: Cutaway/Overlay/Text show a count badge
  * once they have at least one item (CountBadge).
  *
  * Grouped into two clusters, left to right, each with its own micro
@@ -28,7 +28,7 @@
  *    CutawayTrack.tsx) and each overlay (ImageOverlayTrack.tsx/
  *    VideoOverlayTrack.tsx) gets its own, via that clip's own right-click
  *    "Filter".
- *  - OVERLAYS (amber): Video Overlay, Image Overlay, Text, TTS, Avatar --
+ *  - OVERLAYS (amber): Overlay (video or photo), Text, TTS, Avatar --
  *    what composites ON TOP of the base. All five share the same amber
  *    family now (previously each had its own unrelated hue -- amber/sky/
  *    violet -- which read as unrelated colors rather than one "overlays"
@@ -76,8 +76,7 @@ function LabelGlyphIcon({ className }: { className?: string }) {
 }
 
 // A photo frame with a small motion trail on its corner -- distinguishes
-// the "insert a cutaway" trigger from a plain picture glyph, and from
-// PhotoOverlayIcon below (a static corner box, not a trail) -- "this one
+// the "insert a cutaway" trigger from a plain picture glyph -- "this one
 // moves."
 function ImageMotionIcon({ className }: { className?: string }) {
   return (
@@ -105,7 +104,7 @@ function TextSlideIcon({ className }: { className?: string }) {
 }
 
 // A small box overlapping a big box -- the universal Picture-in-Picture
-// glyph, used here as "Video Overlay" 's identity regardless of which
+// glyph, used here as "Overlay" 's identity regardless of which
 // layout (Full-Screen/PiP/Split-Screen) is actually active on any given
 // placement, tinted amber to match that rail's dominant Full-Screen color.
 function VideoOverlayIcon({ className }: { className?: string }) {
@@ -117,22 +116,8 @@ function VideoOverlayIcon({ className }: { className?: string }) {
   );
 }
 
-// A photo frame with a small overlapping corner box (a STATIC box, not a
-// motion trail -- unlike ImageMotionIcon) -- "Image Overlay" 's identity,
-// tinted sky to read as a distinct family from Video Overlay's amber.
-function PhotoOverlayIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <rect x="2.5" y="4.5" width="14" height="14" rx="2" />
-      <circle cx="7.5" cy="9.5" r="1.4" fill="currentColor" stroke="none" />
-      <path d="M4 16l4-4 3 3 4-5 2 2" />
-      <rect x="13" y="11.5" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
 // A little crate/cube -- "Props" 's identity: a physical thing you set down in
-// the scene, distinct from Image Overlay's photo-frame glyph.
+// the scene, distinct from Overlay's picture-in-picture glyph.
 function PropsIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -228,10 +213,8 @@ export function UserActions({
   cutawayCount,
   onOpenTextSlideDialog,
   textSlideCount,
-  onOpenVideoOverlayPicker,
-  videoOverlayCount,
-  onOpenImageOverlayPicker,
-  imageOverlayCount,
+  onOpenOverlayPicker,
+  overlayCount,
   onOpenPropsDialog,
   onOpenTextDialog,
   textOverlayCount,
@@ -249,10 +232,9 @@ export function UserActions({
   cutawayCount: number;
   onOpenTextSlideDialog: () => void;
   textSlideCount: number;
-  onOpenVideoOverlayPicker: () => void;
-  videoOverlayCount: number;
-  onOpenImageOverlayPicker: () => void;
-  imageOverlayCount: number;
+  onOpenOverlayPicker: () => void;
+  // Video and photo overlays together -- one button covers both.
+  overlayCount: number;
   onOpenPropsDialog: () => void;
   onOpenTextDialog: () => void;
   textOverlayCount: number;
@@ -397,7 +379,7 @@ export function UserActions({
         </button>
       </div>
 
-      {/* OVERLAYS -- amber family, lightest to darkest: Video Overlay, Image Overlay, Props, Label, TTS, Avatar */}
+      {/* OVERLAYS -- amber family, lightest to darkest: Overlay, Props, Label, TTS, Avatar */}
       <div className="relative flex h-full gap-3">
         <GroupLabel
           colorClassName="text-amber-600 dark:text-amber-400"
@@ -422,27 +404,15 @@ export function UserActions({
         </GroupLabel>
         <button
           type="button"
-          onClick={onOpenVideoOverlayPicker}
-          title="Video Overlay -- a second video on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
+          onClick={onOpenOverlayPicker}
+          title="Overlay -- a video or a photo on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
           className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-400 dark:text-amber-300 hover:bg-background"
         >
           <VideoOverlayIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-            Video Overlay
+            Overlay
           </span>
-          <CountBadge count={videoOverlayCount} />
-        </button>
-        <button
-          type="button"
-          onClick={onOpenImageOverlayPicker}
-          title="Image Overlay -- a photo on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
-          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-500 dark:text-amber-400 hover:bg-background"
-        >
-          <PhotoOverlayIcon className="h-4 w-4" />
-          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-            Image Overlay
-          </span>
-          <CountBadge count={imageOverlayCount} />
+          <CountBadge count={overlayCount} />
         </button>
         <button
           type="button"

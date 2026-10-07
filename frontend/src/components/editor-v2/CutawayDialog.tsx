@@ -132,7 +132,7 @@ function EyedropperIcon({ className }: { className?: string }) {
 }
 
 /** Shared by both the Video and Image panels' "Remove background" row --
- * None/Background color/AI removal, mirroring VideoOverlayPickerDialog's own
+ * None/Background color/AI removal, mirroring OverlayPickerDialog's own
  * RemovalMode picker so the choice reads the same everywhere it appears.
  * `onPickFromPhoto` is only passed by the Image panel (the Video panel's
  * asset grid has no single large photo to sample a pixel from), so the
@@ -362,7 +362,7 @@ export function CutawayDialog({
   // Shared between the Video and Image panels -- only one is ever visible
   // at a time (the kind switch above), so one picker covers both, same as
   // the old single "Remove background" checkbox it replaced. Mirrors
-  // VideoOverlayPickerDialog's own "none"/"chromaKey"/"ai" RemovalMode.
+  // OverlayPickerDialog's own "none"/"chromaKey"/"ai" RemovalMode.
   const [removalMode, setRemovalMode] = useState<"none" | "chromaKey" | "ai">(
     editing?.backgroundRemoval?.mode === "chromaKey" ? "chromaKey" : editing?.backgroundRemoval?.enabled ? "ai" : "none"
   );

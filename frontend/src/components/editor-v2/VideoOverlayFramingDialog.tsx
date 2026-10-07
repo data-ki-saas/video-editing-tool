@@ -446,7 +446,7 @@ export function VideoOverlayFramingDialog({
   const [colorFilterId, setColorFilterId] = useState<FilterPresetId | null>(overlay.colorFilterId ?? null);
   // Background removal (chromaKey.ts / fal.ai VEED) -- same three-way
   // "Keep"/"Solid color"/"AI removal" pick as CutawayDialog's own
-  // RemovalModePicker and VideoOverlayPickerDialog's add-time radio group;
+  // RemovalModePicker and OverlayPickerDialog's add-time radio group;
   // this is the first place it's reachable AFTER the overlay's already
   // placed (see VideoOverlayClip.backgroundRemoval's own doc comment).
   const [removalMode, setRemovalMode] = useState<"none" | "chromaKey" | "ai">(
