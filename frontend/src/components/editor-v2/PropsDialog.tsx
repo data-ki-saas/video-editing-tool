@@ -20,16 +20,13 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { deleteLibraryProp, importLibraryAssetToProject, importPng, listLibraryAssets, uploadAsset, uploadLibraryProp, type Asset, type LibraryAssetSummary, type PngSearchResult } from "@/lib/api";
-import type { ImageOverlayPlacement } from "@/lib/video/transformations";
+import { loadImageAspectRatio } from "@/lib/image";
+import { fitRectToImageAspect, type ImageOverlayPlacement } from "@/lib/video/transformations";
 import { DEFAULT_OVERLAY_FRAMING, type OverlayFraming } from "@/lib/video/video_math";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import { PeepsTab } from "./PeepsTab";
 import { PngTab } from "./PngTab";
 import { rasterizeSvgToPng, VectorsTab } from "./VectorsTab";
-
-// A freshly-placed prop takes up to this share of the frame's width/height,
-// whichever its own shape hits first.
-const PROP_MAX_FRACTION = 0.5;
 
 const ALPHA_VISIBLE_THRESHOLD = 16;
 const ALPHA_SCAN_MAX_EDGE = 256;
@@ -104,30 +101,11 @@ async function measurePropArtwork(url: string): Promise<PropArtwork | null> {
   }
 }
 
-/** Fallback when the pixel scan can't read the file (e.g. a cross-origin
- * fetch is blocked): an <img> can still load it and report its shape. */
-function loadImageAspectRatio(url: string): Promise<number | null> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve(img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : null);
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
-}
-
-/** A box matching the artwork's own shape (so the overlay's cover-fit never
- * crops it), centered, in the frame's normalized coordinates. */
-function propRect(imageAspect: number, frameAspect: number): ImageOverlayPlacement["rect"] {
-  // Normalized height/width that renders as imageAspect on a frameAspect frame.
-  const heightPerWidth = frameAspect / imageAspect;
-  let width = PROP_MAX_FRACTION;
-  let height = width * heightPerWidth;
-  if (height > PROP_MAX_FRACTION) {
-    height = PROP_MAX_FRACTION;
-    width = height / heightPerWidth;
-  }
-  return { x: (1 - width) / 2, y: (1 - height) / 2, width, height };
-}
+// A box matching the artwork's own shape (so the overlay's cover-fit never
+// crops it), centered, in the frame's normalized coordinates. The pixel scan
+// above can fail (e.g. a cross-origin fetch is blocked); loadImageAspectRatio
+// is the fallback, since an <img> can still load the file and report its shape.
+const propRect = fitRectToImageAspect;
 
 type Tab = "props" | "icons" | "vectors" | "peeps" | "png";
 

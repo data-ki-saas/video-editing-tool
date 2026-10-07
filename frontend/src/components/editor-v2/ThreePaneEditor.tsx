@@ -44,6 +44,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listAssets, deleteAsset, requestBackgroundRemoval, type Asset } from "@/lib/api";
 import { pollBackgroundRemoval, describeMattingTick, MAX_POLL_SECONDS } from "@/lib/backgroundRemoval";
+import { loadImageAspectRatio } from "@/lib/image";
 import { extractThumbnails, getVideoDuration, getVideoDurationAndDimensions, captureSingleFrame } from "@/lib/video/video";
 import { getAudioDuration } from "@/lib/video/audio";
 import { loadCrossOriginImage } from "@/lib/crossOriginImage";
@@ -84,6 +85,7 @@ import {
   applyTrimTrackClick,
   applyDeleteTrimRange,
   applyAddImageOverlay,
+  fitRectToImageAspect,
   type ImageOverlayPlacement,
   applyChangeImageOverlayLayout,
   applyToggleImageSplitScreenOrientation,
@@ -1449,10 +1451,20 @@ export function ThreePaneEditor({
   // places it on its own rail at the current playhead, defaulting to a
   // Picture-in-Picture layout the user can switch afterward, exact parity
   // with handleAddVideoOverlay below (see video_math.ts's ImageOverlayClip).
-  function handleAddImageOverlay(asset: Asset, placement?: ImageOverlayPlacement) {
-    const { label, state } = applyAddImageOverlay(selections, asset.id, currentTimeSeconds, videoDurationSeconds, placement);
-    pushChange(label, state);
+  //
+  // Without an explicit placement (props pass their own), the starting box is
+  // shaped like the image itself -- the fixed default box is roughly square, so
+  // cover-fit would crop the sides off a wide picture (or the top and bottom
+  // off a tall one). Not locked, so it can still be resized freely to crop.
+  async function handleAddImageOverlay(asset: Asset, placement?: ImageOverlayPlacement) {
     setIsImageOverlayPickerOpen(false);
+    let effectivePlacement = placement;
+    if (!effectivePlacement) {
+      const imageAspect = await loadImageAspectRatio(asset.url);
+      if (imageAspect) effectivePlacement = { rect: fitRectToImageAspect(imageAspect, frameAspectRatio ?? 9 / 16) };
+    }
+    const { label, state } = applyAddImageOverlay(selections, asset.id, currentTimeSeconds, videoDurationSeconds, effectivePlacement);
+    pushChange(label, state);
   }
 
   // Right-click "Cutaway" on a video asset in AssetGallery -- appends it to

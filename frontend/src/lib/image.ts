@@ -39,6 +39,16 @@ function loadImageElement(url: string): Promise<HTMLImageElement> {
  * returning the original file unchanged if anything about the resize
  * fails, rather than blocking the upload on a resize bug.
  */
+/** An image's width/height from an <img> load, or null if it can't be read. */
+export function loadImageAspectRatio(url: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img.naturalWidth > 0 && img.naturalHeight > 0 ? img.naturalWidth / img.naturalHeight : null);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
 export async function downscaleImageIfNeeded(file: File): Promise<File> {
   if (!file.type.startsWith("image/")) return file;
 

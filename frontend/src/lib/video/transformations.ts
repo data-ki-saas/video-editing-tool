@@ -513,6 +513,26 @@ export function applyTrimCutawayHead(
 const DEFAULT_OVERLAY_DURATION_SECONDS = 3;
 const DEFAULT_OVERLAY_RECT: CropRect = { x: 0.3, y: 0.3, width: 0.4, height: 0.4 };
 
+// A freshly-placed image takes up to this share of the frame's width/height,
+// whichever its own shape hits first.
+const FITTED_OVERLAY_MAX_FRACTION = 0.5;
+
+/** A centered box (frame-normalized) that renders at `imageAspect` on a
+ * `frameAspect` frame, so an overlay's cover-fit never crops the image. The
+ * fixed DEFAULT_OVERLAY_RECT is roughly square, which crops the sides off any
+ * wide picture and the top and bottom off any tall one. */
+export function fitRectToImageAspect(imageAspect: number, frameAspect: number): CropRect {
+  // Normalized height/width that renders as imageAspect on a frameAspect frame.
+  const heightPerWidth = frameAspect / imageAspect;
+  let width = FITTED_OVERLAY_MAX_FRACTION;
+  let height = width * heightPerWidth;
+  if (height > FITTED_OVERLAY_MAX_FRACTION) {
+    height = FITTED_OVERLAY_MAX_FRACTION;
+    width = height / heightPerWidth;
+  }
+  return { x: (1 - width) / 2, y: (1 - height) / 2, width, height };
+}
+
 /** Optional starting box for a new image overlay -- props pass one sized to
  * the artwork's own shape (so cover-fit never crops it) plus lockAspect. */
 export interface ImageOverlayPlacement {
