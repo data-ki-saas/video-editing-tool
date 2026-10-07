@@ -268,6 +268,41 @@ export async function importStockAsset(
   return handleResponse<Asset>(response);
 }
 
+export interface PngSearchResult {
+  id: string;
+  title: string;
+  thumbnail_url: string;
+  width: number | null;
+  height: number | null;
+  license: string;
+  attribution: string;
+  page_url: string;
+}
+
+export interface PngSearchResponse {
+  results: PngSearchResult[];
+  page: number;
+  has_more: boolean;
+}
+
+export async function searchPngs(query: string, page: number, signal?: AbortSignal) {
+  const url = new URL(`${API_BASE_URL}/api/png-search/search`);
+  url.searchParams.set("query", query);
+  url.searchParams.set("page", String(page));
+
+  const response = await apiFetch(url.toString(), { headers: await authHeader(), signal });
+  return handleResponse<PngSearchResponse>(response);
+}
+
+export async function importPng(projectId: string, sourceId: string, title: string) {
+  const response = await apiFetch(`${API_BASE_URL}/api/png-search/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeader()) },
+    body: JSON.stringify({ project_id: projectId, source_id: sourceId, title }),
+  });
+  return handleResponse<Asset>(response);
+}
+
 export interface TtsWordTiming {
   word: string;
   startMs: number;

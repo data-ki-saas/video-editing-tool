@@ -22,11 +22,17 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-10-07",
+    title: "Props: search millions of transparent PNGs",
+    description:
+      "The Props popup has a new PNG tab. Type anything — a rocket, a coffee cup, a dog — and it searches Wikimedia Commons for openly licensed cut-outs with a see-through background. Click one to drop it into your scene like any other prop: drag, resize, and slide its ends on the time bar. Each result shows its licence, and some ask for a credit if you publish.",
+    isLatest: true,
+  },
+  {
     date: "2026-10-05",
     title: "Props: icons, vectors and build-your-own characters",
     description:
       "The Props popup now has three new tabs. Icons holds Google's Material icons; Vectors searches a huge free library of line and solid vectors, with outline colour, thickness, flip and rotate; and Peeps lets you build a hand-drawn character — pick the hair, face, beard, glasses and mask, choose skin and clothes colours, pick a framing (bust, half body, sitting or full body) and dress the whole figure — gesture (wave, thumbs up, peace, point, hands on hips, crossed arms, cheer), hands, legs (straight, wide, slim, shorts, skirt), shoes and pants colour, or hit Surprise me. Then add it like any other prop: drag, resize, and slide its ends on the time bar. The popup also has a fresh thin blue border.",
-    isLatest: true,
   },
   {
     date: "2026-10-04",

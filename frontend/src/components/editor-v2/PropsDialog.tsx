@@ -19,11 +19,12 @@
  * driving vision favors direct manipulation over confirmation dialogs.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { deleteLibraryProp, importLibraryAssetToProject, listLibraryAssets, uploadAsset, uploadLibraryProp, type Asset, type LibraryAssetSummary } from "@/lib/api";
+import { deleteLibraryProp, importLibraryAssetToProject, importPng, listLibraryAssets, uploadAsset, uploadLibraryProp, type Asset, type LibraryAssetSummary, type PngSearchResult } from "@/lib/api";
 import type { ImageOverlayPlacement } from "@/lib/video/transformations";
 import { DEFAULT_OVERLAY_FRAMING, type OverlayFraming } from "@/lib/video/video_math";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import { PeepsTab } from "./PeepsTab";
+import { PngTab } from "./PngTab";
 import { rasterizeSvgToPng, VectorsTab } from "./VectorsTab";
 
 // A freshly-placed prop takes up to this share of the frame's width/height,
@@ -128,9 +129,9 @@ function propRect(imageAspect: number, frameAspect: number): ImageOverlayPlaceme
   return { x: (1 - width) / 2, y: (1 - height) / 2, width, height };
 }
 
-type Tab = "props" | "icons" | "vectors" | "peeps";
+type Tab = "props" | "icons" | "vectors" | "peeps" | "png";
 
-const TAB_LABELS: Record<Tab, string> = { props: "Props", icons: "Icons", vectors: "Vectors", peeps: "Peeps" };
+const TAB_LABELS: Record<Tab, string> = { props: "Props", icons: "Icons", vectors: "Vectors", peeps: "Peeps", png: "PNG" };
 
 // Google Material icons (src/lib/materialIcons.json, built by
 // scripts/build-material-icons.mjs) load lazily, only once the Icons tab opens.
@@ -286,29 +287,48 @@ export function PropsDialog({
     }
   }
 
+  // Shared by library props and PNG-search results: both arrive as a project
+  // asset of see-through artwork, trimmed to its visible bounds and placed in
+  // a box shaped like it.
+  async function placeImportedAsset(asset: Asset, thumbnailUrl: string | null) {
+    const artwork = (await measurePropArtwork(asset.url)) ?? (thumbnailUrl ? await measurePropArtwork(thumbnailUrl) : null);
+    const frameAspect = frameAspectRatio ?? 9 / 16;
+    const fallbackAspect = artwork ? null : ((await loadImageAspectRatio(asset.url)) ?? (await loadImageAspectRatio(thumbnailUrl ?? "")));
+    onImported(asset);
+    onPlace(
+      asset,
+      artwork
+        ? { rect: propRect(artwork.aspect, frameAspect), framing: artwork.framing, lockAspect: true }
+        : fallbackAspect
+          ? { rect: propRect(fallbackAspect, frameAspect), lockAspect: true }
+          : undefined
+    );
+    onClose();
+  }
+
   function handlePlace(prop: LibraryAssetSummary) {
     if (placingId) return;
     setPlacingId(prop.id);
     setError(null);
     onImportingChange?.(true);
     importLibraryAssetToProject(prop.id, projectId)
-      .then(async (asset) => {
-        const artwork = (await measurePropArtwork(asset.url)) ?? (prop.thumbnailUrl ? await measurePropArtwork(prop.thumbnailUrl) : null);
-        const frameAspect = frameAspectRatio ?? 9 / 16;
-        const fallbackAspect = artwork ? null : ((await loadImageAspectRatio(asset.url)) ?? (await loadImageAspectRatio(prop.thumbnailUrl ?? "")));
-        onImported(asset);
-        onPlace(
-          asset,
-          artwork
-            ? { rect: propRect(artwork.aspect, frameAspect), framing: artwork.framing, lockAspect: true }
-            : fallbackAspect
-              ? { rect: propRect(fallbackAspect, frameAspect), lockAspect: true }
-              : undefined
-        );
-        onClose();
-      })
+      .then((asset) => placeImportedAsset(asset, prop.thumbnailUrl ?? null))
       .catch((err) => {
         setError(err instanceof Error ? err.message : "Couldn't add this prop");
+        setPlacingId(null);
+      })
+      .finally(() => onImportingChange?.(false));
+  }
+
+  function handlePlacePng(result: PngSearchResult) {
+    if (placingId) return;
+    setPlacingId(result.id);
+    setError(null);
+    onImportingChange?.(true);
+    importPng(projectId, result.id, result.title)
+      .then((asset) => placeImportedAsset(asset, result.thumbnail_url))
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Couldn't add this PNG");
         setPlacingId(null);
       })
       .finally(() => onImportingChange?.(false));
@@ -329,7 +349,7 @@ export function PropsDialog({
         </p>
 
         <div className="mb-3 flex gap-1 border-b border-border">
-          {(["props", "icons", "vectors", "peeps"] as const).map((id) => (
+          {(["props", "icons", "vectors", "peeps", "png"] as const).map((id) => (
             <button
               key={id}
               type="button"
@@ -345,7 +365,9 @@ export function PropsDialog({
 
         {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
 
-        {tab === "peeps" ? (
+        {tab === "png" ? (
+          <PngTab placingKey={placingId} onPlace={handlePlacePng} />
+        ) : tab === "peeps" ? (
           <PeepsTab placingKey={placingId} onPlace={(file, key, aspect) => placeRasterized(key, Promise.resolve(file), aspect)} />
         ) : tab === "vectors" ? (
           <VectorsTab placingKey={placingId} onPlace={(file, key) => placeRasterized(key, Promise.resolve(file))} />
