@@ -23,10 +23,16 @@ interface ChangelogEntry {
 const ENTRIES: ChangelogEntry[] = [
   {
     date: "2026-10-08",
+    title: "Peeps: real poses with real hand gestures",
+    description:
+      "The Peeps popup has a new Real poses tab using the original Open Peeps artwork. Mix a pose (pointing, crossed arms, resting, walking, sitting cross-legged, even a wheelchair or a bike) with any hair, face, beard and glasses, flip it, and add it to your reel. Or pick a ready-made figure from over 150 busts, standing, sitting and masked characters.",
+    isLatest: true,
+  },
+  {
+    date: "2026-10-08",
     title: "Peeps: their own button, save them, edit them again, and copy them",
     description:
       "Peeps now has its own button in the Overlays group, no longer tucked inside Props. Name a peep and save it to My peeps, then load it back any time. Double-click a peep in the preview (or right-click it on the time bar and choose Edit peep) to reopen the peep editor and change its mouth, hair or anything else, handy for making a character talk. Right-click any prop on the time bar and choose Duplicate to copy it, then drag the copy to where you want it.",
-    isLatest: true,
   },
   {
     date: "2026-10-07",

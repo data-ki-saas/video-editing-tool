@@ -24,6 +24,7 @@ import { loadImageAspectRatio } from "@/lib/image";
 import { fitRectToImageAspect, type ImageOverlayPlacement } from "@/lib/video/transformations";
 import { DEFAULT_OVERLAY_FRAMING, type OverlayFraming } from "@/lib/video/video_math";
 import { useIsAdmin } from "@/lib/useIsAdmin";
+import { PeepsPlusTab } from "./PeepsPlusTab";
 import { PeepsTab, type Peep } from "./PeepsTab";
 import { PngTab } from "./PngTab";
 import { rasterizeSvgToPng, VectorsTab } from "./VectorsTab";
@@ -107,12 +108,13 @@ async function measurePropArtwork(url: string): Promise<PropArtwork | null> {
 // is the fallback, since an <img> can still load the file and report its shape.
 const propRect = fitRectToImageAspect;
 
-type Tab = "props" | "icons" | "vectors" | "peeps" | "png";
+type Tab = "props" | "icons" | "vectors" | "peeps" | "peepsPlus" | "png";
 
-const TAB_LABELS: Record<Tab, string> = { props: "Props", icons: "Icons", vectors: "Vectors", peeps: "Peeps", png: "PNG" };
+const TAB_LABELS: Record<Tab, string> = { props: "Props", icons: "Icons", vectors: "Vectors", peeps: "Build a character", peepsPlus: "Real poses", png: "PNG" };
 
 // The Props button shows these; the separate Peeps button shows just the Peeps tab.
 const PROPS_TABS: Tab[] = ["props", "icons", "vectors", "png"];
+const PEEPS_TABS: Tab[] = ["peeps", "peepsPlus"];
 
 // Google Material icons (src/lib/materialIcons.json, built by
 // scripts/build-material-icons.mjs) load lazily, only once the Icons tab opens.
@@ -334,9 +336,8 @@ export function PropsDialog({
             : "Click a prop to place it at the playhead on its own timeline row. Then drag it where it belongs, resize it, and slide its ends to choose how long it stays."}
         </p>
 
-        {!isPeepsMode && (
         <div className="mb-3 flex gap-1 border-b border-border">
-          {PROPS_TABS.map((id) => (
+          {(isPeepsMode ? PEEPS_TABS : PROPS_TABS).map((id) => (
             <button
               key={id}
               type="button"
@@ -349,7 +350,6 @@ export function PropsDialog({
             </button>
           ))}
         </div>
-        )}
 
         {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
 
@@ -357,6 +357,8 @@ export function PropsDialog({
           <PngTab placingKey={placingId} onPlace={handlePlacePng} />
         ) : tab === "peeps" ? (
           <PeepsTab placingKey={placingId} onPlace={(file, key, aspect, peep) => placeRasterized(key, Promise.resolve(file), aspect, peep)} />
+        ) : tab === "peepsPlus" ? (
+          <PeepsPlusTab placingKey={placingId} onPlace={(file, key, aspect) => placeRasterized(key, Promise.resolve(file), aspect)} />
         ) : tab === "vectors" ? (
           <VectorsTab placingKey={placingId} onPlace={(file, key) => placeRasterized(key, Promise.resolve(file))} />
         ) : tab === "icons" ? (
