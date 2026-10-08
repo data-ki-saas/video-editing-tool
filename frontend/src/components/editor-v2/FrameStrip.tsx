@@ -239,6 +239,7 @@ const FrameTile = memo(function FrameTile({
   onTextOverlayRectCommit,
   onImageOverlayRectChange,
   onImageOverlayRectCommit,
+  onEditImagePeep,
   onVideoOverlayRectChange,
   onVideoOverlayRectCommit,
 }: {
@@ -316,6 +317,7 @@ const FrameTile = memo(function FrameTile({
   onTextOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
   onImageOverlayRectChange?: (overlayIndex: number, next: CropRect) => void;
   onImageOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
+  onEditImagePeep?: (overlayIndex: number) => void;
   onVideoOverlayRectChange?: (overlayIndex: number, next: CropRect) => void;
   onVideoOverlayRectCommit?: (overlayIndex: number, next: CropRect) => void;
 }) {
@@ -469,6 +471,7 @@ const FrameTile = memo(function FrameTile({
             handleColorClassName="bg-fuchsia-400"
             onChange={onImageOverlayRectChange ? (next) => onImageOverlayRectChange(overlayIndex, next) : undefined}
             onCommit={onImageOverlayRectCommit ? (next) => onImageOverlayRectCommit(overlayIndex, next) : undefined}
+            onDoubleClick={overlay.peep && onEditImagePeep ? () => onEditImagePeep(overlayIndex) : undefined}
           />
         );
       })}
@@ -532,6 +535,7 @@ export function FrameStrip({
   assetUrlById,
   onChangeImageOverlayRect,
   onCommitImageOverlayRect,
+  onEditImagePeep,
   onChangeImageOverlayRange,
   onCommitImageOverlayRange,
   onChangeImageOverlayPosition,
@@ -541,6 +545,7 @@ export function FrameStrip({
   onToggleImageSplitScreenSides,
   onOpenImageOverlayFraming,
   onOpenImageOverlayFilter,
+  onDuplicateImageOverlay,
   onDeleteImageOverlay,
   textOverlays,
   onChangeTextOverlayRect,
@@ -677,6 +682,7 @@ export function FrameStrip({
   assetUrlById: Record<string, string>;
   onChangeImageOverlayRect: (overlayIndex: number, next: CropRect) => void;
   onCommitImageOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onEditImagePeep: (overlayIndex: number) => void;
   onChangeImageOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitImageOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onChangeImageOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
@@ -692,6 +698,7 @@ export function FrameStrip({
   // This overlay's own right-click "Filter" -- opens FilterPresetDialog
   // scoped to just this overlay (see applySelectImageOverlayFilterPreset).
   onOpenImageOverlayFilter: (overlayIndex: number) => void;
+  onDuplicateImageOverlay: (overlayIndex: number) => void;
   onDeleteImageOverlay: (overlayIndex: number) => void;
   textOverlays: TextOverlay[];
   onChangeTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
@@ -1318,6 +1325,8 @@ export function FrameStrip({
           onToggleSides={onToggleImageSplitScreenSides}
           onOpenFraming={onOpenImageOverlayFraming}
           onOpenFilter={onOpenImageOverlayFilter}
+          onDuplicate={onDuplicateImageOverlay}
+          onEditPeep={onEditImagePeep}
           onDelete={onDeleteImageOverlay}
         />
 
@@ -1358,6 +1367,8 @@ export function FrameStrip({
           onToggleSides={onToggleImageSplitScreenSides}
           onOpenFraming={onOpenImageOverlayFraming}
           onOpenFilter={onOpenImageOverlayFilter}
+          onDuplicate={onDuplicateImageOverlay}
+          onEditPeep={onEditImagePeep}
           onDelete={onDeleteImageOverlay}
         />
 
@@ -1412,6 +1423,7 @@ export function FrameStrip({
               onTextOverlayRectCommit={index === activeTileIndex ? onCommitTextOverlayRect : undefined}
               onImageOverlayRectChange={index === activeTileIndex ? onChangeImageOverlayRect : undefined}
               onImageOverlayRectCommit={index === activeTileIndex ? onCommitImageOverlayRect : undefined}
+              onEditImagePeep={index === activeTileIndex ? onEditImagePeep : undefined}
               onVideoOverlayRectChange={index === activeTileIndex ? onChangeVideoOverlayRect : undefined}
               onVideoOverlayRectCommit={index === activeTileIndex ? onCommitVideoOverlayRect : undefined}
             />

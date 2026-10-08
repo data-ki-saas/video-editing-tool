@@ -800,6 +800,10 @@ export interface ImageOverlayClip {
   // artwork's own shape so nothing is cropped, and resizing it keeps that
   // shape instead of letting a free corner drag re-crop the artwork.
   lockAspect?: boolean;
+  // Set for a peep (PeepsTab): the character's own settings (hair, face, colours...),
+  // kept so double-clicking it can reopen the peep editor and redraw the artwork.
+  // Opaque here -- PeepsTab owns the shape.
+  peep?: Record<string, unknown>;
 }
 
 /** Cache key for a still frame captured at one overlay placement's own

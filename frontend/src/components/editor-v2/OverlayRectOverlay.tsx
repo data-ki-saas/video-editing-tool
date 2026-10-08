@@ -38,6 +38,7 @@ export function OverlayRectOverlay({
   bottomOverhangFraction = 0,
   lockAspect = false,
   allowOffscreen = false,
+  onDoubleClick,
 }: {
   rect: CropRect;
   imageUrl?: string;
@@ -83,6 +84,8 @@ export function OverlayRectOverlay({
    * flush with the edge). A sliver (MIN_VISIBLE_FRACTION of the rect) always
    * stays inside so it can be grabbed again. */
   allowOffscreen?: boolean;
+  /** Double-click on the box (e.g. reopen a peep's editor). */
+  onDoubleClick?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isInteractive = Boolean(onChange && onCommit);
@@ -167,6 +170,7 @@ export function OverlayRectOverlay({
       <div
         onPointerDown={(e) => startDrag(e, "move")}
         onClick={(e) => isInteractive && stopClickBubble(e)}
+        onDoubleClick={onDoubleClick}
         className={
           `absolute overflow-hidden border-2 border-dashed ${borderColorClassName}` +
           (isInteractive ? " pointer-events-auto cursor-move" : "")

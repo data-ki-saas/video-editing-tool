@@ -65,6 +65,8 @@ function ImageOverlaySegment({
   onToggleSides,
   onOpenFraming,
   onOpenFilter,
+  onDuplicate,
+  onEditPeep,
   onDelete,
 }: {
   overlay: ImageOverlayClip;
@@ -85,6 +87,8 @@ function ImageOverlaySegment({
   // below for where that comes from.
   onOpenFraming: (clickedTimeSeconds: number) => void;
   onOpenFilter: () => void;
+  onDuplicate: () => void;
+  onEditPeep: () => void;
   onDelete: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -224,13 +228,18 @@ function ImageOverlaySegment({
       onPointerDown={startBodyDrag}
       onContextMenu={(e) => {
         const edit: ContextMenuAction = { label: "Edit", onSelect: () => onOpenFraming(resolveClickedTimeSeconds(e.clientX)) };
+        const editPeep: ContextMenuAction[] = overlay.peep ? [{ label: "Edit peep…", onSelect: onEditPeep }] : [];
         // A prop is a cut-out placed in the scene: full-screen/split-screen
         // layouts make no sense for it, so it gets just Edit + Remove.
+        // Duplicate is PIP-only: a copy lands right after the original, which
+        // for a full/split-screen clip would overlap its exclusive neighbor.
+        const duplicate: ContextMenuAction[] =
+          overlay.layout.type === "picture-in-picture" ? [{ label: "Duplicate", onSelect: onDuplicate }] : [];
         openContextMenu(
           e,
           overlay.lockAspect
-            ? [edit, { label: "Remove", danger: true, onSelect: onDelete }]
-            : [edit, ...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }]
+            ? [edit, ...editPeep, ...duplicate, { label: "Remove", danger: true, onSelect: onDelete }]
+            : [edit, ...editPeep, ...duplicate, ...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }]
         );
       }}
       title="Drag the middle to move, an edge to trim; right-click to edit or remove"
@@ -339,6 +348,8 @@ export function ImageOverlayTrack({
   onToggleSides,
   onOpenFraming,
   onOpenFilter,
+  onDuplicate,
+  onEditPeep,
   onDelete,
 }: {
   imageOverlays: ImageOverlayClip[];
@@ -359,6 +370,8 @@ export function ImageOverlayTrack({
   // clicked time passes through unchanged all the way to ThreePaneEditor.
   onOpenFraming: (overlayIndex: number, clickedTimeSeconds: number) => void;
   onOpenFilter: (overlayIndex: number) => void;
+  onDuplicate: (overlayIndex: number) => void;
+  onEditPeep: (overlayIndex: number) => void;
   onDelete: (overlayIndex: number) => void;
 }) {
   if (imageOverlays.length === 0) return null;
@@ -388,6 +401,8 @@ export function ImageOverlayTrack({
       onToggleSides: () => onToggleSides(index),
       onOpenFraming: (clickedTimeSeconds: number) => onOpenFraming(index, clickedTimeSeconds),
       onOpenFilter: () => onOpenFilter(index),
+      onDuplicate: () => onDuplicate(index),
+      onEditPeep: () => onEditPeep(index),
       onDelete: () => onDelete(index),
     };
   }

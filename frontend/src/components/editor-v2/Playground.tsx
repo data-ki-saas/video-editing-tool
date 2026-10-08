@@ -188,6 +188,7 @@ export function Playground({
   assetUrlById,
   onChangeImageOverlayRect,
   onCommitImageOverlayRect,
+  onEditImagePeep,
   onChangeImageOverlayRange,
   onCommitImageOverlayRange,
   onChangeImageOverlayPosition,
@@ -197,6 +198,7 @@ export function Playground({
   onToggleImageSplitScreenSides,
   onOpenImageOverlayFraming,
   onOpenImageOverlayFilter,
+  onDuplicateImageOverlay,
   onDeleteImageOverlay,
   textOverlays,
   onChangeTextOverlayRect,
@@ -313,6 +315,7 @@ export function Playground({
   assetUrlById: Record<string, string>;
   onChangeImageOverlayRect: (overlayIndex: number, next: CropRect) => void;
   onCommitImageOverlayRect: (overlayIndex: number, next: CropRect) => void;
+  onEditImagePeep: (overlayIndex: number) => void;
   onChangeImageOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitImageOverlayRange: (overlayIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onChangeImageOverlayPosition: (overlayIndex: number, startTimeSeconds: number) => void;
@@ -326,6 +329,7 @@ export function Playground({
   onToggleImageSplitScreenSides: (overlayIndex: number) => void;
   onOpenImageOverlayFraming: (overlayIndex: number, clickedTimeSeconds: number) => void;
   onOpenImageOverlayFilter: (overlayIndex: number) => void;
+  onDuplicateImageOverlay: (overlayIndex: number) => void;
   onDeleteImageOverlay: (overlayIndex: number) => void;
   textOverlays: TextOverlay[];
   onChangeTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
@@ -477,6 +481,7 @@ export function Playground({
             assetUrlById={assetUrlById}
             onChangeImageOverlayRect={onChangeImageOverlayRect}
             onCommitImageOverlayRect={onCommitImageOverlayRect}
+            onEditImagePeep={onEditImagePeep}
             onChangeImageOverlayRange={onChangeImageOverlayRange}
             onCommitImageOverlayRange={onCommitImageOverlayRange}
             onChangeImageOverlayPosition={onChangeImageOverlayPosition}
@@ -486,6 +491,7 @@ export function Playground({
             onToggleImageSplitScreenSides={onToggleImageSplitScreenSides}
             onOpenImageOverlayFraming={onOpenImageOverlayFraming}
             onOpenImageOverlayFilter={onOpenImageOverlayFilter}
+            onDuplicateImageOverlay={onDuplicateImageOverlay}
             onDeleteImageOverlay={onDeleteImageOverlay}
             textOverlays={textOverlays}
             onChangeTextOverlayRect={onChangeTextOverlayRect}

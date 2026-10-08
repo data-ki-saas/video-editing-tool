@@ -22,11 +22,17 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-10-08",
+    title: "Peeps: their own button, save them, edit them again, and copy them",
+    description:
+      "Peeps now has its own button in the Overlays group, no longer tucked inside Props. Name a peep and save it to My peeps, then load it back any time. Double-click a peep in the preview (or right-click it on the time bar and choose Edit peep) to reopen the peep editor and change its mouth, hair or anything else, handy for making a character talk. Right-click any prop on the time bar and choose Duplicate to copy it, then drag the copy to where you want it.",
+    isLatest: true,
+  },
+  {
     date: "2026-10-07",
     title: "One Images & Videos button for photos and videos",
     description:
       "Video Overlay and Image Overlay are now a single Images & Videos button, just like Cutaway. Pick any video or photo in one place — background removal options appear when you choose a video — and see everything already on your reel, photos and videos together, in one list. A photo overlay now also starts in a box shaped like the photo, so wide pictures aren't cropped.",
-    isLatest: true,
   },
   {
     date: "2026-10-07",

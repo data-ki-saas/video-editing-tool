@@ -95,6 +95,8 @@ import {
   applyImageOverlayPositionChange,
   applyChangeImageOverlayFraming,
   applyDeleteImageOverlay,
+  applyDuplicateImageOverlay,
+  applyReplaceImageOverlayPeep,
   applyAddSequenceClip,
   applyAddImageSequenceClip,
   applyEditImageSequenceClip,
@@ -180,6 +182,8 @@ import type { CanvasPlayerHandle } from "./CanvasPlayer";
 import { LocalRenderPopup } from "./LocalRenderPopup";
 import { CoverPicker } from "./CoverPicker";
 import { GuidedTour } from "./GuidedTour";
+import { PeepEditDialog } from "./PeepEditDialog";
+import type { Peep } from "./PeepsTab";
 
 const THUMBNAIL_INTERVAL_SECONDS = 1;
 // A text slide's own placeholder filmstrip tile -- small, fixed size, just
@@ -213,6 +217,8 @@ export function ThreePaneEditor({
   const [assetsError, setAssetsError] = useState<string | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  // Which image overlay's peep editor is open (double-click on a peep).
+  const [peepEditOverlayIndex, setPeepEditOverlayIndex] = useState<number | null>(null);
 
   const [thumbnails, setThumbnails] = useState<string[]>([]);
   // In lockstep with `thumbnails` -- see FrameStrip's own comment for why
@@ -1925,6 +1931,21 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  // ImageOverlayTrack's right-click "Duplicate" -- the copy lands after the
+  // original; drag it from there.
+  function handleDuplicateImageOverlay(overlayIndex: number) {
+    const { label, state } = applyDuplicateImageOverlay(selections, overlayIndex, videoDurationSeconds);
+    pushChange(label, state);
+  }
+
+  // PeepEditDialog's Update: the redrawn artwork replaces the overlay's image.
+  function handleApplyPeepEdit(asset: Asset, aspect: number, peep: Peep) {
+    if (peepEditOverlayIndex === null) return;
+    setAssets((prev) => [asset, ...prev]);
+    const { label, state } = applyReplaceImageOverlayPeep(selections, peepEditOverlayIndex, asset.id, { ...peep }, aspect, frameAspectRatio ?? 9 / 16);
+    pushChange(label, state);
+  }
+
   function handleDeleteImageOverlay(overlayIndex: number) {
     setLiveOverlayRectEdit((prev) => (prev?.index === overlayIndex ? null : prev));
     setLiveOverlayRangeEdit((prev) => (prev?.index === overlayIndex ? null : prev));
@@ -3349,6 +3370,7 @@ export function ThreePaneEditor({
           assetUrlById={assetUrlById}
           onChangeImageOverlayRect={handleChangeImageOverlayRect}
           onCommitImageOverlayRect={handleCommitImageOverlayRect}
+          onEditImagePeep={setPeepEditOverlayIndex}
           onChangeImageOverlayRange={handleChangeImageOverlayRange}
           onCommitImageOverlayRange={handleCommitImageOverlayRange}
           onChangeImageOverlayPosition={handleChangeImageOverlayPosition}
@@ -3358,6 +3380,7 @@ export function ThreePaneEditor({
           onToggleImageSplitScreenSides={handleToggleImageSplitScreenSides}
           onOpenImageOverlayFraming={handleOpenImageOverlayFraming}
           onOpenImageOverlayFilter={handleOpenImageOverlayFilter}
+          onDuplicateImageOverlay={handleDuplicateImageOverlay}
           onDeleteImageOverlay={handleDeleteImageOverlay}
           textOverlays={displayedTextOverlays}
           onChangeTextOverlayRect={handleChangeTextOverlayRect}
@@ -3423,6 +3446,14 @@ export function ThreePaneEditor({
       </section>
 
       <GuidedTour />
+      {peepEditOverlayIndex !== null && selections.overlayImages[peepEditOverlayIndex]?.peep && (
+        <PeepEditDialog
+          projectId={projectId}
+          initialPeep={selections.overlayImages[peepEditOverlayIndex].peep}
+          onApply={handleApplyPeepEdit}
+          onClose={() => setPeepEditOverlayIndex(null)}
+        />
+      )}
       {isCoverPickerOpen && (
         <CoverPicker
           projectId={projectId}

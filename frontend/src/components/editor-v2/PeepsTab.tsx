@@ -17,7 +17,7 @@
  * outline would erase the face). Placed like a prop: rasterized to a
  * transparent PNG, tightly cropped, then uploaded as an image overlay.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Avatar, Style } from "@dicebear/core";
 import openPeeps from "@dicebear/styles/open-peeps.json";
 
@@ -58,14 +58,14 @@ interface Pose {
 
 const POSES: Pose[] = [
   { key: "bust", label: "Bust", viewBox: "0 0 704 704", legs: false },
-  { key: "half", label: "Half body", viewBox: "-260 0 1240 1250", legs: false },
-  { key: "sitting", label: "Sitting", viewBox: "-260 0 1240 2070", legs: true },
-  { key: "full", label: "Full body", viewBox: "-260 0 1240 2150", legs: true },
+  { key: "half", label: "Half body", viewBox: "-340 0 1408 1250", legs: false },
+  { key: "sitting", label: "Sitting", viewBox: "-340 0 1408 2070", legs: true },
+  { key: "full", label: "Full body", viewBox: "-340 0 1408 2150", legs: true },
 ];
 
 const PANTS_SWATCHES = ["#3b4a6b", "#2b2b2b", "#6b7a8f", "#8a6a4a", "#556b2f", "#a33b3b", "#d9d2c0"];
 
-interface Peep {
+export interface Peep {
   head: string;
   face: string;
   beard: string | null;
@@ -102,13 +102,39 @@ const PART_TABS: PartTab[] = [
   { key: "beard", label: "Beard", variants: BEARDS, optional: true, viewBox: "200 300 420 420" },
   { key: "glasses", label: "Glasses", variants: GLASSES, optional: true, viewBox: "200 280 420 320" },
   { key: "mask", label: "Mask", variants: MASKS, optional: true, viewBox: "200 300 420 420" },
-  { key: "gesture", label: "Gesture", variants: GESTURES, optional: false, viewBox: "-260 380 1240 900", thumbPose: "half", poses: ["half", "sitting", "full"] },
+  { key: "gesture", label: "Gesture", variants: GESTURES, optional: false, viewBox: "-340 380 1408 900", thumbPose: "half", poses: ["half", "sitting", "full"] },
   { key: "hands", label: "Hands", variants: HANDS, optional: false, viewBox: "-70 1150 280 280", thumbPose: "half", poses: ["half", "sitting", "full"] },
   { key: "legs", label: "Legs", variants: LEGS, optional: false, viewBox: "-60 1180 900 780", thumbPose: "full", poses: ["sitting", "full"] },
   { key: "shoes", label: "Shoes", variants: SHOES, optional: false, viewBox: "-60 1700 900 400", thumbPose: "full", poses: ["full"] },
 ];
 
 const pick = <T,>(items: readonly T[]): T => items[Math.floor(Math.random() * items.length)];
+
+// Named characters, kept in this browser only, so a peep can be reopened later
+// (e.g. to swap just its face and place it again to animate speech).
+const SAVED_PEEPS_KEY = "peeps.saved";
+
+interface SavedPeep {
+  name: string;
+  peep: Peep;
+}
+
+function readSavedPeeps(): SavedPeep[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SAVED_PEEPS_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSavedPeeps(list: SavedPeep[]) {
+  try {
+    localStorage.setItem(SAVED_PEEPS_KEY, JSON.stringify(list));
+  } catch {
+    // Storage blocked or full: saving is a convenience, the peep itself still works.
+  }
+}
 
 function randomPeep(): Peep {
   return {
@@ -596,15 +622,40 @@ function SwatchRow({ label, value, swatches, onChange }: { label: string; value:
 export function PeepsTab({
   placingKey,
   onPlace,
+  initialPeep,
+  submitLabel = "Add to reel",
 }: {
   placingKey: string | null;
   // `aspect` is the cropped artwork's width/height, so it is placed unsquashed.
-  onPlace: (file: File, key: string, aspect: number) => void;
+  // `peep` is this character's settings, stored on the overlay so it can be edited again.
+  onPlace: (file: File, key: string, aspect: number, peep: Peep) => void;
+  // Reopen an existing character (from an overlay's stored settings) instead of a random one.
+  initialPeep?: Record<string, unknown>;
+  submitLabel?: string;
 }) {
-  const [peep, setPeep] = useState<Peep>(randomPeep);
+  // Merged over a random peep so a settings blob saved by an older version still has every field.
+  const [peep, setPeep] = useState<Peep>(() => (initialPeep ? { ...randomPeep(), ...(initialPeep as Partial<Peep>) } : randomPeep()));
   const [activePart, setActivePart] = useState<PartKey>("head");
   const [error, setError] = useState<string | null>(null);
   const update = (patch: Partial<Peep>) => setPeep((previous) => ({ ...previous, ...patch }));
+  const [saved, setSaved] = useState<SavedPeep[]>([]);
+  const [saveName, setSaveName] = useState("");
+  // Read after mount: localStorage doesn't exist during server rendering.
+  useEffect(() => setSaved(readSavedPeeps()), []);
+
+  function handleSave() {
+    const name = saveName.trim();
+    if (!name) return;
+    const next = [...saved.filter((s) => s.name !== name), { name, peep }];
+    setSaved(next);
+    writeSavedPeeps(next);
+  }
+
+  function handleDeleteSaved(name: string) {
+    const next = saved.filter((s) => s.name !== name);
+    setSaved(next);
+    writeSavedPeeps(next);
+  }
 
   // Body-part tabs only appear for framings that show that part.
   const visibleTabs = PART_TABS.filter((tab) => !tab.poses || tab.poses.includes(peep.pose));
@@ -630,7 +681,7 @@ export function PeepsTab({
     if (isPlacing) return;
     setError(null);
     rasterizePeep(peep)
-      .then(({ file, aspect }) => onPlace(file, "peep", aspect))
+      .then(({ file, aspect }) => onPlace(file, "peep", aspect, peep))
       .catch((err) => setError(err instanceof Error ? err.message : "Could not add this peep"));
   }
 
@@ -662,12 +713,60 @@ export function PeepsTab({
           disabled={isPlacing}
           className="rounded-md bg-accent px-2 py-1.5 text-xs font-medium text-accent-foreground disabled:opacity-60"
         >
-          {isPlacing ? "Adding…" : "Add to reel"}
+          {isPlacing ? "Working…" : submitLabel}
         </button>
         {error && <p className="text-[11px] text-red-600">{error}</p>}
+        <div className="flex flex-col gap-1 rounded-md border border-border p-1.5">
+          <span className="text-[11px] text-muted">My peeps</span>
+          <div className="flex gap-1">
+            <input
+              value={saveName}
+              onChange={(e) => setSaveName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSave()}
+              placeholder="Name this peep"
+              maxLength={30}
+              className="min-w-0 flex-1 rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px]"
+            />
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!saveName.trim()}
+              className="rounded border border-border px-1.5 text-[11px] hover:border-accent disabled:opacity-50"
+            >
+              Save
+            </button>
+          </div>
+          {saved.length > 0 && (
+            <ul className="flex max-h-28 flex-col gap-0.5 overflow-y-auto">
+              {saved.map((s) => (
+                <li key={s.name} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPeep(s.peep);
+                      setSaveName(s.name);
+                    }}
+                    title="Load this peep"
+                    className="min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-[11px] hover:bg-black/5"
+                  >
+                    {s.name}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSaved(s.name)}
+                    aria-label={`Delete ${s.name}`}
+                    className="px-1 text-[11px] text-muted hover:text-red-600"
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <p className="text-[10px] text-muted">
-          Placed like a prop: drag, resize and trim it on the time bar. Colours and parts are fixed once placed -- delete and
-          re-add to change them. Art: Open Peeps by Pablo Stanley (CC0).
+          Placed like a prop: drag, resize and trim it on the time bar. Double-click it in the preview to edit its parts
+          again. Art: Open Peeps by Pablo Stanley (CC0).
         </p>
       </div>
 

@@ -1,0 +1,57 @@
+"use client";
+
+/**
+ * Reopens the peep editor on a peep that's already on the timeline (double-click
+ * it in the preview, or right-click its timeline bar -> "Edit peep"). It is the
+ * same PeepsTab used to create one, opened on the overlay's stored settings;
+ * applying redraws the artwork, uploads it as a new image and swaps it into the
+ * overlay, keeping its timing, position and effects.
+ */
+import { useState } from "react";
+import { uploadAsset, type Asset } from "@/lib/api";
+import { PeepsTab, type Peep } from "./PeepsTab";
+
+export function PeepEditDialog({
+  projectId,
+  initialPeep,
+  onApply,
+  onClose,
+}: {
+  projectId: string;
+  initialPeep: Record<string, unknown>;
+  onApply: (asset: Asset, aspect: number, peep: Peep) => void;
+  onClose: () => void;
+}) {
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function handleApply(file: File, _key: string, aspect: number, peep: Peep) {
+    if (applying) return;
+    setApplying(true);
+    setError(null);
+    uploadAsset(projectId, file)
+      .then((asset) => {
+        onApply(asset, aspect, peep);
+        onClose();
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Could not update this peep");
+        setApplying(false);
+      });
+  }
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Edit peep" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div onClick={(e) => e.stopPropagation()} className="flex h-[70vh] w-full max-w-2xl flex-col rounded-lg border border-accent bg-surface p-4 shadow-lg">
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Edit peep</h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-foreground">
+            ✕
+          </button>
+        </div>
+        {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
+        <PeepsTab placingKey={applying ? "peep" : null} onPlace={handleApply} initialPeep={initialPeep} submitLabel="Update peep" />
+      </div>
+    </div>
+  );
+}

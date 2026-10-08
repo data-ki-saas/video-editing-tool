@@ -24,7 +24,7 @@ import { loadImageAspectRatio } from "@/lib/image";
 import { fitRectToImageAspect, type ImageOverlayPlacement } from "@/lib/video/transformations";
 import { DEFAULT_OVERLAY_FRAMING, type OverlayFraming } from "@/lib/video/video_math";
 import { useIsAdmin } from "@/lib/useIsAdmin";
-import { PeepsTab } from "./PeepsTab";
+import { PeepsTab, type Peep } from "./PeepsTab";
 import { PngTab } from "./PngTab";
 import { rasterizeSvgToPng, VectorsTab } from "./VectorsTab";
 
@@ -111,6 +111,9 @@ type Tab = "props" | "icons" | "vectors" | "peeps" | "png";
 
 const TAB_LABELS: Record<Tab, string> = { props: "Props", icons: "Icons", vectors: "Vectors", peeps: "Peeps", png: "PNG" };
 
+// The Props button shows these; the separate Peeps button shows just the Peeps tab.
+const PROPS_TABS: Tab[] = ["props", "icons", "vectors", "png"];
+
 // Google Material icons (src/lib/materialIcons.json, built by
 // scripts/build-material-icons.mjs) load lazily, only once the Icons tab opens.
 const ICON_RASTER_SIZE = 512;
@@ -139,6 +142,7 @@ const CHECKERBOARD_STYLE: React.CSSProperties = {
 };
 
 export function PropsDialog({
+  mode = "props",
   projectId,
   frameAspectRatio,
   onImported,
@@ -146,6 +150,8 @@ export function PropsDialog({
   onImportingChange,
   onClose,
 }: {
+  // "peeps" opens just the character builder (its own Overlays button).
+  mode?: "props" | "peeps";
   projectId: string;
   // The video frame's width/height, to size a prop's box to its own shape.
   frameAspectRatio: number | null;
@@ -160,7 +166,8 @@ export function PropsDialog({
   const [props, setProps] = useState<LibraryAssetSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [placingId, setPlacingId] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("props");
+  const isPeepsMode = mode === "peeps";
+  const [tab, setTab] = useState<Tab>(isPeepsMode ? "peeps" : "props");
   // Props are a shared catalog, so only admins can add to or prune it.
   const isAdmin = useIsAdmin() === true;
   const [uploadingProp, setUploadingProp] = useState(false);
@@ -200,7 +207,7 @@ export function PropsDialog({
 
   // Shared by the Icons and Vectors tabs: upload the rasterized PNG, then
   // place it as an aspect-locked prop (square unless told otherwise).
-  function placeRasterized(key: string, filePromise: Promise<File>, aspect = 1) {
+  function placeRasterized(key: string, filePromise: Promise<File>, aspect = 1, peep?: Peep) {
     if (placingId) return;
     setPlacingId(key);
     setError(null);
@@ -209,7 +216,7 @@ export function PropsDialog({
       .then((file) => uploadAsset(projectId, file))
       .then((asset) => {
         onImported(asset);
-        onPlace(asset, { rect: propRect(aspect, frameAspectRatio ?? 9 / 16), lockAspect: true });
+        onPlace(asset, { rect: propRect(aspect, frameAspectRatio ?? 9 / 16), lockAspect: true, ...(peep ? { peep: { ...peep } } : {}) });
         onClose();
       })
       .catch((err) => {
@@ -313,21 +320,23 @@ export function PropsDialog({
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="Props" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div role="dialog" aria-modal="true" aria-label={isPeepsMode ? "Peeps" : "Props"} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div onClick={(e) => e.stopPropagation()} className="flex h-[70vh] w-full max-w-2xl flex-col rounded-lg border border-accent bg-surface p-4 shadow-lg">
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Props -- drop something into your scene</h2>
+          <h2 className="text-sm font-semibold">{isPeepsMode ? "Peeps -- build a character" : "Props -- drop something into your scene"}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="text-muted hover:text-foreground">
             ✕
           </button>
         </div>
         <p className="mb-3 text-[11px] text-muted">
-          Click a prop to place it at the playhead on its own timeline row. Then drag it where it belongs, resize it, and slide
-          its ends to choose how long it stays.
+          {isPeepsMode
+            ? "Design a hand-drawn character, then add it at the playhead on its own timeline row. Drag it where it belongs, resize it, and slide its ends to choose how long it stays."
+            : "Click a prop to place it at the playhead on its own timeline row. Then drag it where it belongs, resize it, and slide its ends to choose how long it stays."}
         </p>
 
+        {!isPeepsMode && (
         <div className="mb-3 flex gap-1 border-b border-border">
-          {(["props", "icons", "vectors", "peeps", "png"] as const).map((id) => (
+          {PROPS_TABS.map((id) => (
             <button
               key={id}
               type="button"
@@ -340,13 +349,14 @@ export function PropsDialog({
             </button>
           ))}
         </div>
+        )}
 
         {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
 
         {tab === "png" ? (
           <PngTab placingKey={placingId} onPlace={handlePlacePng} />
         ) : tab === "peeps" ? (
-          <PeepsTab placingKey={placingId} onPlace={(file, key, aspect) => placeRasterized(key, Promise.resolve(file), aspect)} />
+          <PeepsTab placingKey={placingId} onPlace={(file, key, aspect, peep) => placeRasterized(key, Promise.resolve(file), aspect, peep)} />
         ) : tab === "vectors" ? (
           <VectorsTab placingKey={placingId} onPlace={(file, key) => placeRasterized(key, Promise.resolve(file))} />
         ) : tab === "icons" ? (

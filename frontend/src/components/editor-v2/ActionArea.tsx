@@ -579,6 +579,7 @@ export function ActionArea({
   // existing onUploaded/onAddImageOverlay handlers, so nothing outside this
   // component needs to know whether it's open.
   const [isPropsDialogOpen, setIsPropsDialogOpen] = useState(false);
+  const [isPeepsDialogOpen, setIsPeepsDialogOpen] = useState(false);
   // Local, unlike the other three dialogs' open/close state -- selecting a
   // ratio applies it (via onSelectClipRect, already a ThreePaneEditor-level
   // handler) and closes itself in the same click, so nothing outside this
@@ -649,6 +650,7 @@ export function ActionArea({
           onOpenOverlayPicker={onOpenOverlayPicker}
           overlayCount={videoOverlays.length + overlayImages.length}
           onOpenPropsDialog={() => setIsPropsDialogOpen(true)}
+          onOpenPeepsDialog={() => setIsPeepsDialogOpen(true)}
           onOpenTextDialog={onOpenTextDialog}
           textOverlayCount={textOverlays.filter((overlay) => isLabelTemplateId(overlay.templateId)).length}
           onOpenTtsDialog={onOpenTtsDialog}
@@ -772,6 +774,18 @@ export function ActionArea({
           onPlace={onAddImageOverlay}
           onImportingChange={onUploadingChange}
           onClose={() => setIsPropsDialogOpen(false)}
+        />
+      )}
+
+      {isPeepsDialogOpen && (
+        <PropsDialog
+          mode="peeps"
+          projectId={projectId}
+          onImported={onUploaded}
+          frameAspectRatio={frameAspectRatio}
+          onPlace={onAddImageOverlay}
+          onImportingChange={onUploadingChange}
+          onClose={() => setIsPeepsDialogOpen(false)}
         />
       )}
 

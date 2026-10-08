@@ -127,6 +127,18 @@ function PropsIcon({ className }: { className?: string }) {
   );
 }
 
+// A smiling face -- "Peeps" 's identity: a character you build, distinct from
+// Props' crate and Avatar's framed silhouette.
+function PeepsIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8.5 14.5c1 1.4 2.2 2 3.5 2s2.5-.6 3.5-2" />
+      <path d="M9 9.5h.01M15 9.5h.01" />
+    </svg>
+  );
+}
+
 // Speech bubble with a small waveform inside -- "TTS Narration" 's identity,
 // tinted violet to read as its own distinct family from Text's plain/
 // untinted glyph, Video Overlay's amber, and Image Overlay's sky.
@@ -216,6 +228,7 @@ export function UserActions({
   onOpenOverlayPicker,
   overlayCount,
   onOpenPropsDialog,
+  onOpenPeepsDialog,
   onOpenTextDialog,
   textOverlayCount,
   onOpenTtsDialog,
@@ -236,6 +249,7 @@ export function UserActions({
   // Video and photo overlays together -- one button covers both.
   overlayCount: number;
   onOpenPropsDialog: () => void;
+  onOpenPeepsDialog: () => void;
   onOpenTextDialog: () => void;
   textOverlayCount: number;
   onOpenTtsDialog: () => void;
@@ -379,7 +393,7 @@ export function UserActions({
         </button>
       </div>
 
-      {/* OVERLAYS -- amber family, lightest to darkest: Images & Videos, Props, Label, TTS, Avatar */}
+      {/* OVERLAYS -- amber family, lightest to darkest: Images & Videos, Props, Peeps, Label, TTS, Avatar */}
       <div className="relative flex h-full gap-3">
         <GroupLabel
           colorClassName="text-amber-600 dark:text-amber-400"
@@ -423,6 +437,17 @@ export function UserActions({
           <PropsIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
             Props
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onOpenPeepsDialog}
+          title="Peeps -- build a hand-drawn character (hair, face, outfit, pose) and drop it into your scene; double-click it later to edit"
+          className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-500 dark:text-amber-400 hover:bg-background"
+        >
+          <PeepsIcon className="h-4 w-4" />
+          <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
+            Peeps
           </span>
         </button>
         <button

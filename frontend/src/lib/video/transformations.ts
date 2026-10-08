@@ -540,6 +540,8 @@ export interface ImageOverlayPlacement {
   // Crops the overlay to the artwork's visible part (props are often padded).
   framing?: OverlayFraming;
   lockAspect?: boolean;
+  // A peep's own settings, so it can be edited again later (ImageOverlayClip.peep).
+  peep?: Record<string, unknown>;
 }
 
 /** Adds a new image overlay at the current playhead, defaulting to
@@ -570,6 +572,7 @@ export function applyAddImageOverlay(
     layout: { type: "picture-in-picture", rect: placement?.rect ?? DEFAULT_OVERLAY_RECT },
     framing: placement?.framing ?? DEFAULT_OVERLAY_FRAMING,
     ...(placement?.lockAspect ? { lockAspect: true } : {}),
+    ...(placement?.peep ? { peep: placement.peep } : {}),
   };
   return {
     label: "Added image overlay",
@@ -752,6 +755,53 @@ export function applyDeleteImageOverlay(
     label: "Removed image overlay",
     state: { ...selections, overlayImages: selections.overlayImages.filter((_, index) => index !== overlayIndex) },
   };
+}
+
+/** Swaps a placed peep's artwork and settings for a re-edited one, keeping its
+ * timing, filter, effects and position. A new hairstyle or pose can change the
+ * artwork's shape, so a Picture-in-Picture box is reshaped to the new aspect
+ * (same width and centre) so the redrawn peep isn't cropped or squashed. */
+export function applyReplaceImageOverlayPeep(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  assetId: string,
+  peep: Record<string, unknown>,
+  newAspect: number,
+  frameAspect: number
+): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  if (!overlay) return { label: "Edited peep", state: selections };
+  let layout = overlay.layout;
+  if (layout.type === "picture-in-picture") {
+    const { rect } = layout;
+    const height = (rect.width * frameAspect) / newAspect;
+    layout = { ...layout, rect: { ...rect, y: rect.y + (rect.height - height) / 2, height } };
+  }
+  const nextOverlays = [...selections.overlayImages];
+  nextOverlays[overlayIndex] = { ...overlay, assetId, peep, layout, framing: DEFAULT_OVERLAY_FRAMING };
+  return { label: "Edited peep", state: { ...selections, overlayImages: nextOverlays } };
+}
+
+/** Copies a Picture-in-Picture image overlay (a prop, say) with identical
+ * framing and settings, placed straight after the original -- or, if that
+ * would run past the end, flush against the end -- so it can then be dragged
+ * to wherever it's wanted. Appended last, so it draws on top of the original. */
+export function applyDuplicateImageOverlay(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  videoDurationSeconds: number
+): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  if (!overlay) return { label: "Duplicated image overlay", state: selections };
+  const durationSeconds = overlay.endTimeSeconds - overlay.startTimeSeconds;
+  const startTimeSeconds = Math.max(0, Math.min(overlay.endTimeSeconds, videoDurationSeconds - durationSeconds));
+  const copy: ImageOverlayClip = {
+    ...overlay,
+    id: crypto.randomUUID(),
+    startTimeSeconds,
+    endTimeSeconds: startTimeSeconds + durationSeconds,
+  };
+  return { label: "Duplicated image overlay", state: { ...selections, overlayImages: [...selections.overlayImages, copy] } };
 }
 
 /** Appends a video asset to the concatenated sequence -- from
