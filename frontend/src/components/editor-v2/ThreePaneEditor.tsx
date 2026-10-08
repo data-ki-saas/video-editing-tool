@@ -96,6 +96,7 @@ import {
   applyChangeImageOverlayFraming,
   applyDeleteImageOverlay,
   applyDuplicateImageOverlay,
+  applyMoveImageOverlayLayer,
   applyReplaceImageOverlayPeep,
   applyAddSequenceClip,
   applyAddImageSequenceClip,
@@ -183,7 +184,6 @@ import { LocalRenderPopup } from "./LocalRenderPopup";
 import { CoverPicker } from "./CoverPicker";
 import { GuidedTour } from "./GuidedTour";
 import { PeepEditDialog } from "./PeepEditDialog";
-import type { Peep } from "./PeepsTab";
 
 const THUMBNAIL_INTERVAL_SECONDS = 1;
 // A text slide's own placeholder filmstrip tile -- small, fixed size, just
@@ -1938,8 +1938,13 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  function handleMoveImageOverlayLayer(overlayIndex: number, direction: "up" | "down") {
+    const { label, state } = applyMoveImageOverlayLayer(selections, overlayIndex, direction);
+    pushChange(label, state);
+  }
+
   // PeepEditDialog's Update: the redrawn artwork replaces the overlay's image.
-  function handleApplyPeepEdit(asset: Asset, aspect: number, peep: Peep) {
+  function handleApplyPeepEdit(asset: Asset, aspect: number, peep: Record<string, unknown>) {
     if (peepEditOverlayIndex === null) return;
     setAssets((prev) => [asset, ...prev]);
     const { label, state } = applyReplaceImageOverlayPeep(selections, peepEditOverlayIndex, asset.id, { ...peep }, aspect, frameAspectRatio ?? 9 / 16);
@@ -3381,6 +3386,7 @@ export function ThreePaneEditor({
           onOpenImageOverlayFraming={handleOpenImageOverlayFraming}
           onOpenImageOverlayFilter={handleOpenImageOverlayFilter}
           onDuplicateImageOverlay={handleDuplicateImageOverlay}
+          onMoveImageOverlayLayer={handleMoveImageOverlayLayer}
           onDeleteImageOverlay={handleDeleteImageOverlay}
           textOverlays={displayedTextOverlays}
           onChangeTextOverlayRect={handleChangeTextOverlayRect}

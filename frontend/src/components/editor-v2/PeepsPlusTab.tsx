@@ -81,7 +81,7 @@ const innerMarkup = (svg: string) =>
     .replace(/<\/svg>\s*$/, "")
     .replace(/<title>[\s\S]*?<\/title>|<desc>[\s\S]*?<\/desc>/g, "");
 
-interface Look {
+export interface Look {
   stance: Stance;
   pose: string;
   head: string;
@@ -89,6 +89,17 @@ interface Look {
   beard: string | null;
   glasses: string | null;
   flip: boolean;
+}
+
+/** What is stored on a placed figure so it can be edited again (`kind` tells it apart from a builder peep). */
+export interface PackPeep {
+  kind: "pack";
+  look: Look;
+  fills: Fill[];
+}
+
+export function isPackPeep(peep: Record<string, unknown>): peep is Record<string, unknown> & PackPeep {
+  return peep.kind === "pack" && typeof peep.look === "object" && peep.look !== null;
 }
 
 type Texts = Record<string, string>; // part file -> svg text
@@ -134,14 +145,33 @@ function composeFigure(m: Manifest, texts: Texts, look: Look, parts: "all" | "he
 
 const svgDataUrl = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 
-/** Transparent PNG of an SVG document, cropped to its visible pixels, plus the crop's aspect ratio. */
-async function rasterizeCropped(svg: string, width: number, height: number): Promise<{ file: File; aspect: number }> {
-  const scale = RASTER_MAX_SIDE / Math.max(width, height);
-  const w = Math.max(1, Math.round(width * scale));
-  const h = Math.max(1, Math.round(height * scale));
-  const sized = svg.replace(/^<svg /, `<svg width="${w}" height="${h}" `);
+// --- Painting -----------------------------------------------------------------
+// The pack is black and white: every shape is a white "background" fill under black
+// ink lines, and a whole figure's fills are only one or two shapes, so skin, clothes
+// and hair can't be told apart in the files. The ink lines do divide the figure into
+// regions on screen though, so painting is a bucket fill: click a region and it takes
+// the colour. A fill is remembered as a click position (so it replays at any size),
+// and the colour is laid *under* the ink so the lines stay crisp.
+const INK_BARRIER = 128; // ink alpha at or above this stops a fill
+const SHAPE_MIN_ALPHA = 8;
+
+export interface Fill {
+  x: number; // 0..1 across the figure's frame
+  y: number;
+  color: string;
+}
+
+/** The same figure twice: only the white fills, and only the black ink lines. */
+function splitLayers(svg: string): { fill: string; ink: string } {
+  return {
+    fill: svg.replace(/(id="🖍-Ink"[^>]*?)fill="[^"]*"/g, '$1fill="none"'),
+    ink: svg.replace(/(id="🎨-Background"[^>]*?)fill="[^"]*"/g, '$1fill="none"'),
+  };
+}
+
+async function drawSvg(svg: string, w: number, h: number): Promise<HTMLCanvasElement> {
   const img = new Image();
-  img.src = svgDataUrl(sized);
+  img.src = svgDataUrl(svg.replace(/^<svg /, `<svg width="${w}" height="${h}" `));
   await img.decode();
   const canvas = document.createElement("canvas");
   canvas.width = w;
@@ -149,6 +179,92 @@ async function rasterizeCropped(svg: string, width: number, height: number): Pro
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not draw this figure");
   ctx.drawImage(img, 0, 0, w, h);
+  return canvas;
+}
+
+const hexToRgb = (hex: string): [number, number, number] => {
+  const n = parseInt(hex.replace("#", "").padEnd(6, "0").slice(0, 6), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+
+/** Pixels connected to (sx, sy) that are inside the figure's fill and not on an ink line. */
+function floodRegion(fillData: Uint8ClampedArray, inkData: Uint8ClampedArray, w: number, h: number, sx: number, sy: number): Uint8Array | null {
+  const open = (i: number) => fillData[i * 4 + 3] > SHAPE_MIN_ALPHA && inkData[i * 4 + 3] < INK_BARRIER;
+  const start = sy * w + sx;
+  if (!open(start)) return null;
+  const mask = new Uint8Array(w * h);
+  const stack = [start];
+  mask[start] = 1;
+  while (stack.length > 0) {
+    const i = stack.pop() as number;
+    const x = i % w;
+    const neighbours = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i < w * (h - 1) ? i + w : -1];
+    for (const n of neighbours) {
+      if (n >= 0 && !mask[n] && open(n)) {
+        mask[n] = 1;
+        stack.push(n);
+      }
+    }
+  }
+  return mask;
+}
+
+/** Grows a mask by `r` pixels, so a fill tucks under the ink lines that bound it. */
+function dilate(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
+  const horizontal = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!mask[y * w + x]) continue;
+      for (let dx = Math.max(0, x - r); dx <= Math.min(w - 1, x + r); dx++) horizontal[y * w + dx] = 1;
+    }
+  }
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!horizontal[y * w + x]) continue;
+      for (let dy = Math.max(0, y - r); dy <= Math.min(h - 1, y + r); dy++) out[dy * w + x] = 1;
+    }
+  }
+  return out;
+}
+
+/** The figure drawn at `width` px wide with every fill applied, ink on top. */
+async function paintFigure(svg: string, box: Rect, fills: Fill[], width: number): Promise<HTMLCanvasElement> {
+  const w = Math.max(1, Math.round(width));
+  const h = Math.max(1, Math.round((width * box[3]) / box[2]));
+  const layers = splitLayers(svg);
+  const [fillCanvas, inkCanvas] = await Promise.all([drawSvg(layers.fill, w, h), drawSvg(layers.ink, w, h)]);
+  const fillImage = fillCanvas.getContext("2d")!.getImageData(0, 0, w, h);
+  const inkData = inkCanvas.getContext("2d")!.getImageData(0, 0, w, h).data;
+  const radius = Math.max(1, Math.round(w / 250));
+  for (const fill of fills) {
+    const region = floodRegion(fillImage.data, inkData, w, h, Math.min(w - 1, Math.max(0, Math.round(fill.x * w))), Math.min(h - 1, Math.max(0, Math.round(fill.y * h))));
+    if (!region) continue;
+    const grown = dilate(region, w, h, radius);
+    const [r, g, b] = hexToRgb(fill.color);
+    for (let i = 0; i < grown.length; i++) {
+      if (grown[i] && fillImage.data[i * 4 + 3] > SHAPE_MIN_ALPHA) {
+        fillImage.data[i * 4] = r;
+        fillImage.data[i * 4 + 1] = g;
+        fillImage.data[i * 4 + 2] = b;
+      }
+    }
+  }
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext("2d")!;
+  ctx.putImageData(fillImage, 0, 0);
+  ctx.drawImage(inkCanvas, 0, 0);
+  return out;
+}
+
+/** Transparent PNG of a canvas, cropped to its visible pixels, plus the crop's aspect ratio. */
+async function cropToPng(canvas: HTMLCanvasElement): Promise<{ file: File; aspect: number }> {
+  const w = canvas.width;
+  const h = canvas.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Could not draw this figure");
   const { data } = ctx.getImageData(0, 0, w, h);
   let minX = w, minY = h, maxX = -1, maxY = -1;
   for (let y = 0; y < h; y++) {
@@ -171,6 +287,15 @@ async function rasterizeCropped(svg: string, width: number, height: number): Pro
   const blob = await new Promise<Blob | null>((resolve) => cropped.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("Could not draw this figure");
   return { file: new File([blob], "peep-pack.png", { type: "image/png" }), aspect: cw / ch };
+}
+
+/** Transparent, cropped PNG of an SVG document (painted with `fills`, if any). */
+async function rasterizeCropped(svg: string, width: number, height: number, fills: Fill[] = []): Promise<{ file: File; aspect: number }> {
+  const scale = RASTER_MAX_SIDE / Math.max(width, height);
+  const w = Math.max(1, Math.round(width * scale));
+  const h = Math.max(1, Math.round(height * scale));
+  const canvas = fills.length > 0 ? await paintFigure(svg, [0, 0, width, height], fills, w) : await drawSvg(svg, w, h);
+  return cropToPng(canvas);
 }
 
 const CHECKERBOARD_STYLE: React.CSSProperties = {
@@ -198,6 +323,11 @@ function randomLook(m: Manifest, stance: Stance): Look {
   };
 }
 
+// Skin tones first, then hair / clothes colours.
+const PAINT_SWATCHES = ["#f5d5b8", "#e0a37a", "#c68642", "#8d5524", "#4a312c", "#111111", "#ffffff", "#ef4444", "#f97316", "#facc15", "#22c55e", "#3b82f6", "#a855f7", "#ec4899"];
+const PREVIEW_WIDTH = 480;
+const MAX_FILLS = 100;
+
 type Mode = "poses" | "ready";
 type ReadyKey = keyof Manifest["templates"];
 const READY_LABELS: Record<ReadyKey, string> = { bust: "Bust", standing: "Standing", sitting: "Sitting", masks: "With masks" };
@@ -205,10 +335,17 @@ const READY_LABELS: Record<ReadyKey, string> = { bust: "Bust", standing: "Standi
 export function PeepsPlusTab({
   placingKey,
   onPlace,
+  initialPeep,
+  submitLabel = "Add to reel",
 }: {
   placingKey: string | null;
   // `aspect` is the cropped artwork's width/height, so it is placed unsquashed.
-  onPlace: (file: File, key: string, aspect: number) => void;
+  // `peep` is this figure's settings, stored on the overlay so it can be edited again.
+  // Ready-made figures carry no settings (they are not editable), so `peep` is absent for them.
+  onPlace: (file: File, key: string, aspect: number, peep?: PackPeep) => void;
+  // Reopen an existing figure (from an overlay's stored settings) instead of a random one.
+  initialPeep?: PackPeep;
+  submitLabel?: string;
 }) {
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [texts, setTexts] = useState<Texts>({});
@@ -217,6 +354,9 @@ export function PeepsPlusTab({
   const [activePart, setActivePart] = useState<PartKey>("pose");
   const [ready, setReady] = useState<ReadyKey>("standing");
   const [error, setError] = useState<string | null>(null);
+  const [fills, setFills] = useState<Fill[]>(initialPeep?.fills ?? []);
+  const [paintColor, setPaintColor] = useState(PAINT_SWATCHES[1]);
+  const [paintedUrl, setPaintedUrl] = useState<string | null>(null);
   const isPlacing = placingKey !== null;
 
   useEffect(() => {
@@ -225,7 +365,17 @@ export function PeepsPlusTab({
       .then(async (m) => {
         if (cancelled) return;
         setManifest(m);
-        setLook(randomLook(m, "standing"));
+        // A stored look may name parts this pack version no longer has; fall back to a random one.
+        const stored = initialPeep?.look;
+        const usable =
+          stored &&
+          find(m.poses[stored.stance] ?? [], stored.pose) &&
+          find(m.heads, stored.head) &&
+          find(m.faces, stored.face) &&
+          (!stored.beard || find(m.facialHair, stored.beard)) &&
+          (!stored.glasses || find(m.accessories, stored.glasses));
+        setLook(usable ? stored : randomLook(m, "standing"));
+        if (!usable) setFills([]);
         const files = [...m.poses.standing, ...m.poses.sitting, ...m.heads, ...m.faces, ...m.facialHair, ...m.accessories].map((p) => p.file);
         const loaded = await Promise.all(files.map((f) => loadText(f).then((t): [string, string] => [f, t])));
         if (!cancelled) setTexts(Object.fromEntries(loaded));
@@ -234,9 +384,15 @@ export function PeepsPlusTab({
     return () => {
       cancelled = true;
     };
+    // Only the figure it opened on matters: later edits live in this component's own state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const update = (patch: Partial<Look>) => setLook((previous) => (previous ? { ...previous, ...patch } : previous));
+  // Fills are click positions on the figure, so any change to the figure itself clears them.
+  const update = (patch: Partial<Look>) => {
+    setLook((previous) => (previous ? { ...previous, ...patch } : previous));
+    setFills([]);
+  };
 
   function setStance(stance: Stance) {
     if (!manifest || !look) return;
@@ -245,7 +401,33 @@ export function PeepsPlusTab({
   }
 
   const figure = useMemo(() => (manifest && look ? composeFigure(manifest, texts, look) : null), [manifest, texts, look]);
-  const previewUrl = figure ? svgDataUrl(figure.svg) : null;
+  const plainUrl = figure ? svgDataUrl(figure.svg) : null;
+  const previewUrl = fills.length > 0 && paintedUrl ? paintedUrl : plainUrl;
+
+  useEffect(() => {
+    if (!figure || fills.length === 0) return;
+    let cancelled = false;
+    paintFigure(figure.svg, figure.box, fills, PREVIEW_WIDTH)
+      .then((canvas) => !cancelled && setPaintedUrl(canvas.toDataURL("image/png")))
+      .catch(() => !cancelled && setPaintedUrl(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [figure, fills]);
+
+  function handlePreviewClick(event: React.MouseEvent<HTMLImageElement>) {
+    if (!figure) return;
+    // The image is letterboxed (object-contain) inside its box: map the click onto the figure's frame.
+    const rect = event.currentTarget.getBoundingClientRect();
+    const aspect = figure.box[2] / figure.box[3];
+    const shownW = Math.min(rect.width, rect.height * aspect);
+    const shownH = shownW / aspect;
+    const x = (event.clientX - rect.left - (rect.width - shownW) / 2) / shownW;
+    const y = (event.clientY - rect.top - (rect.height - shownH) / 2) / shownH;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    // Saved with the figure (the backend caps that at 8000 characters), so keep the list bounded.
+    setFills((previous) => [...previous.slice(-(MAX_FILLS - 1)), { x, y, color: paintColor }]);
+  }
 
   const thumbnails = useMemo(() => {
     if (!manifest || !look || mode !== "poses") return [];
@@ -261,10 +443,10 @@ export function PeepsPlusTab({
   }, [manifest, texts, look, mode, activePart]);
 
   function handlePlaceFigure() {
-    if (isPlacing || !figure) return;
+    if (isPlacing || !figure || !look) return;
     setError(null);
-    rasterizeCropped(figure.svg, figure.box[2], figure.box[3])
-      .then(({ file, aspect }) => onPlace(file, "peep-pack", aspect))
+    rasterizeCropped(figure.svg, figure.box[2], figure.box[3], fills)
+      .then(({ file, aspect }) => onPlace(file, "peep-pack", aspect, { kind: "pack", look, fills }))
       .catch((err) => setError(err instanceof Error ? err.message : "Could not add this figure"));
   }
 
@@ -290,7 +472,8 @@ export function PeepsPlusTab({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex flex-wrap items-center gap-1">
-        {(["poses", "ready"] as Mode[]).map((id) => (
+        {/* Ready-made figures carry no settings, so an edit reopens only the pose mixer. */}
+        {(initialPeep ? [] : (["poses", "ready"] as Mode[])).map((id) => (
           <button
             key={id}
             type="button"
@@ -310,7 +493,7 @@ export function PeepsPlusTab({
             <div className="flex aspect-[3/4] items-center justify-center overflow-hidden rounded-md border border-border" style={CHECKERBOARD_STYLE}>
               {previewUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element -- a data: URL generated in-browser
-                <img src={previewUrl} alt="Your peep" className="h-full w-full object-contain" />
+                <img src={previewUrl} alt="Your peep" onClick={handlePreviewClick} className="h-full w-full cursor-crosshair object-contain" />
               ) : (
                 <span className="text-[11px] text-muted">Loading…</span>
               )}
@@ -328,9 +511,42 @@ export function PeepsPlusTab({
                 </button>
               ))}
             </div>
-            <button type="button" onClick={() => setLook(randomLook(manifest, look.stance))} className="rounded-md border border-border px-2 py-1 text-xs hover:border-accent">
+            <button type="button" onClick={() => {
+                setLook(randomLook(manifest, look.stance));
+                setFills([]);
+              }} className="rounded-md border border-border px-2 py-1 text-xs hover:border-accent">
               🎲 Surprise me
             </button>
+            <div className="flex flex-col gap-1 rounded-md border border-border p-1.5">
+              <span className="text-[11px] text-muted">Paint: pick a colour, then click the figure</span>
+              <div className="flex flex-wrap items-center gap-1">
+                {PAINT_SWATCHES.map((swatch) => (
+                  <button
+                    key={swatch}
+                    type="button"
+                    onClick={() => setPaintColor(swatch)}
+                    aria-label={`Paint ${swatch}`}
+                    style={{ backgroundColor: swatch }}
+                    className={`h-4 w-4 rounded-full border ${paintColor === swatch ? "ring-2 ring-accent ring-offset-1" : "border-border"}`}
+                  />
+                ))}
+                <input
+                  type="color"
+                  value={paintColor}
+                  onChange={(e) => setPaintColor(e.target.value)}
+                  aria-label="Custom paint colour"
+                  className="h-5 w-5 cursor-pointer rounded border border-border bg-transparent p-0"
+                />
+              </div>
+              <div className="flex gap-1">
+                <button type="button" onClick={() => setFills((previous) => previous.slice(0, -1))} disabled={fills.length === 0} className="flex-1 rounded border border-border px-1 py-0.5 text-[11px] hover:border-accent disabled:opacity-50">
+                  Undo
+                </button>
+                <button type="button" onClick={() => setFills([])} disabled={fills.length === 0} className="flex-1 rounded border border-border px-1 py-0.5 text-[11px] hover:border-accent disabled:opacity-50">
+                  Clear
+                </button>
+              </div>
+            </div>
             <button
               type="button"
               onClick={() => update({ flip: !look.flip })}
@@ -345,9 +561,9 @@ export function PeepsPlusTab({
               disabled={isPlacing || !figure}
               className="rounded-md bg-accent px-2 py-1.5 text-xs font-medium text-accent-foreground disabled:opacity-60"
             >
-              {isPlacing ? "Working…" : "Add to reel"}
+              {isPlacing ? "Working…" : submitLabel}
             </button>
-            <p className="text-[10px] text-muted">Art: Open Peeps by Pablo Stanley. These come in black and white; pick the pose first, then the face.</p>
+            <p className="text-[10px] text-muted">Art: Open Peeps by Pablo Stanley. Change parts first: picking a different part clears your paint.</p>
           </div>
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">

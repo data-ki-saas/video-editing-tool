@@ -199,6 +199,7 @@ export function Playground({
   onOpenImageOverlayFraming,
   onOpenImageOverlayFilter,
   onDuplicateImageOverlay,
+  onMoveImageOverlayLayer,
   onDeleteImageOverlay,
   textOverlays,
   onChangeTextOverlayRect,
@@ -330,6 +331,7 @@ export function Playground({
   onOpenImageOverlayFraming: (overlayIndex: number, clickedTimeSeconds: number) => void;
   onOpenImageOverlayFilter: (overlayIndex: number) => void;
   onDuplicateImageOverlay: (overlayIndex: number) => void;
+  onMoveImageOverlayLayer: (overlayIndex: number, direction: "up" | "down") => void;
   onDeleteImageOverlay: (overlayIndex: number) => void;
   textOverlays: TextOverlay[];
   onChangeTextOverlayRect: (overlayIndex: number, next: CropRect) => void;
@@ -492,6 +494,7 @@ export function Playground({
             onOpenImageOverlayFraming={onOpenImageOverlayFraming}
             onOpenImageOverlayFilter={onOpenImageOverlayFilter}
             onDuplicateImageOverlay={onDuplicateImageOverlay}
+            onMoveImageOverlayLayer={onMoveImageOverlayLayer}
             onDeleteImageOverlay={onDeleteImageOverlay}
             textOverlays={textOverlays}
             onChangeTextOverlayRect={onChangeTextOverlayRect}

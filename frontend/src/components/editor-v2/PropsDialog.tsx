@@ -25,7 +25,7 @@ import { fitRectToImageAspect, type ImageOverlayPlacement } from "@/lib/video/tr
 import { DEFAULT_OVERLAY_FRAMING, type OverlayFraming } from "@/lib/video/video_math";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import { PeepsPlusTab } from "./PeepsPlusTab";
-import { PeepsTab, type Peep } from "./PeepsTab";
+import { PeepsTab } from "./PeepsTab";
 import { PngTab } from "./PngTab";
 import { rasterizeSvgToPng, VectorsTab } from "./VectorsTab";
 
@@ -209,7 +209,7 @@ export function PropsDialog({
 
   // Shared by the Icons and Vectors tabs: upload the rasterized PNG, then
   // place it as an aspect-locked prop (square unless told otherwise).
-  function placeRasterized(key: string, filePromise: Promise<File>, aspect = 1, peep?: Peep) {
+  function placeRasterized(key: string, filePromise: Promise<File>, aspect = 1, peep?: Record<string, unknown>) {
     if (placingId) return;
     setPlacingId(key);
     setError(null);
@@ -356,9 +356,9 @@ export function PropsDialog({
         {tab === "png" ? (
           <PngTab placingKey={placingId} onPlace={handlePlacePng} />
         ) : tab === "peeps" ? (
-          <PeepsTab placingKey={placingId} onPlace={(file, key, aspect, peep) => placeRasterized(key, Promise.resolve(file), aspect, peep)} />
+          <PeepsTab placingKey={placingId} onPlace={(file, key, aspect, peep) => placeRasterized(key, Promise.resolve(file), aspect, { ...peep })} />
         ) : tab === "peepsPlus" ? (
-          <PeepsPlusTab placingKey={placingId} onPlace={(file, key, aspect) => placeRasterized(key, Promise.resolve(file), aspect)} />
+          <PeepsPlusTab placingKey={placingId} onPlace={(file, key, aspect, peep) => placeRasterized(key, Promise.resolve(file), aspect, peep ? { ...peep } : undefined)} />
         ) : tab === "vectors" ? (
           <VectorsTab placingKey={placingId} onPlace={(file, key) => placeRasterized(key, Promise.resolve(file))} />
         ) : tab === "icons" ? (

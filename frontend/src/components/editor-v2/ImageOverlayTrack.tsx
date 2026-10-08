@@ -67,6 +67,7 @@ function ImageOverlaySegment({
   onOpenFilter,
   onDuplicate,
   onEditPeep,
+  onMoveLayer,
   onDelete,
 }: {
   overlay: ImageOverlayClip;
@@ -89,6 +90,8 @@ function ImageOverlaySegment({
   onOpenFilter: () => void;
   onDuplicate: () => void;
   onEditPeep: () => void;
+  // Set when this overlay can move a row up / down (Picture-in-Picture rows only).
+  onMoveLayer?: { up: (() => void) | null; down: (() => void) | null };
   onDelete: () => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -235,11 +238,16 @@ function ImageOverlaySegment({
         // for a full/split-screen clip would overlap its exclusive neighbor.
         const duplicate: ContextMenuAction[] =
           overlay.layout.type === "picture-in-picture" ? [{ label: "Duplicate", onSelect: onDuplicate }] : [];
+        // Rows stack like layers: up is toward the front, down toward the back.
+        const move: ContextMenuAction[] = [
+          ...(onMoveLayer?.up ? [{ label: "Move up", onSelect: onMoveLayer.up }] : []),
+          ...(onMoveLayer?.down ? [{ label: "Move down", onSelect: onMoveLayer.down }] : []),
+        ];
         openContextMenu(
           e,
           overlay.lockAspect
-            ? [edit, ...editPeep, ...duplicate, { label: "Remove", danger: true, onSelect: onDelete }]
-            : [edit, ...editPeep, ...duplicate, ...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }]
+            ? [edit, ...editPeep, ...duplicate, ...move, { label: "Remove", danger: true, onSelect: onDelete }]
+            : [edit, ...editPeep, ...duplicate, ...move, ...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }]
         );
       }}
       title="Drag the middle to move, an edge to trim; right-click to edit or remove"
@@ -350,6 +358,7 @@ export function ImageOverlayTrack({
   onOpenFilter,
   onDuplicate,
   onEditPeep,
+  onMoveLayer,
   onDelete,
 }: {
   imageOverlays: ImageOverlayClip[];
@@ -372,6 +381,7 @@ export function ImageOverlayTrack({
   onOpenFilter: (overlayIndex: number) => void;
   onDuplicate: (overlayIndex: number) => void;
   onEditPeep: (overlayIndex: number) => void;
+  onMoveLayer?: (overlayIndex: number, direction: "up" | "down") => void;
   onDelete: (overlayIndex: number) => void;
 }) {
   if (imageOverlays.length === 0) return null;
@@ -380,7 +390,9 @@ export function ImageOverlayTrack({
   const exclusiveSorted = indexed
     .filter(({ overlay }) => isExclusiveLayout(overlay.layout))
     .sort((a, b) => a.overlay.startTimeSeconds - b.overlay.startTimeSeconds);
-  const pipEntries = indexed.filter(({ overlay }) => overlay.layout.type === "picture-in-picture");
+  // Picture-in-Picture overlays draw in array order, so the last one is frontmost: list
+  // them last-first so the top row is the front layer, like the rest of the z-order stack.
+  const pipEntries = indexed.filter(({ overlay }) => overlay.layout.type === "picture-in-picture").reverse();
 
   function segmentProps(index: number, prevBoundSeconds: number, nextBoundSeconds: number) {
     const overlay = imageOverlays[index];
@@ -403,7 +415,19 @@ export function ImageOverlayTrack({
       onOpenFilter: () => onOpenFilter(index),
       onDuplicate: () => onDuplicate(index),
       onEditPeep: () => onEditPeep(index),
+      onMoveLayer: moveLayerFor(index),
       onDelete: () => onDelete(index),
+    };
+  }
+
+  // Only a Picture-in-Picture row has a row above / below to swap with.
+  function moveLayerFor(index: number) {
+    if (!onMoveLayer) return undefined;
+    const row = pipEntries.findIndex((entry) => entry.index === index);
+    if (row < 0) return undefined;
+    return {
+      up: row > 0 ? () => onMoveLayer(index, "up") : null,
+      down: row < pipEntries.length - 1 ? () => onMoveLayer(index, "down") : null,
     };
   }
 

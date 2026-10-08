@@ -3,14 +3,15 @@
 /**
  * Reopens the peep editor on a peep that's already on the timeline (double-click
  * it in the preview, or right-click its timeline bar -> "Edit peep"). It is the
- * same PeepsTab used to create one, opened on the overlay's stored settings;
+ * same PeepsTab (or, for a figure made in the Real poses tab, PeepsPlusTab) used to create one, opened on the overlay's stored settings;
  * applying redraws the artwork, uploads it as a new image and swaps it into the
  * overlay, keeping its timing, position and effects. Also opened from the asset
  * gallery on a peep asset, where applying just adds the result as a new peep.
  */
 import { useState } from "react";
 import { uploadAsset, type Asset } from "@/lib/api";
-import { PeepsTab, type Peep } from "./PeepsTab";
+import { PeepsPlusTab, isPackPeep } from "./PeepsPlusTab";
+import { PeepsTab } from "./PeepsTab";
 
 export function PeepEditDialog({
   projectId,
@@ -22,7 +23,7 @@ export function PeepEditDialog({
 }: {
   projectId: string;
   initialPeep: Record<string, unknown>;
-  onApply: (asset: Asset, aspect: number, peep: Peep) => void;
+  onApply: (asset: Asset, aspect: number, peep: Record<string, unknown>) => void;
   onClose: () => void;
   title?: string;
   submitLabel?: string;
@@ -30,13 +31,14 @@ export function PeepEditDialog({
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function handleApply(file: File, _key: string, aspect: number, peep: Peep) {
-    if (applying) return;
+  function handleApply(file: File, _key: string, aspect: number, peep?: object) {
+    // Editing always supplies the figure's settings; only a ready-made figure (not editable) lacks them.
+    if (applying || !peep) return;
     setApplying(true);
     setError(null);
     uploadAsset(projectId, file, { ...peep })
       .then((asset) => {
-        onApply(asset, aspect, peep);
+        onApply(asset, aspect, { ...peep });
         onClose();
       })
       .catch((err) => {
@@ -55,7 +57,11 @@ export function PeepEditDialog({
           </button>
         </div>
         {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
-        <PeepsTab placingKey={applying ? "peep" : null} onPlace={handleApply} initialPeep={initialPeep} submitLabel={submitLabel} />
+        {isPackPeep(initialPeep) ? (
+          <PeepsPlusTab placingKey={applying ? "peep" : null} onPlace={handleApply} initialPeep={initialPeep} submitLabel={submitLabel} />
+        ) : (
+          <PeepsTab placingKey={applying ? "peep" : null} onPlace={handleApply} initialPeep={initialPeep} submitLabel={submitLabel} />
+        )}
       </div>
     </div>
   );

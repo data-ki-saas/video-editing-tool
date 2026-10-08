@@ -23,10 +23,16 @@ interface ChangelogEntry {
 const ENTRIES: ChangelogEntry[] = [
   {
     date: "2026-10-08",
+    title: "Move overlays up and down the stack",
+    description:
+      "Right-click a photo, prop or peep on the time bar and choose Move up or Move down to change which one sits in front. The top row is now the front layer, so a character you add later appears on top and you can send it behind another with one click.",
+    isLatest: true,
+  },
+  {
+    date: "2026-10-08",
     title: "Peeps: real poses with real hand gestures",
     description:
-      "The Peeps popup has a new Real poses tab using the original Open Peeps artwork. Mix a pose (pointing, crossed arms, resting, walking, sitting cross-legged, even a wheelchair or a bike) with any hair, face, beard and glasses, flip it, and add it to your reel. Or pick a ready-made figure from over 150 busts, standing, sitting and masked characters.",
-    isLatest: true,
+      "The Peeps popup has a new Real poses tab using the original Open Peeps artwork. Mix a pose (pointing, crossed arms, resting, walking, sitting cross-legged, even a wheelchair or a bike) with any hair, face, beard and glasses, flip it, and add it to your reel. The artwork is black and white, so there's a paint bucket: pick a colour and click the skin, shirt, hair or shoes to fill them. Double-click a figure later to change its pose, face or paint. Or pick a ready-made figure from over 150 busts, standing, sitting and masked characters.",
   },
   {
     date: "2026-10-08",

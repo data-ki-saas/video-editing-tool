@@ -804,6 +804,27 @@ export function applyDuplicateImageOverlay(
   return { label: "Duplicated image overlay", state: { ...selections, overlayImages: [...selections.overlayImages, copy] } };
 }
 
+/** Moves a Picture-in-Picture image overlay one row toward the front ("up") or the
+ * back ("down") of the image-overlay stack by swapping draw order with its neighbour.
+ * Picture-in-Picture overlays are drawn in array order (the last one is frontmost),
+ * so the swap is between this overlay and the next / previous PiP one in the array;
+ * exclusive (full / split-screen) overlays never overlap in time and are unaffected. */
+export function applyMoveImageOverlayLayer(
+  selections: EditSelectionsSnapshot,
+  overlayIndex: number,
+  direction: "up" | "down"
+): TransformationResult {
+  const overlays = selections.overlayImages;
+  const pipIndices = overlays.flatMap((overlay, index) => (overlay.layout.type === "picture-in-picture" ? [index] : []));
+  const position = pipIndices.indexOf(overlayIndex);
+  const label = direction === "up" ? "Moved overlay up" : "Moved overlay down";
+  const neighbour = pipIndices[position + (direction === "up" ? 1 : -1)];
+  if (position < 0 || neighbour === undefined) return { label, state: selections };
+  const next = [...overlays];
+  [next[overlayIndex], next[neighbour]] = [next[neighbour], next[overlayIndex]];
+  return { label, state: { ...selections, overlayImages: next } };
+}
+
 /** Appends a video asset to the concatenated sequence -- from
  * AssetGallery's right-click "Add" on a video asset. The first "Add" is
  * what starts rendering frames at all; every later one plays right after
