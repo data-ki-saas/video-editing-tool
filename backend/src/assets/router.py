@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile
+from fastapi import APIRouter, Depends, Form, UploadFile
 
 from src.assets import service
 from src.assets.schemas import AssetInfo
@@ -9,9 +9,12 @@ router = APIRouter(prefix="/api/assets", tags=["assets"], dependencies=[Depends(
 
 @router.post("", response_model=AssetInfo, status_code=201)
 async def upload_asset(
-    project_id: str, file: UploadFile, user: CurrentUser = Depends(get_current_user)
+    project_id: str,
+    file: UploadFile,
+    peep: str | None = Form(None),
+    user: CurrentUser = Depends(get_current_user),
 ) -> AssetInfo:
-    return await service.upload_asset(project_id, file, user)
+    return await service.upload_asset(project_id, file, user, peep_json=peep)
 
 
 @router.get("", response_model=list[AssetInfo])

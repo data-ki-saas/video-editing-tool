@@ -19,3 +19,5 @@ class AssetInfo(BaseModel):
     # it expires rather than caching this value long-term.
     url: str
     created_at: str
+    # Set for a peep: the settings the peep editor reopens on. None otherwise.
+    peep: dict | None = None

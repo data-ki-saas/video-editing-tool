@@ -74,3 +74,24 @@ async def test_deleting_one_deduped_asset_keeps_the_shared_object(client, fake_a
     delete_second = await client.delete(f"/api/assets/{second['id']}")
     assert delete_second.status_code == 204
     assert not _object_exists(storage_key)  # last reference gone -> object cleaned up
+
+
+async def test_upload_image_with_peep_settings_round_trips(client, fake_assets_table):
+    project_id = fake_assets_table.add_project(TEST_USER.id)
+    files = {"file": ("peep.png", b"fake png bytes", "image/png")}
+    upload = await client.post(
+        "/api/assets", params={"project_id": project_id}, files=files, data={"peep": '{"head": "afro"}'}
+    )
+    assert upload.status_code == 201
+    assert upload.json()["peep"] == {"head": "afro"}
+
+    listing = await client.get("/api/assets", params={"project_id": project_id})
+    assert listing.json()[0]["peep"] == {"head": "afro"}
+
+
+async def test_upload_rejects_malformed_peep_settings(client, fake_assets_table):
+    project_id = fake_assets_table.add_project(TEST_USER.id)
+    files = {"file": ("peep.png", b"fake png bytes", "image/png")}
+    for bad in ("not json", "[1, 2]"):
+        response = await client.post("/api/assets", params={"project_id": project_id}, files=files, data={"peep": bad})
+        assert response.status_code == 400

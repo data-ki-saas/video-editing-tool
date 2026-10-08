@@ -33,6 +33,7 @@ import { UploadDialog } from "./UploadDialog";
 import { StockMediaDialog } from "./StockMediaDialog";
 import { LibraryAssetDialog } from "./LibraryAssetDialog";
 import { PropsDialog } from "./PropsDialog";
+import { PeepEditDialog } from "./PeepEditDialog";
 import { UserActions } from "./UserActions";
 import { NewReelWizard } from "@/components/wizard/NewReelWizard";
 import { TextOverlayDialog } from "./TextOverlayDialog";
@@ -127,7 +128,7 @@ function ActiveTransformationsList({
     colorFilterId ? `, ${getFilterPresetOption(colorFilterId).name} filter` : "";
   for (const overlay of selections.overlayImages) {
     rows.push(
-      `Image overlay (${describeOverlayLayout(overlay.layout)}${filterSuffix(overlay.colorFilterId)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`
+      `${overlay.peep ? "Peep" : "Image overlay"} (${describeOverlayLayout(overlay.layout)}${filterSuffix(overlay.colorFilterId)}) ${formatTimeRange(overlay.startTimeSeconds, overlay.endTimeSeconds)}`
     );
   }
   for (const overlay of selections.textOverlays) {
@@ -580,6 +581,8 @@ export function ActionArea({
   // component needs to know whether it's open.
   const [isPropsDialogOpen, setIsPropsDialogOpen] = useState(false);
   const [isPeepsDialogOpen, setIsPeepsDialogOpen] = useState(false);
+  // A peep asset opened from the gallery's right-click "Edit peep…" -- saving adds a new peep asset.
+  const [editingPeepAsset, setEditingPeepAsset] = useState<Asset | null>(null);
   // Local, unlike the other three dialogs' open/close state -- selecting a
   // ratio applies it (via onSelectClipRect, already a ThreePaneEditor-level
   // handler) and closes itself in the same click, so nothing outside this
@@ -633,6 +636,7 @@ export function ActionArea({
           onOpenOverlayPickerForAsset={onOpenOverlayPickerForAsset}
           onAddMusicClip={onAddMusicClip}
           onOpenCutawayDialogForAsset={onOpenCutawayDialogForAsset}
+          onEditPeepAsset={setEditingPeepAsset}
           usedAssetIds={usedAssetIds}
           videoThumbnailUrlByAssetId={videoThumbnailUrlByAssetId}
         />
@@ -648,8 +652,9 @@ export function ActionArea({
           onOpenTextSlideDialog={onOpenTextSlideDialog}
           textSlideCount={sequenceClips.filter((entry) => entry.kind === "text").length}
           onOpenOverlayPicker={onOpenOverlayPicker}
-          overlayCount={videoOverlays.length + overlayImages.length}
+          overlayCount={videoOverlays.length + overlayImages.filter((overlay) => !overlay.peep).length}
           onOpenPropsDialog={() => setIsPropsDialogOpen(true)}
+          peepCount={overlayImages.filter((overlay) => overlay.peep).length}
           onOpenPeepsDialog={() => setIsPeepsDialogOpen(true)}
           onOpenTextDialog={onOpenTextDialog}
           textOverlayCount={textOverlays.filter((overlay) => isLabelTemplateId(overlay.templateId)).length}
@@ -786,6 +791,16 @@ export function ActionArea({
           onPlace={onAddImageOverlay}
           onImportingChange={onUploadingChange}
           onClose={() => setIsPeepsDialogOpen(false)}
+        />
+      )}
+
+      {editingPeepAsset?.peep && (
+        <PeepEditDialog
+          projectId={projectId}
+          initialPeep={editingPeepAsset.peep}
+          onApply={(asset) => onUploaded(asset)}
+          onClose={() => setEditingPeepAsset(null)}
+          submitLabel="Save as new peep"
         />
       )}
 

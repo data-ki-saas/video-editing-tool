@@ -229,6 +229,7 @@ export function UserActions({
   overlayCount,
   onOpenPropsDialog,
   onOpenPeepsDialog,
+  peepCount,
   onOpenTextDialog,
   textOverlayCount,
   onOpenTtsDialog,
@@ -250,6 +251,7 @@ export function UserActions({
   overlayCount: number;
   onOpenPropsDialog: () => void;
   onOpenPeepsDialog: () => void;
+  peepCount: number;
   onOpenTextDialog: () => void;
   textOverlayCount: number;
   onOpenTtsDialog: () => void;
@@ -449,6 +451,7 @@ export function UserActions({
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
             Peeps
           </span>
+          <CountBadge count={peepCount} />
         </button>
         <button
           type="button"

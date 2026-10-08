@@ -133,11 +133,23 @@ export interface Asset {
   // asset (listAssets/uploadAsset) rather than caching this past expiry.
   url: string;
   created_at: string;
+  // A peep's own settings, so the peep editor can reopen on it; null for
+  // ordinary assets (and for peeps made before this was stored).
+  peep?: Record<string, unknown> | null;
 }
 
-export async function uploadAsset(projectId: string, file: File) {
+/** Filename every rendered peep is uploaded under (PeepsTab). Peeps made before
+ * their settings were stored with the asset have only this to go by. */
+export const PEEP_ASSET_FILENAME = "peep.png";
+
+export function isPeepAsset(asset: Asset): boolean {
+  return asset.kind === "image" && (asset.peep != null || asset.filename === PEEP_ASSET_FILENAME);
+}
+
+export async function uploadAsset(projectId: string, file: File, peep?: Record<string, unknown>) {
   const formData = new FormData();
   formData.append("file", file);
+  if (peep) formData.append("peep", JSON.stringify(peep));
 
   const url = new URL(`${API_BASE_URL}/api/assets`);
   url.searchParams.set("project_id", projectId);

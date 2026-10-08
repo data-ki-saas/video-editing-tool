@@ -18,6 +18,8 @@ class AssetRecord:
     storage_key: str
     created_at: str
     content_hash: str | None = None
+    # A peep's own settings (see supabase/migrations/0047); None for ordinary assets.
+    peep: dict | None = None
 
 
 def project_owned_by(project_id: str, owner_id: str) -> bool:
@@ -43,6 +45,7 @@ def create_asset(
     size_bytes: int,
     storage_key: str,
     content_hash: str,
+    peep: dict | None = None,
 ) -> AssetRecord:
     payload = {
         "id": str(uuid.uuid4()),
@@ -55,6 +58,8 @@ def create_asset(
         "storage_key": storage_key,
         "content_hash": content_hash,
     }
+    if peep is not None:
+        payload["peep"] = peep
     result = get_supabase_client().table(_TABLE).insert(payload).execute()
     return AssetRecord(**result.data[0])
 

@@ -20,6 +20,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Avatar, Style } from "@dicebear/core";
 import openPeeps from "@dicebear/styles/open-peeps.json";
+import { PEEP_ASSET_FILENAME } from "@/lib/api";
 
 const RASTER_SIZE = 1408; // 2x the style's 704 canvas, so scaled-up peeps stay crisp
 const RASTER_MAX_SIDE = 2400; // cap for the long side of tall poses (full body / sitting)
@@ -581,7 +582,7 @@ async function rasterizePeep(peep: Peep): Promise<{ file: File; aspect: number }
   cropped.getContext("2d")?.drawImage(canvas, minX, minY, width, height, 0, 0, width, height);
   const blob = await new Promise<Blob | null>((resolve) => cropped.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("Could not draw this peep");
-  return { file: new File([blob], "peep.png", { type: "image/png" }), aspect: width / height };
+  return { file: new File([blob], PEEP_ASSET_FILENAME, { type: "image/png" }), aspect: width / height };
 }
 
 const CHECKERBOARD_STYLE: React.CSSProperties = {

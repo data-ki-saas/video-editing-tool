@@ -103,7 +103,11 @@ export function OverlayPickerDialog({
 
   const placed = [
     ...videoOverlays.map((overlay, index) => ({ kind: "video" as const, index, overlay })),
-    ...overlayImages.map((overlay, index) => ({ kind: "image" as const, index, overlay })),
+    // Peeps have their own Overlays button; the index stays the one into
+    // overlayImages, so filter after mapping.
+    ...overlayImages
+      .map((overlay, index) => ({ kind: "image" as const, index, overlay }))
+      .filter(({ overlay }) => !overlay.peep),
   ].sort((a, b) => a.overlay.startTimeSeconds - b.overlay.startTimeSeconds);
 
   return (

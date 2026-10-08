@@ -213,7 +213,7 @@ export function PropsDialog({
     setError(null);
     onImportingChange?.(true);
     filePromise
-      .then((file) => uploadAsset(projectId, file))
+      .then((file) => uploadAsset(projectId, file, peep ? { ...peep } : undefined))
       .then((asset) => {
         onImported(asset);
         onPlace(asset, { rect: propRect(aspect, frameAspectRatio ?? 9 / 16), lockAspect: true, ...(peep ? { peep: { ...peep } } : {}) });

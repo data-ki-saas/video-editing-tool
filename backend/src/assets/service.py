@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 import re
 import tempfile
@@ -26,6 +27,21 @@ _ALLOWED_EXTENSIONS = re.compile(r"\.(mp4|jpe?g|png|mp3)$", re.IGNORECASE)
 _UNSAFE_FILENAME_CHARS = re.compile(r"[^a-zA-Z0-9._-]")
 
 
+_MAX_PEEP_JSON_CHARS = 8000
+
+
+def _parse_peep(raw: str) -> dict:
+    if len(raw) > _MAX_PEEP_JSON_CHARS:
+        raise HTTPException(status_code=400, detail="Peep settings are too large")
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Peep settings are not valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="Peep settings must be an object")
+    return parsed
+
+
 def _to_asset_info(record: repository.AssetRecord) -> AssetInfo:
     return AssetInfo(
         id=record.id,
@@ -37,6 +53,7 @@ def _to_asset_info(record: repository.AssetRecord) -> AssetInfo:
         size_bytes=record.size_bytes,
         url=r2_client.presigned_get_url(record.storage_key),
         created_at=record.created_at,
+        peep=record.peep,
     )
 
 
@@ -49,6 +66,7 @@ def store_asset_bytes(
     kind: str,
     body: bytes,
     enforce_quota: bool = True,
+    peep: dict | None = None,
 ) -> AssetInfo:
     """Dedup-by-content-hash + R2 write + DB insert, shared by every path
     that turns some bytes into a project asset -- a direct upload
@@ -116,6 +134,7 @@ def store_asset_bytes(
             size_bytes=len(body),
             storage_key=storage_key,
             content_hash=content_hash,
+            peep=peep,
         )
     except Exception as exc:
         logger.exception(
@@ -137,7 +156,9 @@ def store_asset_bytes(
     return _to_asset_info(record)
 
 
-async def upload_asset(project_id: str, file: UploadFile, user: CurrentUser) -> AssetInfo:
+async def upload_asset(
+    project_id: str, file: UploadFile, user: CurrentUser, peep_json: str | None = None
+) -> AssetInfo:
     if not repository.project_owned_by(project_id, user.id):
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -145,9 +166,19 @@ async def upload_asset(project_id: str, file: UploadFile, user: CurrentUser) -> 
     if not kind or not file.filename or not _ALLOWED_EXTENSIONS.search(file.filename):
         raise HTTPException(status_code=400, detail="Only .mp4, .jpg, .png, and .mp3 files are supported")
 
+    peep = _parse_peep(peep_json) if peep_json else None
+    if peep is not None and kind != "image":
+        raise HTTPException(status_code=400, detail="Only an image can carry peep settings")
+
     body = await file.read()
     asset = store_asset_bytes(
-        project_id=project_id, user=user, filename=file.filename, content_type=file.content_type, kind=kind, body=body
+        project_id=project_id,
+        user=user,
+        filename=file.filename,
+        content_type=file.content_type,
+        kind=kind,
+        body=body,
+        peep=peep,
     )
     metering_repository.record_consumption(
         user_id=user.id,

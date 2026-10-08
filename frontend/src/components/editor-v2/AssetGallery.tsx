@@ -42,7 +42,7 @@
  * plays at a time; starting a second stops whichever was already playing.
  */
 import { useEffect, useRef, useState } from "react";
-import { deleteAsset, type Asset, type AssetKind } from "@/lib/api";
+import { deleteAsset, isPeepAsset, type Asset } from "@/lib/api";
 import { getVideoDuration } from "@/lib/video/video";
 import { getAudioDuration } from "@/lib/video/audio";
 import { useCrossOriginImageSrcMap } from "@/lib/useCrossOriginImageSrc";
@@ -70,10 +70,13 @@ function formatDuration(seconds: number): string {
 // Row order/labels for the three kind-grouped sections below -- "audio"
 // assets are music to the user, so it's labeled that way here even though
 // AssetKind (and the rest of this file) keeps calling it "audio".
-const ASSET_SECTIONS: { kind: AssetKind; label: string; emptyText: string }[] = [
-  { kind: "video", label: "Videos", emptyText: "No videos yet" },
-  { kind: "image", label: "Images", emptyText: "No images yet" },
-  { kind: "audio", label: "Music", emptyText: "No music yet" },
+// Peeps are image assets underneath, but get their own column so they aren't
+// lumped in with photos.
+const ASSET_SECTIONS: { key: string; matches: (asset: Asset) => boolean; label: string; emptyText: string }[] = [
+  { key: "video", matches: (asset) => asset.kind === "video", label: "Videos", emptyText: "No videos yet" },
+  { key: "image", matches: (asset) => asset.kind === "image" && !isPeepAsset(asset), label: "Images", emptyText: "No images yet" },
+  { key: "peep", matches: isPeepAsset, label: "Peeps", emptyText: "No peeps yet" },
+  { key: "audio", matches: (asset) => asset.kind === "audio", label: "Music", emptyText: "No music yet" },
 ];
 
 export function AssetGallery({
@@ -90,6 +93,7 @@ export function AssetGallery({
   onOpenOverlayPickerForAsset,
   onAddMusicClip,
   onOpenCutawayDialogForAsset,
+  onEditPeepAsset,
   usedAssetIds,
   videoThumbnailUrlByAssetId,
 }: {
@@ -116,6 +120,8 @@ export function AssetGallery({
   onOpenOverlayPickerForAsset: (asset: Asset) => void;
   onAddMusicClip: (asset: Asset) => void;
   onOpenCutawayDialogForAsset: (asset: Asset) => void;
+  // A peep asset's right-click "Edit peep…" (only offered when its settings were stored).
+  onEditPeepAsset: (asset: Asset) => void;
   usedAssetIds: Set<string>;
   // assetId -> a single representative still frame, one per video asset --
   // lifted up to ThreePaneEditor (rather than generated locally here, as
@@ -246,6 +252,7 @@ export function AssetGallery({
             ...(asset.kind === "image"
               ? [
                   { label: "View", onSelect: () => setPreviewAsset(asset) },
+                  ...(asset.peep ? [{ label: "Edit peep…", onSelect: () => onEditPeepAsset(asset) }] : []),
                   { label: "Cutaway", onSelect: () => onOpenCutawayDialogForAsset(asset) },
                   { label: "Overlay", onSelect: () => onAddImageOverlay(asset) },
                 ]
@@ -381,10 +388,10 @@ export function AssetGallery({
         <ReelLoader stage="Loading assets…" className="p-0" />
       ) : (
         <div className="flex flex-1 gap-2 overflow-hidden">
-          {ASSET_SECTIONS.map(({ kind, label, emptyText }) => {
-            const sectionAssets = assets.filter((asset) => asset.kind === kind);
+          {ASSET_SECTIONS.map(({ key, matches, label, emptyText }) => {
+            const sectionAssets = assets.filter(matches);
             return (
-              <div key={kind} className="flex min-w-0 flex-1 flex-col gap-1">
+              <div key={key} className="flex min-w-0 flex-1 flex-col gap-1">
                 <h3 className="text-center text-[10px] font-medium uppercase tracking-wide text-muted">{label}</h3>
                 <div className="flex flex-1 flex-col items-center gap-2 overflow-y-auto">
                   {sectionAssets.length === 0 ? (
