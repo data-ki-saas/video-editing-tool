@@ -720,13 +720,13 @@ export function CutawayDialog({
   // (combining into one motion). At least one axis stays selected at all
   // times. Re-sorted to IMAGE_TEMPLATE_OPTIONS' own order so the persisted
   // array (and its tooltip/preview) is always deterministic regardless of
-  // click order.
+  // click order. Deselecting everything is allowed -- that's a still photo
+  // with no motion (see imageTemplates.ts's kenBurnsRects).
   function handleToggleTemplate(id: ImageTemplateId) {
     setTemplateIds((prev) => {
       const axis = IMAGE_TEMPLATE_AXES[id];
       const withoutSameAxis = prev.filter((existingId) => IMAGE_TEMPLATE_AXES[existingId] !== axis);
       const next = prev.includes(id) ? withoutSameAxis : [...withoutSameAxis, id];
-      if (next.length === 0) return prev;
       return IMAGE_TEMPLATE_OPTIONS.filter((option) => next.includes(option.id)).map((option) => option.id);
     });
   }
@@ -913,7 +913,7 @@ export function CutawayDialog({
         {/* Panel 2 (28%) -- Ken Burns template picker, multi-select: one
             pick per axis, freely combinable across axes. */}
         <div style={{ flexBasis: "28%" }} className="mb-3 flex min-h-0 shrink-0 flex-col gap-1.5">
-          <p className="text-[11px] text-muted">Choose one or more motions -- combine, e.g., a zoom with a pan</p>
+          <p className="text-[11px] text-muted">Choose a motion (optional) -- combine, e.g., a zoom with a pan, or pick none for a still photo</p>
           <div className="grid flex-1 grid-cols-3 gap-2">
             {IMAGE_TEMPLATE_OPTIONS.map((option) => {
               const isSelected = templateIds.includes(option.id);

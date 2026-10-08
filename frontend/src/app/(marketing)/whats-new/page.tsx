@@ -23,9 +23,9 @@ interface ChangelogEntry {
 const ENTRIES: ChangelogEntry[] = [
   {
     date: "2026-10-07",
-    title: "One Overlay button for videos and photos",
+    title: "One Images & Videos button for photos and videos",
     description:
-      "Video Overlay and Image Overlay are now a single Overlay button, just like Cutaway. Pick any video or photo in one place — background removal options appear when you choose a video — and see everything already on your reel, photos and videos together, in one list. A photo overlay now also starts in a box shaped like the photo, so wide pictures aren't cropped.",
+      "Video Overlay and Image Overlay are now a single Images & Videos button, just like Cutaway. Pick any video or photo in one place — background removal options appear when you choose a video — and see everything already on your reel, photos and videos together, in one list. A photo overlay now also starts in a box shaped like the photo, so wide pictures aren't cropped.",
     isLatest: true,
   },
   {

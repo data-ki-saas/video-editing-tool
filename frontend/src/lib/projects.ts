@@ -128,7 +128,10 @@ export interface EditSelectionsSnapshot {
 // rather than as two copies that could drift out of sync with each other or
 // with EditSelectionsSnapshot's own field list.
 export const DEFAULT_EDIT_SELECTIONS: EditSelectionsSnapshot = {
-  clipRectId: null,
+  // 9:16 portrait is this app's default reel shape -- pre-selected so a new
+  // reel never starts with no clip rectangle (cropRect is derived from it
+  // once the first video's frame size is known, see ThreePaneEditor).
+  clipRectId: "9:16",
   cropRect: null,
   zoomEffects: [],
   flipHorizontalToggles: [],

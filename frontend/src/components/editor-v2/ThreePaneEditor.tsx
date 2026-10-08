@@ -1315,6 +1315,15 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  // A default-selected clip rectangle (DEFAULT_EDIT_SELECTIONS) has an id
+  // but no cropRect yet -- that needs the source frame's size, which only
+  // arrives once the first video loads. Applies it then, as one history entry.
+  useEffect(() => {
+    if (!frameDimensions || !selections.clipRectId || selections.cropRect) return;
+    handleSelectClipRect(selections.clipRectId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only reacts to frame size / the id+crop pair becoming (un)set
+  }, [frameDimensions, selections.clipRectId, selections.cropRect]);
+
   function handleFlip(axis: "horizontal" | "vertical") {
     const { label, state } = applyFlipToggle(selections, axis, currentTimeSeconds);
     pushChange(label, state);

@@ -131,7 +131,6 @@ export function MobileImageTemplatePicker({
       const axis = IMAGE_TEMPLATE_AXES[id];
       const withoutSameAxis = prev.filter((existingId) => IMAGE_TEMPLATE_AXES[existingId] !== axis);
       const next = prev.includes(id) ? withoutSameAxis : [...withoutSameAxis, id];
-      if (next.length === 0) return prev;
       return IMAGE_TEMPLATE_OPTIONS.filter((option) => next.includes(option.id)).map((option) => option.id);
     });
   }

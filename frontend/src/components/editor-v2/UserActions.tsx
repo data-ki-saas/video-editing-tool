@@ -9,7 +9,7 @@
  * choice the instant it's clicked rather than needing a save step, so once
  * something's selected this tab also grows a small preview swatch of it at
  * the bottom. The other tabs pin their own at-a-glance state to the same
- * bottom spot: Cutaway/Overlay/Text show a count badge
+ * bottom spot: Cutaway/Images & Videos/Text show a count badge
  * once they have at least one item (CountBadge).
  *
  * Grouped into two clusters, left to right, each with its own micro
@@ -28,7 +28,7 @@
  *    CutawayTrack.tsx) and each overlay (ImageOverlayTrack.tsx/
  *    VideoOverlayTrack.tsx) gets its own, via that clip's own right-click
  *    "Filter".
- *  - OVERLAYS (amber): Overlay (video or photo), Text, TTS, Avatar --
+ *  - OVERLAYS (amber): Images & Videos, Text, TTS, Avatar --
  *    what composites ON TOP of the base. All five share the same amber
  *    family now (previously each had its own unrelated hue -- amber/sky/
  *    violet -- which read as unrelated colors rather than one "overlays"
@@ -104,7 +104,7 @@ function TextSlideIcon({ className }: { className?: string }) {
 }
 
 // A small box overlapping a big box -- the universal Picture-in-Picture
-// glyph, used here as "Overlay" 's identity regardless of which
+// glyph, used here as "Images & Videos" 's identity regardless of which
 // layout (Full-Screen/PiP/Split-Screen) is actually active on any given
 // placement, tinted amber to match that rail's dominant Full-Screen color.
 function VideoOverlayIcon({ className }: { className?: string }) {
@@ -379,7 +379,7 @@ export function UserActions({
         </button>
       </div>
 
-      {/* OVERLAYS -- amber family, lightest to darkest: Overlay, Props, Label, TTS, Avatar */}
+      {/* OVERLAYS -- amber family, lightest to darkest: Images & Videos, Props, Label, TTS, Avatar */}
       <div className="relative flex h-full gap-3">
         <GroupLabel
           colorClassName="text-amber-600 dark:text-amber-400"
@@ -405,12 +405,12 @@ export function UserActions({
         <button
           type="button"
           onClick={onOpenOverlayPicker}
-          title="Overlay -- a video or a photo on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
+          title="Images & Videos -- a photo or a video on its own switchable Full-Screen/Picture-in-Picture/Split Screen layer"
           className="flex h-full w-8 shrink-0 flex-col items-center gap-2 border-r border-border pb-2 pt-2 text-amber-400 dark:text-amber-300 hover:bg-background"
         >
           <VideoOverlayIcon className="h-4 w-4" />
           <span className="text-[10px] tracking-wide" style={{ writingMode: "vertical-rl" }}>
-            Overlay
+            Images & Videos
           </span>
           <CountBadge count={overlayCount} />
         </button>

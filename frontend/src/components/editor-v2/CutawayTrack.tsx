@@ -301,7 +301,7 @@ function CutawaySegmentButton({
         }
         title={
           segment.kind === "image"
-            ? `Drag to reorder -- ${segment.templateIds.map((id) => getImageTemplateOption(id).name).join(" + ")}; click to edit, right-click for more`
+            ? `Drag to reorder -- ${segment.templateIds.length > 0 ? segment.templateIds.map((id) => getImageTemplateOption(id).name).join(" + ") : "Still photo"}; click to edit, right-click for more`
             : segment.kind === "text"
               ? `Drag to reorder this text slide -- "${segment.text}"; click to edit, right-click to remove`
               : "Drag to reorder this video cutaway -- right-click for more"

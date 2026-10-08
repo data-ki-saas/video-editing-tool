@@ -67,7 +67,10 @@ export const IMAGE_TEMPLATE_AXES: Record<ImageTemplateId, ImageTemplateAxis> = {
  * default template if neither is set (shouldn't happen for entries created
  * through the dialog, which always requires >=1 axis selected). */
 export function normalizeImageTemplateIds(entry: { templateIds?: string[] | null; templateId?: string | null }): string[] {
-  if (entry.templateIds && entry.templateIds.length > 0) return entry.templateIds;
+  // An explicit empty array is a deliberate "no motion" (still photo), not
+  // missing data -- only a truly absent templateIds falls through to the
+  // legacy/default handling below.
+  if (entry.templateIds) return entry.templateIds;
   if (entry.templateId) return [entry.templateId];
   return [DEFAULT_IMAGE_TEMPLATE_ID];
 }
@@ -122,6 +125,9 @@ function rectForAlign(
  * entirely unrecognized (shouldn't happen -- the dialog always requires
  * >=1 axis selected). */
 function kenBurnsRects(templateIds: string[], base: CropRect): { startRect: CropRect; targetRect: CropRect } {
+  // No motion picked -> a still photo: start and target are both the base
+  // rect, so the ZoomEffect holds it unchanged for the whole clip.
+  if (templateIds.length === 0) return { startRect: base, targetRect: base };
   const ids = new Set(templateIds);
   const zoomIn = ids.has("zoom-in");
   const zoomOut = ids.has("zoom-out") && !zoomIn;
