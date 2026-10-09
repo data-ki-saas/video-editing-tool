@@ -27,6 +27,13 @@
  * start"/"Restore trimmed end" to undo it without re-dragging back out by
  * hand.
  *
+ * A VIDEO segment's end handle can also be dragged PAST the end of its own
+ * file: the footage then loops back to its start for the extra time (see
+ * transformations.ts's applyExtendVideoCutaway and SequenceEntry's
+ * extendedDurationSeconds), with a thin seam line at each restart, and
+ * everything after it reflows later. Dragging back in shortens it again --
+ * the usual tail trim cuts the video off there.
+ *
  * A segment's POSITION IN THE SEQUENCE is click-hold-drag reorderable right
  * here: press and drag a segment past a neighbor's midpoint to preview
  * swapping places with it, drop to commit (see handleDragPointerDown below
@@ -67,6 +74,7 @@ import {
   MIN_IMAGE_CLIP_DURATION_SECONDS,
   MAX_IMAGE_CLIP_DURATION_SECONDS,
   MIN_VIDEO_CUTAWAY_DURATION_SECONDS,
+  maxVideoCutawaySpanSeconds,
   type TextSlideLayout,
   type TextSlideStyle,
 } from "@/lib/video/transformations";
@@ -196,6 +204,11 @@ export type CutawaySegment =
       // durationSeconds. The right-edge resize handle's own max bound:
       // dragging it back out this far removes the tail trim entirely.
       nativeDurationSeconds: number;
+      // The source file's own length. Equal to nativeDurationSeconds for an
+      // ordinary clip; shorter once the clip has been stretched past its
+      // file (the footage loops every sourceDurationSeconds -- see
+      // applyExtendVideoCutaway). Bounds how far the end handle can stretch.
+      sourceDurationSeconds: number;
       colorFilterId: FilterPresetId | null;
       canvasFillMode: CanvasFillMode | null;
       canvasFillColor?: string;
@@ -271,6 +284,18 @@ function CutawaySegmentButton({
     segment.kind === "video" &&
     segment.startTimeSeconds + segment.durationSeconds < segment.nativeStartTimeSeconds + segment.nativeDurationSeconds - 0.05;
   const clipPath = buildCutawayClipPath(isHeadTrimmed, isTailTrimmed);
+  // Where a stretched-past-its-file clip's footage restarts, as a percentage
+  // of this segment's own displayed width. Hidden mid-drag: the live width
+  // then differs from the committed one these are measured against.
+  const loopSeamPercents: number[] = [];
+  const isLooped = segment.kind === "video" && segment.sourceDurationSeconds < segment.nativeDurationSeconds - 0.05;
+  if (segment.kind === "video" && isLooped && resizingEdge === null && segment.durationSeconds > 0) {
+    for (let repeat = 1; repeat * segment.sourceDurationSeconds < segment.nativeDurationSeconds - 0.001; repeat++) {
+      const seamSeconds = segment.nativeStartTimeSeconds + repeat * segment.sourceDurationSeconds;
+      const percent = ((seamSeconds - segment.startTimeSeconds) / segment.durationSeconds) * 100;
+      if (percent > 0 && percent < 100) loopSeamPercents.push(percent);
+    }
+  }
 
   return (
     <>
@@ -304,7 +329,7 @@ function CutawaySegmentButton({
             ? `Drag to reorder -- ${segment.templateIds.length > 0 ? segment.templateIds.map((id) => getImageTemplateOption(id).name).join(" + ") : "Still photo"}; click to edit, right-click for more`
             : segment.kind === "text"
               ? `Drag to reorder this text slide -- "${segment.text}"; click to edit, right-click to remove`
-              : "Drag to reorder this video cutaway -- right-click for more"
+              : "Drag to reorder this video cutaway; drag its right edge past the end to loop it -- right-click for more"
         }
         className={
           "absolute top-0 flex h-full items-center gap-1 overflow-hidden rounded-sm border text-[9px] leading-none cursor-grab active:cursor-grabbing " +
@@ -323,7 +348,10 @@ function CutawaySegmentButton({
         }}
       >
         <span className="pointer-events-none shrink-0 pl-1">{isImage ? "🖼" : isText ? "📝" : "▶"}</span>
-        <span className="pointer-events-none truncate pr-1">{isText ? segment.text || "Text Slide" : "Cutaway"}</span>
+        <span className="pointer-events-none truncate pr-1">{isText ? segment.text || "Text Slide" : isLooped ? "Cutaway ↻" : "Cutaway"}</span>
+        {loopSeamPercents.map((percent) => (
+          <div key={percent} className="pointer-events-none absolute top-0 h-full w-px bg-white/50" style={{ left: `${percent}%` }} />
+        ))}
         {filterOption && (
           <span className="pointer-events-none shrink-0 truncate rounded-full bg-black/30 px-1 pr-1" title={filterOption.name}>
             {filterOption.name}
@@ -637,7 +665,16 @@ export function CutawayTrack({
     const startClientX = e.clientX;
     const startDurationSeconds = segment.durationSeconds;
     const minDurationSeconds = segment.kind === "video" ? MIN_VIDEO_CUTAWAY_DURATION_SECONDS : MIN_IMAGE_CLIP_DURATION_SECONDS;
-    const maxDurationSeconds = segment.kind === "video" ? segment.nativeDurationSeconds : MAX_IMAGE_CLIP_DURATION_SECONDS;
+    // A video's END handle can drag past its own span -- the footage loops
+    // to fill it (up to maxVideoCutawaySpanSeconds, measured from the
+    // clip's real start, so a trimmed head doesn't shorten the allowance);
+    // its START handle can only ever un-trim back to the real start.
+    const maxDurationSeconds =
+      segment.kind === "video"
+        ? edge === "end"
+          ? maxVideoCutawaySpanSeconds(segment.sourceDurationSeconds) - (segment.startTimeSeconds - segment.nativeStartTimeSeconds)
+          : segment.nativeDurationSeconds
+        : MAX_IMAGE_CLIP_DURATION_SECONDS;
     let candidateDurationSeconds = startDurationSeconds;
     setResizePreview({ entryId: segment.entryId, edge, candidateDurationSeconds });
 

@@ -58,6 +58,7 @@ import {
   DEFAULT_MAIN_AUDIO_VOLUME,
   DEFAULT_BACKGROUND_VOLUME,
   videoOverlayStartThumbnailKey,
+  loopedLocalSeconds,
   type AvatarAction,
   type AvatarOverlayClip,
   type CropRect,
@@ -113,6 +114,7 @@ import {
   applyResizeTextClip,
   applyTrimCutawayHead,
   applyTrimCutawayTail,
+  applyExtendVideoCutaway,
   applyAddTextOverlay,
   applyAddLabelOverlay,
   applyEditLabelOverlay,
@@ -1088,7 +1090,10 @@ export function ThreePaneEditor({
   // own durationSeconds -- a duration edit (FrameStrip's post-add resize
   // handle) must re-trigger extraction too, not just an id/url/kind change.
   const sequenceClipsKey = playbackClips
-    .map((clip) => `${clip.id}:${clip.url}:${clip.kind === "image" || clip.kind === "text" ? clip.durationSeconds : ""}`)
+    .map(
+      (clip) =>
+        `${clip.id}:${clip.url}:${clip.kind === "image" || clip.kind === "text" ? clip.durationSeconds : (clip.extendedDurationSeconds ?? "")}`
+    )
     .join(",");
 
   // Unfolds the video sequence into a per-second thumbnail strip + duration,
@@ -1222,9 +1227,17 @@ export function ThreePaneEditor({
         }
 
         let clipDurationSeconds: number;
+        let sourceDurationSeconds: number;
         try {
           const { durationSeconds, width, height } = await getVideoDurationAndDimensions(clip.url);
-          clipDurationSeconds = durationSeconds;
+          sourceDurationSeconds = durationSeconds;
+          // Stretched past its own file (CutawayTrack's end handle): the
+          // clip's span on the timeline is the longer authored one, and its
+          // thumbnails repeat below to fill it.
+          clipDurationSeconds =
+            clip.extendedDurationSeconds !== undefined && clip.extendedDurationSeconds > durationSeconds + 0.05
+              ? clip.extendedDurationSeconds
+              : durationSeconds;
           if (width > 0 && height > 0) {
             const clipEntryId = clip.id;
             setClipAspectRatioByEntryId((prev) => ({ ...prev, [clipEntryId]: width / height }));
@@ -1236,12 +1249,22 @@ export function ThreePaneEditor({
         if (cancelled) return;
 
         try {
-          const clipThumbnails = await extractThumbnails(clip.url, THUMBNAIL_INTERVAL_SECONDS);
+          const sourceThumbnails = await extractThumbnails(clip.url, THUMBNAIL_INTERVAL_SECONDS);
           if (cancelled) return;
-          accumulatedThumbnails = [...accumulatedThumbnails, ...clipThumbnails];
           const clipTimestamps = generateSampleTimestamps(clipDurationSeconds, THUMBNAIL_INTERVAL_SECONDS).map(
             (t) => t + clipStartSeconds
           );
+          // Restarts the source's own thumbnails at every loop seam -- the
+          // tick at local time t shows the frame at t % sourceDuration,
+          // same as what playback will actually show there.
+          const clipThumbnails =
+            clipDurationSeconds > sourceDurationSeconds + 0.05 && sourceThumbnails.length > 0
+              ? clipTimestamps.map((timestamp) => {
+                  const wrapped = loopedLocalSeconds(timestamp - clipStartSeconds, sourceDurationSeconds);
+                  return sourceThumbnails[Math.min(sourceThumbnails.length - 1, Math.floor(wrapped / THUMBNAIL_INTERVAL_SECONDS))];
+                })
+              : sourceThumbnails;
+          accumulatedThumbnails = [...accumulatedThumbnails, ...clipThumbnails];
           accumulatedTimestamps = [...accumulatedTimestamps, ...clipTimestamps];
           setThumbnails(accumulatedThumbnails);
           setThumbnailTimestampsSeconds(accumulatedTimestamps);
@@ -2432,6 +2455,19 @@ export function ThreePaneEditor({
       pushChange(label, state);
     } else if (segment.kind === "text") {
       const { label, state } = applyResizeTextClip(selections, segment.entryId, newDurationSeconds, segment.startTimeSeconds);
+      pushChange(label, state);
+    } else if (segment.startTimeSeconds + newDurationSeconds > segment.nativeStartTimeSeconds + segment.nativeDurationSeconds + 0.05) {
+      // Dragged out past this clip's own end -- the footage loops to fill
+      // the extra time (and everything after shifts later), rather than
+      // un-trimming, which can only ever reveal footage already there.
+      const { label, state } = applyExtendVideoCutaway(
+        selections,
+        segment.entryId,
+        segment.nativeStartTimeSeconds,
+        segment.nativeDurationSeconds,
+        segment.startTimeSeconds + newDurationSeconds - segment.nativeStartTimeSeconds,
+        segment.sourceDurationSeconds
+      );
       pushChange(label, state);
     } else {
       const clipEndSeconds = segment.nativeStartTimeSeconds + segment.nativeDurationSeconds;

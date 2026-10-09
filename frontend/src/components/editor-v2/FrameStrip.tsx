@@ -1164,6 +1164,10 @@ export function FrameStrip({
         durationSeconds: effectiveDurationSeconds,
         nativeStartTimeSeconds: startTimeSeconds,
         nativeDurationSeconds: endTimeSeconds - startTimeSeconds,
+        // The file's own length: recorded on the entry once it's been
+        // stretched past it (see applyExtendVideoCutaway), otherwise the
+        // boundary span IS the file's length.
+        sourceDurationSeconds: entry.sourceDurationSeconds ?? endTimeSeconds - startTimeSeconds,
         colorFilterId: entry.colorFilterId ?? null,
         canvasFillMode: entry.canvasFillMode ?? null,
         canvasFillColor: entry.canvasFillColor,

@@ -475,6 +475,73 @@ export function applyTrimCutawayTail(
   return { label: "Trimmed cutaway", state: { ...selections, trimRanges } };
 }
 
+/** Stretching a VIDEO cutaway's end handle past the end of its own file --
+ * the footage loops back to its start and plays again for the extra time.
+ * Sets the entry's `extendedDurationSeconds` (its new total span; cleared
+ * again if the span no longer exceeds the file), drops any tail trim the
+ * clip carried (dragging out past the end means "show everything up to
+ * here"), and -- unlike applyTrimCutawayTail, which only ever hides footage
+ * inside a span that never changes -- reflows everything after the clip by
+ * the span's growth/shrink, the same shift applyResizeImageClip does for a
+ * photo whose duration changes. `oldSpanSeconds` is the clip's current
+ * boundary span (CutawaySegment.nativeDurationSeconds), passed in for the
+ * same reason applyResizeImageClip takes `clipStartSeconds`: this module
+ * never sees probed durations. */
+export function applyExtendVideoCutaway(
+  selections: EditSelectionsSnapshot,
+  entryId: string,
+  clipStartSeconds: number,
+  oldSpanSeconds: number,
+  newSpanSeconds: number,
+  sourceDurationSeconds: number
+): TransformationResult {
+  const entryIndex = selections.sequenceClips.findIndex((entry) => entry.id === entryId);
+  const entry = selections.sequenceClips[entryIndex];
+  if (!entry || entry.kind !== "video") return { label: "Looped cutaway", state: selections };
+
+  const clampedSpan = Math.min(maxVideoCutawaySpanSeconds(sourceDurationSeconds), Math.max(sourceDurationSeconds, newSpanSeconds));
+  const delta = clampedSpan - oldSpanSeconds;
+  if (Math.abs(delta) < 0.01) return { label: "Looped cutaway", state: selections };
+
+  const oldEndSeconds = clipStartSeconds + oldSpanSeconds;
+  const shiftEffectRange = <T extends { startTimeSeconds: number; endTimeSeconds: number }>(item: T): T =>
+    item.startTimeSeconds >= oldEndSeconds
+      ? { ...item, startTimeSeconds: item.startTimeSeconds + delta, endTimeSeconds: item.endTimeSeconds + delta }
+      : item;
+
+  const isLooped = clampedSpan > sourceDurationSeconds + 0.05;
+  const nextEntries = [...selections.sequenceClips];
+  nextEntries[entryIndex] = {
+    ...entry,
+    extendedDurationSeconds: isLooped ? clampedSpan : undefined,
+    sourceDurationSeconds: isLooped ? sourceDurationSeconds : undefined,
+  };
+
+  // Same tail-trim identification applyTrimCutawayTail uses: a range
+  // ending exactly at this clip's own (old) end.
+  const withoutOwnTailTrim = selections.trimRanges.filter(
+    (range) => !(range.startTimeSeconds >= clipStartSeconds && Math.abs(range.endTimeSeconds - oldEndSeconds) < 0.01)
+  );
+
+  return {
+    label: "Looped cutaway",
+    state: {
+      ...selections,
+      sequenceClips: nextEntries,
+      zoomEffects: selections.zoomEffects.map(shiftEffectRange),
+      overlayImages: selections.overlayImages.map(shiftEffectRange),
+      textOverlays: selections.textOverlays.map(shiftEffectRange),
+      trimRanges: withoutOwnTailTrim.map(shiftEffectRange),
+      videoOverlays: selections.videoOverlays.map(shiftEffectRange),
+      ttsOverlays: selections.ttsOverlays.map((overlay) =>
+        overlay.startTimeSeconds >= oldEndSeconds ? { ...overlay, startTimeSeconds: overlay.startTimeSeconds + delta } : overlay
+      ),
+      flipHorizontalToggles: selections.flipHorizontalToggles.map((t) => (t >= oldEndSeconds ? t + delta : t)),
+      flipVerticalToggles: selections.flipVerticalToggles.map((t) => (t >= oldEndSeconds ? t + delta : t)),
+    },
+  };
+}
+
 /** Same as applyTrimCutawayTail, mirrored onto the HEAD of a video cutaway
  * (CutawayTrack's own left-edge resize handle) -- trims a TrimRange
  * spanning [clipStartSeconds, newStartSeconds) instead. `clipStartSeconds`
@@ -1084,6 +1151,18 @@ export const MAX_IMAGE_CLIP_DURATION_SECONDS = 15;
 // much smaller floor meant for a Picture-in-Picture snippet, not a
 // base-sequence clip carrying the main frame).
 export const MIN_VIDEO_CUTAWAY_DURATION_SECONDS = 1;
+
+// How far a video cutaway can be stretched past its own file (it loops) --
+// a multiple of the file's length, with an absolute ceiling so a very short
+// clip can't be looped into minutes of repetition by one long drag.
+export const MAX_VIDEO_CUTAWAY_LOOP_REPEATS = 10;
+export const MAX_VIDEO_CUTAWAY_SPAN_SECONDS = 120;
+
+/** The longest total span a video cutaway of `sourceDurationSeconds` can be
+ * stretched to. Never below the file's own length. */
+export function maxVideoCutawaySpanSeconds(sourceDurationSeconds: number): number {
+  return Math.max(sourceDurationSeconds, Math.min(sourceDurationSeconds * MAX_VIDEO_CUTAWAY_LOOP_REPEATS, MAX_VIDEO_CUTAWAY_SPAN_SECONDS));
+}
 
 /** Appends an image asset to the concatenated sequence as its own
  * full-screen clip, animated via one or more combined Ken Burns templates --

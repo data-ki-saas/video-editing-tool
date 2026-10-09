@@ -23,10 +23,16 @@ interface ChangelogEntry {
 const ENTRIES: ChangelogEntry[] = [
   {
     date: "2026-10-09",
+    title: "Stretch a video cutaway to loop it",
+    description:
+      "Drag the right edge of a video cutaway past its end and the footage plays again from the start to fill the extra time, with a thin line marking each restart. Drag it back in to shorten it and the video is simply cut off there. Everything after the cutaway slides along so nothing drifts out of place.",
+    isLatest: true,
+  },
+  {
+    date: "2026-10-09",
     title: "Group props and peeps on the time bar",
     description:
       "Right-click a prop or peep on the time bar and choose Group with next to tie it to its neighbour in the same row; repeat to add more. A grouped set gets a white outline and moves as one: drag it along the time bar, Duplicate group, Move group up or down, or Ungroup to edit the pieces again. While grouped, the individual props can't be trimmed or edited.",
-    isLatest: true,
   },
   {
     date: "2026-10-08",

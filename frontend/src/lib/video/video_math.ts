@@ -1599,6 +1599,22 @@ export interface SequenceClipInfo {
   // lib/localRender/gatherLocalRenderClips.ts.
   width?: number;
   height?: number;
+  // Set only for a VIDEO clip stretched past its own file (SequenceEntry's
+  // extendedDurationSeconds): the file's real length, which
+  // `durationSeconds` above then exceeds -- the footage restarts from its
+  // beginning every loopSourceSeconds. See loopedLocalSeconds.
+  loopSourceSeconds?: number;
+}
+
+/** Maps a time since a clip's own start onto the position in its SOURCE
+ * file to show -- the same value for an ordinary clip, wrapped back to the
+ * start every `loopSourceSeconds` for a looped one. */
+export function loopedLocalSeconds(localSeconds: number, loopSourceSeconds: number | undefined): number {
+  if (!loopSourceSeconds || loopSourceSeconds <= 0) return localSeconds;
+  const wrapped = localSeconds % loopSourceSeconds;
+  // A hair under a whole repeat is floating-point noise from a cumulative
+  // sum, not the very end of the file -- it belongs to the next repeat.
+  return loopSourceSeconds - wrapped < 0.001 ? 0 : wrapped;
 }
 
 export function buildSequenceClipInfos(
@@ -1610,6 +1626,7 @@ export function buildSequenceClipInfos(
     kind?: "video" | "image" | "text";
     width?: number;
     height?: number;
+    loopSourceSeconds?: number;
   }[]
 ): SequenceClipInfo[] {
   let cursor = 0;
@@ -1643,6 +1660,20 @@ export type SequenceEntry =
       id: string;
       kind: "video";
       assetId: string;
+      // Set only when the creator dragged this cutaway's end handle PAST the
+      // source file's own length (CutawayTrack) -- the clip's total span on
+      // the timeline, longer than the probed file, during which the footage
+      // loops back to its start and plays again (see SequenceClipInfo's
+      // loopSourceSeconds and loopedLocalSeconds below). Absent (or no
+      // longer than the probed length) means the clip just plays once, at
+      // its real length -- every reel saved before this existed.
+      extendedDurationSeconds?: number;
+      // The source file's own probed length, recorded alongside
+      // extendedDurationSeconds when it's set -- only so the editor UI can
+      // draw loop seams and bound the stretch without a second probe.
+      // Playback/export always re-probe the real file (see
+      // gatherLocalRenderClips.ts), never trusting this.
+      sourceDurationSeconds?: number;
       colorFilterId?: FilterPresetId | null;
       cutTransitionInId?: CutTransitionId | null;
       canvasFillMode?: CanvasFillMode | null;
@@ -2038,7 +2069,18 @@ export function buildRenderSegments(
 ): RenderSegment[] {
   const totalDurationSeconds = totalSequenceDuration(clips);
   const keptRanges = invertTrimRanges(trimRanges, totalDurationSeconds);
-  const clipBoundaries = clips.map((clip) => clip.startTimeSeconds);
+  // Every clip seam, plus every point a looped video clip restarts from the
+  // top of its file -- splitting there too means no segment ever spans a
+  // wrap, so each one stays a plain contiguous run of its source file.
+  const clipBoundaries = clips.flatMap((clip) => {
+    const points = [clip.startTimeSeconds];
+    if (clip.loopSourceSeconds && clip.loopSourceSeconds > 0) {
+      for (let repeat = 1; repeat * clip.loopSourceSeconds < clip.durationSeconds - 0.001; repeat++) {
+        points.push(clip.startTimeSeconds + repeat * clip.loopSourceSeconds);
+      }
+    }
+    return points;
+  });
 
   const segments: RenderSegment[] = [];
   let outputCursor = 0;
@@ -2077,7 +2119,7 @@ export function buildRenderSegments(
         width: clip.width,
         height: clip.height,
         sourceStartSeconds: subStart,
-        clipLocalStartSeconds: subStart - clip.startTimeSeconds,
+        clipLocalStartSeconds: loopedLocalSeconds(subStart - clip.startTimeSeconds, clip.loopSourceSeconds),
         durationSeconds,
         outputStartSeconds,
         cutTransitionInId: overlapSeconds > 0 ? cutTransitionInId : null,

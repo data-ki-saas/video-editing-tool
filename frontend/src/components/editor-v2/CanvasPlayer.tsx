@@ -84,7 +84,7 @@ import { normalizeImageTemplateIds } from "@/lib/video/imageTemplates";
 import { segmentClipFramesApproximate, lumaFramesToAlphaMasks, segmentImageApproximate } from "@/lib/video/backgroundSegmentation";
 import { chromaKeyFramesToAlphaMasks, chromaKeyImageToBitmap, DEFAULT_CHROMA_KEY_COLOR } from "@/lib/video/chromaKey";
 import { drawBrandWatermark } from "@/lib/video/brandWatermark";
-import { decodeAudioBuffer, concatenateAudioBuffers } from "@/lib/video/audio";
+import { decodeAudioBuffer, concatenateAudioBuffers, loopAudioBuffer } from "@/lib/video/audio";
 import {
   frameIndexAtTime,
   pickPreviewFrameRate,
@@ -108,6 +108,7 @@ import {
   buildSequenceClipInfos,
   totalSequenceDuration,
   resolveSequencePosition,
+  loopedLocalSeconds,
   resolveCutTransitionBlend,
   resolveCutTransitionOverlapSeconds,
   buildVirtualCutTransitionSkipRanges,
@@ -854,7 +855,11 @@ export const CanvasPlayer = forwardRef<
     if (!ctx) return;
     ctx.imageSmoothingQuality = "high"; // default "low" visibly softens/aliases every scaled drawImage below (crop/zoom, overlays)
 
-    const frameIndex = frameIndexAtTime(position.localSeconds, frameRatesRef.current[position.clipIndex], images.length);
+    const frameIndex = frameIndexAtTime(
+      loopedLocalSeconds(position.localSeconds, currentClipMeta?.loopSourceSeconds),
+      frameRatesRef.current[position.clipIndex],
+      images.length
+    );
     const image = images[frameIndex];
 
     const hasAuthoredCrop = liveCropRectOverride != null || baseCropRect != null;
@@ -2094,7 +2099,10 @@ export const CanvasPlayer = forwardRef<
   // otherwise durationRef/loadedClipsRef keep the old length and playback
   // stalls at the slide's stale end.
   const clipsKey = clips
-    .map((clip) => `${clip.id}:${clip.url}:${clip.kind === "image" || clip.kind === "text" ? clip.durationSeconds : ""}`)
+    .map(
+      (clip) =>
+        `${clip.id}:${clip.url}:${clip.kind === "image" || clip.kind === "text" ? clip.durationSeconds : (clip.extendedDurationSeconds ?? "")}`
+    )
     .join(",");
   useEffect(() => {
     let cancelled = false;
@@ -2118,7 +2126,14 @@ export const CanvasPlayer = forwardRef<
       if (clips.length === 0) return;
       const audioContext = ensureAudioContext();
 
-      type LoadedClipMeta = { id: string; assetId: string; url: string; durationSeconds: number; kind: "video" | "image" | "text" };
+      type LoadedClipMeta = {
+        id: string;
+        assetId: string;
+        url: string;
+        durationSeconds: number;
+        kind: "video" | "image" | "text";
+        loopSourceSeconds?: number;
+      };
       type ClipLoadResult =
         | {
             ok: true;
@@ -2291,6 +2306,14 @@ export const CanvasPlayer = forwardRef<
           clipProgress[index] = 1;
           reportProgress();
 
+          // Stretched past its own file (CutawayTrack's end handle): the
+          // clip spans the longer authored duration, with the frames looping
+          // (drawFrameAt wraps via loopSourceSeconds) and the audio tiled to
+          // match, so the concatenated sequence audio stays aligned with
+          // every clip after this one.
+          const isLooped = clip.extendedDurationSeconds !== undefined && clip.extendedDurationSeconds > duration + 0.05;
+          const clipAudioBuffer = isLooped ? loopAudioBuffer(audioContext, audioBuffer, duration, clip.extendedDurationSeconds!) : audioBuffer;
+
           // AI background removal -- real matte (extracted at the SAME
           // frameRate, so it lines up frame-for-frame with `images`) once
           // ready, else an instant approximate cutout straight off the
@@ -2322,8 +2345,15 @@ export const CanvasPlayer = forwardRef<
             ok: true,
             images,
             frameRate,
-            audioBuffer,
-            meta: { id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds: duration, kind: "video" },
+            audioBuffer: clipAudioBuffer,
+            meta: {
+              id: clip.id,
+              assetId: clip.assetId,
+              url: clip.url,
+              durationSeconds: isLooped ? clip.extendedDurationSeconds! : duration,
+              kind: "video",
+              ...(isLooped ? { loopSourceSeconds: duration } : {}),
+            },
             mattes,
             // "Make it 3D" parallax (see the image branch above) is scoped
             // to still-image Ken Burns cutaways only -- a video clip has no

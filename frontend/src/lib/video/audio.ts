@@ -59,6 +59,28 @@ export async function decodeAudioBuffer(url: string): Promise<AudioBuffer> {
   }
 }
 
+/** Repeats the first `sourceSeconds` of `buffer` end-to-end until it's
+ * `targetSeconds` long -- the preview's audio for a video cutaway stretched
+ * past its own file (the picture loops, so the sound must too, or every
+ * clip after it would play against the wrong stretch of the concatenated
+ * sequence audio). Truncates the final repeat; pads with silence if the
+ * decoded buffer is a hair shorter than the probed `sourceSeconds`. */
+export function loopAudioBuffer(context: BaseAudioContext, buffer: AudioBuffer, sourceSeconds: number, targetSeconds: number): AudioBuffer {
+  const sampleRate = buffer.sampleRate;
+  const sourceLength = Math.max(1, Math.round(sourceSeconds * sampleRate));
+  const targetLength = Math.max(1, Math.round(targetSeconds * sampleRate));
+  const looped = context.createBuffer(buffer.numberOfChannels, targetLength, sampleRate);
+  for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    const out = looped.getChannelData(channel);
+    for (let offset = 0; offset < targetLength; offset += sourceLength) {
+      const chunkLength = Math.min(sourceLength, targetLength - offset, channelData.length);
+      out.set(channelData.subarray(0, chunkLength), offset);
+    }
+  }
+  return looped;
+}
+
 /**
  * Concatenates decoded audio buffers into one continuous buffer, so a
  * multi-clip sequence can still be played back through a single

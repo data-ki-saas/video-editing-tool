@@ -25,6 +25,7 @@ export async function gatherLocalSequenceClips(
     kind: "video" | "image" | "text";
     width?: number;
     height?: number;
+    loopSourceSeconds?: number;
   }[] = [];
   for (const clip of clips) {
     if (clip.kind === "text") {
@@ -58,7 +59,19 @@ export async function gatherLocalSequenceClips(
     }
     try {
       const { durationSeconds, width, height } = await getVideoDurationAndDimensions(clip.url);
-      clipMeta.push({ id: clip.id, assetId: clip.assetId, url: clip.url, durationSeconds, kind: "video", width, height });
+      // Stretched past its own file (CutawayTrack's end handle): the clip
+      // spans the longer authored duration and the footage loops within it.
+      const isLooped = clip.extendedDurationSeconds !== undefined && clip.extendedDurationSeconds > durationSeconds + 0.05;
+      clipMeta.push({
+        id: clip.id,
+        assetId: clip.assetId,
+        url: clip.url,
+        durationSeconds: isLooped ? clip.extendedDurationSeconds! : durationSeconds,
+        kind: "video",
+        width,
+        height,
+        ...(isLooped ? { loopSourceSeconds: durationSeconds } : {}),
+      });
     } catch {
       // Skipped -- same "one bad clip shouldn't block the rest" policy as
       // CanvasPlayer's own sequence loading.
