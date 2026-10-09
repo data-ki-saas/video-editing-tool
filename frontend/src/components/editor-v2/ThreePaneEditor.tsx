@@ -96,6 +96,7 @@ import {
   applyChangeImageOverlayFraming,
   applyDeleteImageOverlay,
   applyDuplicateImageOverlay,
+  applySetImageOverlayTag,
   applyMoveImageOverlayLayer,
   applyReplaceImageOverlayPeep,
   applyAddSequenceClip,
@@ -1938,6 +1939,11 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  function handleSetImageOverlayTag(overlayIndex: number, tag: string) {
+    const { label, state } = applySetImageOverlayTag(selections, overlayIndex, tag);
+    if (state !== selections) pushChange(label, state);
+  }
+
   function handleMoveImageOverlayLayer(overlayIndex: number, direction: "up" | "down") {
     const { label, state } = applyMoveImageOverlayLayer(selections, overlayIndex, direction);
     pushChange(label, state);
@@ -3391,6 +3397,7 @@ export function ThreePaneEditor({
           onOpenImageOverlayFraming={handleOpenImageOverlayFraming}
           onOpenImageOverlayFilter={handleOpenImageOverlayFilter}
           onDuplicateImageOverlay={handleDuplicateImageOverlay}
+          onSetImageOverlayTag={handleSetImageOverlayTag}
           onMoveImageOverlayLayer={handleMoveImageOverlayLayer}
           onDeleteImageOverlay={handleDeleteImageOverlay}
           textOverlays={displayedTextOverlays}

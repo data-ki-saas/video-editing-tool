@@ -546,6 +546,7 @@ export function FrameStrip({
   onOpenImageOverlayFraming,
   onOpenImageOverlayFilter,
   onDuplicateImageOverlay,
+  onSetImageOverlayTag,
   onMoveImageOverlayLayer,
   onDeleteImageOverlay,
   textOverlays,
@@ -700,6 +701,7 @@ export function FrameStrip({
   // scoped to just this overlay (see applySelectImageOverlayFilterPreset).
   onOpenImageOverlayFilter: (overlayIndex: number) => void;
   onDuplicateImageOverlay: (overlayIndex: number) => void;
+  onSetImageOverlayTag: (overlayIndex: number, tag: string) => void;
   onMoveImageOverlayLayer: (overlayIndex: number, direction: "up" | "down") => void;
   onDeleteImageOverlay: (overlayIndex: number) => void;
   textOverlays: TextOverlay[];
@@ -1328,6 +1330,7 @@ export function FrameStrip({
           onOpenFraming={onOpenImageOverlayFraming}
           onOpenFilter={onOpenImageOverlayFilter}
           onDuplicate={onDuplicateImageOverlay}
+          onSetTag={onSetImageOverlayTag}
           onEditPeep={onEditImagePeep}
           onMoveLayer={onMoveImageOverlayLayer}
           onDelete={onDeleteImageOverlay}
@@ -1371,6 +1374,7 @@ export function FrameStrip({
           onOpenFraming={onOpenImageOverlayFraming}
           onOpenFilter={onOpenImageOverlayFilter}
           onDuplicate={onDuplicateImageOverlay}
+          onSetTag={onSetImageOverlayTag}
           onEditPeep={onEditImagePeep}
           onDelete={onDeleteImageOverlay}
         />

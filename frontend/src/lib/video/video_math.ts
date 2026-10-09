@@ -807,7 +807,11 @@ export interface ImageOverlayClip {
   // Timeline row (Picture-in-Picture only; higher = nearer the front/top). Purely a
   // display grouping so non-overlapping overlays can share a row -- see layoutPipLanes.
   lane?: number;
+  // Optional short label shown on the overlay's timeline segment (max MAX_OVERLAY_TAG_LENGTH chars).
+  tag?: string;
 }
+
+export const MAX_OVERLAY_TAG_LENGTH = 10;
 
 /** Assigns each Picture-in-Picture image overlay (by array index) a dense timeline row.
  * An overlay keeps its stored `lane` when nothing already placed there overlaps it in

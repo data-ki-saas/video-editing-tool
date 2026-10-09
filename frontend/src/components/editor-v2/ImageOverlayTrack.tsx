@@ -11,17 +11,18 @@
  * uses to interleave this with VideoOverlayTrack's own two row-groups into
  * one z-order-accurate stack -- is identical.
  *
- * Uses its OWN 3-hue palette (sky / pink / lime) rather than video
+ * Uses its OWN 3-hue palette (sky / rose / lime) rather than video
  * overlay's amber / violet / teal, so the two overlay kinds read as visually
  * distinct families at a glance, on this rail and on the matching "Image
  * Overlay" vertical tab (UserActions.tsx).
  */
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ContextMenu, useContextMenu, type ContextMenuAction } from "./ContextMenu";
 import { SplitScreenOrientationIcon, SwapIcon, FramingIcon, PictureInPictureIcon, FullScreenIcon } from "@/components/icons/UIIcons";
 import { canMoveImageOverlayLane } from "@/lib/video/transformations";
 import {
   isExclusiveLayout,
+  MAX_OVERLAY_TAG_LENGTH,
   layoutPipLanes,
   snapToNearest,
   MIN_VIDEO_OVERLAY_DURATION_SECONDS as MIN_DURATION_SECONDS,
@@ -42,12 +43,12 @@ const DRAG_THRESHOLD_PX = 4;
 
 const LAYOUT_COLOR_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
   "full-screen": "border-sky-700 bg-sky-500",
-  "picture-in-picture": "border-pink-500 bg-pink-400",
+  "picture-in-picture": "border-rose-400 bg-rose-300",
   "split-screen": "border-lime-700 bg-lime-600",
 };
 const LAYOUT_TEXT_COLOR_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
   "full-screen": "text-sky-600",
-  "picture-in-picture": "text-pink-500",
+  "picture-in-picture": "text-rose-400",
   "split-screen": "text-lime-700",
 };
 
@@ -69,6 +70,7 @@ function ImageOverlaySegment({
   onOpenFilter,
   onDuplicate,
   onEditPeep,
+  onSetTag,
   onMoveLayer,
   onDelete,
 }: {
@@ -92,6 +94,7 @@ function ImageOverlaySegment({
   onOpenFilter: () => void;
   onDuplicate: () => void;
   onEditPeep: () => void;
+  onSetTag: (tag: string) => void;
   // Set when this overlay can move a row up / down (Picture-in-Picture rows only).
   onMoveLayer?: { up: (() => void) | null; down: (() => void) | null };
   onDelete: () => void;
@@ -101,6 +104,16 @@ function ImageOverlaySegment({
   // comment for why that poisons the cache against CanvasPlayer's CORS fetch.
   const thumbnailSrc = useCrossOriginImageSrc(thumbnailUrl);
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
+  const [isEditingTag, setIsEditingTag] = useState(false);
+  const tagInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (isEditingTag) tagInputRef.current?.select();
+  }, [isEditingTag]);
+
+  function commitTag(value: string) {
+    setIsEditingTag(false);
+    onSetTag(value);
+  }
 
   // Where a click landed, as a time within THIS overlay's own
   // [startTimeSeconds, endTimeSeconds) window -- an overlay can stretch
@@ -245,11 +258,13 @@ function ImageOverlaySegment({
           ...(onMoveLayer?.up ? [{ label: "Move up", onSelect: onMoveLayer.up }] : []),
           ...(onMoveLayer?.down ? [{ label: "Move down", onSelect: onMoveLayer.down }] : []),
         ];
+        // Deferred a tick so the menu closing doesn't steal focus back from the tag input.
+        const editTag: ContextMenuAction = { label: "Edit tag", onSelect: () => setTimeout(() => setIsEditingTag(true), 0) };
         openContextMenu(
           e,
           overlay.lockAspect
-            ? [edit, ...editPeep, ...duplicate, ...move, { label: "Remove", danger: true, onSelect: onDelete }]
-            : [edit, ...editPeep, ...duplicate, ...move, ...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }]
+            ? [edit, editTag, ...editPeep, ...duplicate, ...move, { label: "Remove", danger: true, onSelect: onDelete }]
+            : [edit, editTag, ...editPeep, ...duplicate, ...move, ...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }]
         );
       }}
       title="Drag the middle to move, an edge to trim; right-click to edit or remove"
@@ -288,6 +303,34 @@ function ImageOverlaySegment({
         // reasoning ("ai" mode only, since chroma key's matteAssetId is
         // permanently null).
         <MattingProgressBadge progress={overlay.backgroundRemoval.progress ?? 0} />
+      )}
+      {isEditingTag ? (
+        <input
+          ref={tagInputRef}
+          autoFocus
+          defaultValue={overlay.tag ?? ""}
+          maxLength={MAX_OVERLAY_TAG_LENGTH}
+          placeholder="tag"
+          onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitTag(e.currentTarget.value);
+            else if (e.key === "Escape") setIsEditingTag(false);
+            e.stopPropagation();
+          }}
+          onBlur={(e) => commitTag(e.currentTarget.value)}
+          className="z-10 mr-6 h-4 min-w-0 flex-1 rounded-sm bg-white/90 px-1 text-[10px] leading-none text-black outline-none"
+        />
+      ) : (
+        overlay.tag && (
+          <span
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setIsEditingTag(true)}
+            title="Click to rename this tag"
+            className="z-10 mr-6 min-w-0 flex-1 cursor-text truncate text-[10px] font-medium leading-none text-white"
+          >
+            {overlay.tag}
+          </span>
+        )
       )}
       <div
         onPointerDown={(e) => startEdgeDrag(e, "start")}
@@ -360,6 +403,7 @@ export function ImageOverlayTrack({
   onOpenFilter,
   onDuplicate,
   onEditPeep,
+  onSetTag,
   onMoveLayer,
   onDelete,
 }: {
@@ -383,6 +427,7 @@ export function ImageOverlayTrack({
   onOpenFilter: (overlayIndex: number) => void;
   onDuplicate: (overlayIndex: number) => void;
   onEditPeep: (overlayIndex: number) => void;
+  onSetTag: (overlayIndex: number, tag: string) => void;
   onMoveLayer?: (overlayIndex: number, direction: "up" | "down") => void;
   onDelete: (overlayIndex: number) => void;
 }) {
@@ -420,6 +465,7 @@ export function ImageOverlayTrack({
       onOpenFilter: () => onOpenFilter(index),
       onDuplicate: () => onDuplicate(index),
       onEditPeep: () => onEditPeep(index),
+      onSetTag: (tag: string) => onSetTag(index, tag),
       onMoveLayer: moveLayerFor(index),
       onDelete: () => onDelete(index),
     };

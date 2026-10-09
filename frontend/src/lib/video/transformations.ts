@@ -31,6 +31,7 @@ import {
   DEFAULT_TEXT_OVERLAY_RECT,
   DEFAULT_AVATAR_OVERLAY_RECT,
   DEFAULT_OVERLAY_FRAMING,
+  MAX_OVERLAY_TAG_LENGTH,
   DEFAULT_SPLIT_SCREEN_RATIO,
   MIN_VIDEO_OVERLAY_DURATION_SECONDS,
   type AvatarAction,
@@ -805,6 +806,17 @@ export function applyDuplicateImageOverlay(
     endTimeSeconds: startTimeSeconds + durationSeconds,
   };
   return { label: "Duplicated image overlay", state: { ...selections, overlayImages: [...selections.overlayImages, copy] } };
+}
+
+/** Sets (or, when blank, clears) an image overlay's timeline tag. */
+export function applySetImageOverlayTag(selections: EditSelectionsSnapshot, overlayIndex: number, tag: string): TransformationResult {
+  const overlay = selections.overlayImages[overlayIndex];
+  const next = tag.trim().slice(0, MAX_OVERLAY_TAG_LENGTH);
+  if (!overlay || (overlay.tag ?? "") === next) return { label: "Edited overlay tag", state: selections };
+  const nextOverlays = [...selections.overlayImages];
+  const updated: ImageOverlayClip = { ...overlay, tag: next || undefined };
+  nextOverlays[overlayIndex] = updated;
+  return { label: "Edited overlay tag", state: { ...selections, overlayImages: nextOverlays } };
 }
 
 /** Whether a Picture-in-Picture image overlay can move into the timeline row above
