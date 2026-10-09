@@ -38,9 +38,9 @@
  * here: press and drag a segment past a neighbor's midpoint to preview
  * swapping places with it, drop to commit (see handleDragPointerDown below
  * and transformations.ts's applyMoveSequenceClip, which reflows every
- * time-anchored selection -- zoom/pan, overlays, captions, trims -- so a
- * reorder never silently desyncs something already authored against the old
- * order). Desktop-only; MobileAssetStrip's own reorder is deliberately
+ * footage-anchored edit -- zoom/pan, trims, flips -- so a reorder never
+ * silently desyncs them from their clip; overlays and captions stay put on
+ * the timeline). Desktop-only; MobileAssetStrip's own reorder is deliberately
  * buttons, not drag -- see that file's comment for why touch precision made
  * a different call.
  *

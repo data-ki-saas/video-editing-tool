@@ -1764,10 +1764,12 @@ export function applyReorderSequenceClip(
  *
  * Every clip keeps its own duration -- only array order changes -- so the
  * new start time of each clip can be recomputed from scratch by walking the
- * reordered array once. Reflows every time-anchored selection by however
- * much ITS containing clip's start time moved, same reflow-by-delta idiom as
- * applyReorderSequenceClip/applyDeleteSequenceClip, generalized from a fixed
- * swap-pair/single-clip range to however many clips the drag crossed. */
+ * reordered array once. Reflows every FOOTAGE-anchored selection (zoom/pan,
+ * trims, flips) by however much ITS containing clip's start time moved, same
+ * reflow-by-delta idiom as applyReorderSequenceClip/applyDeleteSequenceClip,
+ * generalized from a fixed swap-pair/single-clip range to however many clips
+ * the drag crossed. Overlays are left exactly where they are -- unlike
+ * applyReorderSequenceClip, which still carries them along. */
 export function applyMoveSequenceClip(
   selections: EditSelectionsSnapshot,
   entryId: string,
@@ -1827,14 +1829,10 @@ export function applyMoveSequenceClip(
     state: {
       ...selections,
       sequenceClips: nextEntries,
+      // Overlays (image/text/video/voiceover) are deliberately NOT shifted:
+      // dragging a cutaway moves only the footage, and anything layered on
+      // top stays put on the timeline.
       zoomEffects: selections.zoomEffects.map(shiftZoomEffectRange),
-      overlayImages: selections.overlayImages.map(shiftRange),
-      textOverlays: selections.textOverlays.map(shiftRange),
-      ttsOverlays: selections.ttsOverlays.map((overlay) => ({
-        ...overlay,
-        startTimeSeconds: shiftToggle(overlay.startTimeSeconds),
-      })),
-      videoOverlays: selections.videoOverlays.map(shiftRange),
       trimRanges: selections.trimRanges.map(shiftRange),
       flipHorizontalToggles: selections.flipHorizontalToggles.map(shiftToggle),
       flipVerticalToggles: selections.flipVerticalToggles.map(shiftToggle),
