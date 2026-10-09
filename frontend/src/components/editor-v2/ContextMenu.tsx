@@ -95,6 +95,11 @@ export function ContextMenu({ state, onClose }: { state: ContextMenuState | null
   return (
     <div
       ref={menuRef}
+      // The menu is often rendered inside the element that opened it (e.g. an
+      // overlay segment with its own onPointerDown drag/click handler), and
+      // React bubbles pointer events through the tree -- without this, picking
+      // an item also counts as a click on that element (opening its editor).
+      onPointerDown={(e) => e.stopPropagation()}
       style={{ position: "fixed", top, left, zIndex: 60 }}
       className="min-w-32 overflow-hidden rounded-md border border-border bg-surface py-1 shadow-lg"
     >

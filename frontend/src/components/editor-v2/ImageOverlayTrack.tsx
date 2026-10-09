@@ -19,8 +19,10 @@
 import { useRef } from "react";
 import { ContextMenu, useContextMenu, type ContextMenuAction } from "./ContextMenu";
 import { SplitScreenOrientationIcon, SwapIcon, FramingIcon, PictureInPictureIcon, FullScreenIcon } from "@/components/icons/UIIcons";
+import { canMoveImageOverlayLane } from "@/lib/video/transformations";
 import {
   isExclusiveLayout,
+  layoutPipLanes,
   snapToNearest,
   MIN_VIDEO_OVERLAY_DURATION_SECONDS as MIN_DURATION_SECONDS,
   type ImageOverlayClip,
@@ -390,9 +392,12 @@ export function ImageOverlayTrack({
   const exclusiveSorted = indexed
     .filter(({ overlay }) => isExclusiveLayout(overlay.layout))
     .sort((a, b) => a.overlay.startTimeSeconds - b.overlay.startTimeSeconds);
-  // Picture-in-Picture overlays draw in array order, so the last one is frontmost: list
-  // them last-first so the top row is the front layer, like the rest of the z-order stack.
-  const pipEntries = indexed.filter(({ overlay }) => overlay.layout.type === "picture-in-picture").reverse();
+  // Picture-in-Picture overlays are grouped into timeline rows (non-overlapping ones can
+  // share a row); the highest row is the front layer and is listed first.
+  const pipLanes = layoutPipLanes(imageOverlays);
+  const pipRows: number[][] = [];
+  for (const [index, lane] of pipLanes) (pipRows[lane] ??= []).push(index);
+  pipRows.reverse();
 
   function segmentProps(index: number, prevBoundSeconds: number, nextBoundSeconds: number) {
     const overlay = imageOverlays[index];
@@ -420,23 +425,34 @@ export function ImageOverlayTrack({
     };
   }
 
-  // Only a Picture-in-Picture row has a row above / below to swap with.
+  // Only a Picture-in-Picture overlay can merge into the row above / below, and only
+  // when that row is free for its whole time span.
   function moveLayerFor(index: number) {
-    if (!onMoveLayer) return undefined;
-    const row = pipEntries.findIndex((entry) => entry.index === index);
-    if (row < 0) return undefined;
+    if (!onMoveLayer || !pipLanes.has(index)) return undefined;
     return {
-      up: row > 0 ? () => onMoveLayer(index, "up") : null,
-      down: row < pipEntries.length - 1 ? () => onMoveLayer(index, "down") : null,
+      up: canMoveImageOverlayLane(imageOverlays, index, "up") ? () => onMoveLayer(index, "up") : null,
+      down: canMoveImageOverlayLane(imageOverlays, index, "down") ? () => onMoveLayer(index, "down") : null,
     };
   }
 
   return (
     <div className="flex flex-col gap-0.5">
       {layoutGroup !== "exclusive" &&
-        pipEntries.map(({ index }) => (
-          <div key={index} className="relative h-5 w-full shrink-0">
-            <ImageOverlaySegment {...segmentProps(index, 0, videoDurationSeconds)} />
+        pipRows.map((row) => (
+          <div key={row.join("-")} className="relative h-5 w-full shrink-0">
+            {row.map((index) => {
+              // Bounded by its row neighbours so a drag can't make two share the same time.
+              const me = imageOverlays[index];
+              let prev = 0;
+              let next = videoDurationSeconds;
+              for (const other of row) {
+                if (other === index) continue;
+                const o = imageOverlays[other];
+                if (o.endTimeSeconds <= me.startTimeSeconds) prev = Math.max(prev, o.endTimeSeconds);
+                else if (o.startTimeSeconds >= me.endTimeSeconds) next = Math.min(next, o.startTimeSeconds);
+              }
+              return <ImageOverlaySegment key={index} {...segmentProps(index, prev, next)} />;
+            })}
           </div>
         ))}
       {layoutGroup !== "picture-in-picture" && exclusiveSorted.length > 0 && (

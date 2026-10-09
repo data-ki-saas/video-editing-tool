@@ -27,6 +27,7 @@ import {
   toggleFlipAt,
   mergeTrimRanges,
   isExclusiveLayout,
+  layoutPipLanes,
   DEFAULT_TEXT_OVERLAY_RECT,
   DEFAULT_AVATAR_OVERLAY_RECT,
   DEFAULT_OVERLAY_FRAMING,
@@ -804,24 +805,53 @@ export function applyDuplicateImageOverlay(
   return { label: "Duplicated image overlay", state: { ...selections, overlayImages: [...selections.overlayImages, copy] } };
 }
 
-/** Moves a Picture-in-Picture image overlay one row toward the front ("up") or the
- * back ("down") of the image-overlay stack by swapping draw order with its neighbour.
- * Picture-in-Picture overlays are drawn in array order (the last one is frontmost),
- * so the swap is between this overlay and the next / previous PiP one in the array;
- * exclusive (full / split-screen) overlays never overlap in time and are unaffected. */
+/** Whether a Picture-in-Picture image overlay can move into the timeline row above
+ * ("up") or below ("down") it: that row must exist and be empty for the overlay's
+ * whole time span. */
+export function canMoveImageOverlayLane(overlays: ImageOverlayClip[], overlayIndex: number, direction: "up" | "down"): boolean {
+  const lanes = layoutPipLanes(overlays);
+  const lane = lanes.get(overlayIndex);
+  if (lane === undefined) return false;
+  const target = lane + (direction === "up" ? 1 : -1);
+  const mover = overlays[overlayIndex];
+  let targetExists = false;
+  for (const [index, l] of lanes) {
+    if (l !== target) continue;
+    targetExists = true;
+    const other = overlays[index];
+    if (other.startTimeSeconds < mover.endTimeSeconds && mover.startTimeSeconds < other.endTimeSeconds) return false;
+  }
+  return targetExists;
+}
+
+/** Moves a Picture-in-Picture image overlay into the adjacent timeline row so several
+ * peeps can share one row. Does nothing unless that row is free for the overlay's
+ * whole duration; a row left empty disappears (rows are renumbered densely).
+ * Picture-in-Picture overlays draw in array order (last = frontmost), so the PiP
+ * slots are re-sorted by row afterwards to keep draw order matching the rows. */
 export function applyMoveImageOverlayLayer(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
   direction: "up" | "down"
 ): TransformationResult {
   const overlays = selections.overlayImages;
-  const pipIndices = overlays.flatMap((overlay, index) => (overlay.layout.type === "picture-in-picture" ? [index] : []));
-  const position = pipIndices.indexOf(overlayIndex);
   const label = direction === "up" ? "Moved overlay up" : "Moved overlay down";
-  const neighbour = pipIndices[position + (direction === "up" ? 1 : -1)];
-  if (position < 0 || neighbour === undefined) return { label, state: selections };
-  const next = [...overlays];
-  [next[overlayIndex], next[neighbour]] = [next[neighbour], next[overlayIndex]];
+  if (!canMoveImageOverlayLane(overlays, overlayIndex, direction)) return { label, state: selections };
+  const lanes = layoutPipLanes(overlays);
+  const withLanes = overlays.map((overlay, index) => {
+    const lane = lanes.get(index);
+    if (lane === undefined) return overlay;
+    return { ...overlay, lane: index === overlayIndex ? lane + (direction === "up" ? 1 : -1) : lane };
+  });
+  const dense = layoutPipLanes(withLanes);
+  const pipIndices = [...dense.keys()];
+  const sorted = pipIndices
+    .map((index) => ({ overlay: { ...withLanes[index], lane: dense.get(index)! }, index }))
+    .sort((a, b) => a.overlay.lane - b.overlay.lane || a.index - b.index);
+  const next = [...withLanes];
+  pipIndices.forEach((slot, i) => {
+    next[slot] = sorted[i].overlay;
+  });
   return { label, state: { ...selections, overlayImages: next } };
 }
 

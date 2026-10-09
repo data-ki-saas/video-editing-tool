@@ -804,6 +804,30 @@ export interface ImageOverlayClip {
   // kept so double-clicking it can reopen the peep editor and redraw the artwork.
   // Opaque here -- PeepsTab owns the shape.
   peep?: Record<string, unknown>;
+  // Timeline row (Picture-in-Picture only; higher = nearer the front/top). Purely a
+  // display grouping so non-overlapping overlays can share a row -- see layoutPipLanes.
+  lane?: number;
+}
+
+/** Assigns each Picture-in-Picture image overlay (by array index) a dense timeline row.
+ * An overlay keeps its stored `lane` when nothing already placed there overlaps it in
+ * time; otherwise (or with no stored lane) it gets a fresh row on top. Rows are then
+ * renumbered 0..n-1 with no gaps, so a row emptied by a move disappears. */
+export function layoutPipLanes(overlays: ImageOverlayClip[]): Map<number, number> {
+  const placed: { lane: number; start: number; end: number; index: number }[] = [];
+  let maxLane = -1;
+  overlays.forEach((overlay, index) => {
+    if (overlay.layout.type !== "picture-in-picture") return;
+    const { startTimeSeconds: start, endTimeSeconds: end } = overlay;
+    const wanted = overlay.lane;
+    const fits =
+      wanted !== undefined && !placed.some((p) => p.lane === wanted && p.start < end && start < p.end);
+    const lane = fits ? wanted : maxLane + 1;
+    maxLane = Math.max(maxLane, lane);
+    placed.push({ lane, start, end, index });
+  });
+  const dense = [...new Set(placed.map((p) => p.lane))].sort((a, b) => a - b);
+  return new Map(placed.map((p) => [p.index, dense.indexOf(p.lane)]));
 }
 
 /** Cache key for a still frame captured at one overlay placement's own
