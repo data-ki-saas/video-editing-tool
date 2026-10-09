@@ -59,7 +59,7 @@ interface Pose {
 
 const POSES: Pose[] = [
   { key: "bust", label: "Bust", viewBox: "0 0 704 704", legs: false },
-  { key: "half", label: "Half body", viewBox: "-340 0 1408 1250", legs: false },
+  { key: "half", label: "Half body", viewBox: "-340 0 1408 1420", legs: false }, // tall enough for the hanging hands (to y ~1390)
   { key: "sitting", label: "Sitting", viewBox: "-340 0 1408 2070", legs: true },
   { key: "full", label: "Full body", viewBox: "-340 0 1408 2150", legs: true },
 ];
@@ -562,24 +562,30 @@ async function rasterizePeep(peep: Peep): Promise<{ file: File; aspect: number }
   if (!ctx) throw new Error("Could not draw this peep");
   ctx.drawImage(img, 0, 0, rasterW, rasterH);
   const { data } = ctx.getImageData(0, 0, rasterW, rasterH);
-  let minX = rasterW, minY = rasterH, maxX = -1, maxY = -1;
+  let minX = rasterW, maxX = -1;
   for (let y = 0; y < rasterH; y++) {
     for (let x = 0; x < rasterW; x++) {
       if (data[(y * rasterW + x) * 4 + 3] > ALPHA_VISIBLE_THRESHOLD) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
       }
     }
   }
   if (maxX < 0) throw new Error("Could not draw this peep");
-  const width = maxX - minX + 1;
-  const height = maxY - minY + 1;
+  // Every peep of a framing must come out exactly the same height (animations swap
+  // between edits of one peep), so the vertical extent is the whole pose frame, never
+  // the visible pixels. Horizontally the crop is centred on the torso's axis, so a
+  // gesture arm only widens the image, symmetrically, and the figure stays put.
+  const [vbX] = pose.viewBox.split(" ").map(Number);
+  const axisX = peep.flip ? 704 - ARM_MIRROR_X / 2 : ARM_MIRROR_X / 2;
+  const centerX = Math.round((axisX - vbX) * scale);
+  const halfWidth = Math.max(centerX - minX, maxX - centerX) + 1;
+  const width = halfWidth * 2;
+  const height = rasterH;
   const cropped = document.createElement("canvas");
   cropped.width = width;
   cropped.height = height;
-  cropped.getContext("2d")?.drawImage(canvas, minX, minY, width, height, 0, 0, width, height);
+  cropped.getContext("2d")?.drawImage(canvas, halfWidth - centerX, 0);
   const blob = await new Promise<Blob | null>((resolve) => cropped.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("Could not draw this peep");
   return { file: new File([blob], PEEP_ASSET_FILENAME, { type: "image/png" }), aspect: width / height };

@@ -759,9 +759,11 @@ export function applyDeleteImageOverlay(
 }
 
 /** Swaps a placed peep's artwork and settings for a re-edited one, keeping its
- * timing, filter, effects and position. A new hairstyle or pose can change the
- * artwork's shape, so a Picture-in-Picture box is reshaped to the new aspect
- * (same width and centre) so the redrawn peep isn't cropped or squashed. */
+ * timing, filter, effects and position. The artwork is always the same height
+ * for a given framing (so animations built on it line up); a gesture or
+ * hairstyle only changes its width, so a Picture-in-Picture box is reshaped to
+ * the new aspect keeping its height and centre, so the redrawn peep isn't
+ * cropped or squashed and the figure doesn't rescale. */
 export function applyReplaceImageOverlayPeep(
   selections: EditSelectionsSnapshot,
   overlayIndex: number,
@@ -775,8 +777,8 @@ export function applyReplaceImageOverlayPeep(
   let layout = overlay.layout;
   if (layout.type === "picture-in-picture") {
     const { rect } = layout;
-    const height = (rect.width * frameAspect) / newAspect;
-    layout = { ...layout, rect: { ...rect, y: rect.y + (rect.height - height) / 2, height } };
+    const width = (rect.height * newAspect) / frameAspect;
+    layout = { ...layout, rect: { ...rect, x: rect.x + (rect.width - width) / 2, width } };
   }
   const nextOverlays = [...selections.overlayImages];
   nextOverlays[overlayIndex] = { ...overlay, assetId, peep, layout, framing: DEFAULT_OVERLAY_FRAMING };
