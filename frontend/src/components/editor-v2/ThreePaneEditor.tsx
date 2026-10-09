@@ -3428,7 +3428,10 @@ export function ThreePaneEditor({
           onSeek={handleSeek}
           baseCropRect={selections.cropRect}
           zoomEffects={displayedZoomEffects}
-          frameAspectRatio={frameAspectRatio}
+          // The reel's output shape, not the first clip's -- pins every
+          // filmstrip tile to one size however differently shaped the clips
+          // (or a replaced cutaway) underneath are.
+          frameAspectRatio={outputAspectRatio}
           entryAspectRatioById={clipAspectRatioByEntryId}
           onChangeZoomRange={handleChangeZoomRange}
           onCommitZoomRange={handleCommitZoomRange}

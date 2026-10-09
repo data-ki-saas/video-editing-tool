@@ -213,11 +213,17 @@ function resolveCutawayVideoTrim(
   return { startTimeSeconds, durationSeconds: Math.max(0, endTimeSeconds - startTimeSeconds) };
 }
 
+// Every filmstrip tile is exactly one inch tall (CSS inches are 96px) --
+// a comfortable, constant working height whatever shape the clips are.
+const TILE_HEIGHT_CSS = "1in";
+const TILE_HEIGHT_PX = 96;
+
 const FrameTile = memo(function FrameTile({
   src,
   index,
   widthPx,
   frameAspectRatio,
+  contentAspectRatio,
   cropRect,
   flipHorizontal,
   flipVertical,
@@ -246,7 +252,16 @@ const FrameTile = memo(function FrameTile({
   src: string;
   index: number;
   widthPx: number;
+  // The tile's own BOX shape -- the reel's output aspect ratio, identical for
+  // every tile whatever clip it falls under, so replacing a cutaway with a
+  // differently-shaped photo never resizes the strip or distorts the
+  // overlays drawn over it (an overlay rect is a fraction of the OUTPUT
+  // frame, not of whichever clip's raw shape happens to be underneath).
   frameAspectRatio: number | null;
+  // The clip's OWN picture shape, fitted and centered inside the box above
+  // (see contentBoxStyle below) -- the clip-rectangle handles are authored
+  // against the raw picture, so they live in this inner box, not the tile's.
+  contentAspectRatio: number | null;
   cropRect: CropRect | null;
   flipHorizontal: boolean;
   flipVertical: boolean;
@@ -295,9 +310,10 @@ const FrameTile = memo(function FrameTile({
   // rather than a video one -- its `src` is that cutaway's own photo, held
   // unchanged for the whole clip (see ThreePaneEditor's extractSequence),
   // NOT a video frame captured at this tile's own native resolution. The
-  // tile's own box is already sized to THIS clip's own aspect ratio (see
-  // FrameStrip's tileFrameAspectRatio), so object-cover on a video tile
-  // never actually crops it -- box and image already agree. Kept as
+  // picture sits in its own inner box sized to THIS clip's own aspect ratio
+  // (see FrameStrip's tileContentAspectRatio and FrameTile's contentBoxStyle),
+  // so object-cover on a video tile never actually crops it -- box and image
+  // already agree. Kept as
   // object-contain for images regardless: an authored Ken Burns cropRect
   // (baseCropRect) is drawn on TOP of the raw photo at its full, undistorted
   // extent, matching CanvasPlayer's own draw order -- object-cover here
@@ -332,6 +348,18 @@ const FrameTile = memo(function FrameTile({
   const imageOverlayCssFilter = getFilterPresetOption(activeExclusiveImageOverlay?.colorFilterId ?? null).cssFilter;
   const videoOverlayCssFilter = getFilterPresetOption(activeExclusiveVideoOverlay?.colorFilterId ?? null).cssFilter;
 
+  // The clip's own picture always takes the tile's full pinned HEIGHT, its
+  // width following its own aspect ratio and centered -- so a wider-than-
+  // output clip runs past the tile's sides (clipped by the tile's own
+  // overflow-hidden) and a narrower one leaves bars either side.
+  const frameWidthPx = TILE_HEIGHT_PX * (frameAspectRatio ?? 9 / 16);
+  const contentRatio = contentAspectRatio ?? frameAspectRatio;
+  const contentBoxStyle: React.CSSProperties = (() => {
+    if (!frameAspectRatio || !contentRatio) return { left: 0, top: 0, width: "100%", height: "100%" };
+    const widthFraction = contentRatio / frameAspectRatio;
+    return { left: `${((1 - widthFraction) / 2) * 100}%`, top: 0, width: `${widthFraction * 100}%`, height: "100%" };
+  })();
+
   function rectStyle(rect: CropRect): React.CSSProperties {
     return { left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` };
   }
@@ -358,9 +386,15 @@ const FrameTile = memo(function FrameTile({
     // Playground's allocated space, Playground.tsx scrolls vertically
     // rather than this shrinking (or centering with padding) to fit.
     <div
-      className={`relative shrink-0 overflow-hidden ${isTrimmed ? "opacity-30" : ""}`}
-      style={{ width: widthPx, aspectRatio: frameAspectRatio ?? undefined }}
+      className={`relative shrink-0 overflow-hidden bg-neutral-900 ${isTrimmed ? "opacity-30" : ""}`}
+      style={{ width: widthPx, height: TILE_HEIGHT_CSS }}
     >
+      {/* The output-shaped frame: pinned to the tile's own height, its width
+          following the reel's aspect ratio. Everything that's positioned as
+          a fraction of the OUTPUT frame (the picture, crop handles,
+          overlays) lives in here; a frame wider than the tile's own
+          time-based slice is clipped by the tile's overflow-hidden. */}
+      <div className="absolute left-0 top-0 h-full" style={{ width: frameWidthPx }}>
       {/* Safe to fill the box exactly (object-cover would normally risk
           cropping) -- the box's own aspect-ratio already matches the
           image's, so there is nothing to crop. */}
@@ -423,22 +457,26 @@ const FrameTile = memo(function FrameTile({
           </div>
         </>
       ) : (
-        // eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image
-        <img
-          src={src}
-          alt={`Frame at ${index}s`}
-          className={`h-full w-full ${isImageClip ? "object-contain" : "object-cover"}`}
-          style={baseImgStyle}
-        />
+        <div className="absolute" style={contentBoxStyle}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- short-lived data URLs, not a Next-optimizable remote image */}
+          <img
+            src={src}
+            alt={`Frame at ${index}s`}
+            className={`h-full w-full ${isImageClip ? "object-contain" : "object-cover"}`}
+            style={baseImgStyle}
+          />
+        </div>
       )}
       {cropRect && (
-        <CropRectOverlay
-          cropRect={cropRect}
-          onChange={onChange}
-          onCommit={onCommit}
-          onFlipHorizontal={onFlipHorizontal}
-          onFlipVertical={onFlipVertical}
-        />
+        <div className="absolute" style={contentBoxStyle}>
+          <CropRectOverlay
+            cropRect={cropRect}
+            onChange={onChange}
+            onCommit={onCommit}
+            onFlipHorizontal={onFlipHorizontal}
+            onFlipVertical={onFlipVertical}
+          />
+        </div>
       )}
       {videoOverlayPips.map(({ overlay, overlayIndex, frameUrl }) => {
         if (overlay.layout.type !== "picture-in-picture") return null;
@@ -486,6 +524,7 @@ const FrameTile = memo(function FrameTile({
           }
         />
       ))}
+      </div>
     </div>
   );
 });
@@ -656,9 +695,10 @@ export function FrameStrip({
   frameAspectRatio: number | null;
   // Each sequence entry's own native aspect ratio, keyed by entry id -- see
   // ThreePaneEditor's clipAspectRatioByEntryId. Resolved per tile below
-  // (tileFrameAspectRatio) so a cutaway whose source resolution differs
-  // from frameAspectRatio's own clip gets its OWN box shape instead of
-  // being force-fit into a mismatched one and arbitrarily cropped.
+  // (tileContentAspectRatio) so a cutaway whose source resolution differs
+  // from the reel's output shape (frameAspectRatio) gets its picture
+  // fitted inside the pinned tile box instead of being force-fit into a
+  // mismatched one and arbitrarily cropped.
   entryAspectRatioById: Record<string, number>;
   onChangeZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
@@ -926,24 +966,20 @@ export function FrameStrip({
   }, [thumbnails.length, thumbnailTimestampsSeconds, clipBoundarySeconds, sequenceEntries]);
 
   // Same resolution as tileIsImageClip above, but for the resolved clip's
-  // OWN aspect ratio (entryAspectRatioById), falling back to the single
-  // frameAspectRatio prop when that clip's own ratio hasn't been probed yet
-  // (still loading) or is a fallback/synthetic entry never captured there.
-  // Without this, every tile shared frameAspectRatio -- the ratio of
-  // whichever clip happened to load FIRST in the whole sequence -- so any
-  // OTHER clip (e.g. a cutaway shot in a different orientation/resolution)
-  // got boxed to the wrong shape and had object-cover crop an arbitrary,
-  // uncontrolled slice of it to fill that mismatched box.
-  const tileFrameAspectRatio = useMemo(() => {
+  // OWN aspect ratio (entryAspectRatioById) -- null when it hasn't been
+  // probed yet (still loading), in which case the picture just fills the
+  // tile. Only the picture inside each tile follows this; every tile's own
+  // box is the single pinned frameAspectRatio (the reel's output shape).
+  const tileContentAspectRatio = useMemo(() => {
     return thumbnailTimestampsSeconds.map((timestamp) => {
       const entryIndex = clipBoundarySeconds.findIndex((boundary) => timestamp < boundary);
       const resolvedIndex = entryIndex === -1 ? clipBoundarySeconds.length : entryIndex;
       const entryId = sequenceEntries[resolvedIndex]?.id;
       const entryRatio = entryId ? entryAspectRatioById[entryId] : undefined;
-      return entryRatio ?? frameAspectRatio;
+      return entryRatio ?? null;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- thumbnails.length (not the array reference) is what actually matters here
-  }, [thumbnails.length, thumbnailTimestampsSeconds, clipBoundarySeconds, sequenceEntries, entryAspectRatioById, frameAspectRatio]);
+  }, [thumbnails.length, thumbnailTimestampsSeconds, clipBoundarySeconds, sequenceEntries, entryAspectRatioById]);
 
   // Same resolution as tileIsImageClip above, but for the resolved clip's
   // own colorFilterId -- lets each tile paint with the same cssFilter
@@ -1416,7 +1452,8 @@ export function FrameStrip({
               src={src}
               index={index}
               widthPx={tileWidthsPx[index]}
-              frameAspectRatio={tileFrameAspectRatio[index] ?? frameAspectRatio}
+              frameAspectRatio={frameAspectRatio}
+              contentAspectRatio={tileContentAspectRatio[index] ?? null}
               cropRect={tileCropRects[index]}
               flipHorizontal={tileFlips[index].flipHorizontal}
               flipVertical={tileFlips[index].flipVertical}

@@ -294,8 +294,8 @@ export function Playground({
   frameAspectRatio: number | null;
   // Each sequence entry's own native aspect ratio, keyed by entry id -- see
   // ThreePaneEditor's clipAspectRatioByEntryId and FrameStrip's own
-  // tileFrameAspectRatio for why this (not the single frameAspectRatio
-  // above) is what boxes each rail tile.
+  // tileContentAspectRatio for why this (not the frameAspectRatio above,
+  // which pins every tile's box) is what shapes the picture inside it.
   entryAspectRatioById: Record<string, number>;
   onChangeZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
   onCommitZoomRange: (effectIndex: number, startTimeSeconds: number, endTimeSeconds: number) => void;
