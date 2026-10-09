@@ -806,8 +806,9 @@ export function applyDuplicateImageOverlay(
 }
 
 /** Whether a Picture-in-Picture image overlay can move into the timeline row above
- * ("up") or below ("down") it: that row must exist and be empty for the overlay's
- * whole time span. */
+ * ("up") or below ("down") it: an existing row must be empty for the overlay's whole
+ * time span; past the top/bottom row a new row is created, as long as the overlay
+ * isn't already alone in its own row. */
 export function canMoveImageOverlayLane(overlays: ImageOverlayClip[], overlayIndex: number, direction: "up" | "down"): boolean {
   const lanes = layoutPipLanes(overlays);
   const lane = lanes.get(overlayIndex);
@@ -815,18 +816,23 @@ export function canMoveImageOverlayLane(overlays: ImageOverlayClip[], overlayInd
   const target = lane + (direction === "up" ? 1 : -1);
   const mover = overlays[overlayIndex];
   let targetExists = false;
+  let sharesOwnLane = false;
   for (const [index, l] of lanes) {
+    if (index !== overlayIndex && l === lane) sharesOwnLane = true;
     if (l !== target) continue;
     targetExists = true;
     const other = overlays[index];
     if (other.startTimeSeconds < mover.endTimeSeconds && mover.startTimeSeconds < other.endTimeSeconds) return false;
   }
-  return targetExists;
+  // Past the top/bottom row there's nothing to merge into, so the move creates a new
+  // row -- pointless (and a no-op after renumbering) when the overlay is already alone.
+  return targetExists || sharesOwnLane;
 }
 
 /** Moves a Picture-in-Picture image overlay into the adjacent timeline row so several
  * peeps can share one row. Does nothing unless that row is free for the overlay's
- * whole duration; a row left empty disappears (rows are renumbered densely).
+ * whole duration -- or, past the top/bottom row, creates a new row for it. A row left
+ * empty disappears (rows are renumbered densely).
  * Picture-in-Picture overlays draw in array order (last = frontmost), so the PiP
  * slots are re-sorted by row afterwards to keep draw order matching the rows. */
 export function applyMoveImageOverlayLayer(
