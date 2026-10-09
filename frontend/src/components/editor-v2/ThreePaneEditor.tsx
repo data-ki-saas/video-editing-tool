@@ -1474,7 +1474,7 @@ export function ThreePaneEditor({
     let effectivePlacement = placement;
     if (!effectivePlacement) {
       const imageAspect = await loadImageAspectRatio(asset.url);
-      if (imageAspect) effectivePlacement = { rect: fitRectToImageAspect(imageAspect, frameAspectRatio ?? 9 / 16) };
+      if (imageAspect) effectivePlacement = { rect: fitRectToImageAspect(imageAspect, outputAspectRatio) };
     }
     const { label, state } = applyAddImageOverlay(selections, asset.id, currentTimeSeconds, videoDurationSeconds, effectivePlacement);
     pushChange(label, state);
@@ -1947,7 +1947,7 @@ export function ThreePaneEditor({
   function handleApplyPeepEdit(asset: Asset, aspect: number, peep: Record<string, unknown>) {
     if (peepEditOverlayIndex === null) return;
     setAssets((prev) => [asset, ...prev]);
-    const { label, state } = applyReplaceImageOverlayPeep(selections, peepEditOverlayIndex, asset.id, { ...peep }, aspect, frameAspectRatio ?? 9 / 16);
+    const { label, state } = applyReplaceImageOverlayPeep(selections, peepEditOverlayIndex, asset.id, { ...peep }, aspect, outputAspectRatio);
     pushChange(label, state);
   }
 
@@ -2782,6 +2782,11 @@ export function ThreePaneEditor({
     : selections.zoomEffects;
 
   const frameAspectRatio = frameDimensions ? frameDimensions.width / frameDimensions.height : null;
+
+  // The canvas's own ratio: the chosen clip rectangle's, not the source video's. Overlay
+  // boxes must be shaped against this one, or cover-fit crops the artwork (a peep's hands).
+  const outputClipRect = CLIP_RECT_OPTIONS.find((option) => option.id === selections.clipRectId);
+  const outputAspectRatio = outputClipRect ? outputClipRect.widthRatio / outputClipRect.heightRatio : (frameAspectRatio ?? 9 / 16);
 
   // The thumbnail closest to the current playhead -- what TextOverlayDialog
   // shows behind the draggable text rect, so positioning a caption happens

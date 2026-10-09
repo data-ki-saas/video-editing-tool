@@ -775,7 +775,7 @@ export function ActionArea({
         <PropsDialog
           projectId={projectId}
           onImported={onUploaded}
-          frameAspectRatio={frameAspectRatio}
+          frameAspectRatio={playAreaRatio}
           onPlace={onAddImageOverlay}
           onImportingChange={onUploadingChange}
           onClose={() => setIsPropsDialogOpen(false)}
@@ -787,7 +787,7 @@ export function ActionArea({
           mode="peeps"
           projectId={projectId}
           onImported={onUploaded}
-          frameAspectRatio={frameAspectRatio}
+          frameAspectRatio={playAreaRatio}
           onPlace={onAddImageOverlay}
           onImportingChange={onUploadingChange}
           onClose={() => setIsPeepsDialogOpen(false)}
