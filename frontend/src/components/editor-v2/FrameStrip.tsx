@@ -112,7 +112,7 @@ import { LabelTrack } from "./LabelTrack";
 import { TtsOverlayTrack } from "./TtsOverlayTrack";
 import { AvatarOverlayTrack } from "./AvatarOverlayTrack";
 import { VideoOverlayTrack } from "./VideoOverlayTrack";
-import { ImageOverlayTrack } from "./ImageOverlayTrack";
+import { ImageOverlayTrack, type ImageOverlayGroupHandlers } from "./ImageOverlayTrack";
 import { MarkerTrack } from "./MarkerTrack";
 import { CutawayTrack, type CutawaySegment } from "./CutawayTrack";
 import { CutTransitionIcon } from "./CutTransitionDialog";
@@ -547,6 +547,7 @@ export function FrameStrip({
   onOpenImageOverlayFilter,
   onDuplicateImageOverlay,
   onSetImageOverlayTag,
+  imageOverlayGroupHandlers,
   onMoveImageOverlayLayer,
   onDeleteImageOverlay,
   textOverlays,
@@ -702,6 +703,7 @@ export function FrameStrip({
   onOpenImageOverlayFilter: (overlayIndex: number) => void;
   onDuplicateImageOverlay: (overlayIndex: number) => void;
   onSetImageOverlayTag: (overlayIndex: number, tag: string) => void;
+  imageOverlayGroupHandlers: ImageOverlayGroupHandlers;
   onMoveImageOverlayLayer: (overlayIndex: number, direction: "up" | "down") => void;
   onDeleteImageOverlay: (overlayIndex: number) => void;
   textOverlays: TextOverlay[];
@@ -1331,6 +1333,7 @@ export function FrameStrip({
           onOpenFilter={onOpenImageOverlayFilter}
           onDuplicate={onDuplicateImageOverlay}
           onSetTag={onSetImageOverlayTag}
+          groupHandlers={imageOverlayGroupHandlers}
           onEditPeep={onEditImagePeep}
           onMoveLayer={onMoveImageOverlayLayer}
           onDelete={onDeleteImageOverlay}
@@ -1375,6 +1378,7 @@ export function FrameStrip({
           onOpenFilter={onOpenImageOverlayFilter}
           onDuplicate={onDuplicateImageOverlay}
           onSetTag={onSetImageOverlayTag}
+          groupHandlers={imageOverlayGroupHandlers}
           onEditPeep={onEditImagePeep}
           onDelete={onDeleteImageOverlay}
         />

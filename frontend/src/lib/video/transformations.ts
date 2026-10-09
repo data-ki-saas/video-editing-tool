@@ -32,6 +32,7 @@ import {
   DEFAULT_AVATAR_OVERLAY_RECT,
   DEFAULT_OVERLAY_FRAMING,
   MAX_OVERLAY_TAG_LENGTH,
+  imageOverlayGroupSpan,
   DEFAULT_SPLIT_SCREEN_RATIO,
   MIN_VIDEO_OVERLAY_DURATION_SECONDS,
   type AvatarAction,
@@ -819,28 +820,72 @@ export function applySetImageOverlayTag(selections: EditSelectionsSnapshot, over
   return { label: "Edited overlay tag", state: { ...selections, overlayImages: nextOverlays } };
 }
 
-/** Whether a Picture-in-Picture image overlay can move into the timeline row above
- * ("up") or below ("down") it: an existing row must be empty for the overlay's whole
- * time span; past the top/bottom row a new row is created, as long as the overlay
- * isn't already alone in its own row. */
-export function canMoveImageOverlayLane(overlays: ImageOverlayClip[], overlayIndex: number, direction: "up" | "down"): boolean {
+/** Whether a set of Picture-in-Picture image overlays sharing one row can move together
+ * into the row above ("up") or below ("down"): an existing row must be empty across their
+ * whole span (a grouped overlay there counts as occupying its group's whole span, so
+ * nothing slots into a gap between grouped overlays); past the top/bottom row a new row is
+ * created, as long as they aren't already alone in their own row. */
+function canMoveImageOverlaysLane(overlays: ImageOverlayClip[], indices: number[], direction: "up" | "down"): boolean {
   const lanes = layoutPipLanes(overlays);
-  const lane = lanes.get(overlayIndex);
-  if (lane === undefined) return false;
+  const lane = lanes.get(indices[0]);
+  if (lane === undefined || indices.some((i) => lanes.get(i) !== lane)) return false;
   const target = lane + (direction === "up" ? 1 : -1);
-  const mover = overlays[overlayIndex];
+  const moverStart = Math.min(...indices.map((i) => overlays[i].startTimeSeconds));
+  const moverEnd = Math.max(...indices.map((i) => overlays[i].endTimeSeconds));
   let targetExists = false;
   let sharesOwnLane = false;
   for (const [index, l] of lanes) {
-    if (index !== overlayIndex && l === lane) sharesOwnLane = true;
+    if (indices.includes(index)) continue;
+    if (l === lane) sharesOwnLane = true;
     if (l !== target) continue;
     targetExists = true;
     const other = overlays[index];
-    if (other.startTimeSeconds < mover.endTimeSeconds && mover.startTimeSeconds < other.endTimeSeconds) return false;
+    const span = (other.groupId && imageOverlayGroupSpan(overlays, other.groupId)) || { start: other.startTimeSeconds, end: other.endTimeSeconds };
+    if (span.start < moverEnd && moverStart < span.end) return false;
   }
   // Past the top/bottom row there's nothing to merge into, so the move creates a new
-  // row -- pointless (and a no-op after renumbering) when the overlay is already alone.
+  // row -- pointless (and a no-op after renumbering) when they're already alone.
   return targetExists || sharesOwnLane;
+}
+
+export function canMoveImageOverlayLane(overlays: ImageOverlayClip[], overlayIndex: number, direction: "up" | "down"): boolean {
+  return canMoveImageOverlaysLane(overlays, [overlayIndex], direction);
+}
+
+/** Indices of every overlay in group `groupId`. */
+function groupIndices(overlays: ImageOverlayClip[], groupId: string): number[] {
+  return overlays.flatMap((o, i) => (o.groupId === groupId ? [i] : []));
+}
+
+export function canMoveImageOverlayGroupLane(overlays: ImageOverlayClip[], groupId: string, direction: "up" | "down"): boolean {
+  const indices = groupIndices(overlays, groupId);
+  return indices.length > 0 && canMoveImageOverlaysLane(overlays, indices, direction);
+}
+
+function moveImageOverlaysLayer(
+  selections: EditSelectionsSnapshot,
+  indices: number[],
+  direction: "up" | "down",
+  label: string
+): TransformationResult {
+  const overlays = selections.overlayImages;
+  if (!canMoveImageOverlaysLane(overlays, indices, direction)) return { label, state: selections };
+  const lanes = layoutPipLanes(overlays);
+  const withLanes = overlays.map((overlay, index) => {
+    const lane = lanes.get(index);
+    if (lane === undefined) return overlay;
+    return { ...overlay, lane: indices.includes(index) ? lane + (direction === "up" ? 1 : -1) : lane };
+  });
+  const dense = layoutPipLanes(withLanes);
+  const pipIndices = [...dense.keys()];
+  const sorted = pipIndices
+    .map((index) => ({ overlay: { ...withLanes[index], lane: dense.get(index)! }, index }))
+    .sort((a, b) => a.overlay.lane - b.overlay.lane || a.index - b.index);
+  const next = [...withLanes];
+  pipIndices.forEach((slot, i) => {
+    next[slot] = sorted[i].overlay;
+  });
+  return { label, state: { ...selections, overlayImages: next } };
 }
 
 /** Moves a Picture-in-Picture image overlay into the adjacent timeline row so several
@@ -854,25 +899,106 @@ export function applyMoveImageOverlayLayer(
   overlayIndex: number,
   direction: "up" | "down"
 ): TransformationResult {
-  const overlays = selections.overlayImages;
-  const label = direction === "up" ? "Moved overlay up" : "Moved overlay down";
-  if (!canMoveImageOverlayLane(overlays, overlayIndex, direction)) return { label, state: selections };
+  return moveImageOverlaysLayer(selections, [overlayIndex], direction, direction === "up" ? "Moved overlay up" : "Moved overlay down");
+}
+
+/** Moves a whole group into the adjacent row -- see applyMoveImageOverlayLayer. */
+export function applyMoveImageOverlayGroupLayer(
+  selections: EditSelectionsSnapshot,
+  groupId: string,
+  direction: "up" | "down"
+): TransformationResult {
+  return moveImageOverlaysLayer(
+    selections,
+    groupIndices(selections.overlayImages, groupId),
+    direction,
+    direction === "up" ? "Moved group up" : "Moved group down"
+  );
+}
+
+/** Whether an overlay has a neighbour after it (or after its group) in its row to group with. */
+export function findNextImageOverlayInRow(overlays: ImageOverlayClip[], overlayIndex: number): number {
   const lanes = layoutPipLanes(overlays);
-  const withLanes = overlays.map((overlay, index) => {
-    const lane = lanes.get(index);
-    if (lane === undefined) return overlay;
-    return { ...overlay, lane: index === overlayIndex ? lane + (direction === "up" ? 1 : -1) : lane };
-  });
-  const dense = layoutPipLanes(withLanes);
-  const pipIndices = [...dense.keys()];
-  const sorted = pipIndices
-    .map((index) => ({ overlay: { ...withLanes[index], lane: dense.get(index)! }, index }))
-    .sort((a, b) => a.overlay.lane - b.overlay.lane || a.index - b.index);
-  const next = [...withLanes];
-  pipIndices.forEach((slot, i) => {
-    next[slot] = sorted[i].overlay;
-  });
-  return { label, state: { ...selections, overlayImages: next } };
+  const lane = lanes.get(overlayIndex);
+  const me = overlays[overlayIndex];
+  if (lane === undefined || !me) return -1;
+  const myEnd = (me.groupId && imageOverlayGroupSpan(overlays, me.groupId)?.end) || me.endTimeSeconds;
+  let nextIndex = -1;
+  for (const [index, l] of lanes) {
+    const o = overlays[index];
+    if (l !== lane || (me.groupId && o.groupId === me.groupId)) continue;
+    if (o.startTimeSeconds < myEnd) continue;
+    if (nextIndex < 0 || o.startTimeSeconds < overlays[nextIndex].startTimeSeconds) nextIndex = index;
+  }
+  return nextIndex;
+}
+
+/** Joins an overlay with the next one in its row (by start time) into one group -- the
+ * next overlay's own group, if it has one, is absorbed. Only neighbours can be grouped,
+ * so a group is always a contiguous run on one row. */
+export function applyGroupImageOverlayWithNext(selections: EditSelectionsSnapshot, overlayIndex: number): TransformationResult {
+  const label = "Grouped overlays";
+  const overlays = selections.overlayImages;
+  const nextIndex = findNextImageOverlayInRow(overlays, overlayIndex);
+  if (nextIndex < 0) return { label, state: selections };
+  const lane = layoutPipLanes(overlays).get(overlayIndex)!;
+  const groupId = overlays[overlayIndex].groupId ?? crypto.randomUUID();
+  const absorbed = overlays[nextIndex].groupId;
+  const nextOverlays = overlays.map((o, i) =>
+    i === overlayIndex || i === nextIndex || (absorbed && o.groupId === absorbed) ? { ...o, groupId, lane } : o
+  );
+  return { label, state: { ...selections, overlayImages: nextOverlays } };
+}
+
+/** Dissolves a group; its overlays stay exactly where they are. */
+export function applyUngroupImageOverlays(selections: EditSelectionsSnapshot, groupId: string): TransformationResult {
+  return {
+    label: "Ungrouped overlays",
+    state: {
+      ...selections,
+      overlayImages: selections.overlayImages.map((o) => (o.groupId === groupId ? { ...o, groupId: undefined } : o)),
+    },
+  };
+}
+
+/** Slides every overlay in a group along the timeline by `deltaSeconds`, keeping the gaps
+ * between them. The track's own drag math has already clamped the delta. */
+export function applyMoveImageOverlayGroup(selections: EditSelectionsSnapshot, groupId: string, deltaSeconds: number): TransformationResult {
+  return {
+    label: "Moved group",
+    state: {
+      ...selections,
+      overlayImages: selections.overlayImages.map((o) =>
+        o.groupId === groupId
+          ? { ...o, startTimeSeconds: o.startTimeSeconds + deltaSeconds, endTimeSeconds: o.endTimeSeconds + deltaSeconds }
+          : o
+      ),
+    },
+  };
+}
+
+/** Copies a whole group (as a new group) straight after the original -- or, if that would
+ * run past the end, flush against the end -- like applyDuplicateImageOverlay. */
+export function applyDuplicateImageOverlayGroup(
+  selections: EditSelectionsSnapshot,
+  groupId: string,
+  videoDurationSeconds: number
+): TransformationResult {
+  const label = "Duplicated group";
+  const span = imageOverlayGroupSpan(selections.overlayImages, groupId);
+  if (!span) return { label, state: selections };
+  const shift = Math.max(0, Math.min(span.end - span.start, videoDurationSeconds - span.end));
+  const copyGroupId = crypto.randomUUID();
+  const copies = selections.overlayImages
+    .filter((o) => o.groupId === groupId)
+    .map((o): ImageOverlayClip => ({
+      ...o,
+      id: crypto.randomUUID(),
+      groupId: copyGroupId,
+      startTimeSeconds: o.startTimeSeconds + shift,
+      endTimeSeconds: o.endTimeSeconds + shift,
+    }));
+  return { label, state: { ...selections, overlayImages: [...selections.overlayImages, ...copies] } };
 }
 
 /** Appends a video asset to the concatenated sequence -- from

@@ -97,6 +97,11 @@ import {
   applyDeleteImageOverlay,
   applyDuplicateImageOverlay,
   applySetImageOverlayTag,
+  applyGroupImageOverlayWithNext,
+  applyUngroupImageOverlays,
+  applyDuplicateImageOverlayGroup,
+  applyMoveImageOverlayGroup,
+  applyMoveImageOverlayGroupLayer,
   applyMoveImageOverlayLayer,
   applyReplaceImageOverlayPeep,
   applyAddSequenceClip,
@@ -177,6 +182,7 @@ import { CLIP_RECT_OPTIONS } from "./ClipRectIcon";
 import { DEFAULT_MARKER_LABEL } from "./MarkerTrack";
 import { ActionArea } from "./ActionArea";
 import { Playground } from "./Playground";
+import type { ImageOverlayGroupHandlers } from "./ImageOverlayTrack";
 import type { VideoOverlayThumbnailFrames } from "./FrameStrip";
 import type { CutawaySegment } from "./CutawayTrack";
 import { FeedbackArea, type ActivityLogEntry } from "./FeedbackArea";
@@ -1939,6 +1945,30 @@ export function ThreePaneEditor({
     pushChange(label, state);
   }
 
+  // Grouped neighbouring Picture-in-Picture overlays: drag/duplicate/move-row as one, ungroup to edit again.
+  const imageOverlayGroupHandlers: ImageOverlayGroupHandlers = {
+    onGroupWithNext: (overlayIndex) => {
+      const { label, state } = applyGroupImageOverlayWithNext(selections, overlayIndex);
+      if (state !== selections) pushChange(label, state);
+    },
+    onUngroup: (groupId) => {
+      const { label, state } = applyUngroupImageOverlays(selections, groupId);
+      pushChange(label, state);
+    },
+    onDuplicateGroup: (groupId) => {
+      const { label, state } = applyDuplicateImageOverlayGroup(selections, groupId, videoDurationSeconds);
+      pushChange(label, state);
+    },
+    onMoveGroup: (groupId, deltaSeconds) => {
+      const { label, state } = applyMoveImageOverlayGroup(selections, groupId, deltaSeconds);
+      pushChange(label, state);
+    },
+    onMoveGroupLayer: (groupId, direction) => {
+      const { label, state } = applyMoveImageOverlayGroupLayer(selections, groupId, direction);
+      if (state !== selections) pushChange(label, state);
+    },
+  };
+
   function handleSetImageOverlayTag(overlayIndex: number, tag: string) {
     const { label, state } = applySetImageOverlayTag(selections, overlayIndex, tag);
     if (state !== selections) pushChange(label, state);
@@ -3398,6 +3428,7 @@ export function ThreePaneEditor({
           onOpenImageOverlayFilter={handleOpenImageOverlayFilter}
           onDuplicateImageOverlay={handleDuplicateImageOverlay}
           onSetImageOverlayTag={handleSetImageOverlayTag}
+          imageOverlayGroupHandlers={imageOverlayGroupHandlers}
           onMoveImageOverlayLayer={handleMoveImageOverlayLayer}
           onDeleteImageOverlay={handleDeleteImageOverlay}
           textOverlays={displayedTextOverlays}

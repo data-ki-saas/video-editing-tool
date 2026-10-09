@@ -19,9 +19,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ContextMenu, useContextMenu, type ContextMenuAction } from "./ContextMenu";
 import { SplitScreenOrientationIcon, SwapIcon, FramingIcon, PictureInPictureIcon, FullScreenIcon } from "@/components/icons/UIIcons";
-import { canMoveImageOverlayLane } from "@/lib/video/transformations";
+import { canMoveImageOverlayGroupLane, canMoveImageOverlayLane, findNextImageOverlayInRow } from "@/lib/video/transformations";
 import {
   isExclusiveLayout,
+  imageOverlayGroupSpan,
   MAX_OVERLAY_TAG_LENGTH,
   layoutPipLanes,
   snapToNearest,
@@ -52,6 +53,18 @@ const LAYOUT_TEXT_COLOR_CLASSNAMES: Record<VideoOverlayLayout["type"], string> =
   "split-screen": "text-lime-700",
 };
 
+/** Timeline actions on a group of neighbouring Picture-in-Picture overlays. */
+export interface ImageOverlayGroupHandlers {
+  onGroupWithNext: (overlayIndex: number) => void;
+  onUngroup: (groupId: string) => void;
+  onDuplicateGroup: (groupId: string) => void;
+  onMoveGroup: (groupId: string, deltaSeconds: number) => void;
+  onMoveGroupLayer: (groupId: string, direction: "up" | "down") => void;
+}
+
+/** A group's own outline -- white so it reads over any of the three layout colours. */
+const GROUP_OUTLINE_CLASSNAME = "pointer-events-none absolute top-0 z-20 h-5 rounded-sm border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.45)]";
+
 function ImageOverlaySegment({
   overlay,
   thumbnailUrl,
@@ -73,6 +86,11 @@ function ImageOverlaySegment({
   onSetTag,
   onMoveLayer,
   onDelete,
+  isGrouped,
+  groupOffsetSeconds,
+  onGroupPointerDown,
+  groupMenu,
+  onGroupWithNext,
 }: {
   overlay: ImageOverlayClip;
   thumbnailUrl: string;
@@ -98,6 +116,13 @@ function ImageOverlaySegment({
   // Set when this overlay can move a row up / down (Picture-in-Picture rows only).
   onMoveLayer?: { up: (() => void) | null; down: (() => void) | null };
   onDelete: () => void;
+  // In a group the segment is a plain draggable block: no trimming, framing, tag or
+  // layout edits, and the context menu only offers group actions (groupMenu).
+  isGrouped: boolean;
+  groupOffsetSeconds: number; // live shift while the whole group is being dragged
+  onGroupPointerDown: (e: React.PointerEvent) => void;
+  groupMenu: ContextMenuAction[];
+  onGroupWithNext: (() => void) | null; // null when nothing follows this one in its row
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   // Never a plain <img src={thumbnailUrl}> -- see useCrossOriginImageSrc's own
@@ -205,7 +230,7 @@ function ImageOverlaySegment({
     window.addEventListener("pointerup", handleUp);
   }
 
-  const leftPercent = videoDurationSeconds > 0 ? (overlay.startTimeSeconds / videoDurationSeconds) * 100 : 0;
+  const leftPercent = videoDurationSeconds > 0 ? ((overlay.startTimeSeconds + groupOffsetSeconds) / videoDurationSeconds) * 100 : 0;
   const durationSeconds = overlay.endTimeSeconds - overlay.startTimeSeconds;
   const widthPercent = videoDurationSeconds > 0 ? (durationSeconds / videoDurationSeconds) * 100 : 0;
 
@@ -243,8 +268,12 @@ function ImageOverlaySegment({
   return (
     <div
       ref={rootRef}
-      onPointerDown={startBodyDrag}
+      onPointerDown={isGrouped ? onGroupPointerDown : startBodyDrag}
       onContextMenu={(e) => {
+        if (isGrouped) {
+          openContextMenu(e, groupMenu);
+          return;
+        }
         const edit: ContextMenuAction = { label: "Edit", onSelect: () => onOpenFraming(resolveClickedTimeSeconds(e.clientX)) };
         const editPeep: ContextMenuAction[] = overlay.peep ? [{ label: "Edit peep…", onSelect: onEditPeep }] : [];
         // A prop is a cut-out placed in the scene: full-screen/split-screen
@@ -260,14 +289,15 @@ function ImageOverlaySegment({
         ];
         // Deferred a tick so the menu closing doesn't steal focus back from the tag input.
         const editTag: ContextMenuAction = { label: "Edit tag", onSelect: () => setTimeout(() => setIsEditingTag(true), 0) };
+        const group: ContextMenuAction[] = onGroupWithNext ? [{ label: "Group with next", onSelect: onGroupWithNext }] : [];
         openContextMenu(
           e,
           overlay.lockAspect
-            ? [edit, editTag, ...editPeep, ...duplicate, ...move, { label: "Remove", danger: true, onSelect: onDelete }]
-            : [edit, editTag, ...editPeep, ...duplicate, ...move, ...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }]
+            ? [edit, editTag, ...editPeep, ...duplicate, ...move, ...group, { label: "Remove", danger: true, onSelect: onDelete }]
+            : [edit, editTag, ...editPeep, ...duplicate, ...move, ...group, ...layoutMenuEntries, { label: "Filter…", onSelect: onOpenFilter }, { label: "Remove overlay", danger: true, onSelect: onDelete }]
         );
       }}
-      title="Drag the middle to move, an edge to trim; right-click to edit or remove"
+      title={isGrouped ? "Drag to move the whole group; right-click for group actions" : "Drag the middle to move, an edge to trim; right-click to edit or remove"}
       className={`absolute top-0 flex h-5 cursor-grab items-center gap-1 overflow-hidden rounded-sm border px-1 ${LAYOUT_COLOR_CLASSNAMES[overlay.layout.type]}`}
       style={{ left: `${leftPercent}%`, width: `${widthPercent}%` }}
     >
@@ -280,15 +310,17 @@ function ImageOverlaySegment({
           style={{ filter: getFilterPresetOption(overlay.colorFilterId ?? null).cssFilter }}
         />
       )}
-      <button
-        type="button"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => onOpenFraming(resolveClickedTimeSeconds(e.clientX))}
-        title="Adjust framing -- recenter or flip this overlay's own photo"
-        className="pointer-events-auto z-10 shrink-0 rounded-sm bg-black/25 p-0.5 text-white hover:bg-black/50"
-      >
-        <FramingIcon className="h-2.5 w-2.5" />
-      </button>
+      {!isGrouped && (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => onOpenFraming(resolveClickedTimeSeconds(e.clientX))}
+          title="Adjust framing -- recenter or flip this overlay's own photo"
+          className="pointer-events-auto z-10 shrink-0 rounded-sm bg-black/25 p-0.5 text-white hover:bg-black/50"
+        >
+          <FramingIcon className="h-2.5 w-2.5" />
+        </button>
+      )}
       {overlay.colorFilterId && (
         <span
           className="pointer-events-none z-10 shrink-0 truncate rounded-full bg-black/30 px-1 text-[9px] font-normal leading-none text-white"
@@ -304,7 +336,7 @@ function ImageOverlaySegment({
         // permanently null).
         <MattingProgressBadge progress={overlay.backgroundRemoval.progress ?? 0} />
       )}
-      {isEditingTag ? (
+      {isEditingTag && !isGrouped ? (
         <input
           ref={tagInputRef}
           autoFocus
@@ -323,23 +355,27 @@ function ImageOverlaySegment({
       ) : (
         overlay.tag && (
           <span
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => setIsEditingTag(true)}
-            title="Click to rename this tag"
-            className="z-10 mr-6 min-w-0 flex-1 cursor-text truncate text-[10px] font-medium leading-none text-white"
+            onPointerDown={isGrouped ? undefined : (e) => e.stopPropagation()}
+            onClick={isGrouped ? undefined : () => setIsEditingTag(true)}
+            title={isGrouped ? undefined : "Click to rename this tag"}
+            className={`z-10 mr-6 min-w-0 flex-1 truncate text-[10px] font-medium leading-none text-white ${isGrouped ? "" : "cursor-text"}`}
           >
             {overlay.tag}
           </span>
         )
       )}
-      <div
-        onPointerDown={(e) => startEdgeDrag(e, "start")}
-        className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-black/20"
-      />
-      <div
-        onPointerDown={(e) => startEdgeDrag(e, "end")}
-        className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-black/20"
-      />
+      {!isGrouped && (
+        <>
+          <div
+            onPointerDown={(e) => startEdgeDrag(e, "start")}
+            className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize bg-black/20"
+          />
+          <div
+            onPointerDown={(e) => startEdgeDrag(e, "end")}
+            className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize bg-black/20"
+          />
+        </>
+      )}
       {overlay.layout.type === "full-screen" && (
         <span
           title="Full-Screen"
@@ -406,6 +442,7 @@ export function ImageOverlayTrack({
   onSetTag,
   onMoveLayer,
   onDelete,
+  groupHandlers,
 }: {
   imageOverlays: ImageOverlayClip[];
   assetUrlById: Record<string, string>;
@@ -430,7 +467,10 @@ export function ImageOverlayTrack({
   onSetTag: (overlayIndex: number, tag: string) => void;
   onMoveLayer?: (overlayIndex: number, direction: "up" | "down") => void;
   onDelete: (overlayIndex: number) => void;
+  groupHandlers: ImageOverlayGroupHandlers;
 }) {
+  // Live shift of one group while it's being dragged; committed once on release.
+  const [groupDrag, setGroupDrag] = useState<{ groupId: string; deltaSeconds: number } | null>(null);
   if (imageOverlays.length === 0) return null;
 
   const indexed = imageOverlays.map((overlay, index) => ({ overlay, index }));
@@ -444,9 +484,81 @@ export function ImageOverlayTrack({
   for (const [index, lane] of pipLanes) (pipRows[lane] ??= []).push(index);
   pipRows.reverse();
 
-  function segmentProps(index: number, prevBoundSeconds: number, nextBoundSeconds: number) {
+  // Drags every overlay of a group together. Bounded by the nearest non-member on each side
+  // of the group in its row, so the group can't run into a neighbour, and snapped on either edge.
+  function startGroupDrag(e: React.PointerEvent, groupId: string, row: number[]) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const rowEl = e.currentTarget.parentElement;
+    const span = imageOverlayGroupSpan(imageOverlays, groupId);
+    if (!rowEl || !span || videoDurationSeconds <= 0) return;
+    const rowWidth = rowEl.getBoundingClientRect().width;
+    let prev = 0;
+    let next = videoDurationSeconds;
+    for (const other of row) {
+      const o = imageOverlays[other];
+      if (o.groupId === groupId) continue;
+      if (o.endTimeSeconds <= span.start) prev = Math.max(prev, o.endTimeSeconds);
+      else if (o.startTimeSeconds >= span.end) next = Math.min(next, o.startTimeSeconds);
+    }
+    const minDelta = prev - span.start;
+    const maxDelta = Math.max(next - span.end, minDelta);
+    const snapThresholdSeconds = (SNAP_THRESHOLD_PX / rowWidth) * videoDurationSeconds;
+    const startX = e.clientX;
+    let dragged = false;
+
+    function computeDelta(clientX: number): number {
+      const raw = Math.min(Math.max(((clientX - startX) / rowWidth) * videoDurationSeconds, minDelta), maxDelta);
+      const viaStart = snapToNearest(span!.start + raw, snapPointsSeconds, snapThresholdSeconds) - span!.start;
+      const viaEnd = snapToNearest(span!.end + raw, snapPointsSeconds, snapThresholdSeconds) - span!.end;
+      const snapped = viaStart !== raw ? viaStart : viaEnd;
+      return Math.min(Math.max(snapped, minDelta), maxDelta);
+    }
+    function handleMove(ev: PointerEvent) {
+      if (!dragged && Math.abs(ev.clientX - startX) >= DRAG_THRESHOLD_PX) dragged = true;
+      if (dragged) setGroupDrag({ groupId, deltaSeconds: computeDelta(ev.clientX) });
+    }
+    function handleUp(ev: PointerEvent) {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      setGroupDrag(null);
+      // A click that never became a drag does nothing: a group has no edit dialog.
+      if (dragged) groupHandlers.onMoveGroup(groupId, computeDelta(ev.clientX));
+    }
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
+  function segmentProps(index: number, prevBoundSeconds: number, nextBoundSeconds: number, row?: number[]) {
     const overlay = imageOverlays[index];
+    // Only Picture-in-Picture overlays (those that sit in a row) can be grouped.
+    const inRow = !!row && pipLanes.has(index);
+    const groupId = inRow ? overlay.groupId : undefined;
+    const canGroupWithNext = inRow && findNextImageOverlayInRow(imageOverlays, index) >= 0;
+    const isLastInGroup = !groupId || imageOverlayGroupSpan(imageOverlays, groupId)?.end === overlay.endTimeSeconds;
+    const groupMenu: ContextMenuAction[] = groupId
+      ? [
+          { label: "Duplicate group", onSelect: () => groupHandlers.onDuplicateGroup(groupId) },
+          ...(canMoveImageOverlayGroupLane(imageOverlays, groupId, "up")
+            ? [{ label: "Move group up", onSelect: () => groupHandlers.onMoveGroupLayer(groupId, "up") }]
+            : []),
+          ...(canMoveImageOverlayGroupLane(imageOverlays, groupId, "down")
+            ? [{ label: "Move group down", onSelect: () => groupHandlers.onMoveGroupLayer(groupId, "down") }]
+            : []),
+          ...(canGroupWithNext && isLastInGroup
+            ? [{ label: "Add next to group", onSelect: () => groupHandlers.onGroupWithNext(index) }]
+            : []),
+          { label: "Ungroup", onSelect: () => groupHandlers.onUngroup(groupId) },
+        ]
+      : [];
     return {
+      isGrouped: !!groupId,
+      groupOffsetSeconds: groupId && groupDrag?.groupId === groupId ? groupDrag.deltaSeconds : 0,
+      onGroupPointerDown: (e: React.PointerEvent) => {
+        if (groupId && row) startGroupDrag(e, groupId, row);
+      },
+      groupMenu,
+      onGroupWithNext: canGroupWithNext ? () => groupHandlers.onGroupWithNext(index) : null,
       overlay,
       thumbnailUrl: assetUrlById[overlay.assetId] ?? "",
       videoDurationSeconds,
@@ -497,7 +609,22 @@ export function ImageOverlayTrack({
                 if (o.endTimeSeconds <= me.startTimeSeconds) prev = Math.max(prev, o.endTimeSeconds);
                 else if (o.startTimeSeconds >= me.endTimeSeconds) next = Math.min(next, o.startTimeSeconds);
               }
-              return <ImageOverlaySegment key={index} {...segmentProps(index, prev, next)} />;
+              return <ImageOverlaySegment key={index} {...segmentProps(index, prev, next, row)} />;
+            })}
+            {[...new Set(row.flatMap((index) => imageOverlays[index].groupId ?? []))].map((groupId) => {
+              const span = imageOverlayGroupSpan(imageOverlays, groupId);
+              if (!span || videoDurationSeconds <= 0) return null;
+              const offset = groupDrag?.groupId === groupId ? groupDrag.deltaSeconds : 0;
+              return (
+                <div
+                  key={groupId}
+                  className={GROUP_OUTLINE_CLASSNAME}
+                  style={{
+                    left: `${((span.start + offset) / videoDurationSeconds) * 100}%`,
+                    width: `${((span.end - span.start) / videoDurationSeconds) * 100}%`,
+                  }}
+                />
+              );
             })}
           </div>
         ))}

@@ -22,11 +22,17 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-10-09",
+    title: "Group props and peeps on the time bar",
+    description:
+      "Right-click a prop or peep on the time bar and choose Group with next to tie it to its neighbour in the same row; repeat to add more. A grouped set gets a white outline and moves as one: drag it along the time bar, Duplicate group, Move group up or down, or Ungroup to edit the pieces again. While grouped, the individual props can't be trimmed or edited.",
+    isLatest: true,
+  },
+  {
     date: "2026-10-08",
     title: "Move overlays up and down the stack",
     description:
       "Right-click a photo, prop or peep on the time bar and choose Move up or Move down to change which one sits in front. The top row is now the front layer, so a character you add later appears on top and you can send it behind another with one click.",
-    isLatest: true,
   },
   {
     date: "2026-10-08",

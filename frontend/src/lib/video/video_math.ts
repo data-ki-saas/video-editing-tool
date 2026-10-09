@@ -809,9 +809,25 @@ export interface ImageOverlayClip {
   lane?: number;
   // Optional short label shown on the overlay's timeline segment (max MAX_OVERLAY_TAG_LENGTH chars).
   tag?: string;
+  // Shared by a run of neighbouring Picture-in-Picture overlays in one row that were
+  // grouped on the timeline: they then move, duplicate and change row together, and
+  // can't be edited individually until ungrouped.
+  groupId?: string;
 }
 
 export const MAX_OVERLAY_TAG_LENGTH = 10;
+
+/** Time span [start, end] covered by every overlay carrying `groupId`, or null if none do. */
+export function imageOverlayGroupSpan(overlays: ImageOverlayClip[], groupId: string): { start: number; end: number } | null {
+  let start = Infinity;
+  let end = -Infinity;
+  for (const o of overlays) {
+    if (o.groupId !== groupId) continue;
+    start = Math.min(start, o.startTimeSeconds);
+    end = Math.max(end, o.endTimeSeconds);
+  }
+  return end > start ? { start, end } : null;
+}
 
 /** Assigns each Picture-in-Picture image overlay (by array index) a dense timeline row.
  * An overlay keeps its stored `lane` when nothing already placed there overlaps it in

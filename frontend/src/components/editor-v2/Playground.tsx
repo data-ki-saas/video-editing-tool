@@ -90,6 +90,7 @@ import type {
   ZoomEffect,
 } from "@/lib/video/video_math";
 import type { TimelineMarker } from "@/lib/projects";
+import type { ImageOverlayGroupHandlers } from "./ImageOverlayTrack";
 
 // Fixed height shared by BOTH audio rails -- same tier as every other rail
 // in the strip (TrimTrack's h-4, VideoOverlayTrack's h-5, ...), not
@@ -200,6 +201,7 @@ export function Playground({
   onOpenImageOverlayFilter,
   onDuplicateImageOverlay,
   onSetImageOverlayTag,
+  imageOverlayGroupHandlers,
   onMoveImageOverlayLayer,
   onDeleteImageOverlay,
   textOverlays,
@@ -333,6 +335,7 @@ export function Playground({
   onOpenImageOverlayFilter: (overlayIndex: number) => void;
   onDuplicateImageOverlay: (overlayIndex: number) => void;
   onSetImageOverlayTag: (overlayIndex: number, tag: string) => void;
+  imageOverlayGroupHandlers: ImageOverlayGroupHandlers;
   onMoveImageOverlayLayer: (overlayIndex: number, direction: "up" | "down") => void;
   onDeleteImageOverlay: (overlayIndex: number) => void;
   textOverlays: TextOverlay[];
@@ -497,6 +500,7 @@ export function Playground({
             onOpenImageOverlayFilter={onOpenImageOverlayFilter}
             onDuplicateImageOverlay={onDuplicateImageOverlay}
             onSetImageOverlayTag={onSetImageOverlayTag}
+            imageOverlayGroupHandlers={imageOverlayGroupHandlers}
             onMoveImageOverlayLayer={onMoveImageOverlayLayer}
             onDeleteImageOverlay={onDeleteImageOverlay}
             textOverlays={textOverlays}
