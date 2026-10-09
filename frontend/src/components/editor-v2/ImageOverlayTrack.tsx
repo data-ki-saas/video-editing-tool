@@ -11,7 +11,7 @@
  * uses to interleave this with VideoOverlayTrack's own two row-groups into
  * one z-order-accurate stack -- is identical.
  *
- * Uses its OWN 3-hue palette (sky / fuchsia / lime) rather than video
+ * Uses its OWN 3-hue palette (sky / pink / lime) rather than video
  * overlay's amber / violet / teal, so the two overlay kinds read as visually
  * distinct families at a glance, on this rail and on the matching "Image
  * Overlay" vertical tab (UserActions.tsx).
@@ -42,12 +42,12 @@ const DRAG_THRESHOLD_PX = 4;
 
 const LAYOUT_COLOR_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
   "full-screen": "border-sky-700 bg-sky-500",
-  "picture-in-picture": "border-fuchsia-700 bg-fuchsia-500",
+  "picture-in-picture": "border-pink-500 bg-pink-400",
   "split-screen": "border-lime-700 bg-lime-600",
 };
 const LAYOUT_TEXT_COLOR_CLASSNAMES: Record<VideoOverlayLayout["type"], string> = {
   "full-screen": "text-sky-600",
-  "picture-in-picture": "text-fuchsia-600",
+  "picture-in-picture": "text-pink-500",
   "split-screen": "text-lime-700",
 };
 
