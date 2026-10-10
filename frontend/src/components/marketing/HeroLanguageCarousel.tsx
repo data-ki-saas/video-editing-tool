@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { SpeakerFullIcon, SpeakerMutedIcon } from "@/components/icons/UIIcons";
-import { HERO_CAROUSEL_CARDS } from "./heroCarouselData";
+import { HERO_CAROUSEL_CARDS, type HeroCarouselCard } from "./heroCarouselData";
 
 const AUTO_ADVANCE_MS = 4500;
 // Longer than any real tagline audio (~4-6s) -- only kicks in if 'ended'
@@ -34,6 +34,33 @@ function PlaceholderPortrait({ label }: { label: string }) {
       <span className="absolute left-2 top-2 rounded-full border border-dashed border-border bg-surface/80 px-2 py-0.5 text-[11px] text-muted">
         Artwork coming soon
       </span>
+      <span className="absolute bottom-2 right-2 rounded-full border border-border bg-surface/90 px-2.5 py-1 text-xs font-medium text-foreground">
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function SampleReel({
+  video,
+  label,
+  active,
+}: {
+  video: NonNullable<HeroCarouselCard["video"]>;
+  label: string;
+  active: boolean;
+}) {
+  // Only the on-screen card actually loads/plays the reel -- the others sit
+  // off to the side of the track showing just the poster frame. Remounting on
+  // activation restarts it from 0 each time the card comes back around.
+  return (
+    <div className="relative aspect-[3/4] w-full overflow-hidden bg-black">
+      {active ? (
+        <video src={video.src} poster={video.posterSrc} autoPlay muted loop playsInline className="h-full w-full object-cover" />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={video.posterSrc} alt="" className="h-full w-full object-cover" />
+      )}
       <span className="absolute bottom-2 right-2 rounded-full border border-border bg-surface/90 px-2.5 py-1 text-xs font-medium text-foreground">
         {label}
       </span>
@@ -82,11 +109,16 @@ export function HeroLanguageCarousel() {
   useEffect(() => {
     if (isPaused) return;
     const audio = audioRef.current;
-    const holdMs = muted || !audio ? AUTO_ADVANCE_MS : AUDIO_FALLBACK_MS;
+    const card = cards[activeIndex];
+    const holdMs = card.video
+      ? card.video.durationSeconds * 1000
+      : muted || !audio
+        ? AUTO_ADVANCE_MS
+        : AUDIO_FALLBACK_MS;
     const timer = setTimeout(() => goTo(activeIndex + 1), holdMs);
 
-    if (!muted && audio) {
-      audio.src = cards[activeIndex].audioSrc;
+    if (!muted && audio && card.audioSrc) {
+      audio.src = card.audioSrc;
       audio.currentTime = 0;
       // Autoplay can still be rejected (e.g. permissions changed mid-session)
       // -- the timed fallback above covers that case, so the catch is silent.
@@ -100,6 +132,8 @@ export function HeroLanguageCarousel() {
   }, [activeIndex, muted, isPaused, cards, goTo]);
 
   function handleAudioEnded() {
+    // A video card holds for the reel's own length instead (see the effect above).
+    if (cards[activeIndex].video) return;
     goTo(activeIndex + 1);
   }
 
@@ -113,9 +147,12 @@ export function HeroLanguageCarousel() {
         } else {
           // First play() call happens directly inside this click handler so
           // it carries the user gesture browsers require for audible autoplay.
-          audio.src = cards[activeIndex].audioSrc;
-          audio.currentTime = 0;
-          audio.play().catch(() => {});
+          const { audioSrc } = cards[activeIndex];
+          if (audioSrc) {
+            audio.src = audioSrc;
+            audio.currentTime = 0;
+            audio.play().catch(() => {});
+          }
         }
       }
       return next;
@@ -153,16 +190,21 @@ export function HeroLanguageCarousel() {
             className="flex transition-transform duration-500 ease-out"
             style={{ transform: `translateX(-${activeIndex * 100}%)` }}
           >
-            {cards.map((card) => (
+            {cards.map((card, index) => {
+              const label = card.nativeName === card.englishName ? card.englishName : `${card.nativeName} · ${card.englishName}`;
+              return (
               <div key={card.locale} className="w-full shrink-0">
-                <PlaceholderPortrait
-                  label={card.nativeName === card.englishName ? card.englishName : `${card.nativeName} · ${card.englishName}`}
-                />
+                {card.video ? (
+                  <SampleReel video={card.video} label={label} active={index === activeIndex} />
+                ) : (
+                  <PlaceholderPortrait label={label} />
+                )}
                 <p lang={card.locale} className="p-4 text-left text-sm leading-relaxed text-foreground">
                   {card.tagline}
                 </p>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

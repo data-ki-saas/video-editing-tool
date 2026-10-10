@@ -20,7 +20,10 @@ export type HeroCarouselCard = {
   englishName: string;
   /** The tagline, translated into this card's language -- this is exactly what the audio reads aloud. */
   tagline: string;
-  audioSrc: string;
+  /** Pre-generated voiceover. Omitted for a card that plays a sample reel instead (its own audio is in the video). */
+  audioSrc?: string;
+  /** A sample reel shown in place of the placeholder portrait, played muted while the card is on screen. */
+  video?: { src: string; posterSrc: string; durationSeconds: number };
 };
 
 export const HERO_CAROUSEL_CARDS: HeroCarouselCard[] = [
@@ -58,5 +61,17 @@ export const HERO_CAROUSEL_CARDS: HeroCarouselCard[] = [
     englishName: "Tamil",
     tagline: "MyReels.in இந்திய மொழிகளில் யூடியூப் ரீல்களை உருவாக்க சிறந்த ஆன்லைன் தளமாகும்.",
     audioSrc: "/audio/hero-carousel/ta.mp3",
+  },
+  {
+    locale: "pa-IN",
+    nativeName: "ਪੰਜਾਬੀ",
+    englishName: "Punjabi",
+    tagline: "MyReels.in ਭਾਰਤੀ ਭਾਸ਼ਾਵਾਂ ਵਿੱਚ ਯੂਟਿਊਬ ਰੀਲਾਂ ਬਣਾਉਣ ਲਈ ਸਭ ਤੋਂ ਵਧੀਆ ਔਨਲਾਈਨ ਸਰੋਤ ਹੈ।",
+    video: {
+      src: "https://pub-d83eae9e98504d64a51e524435adbee7.r2.dev/library/8617dc6f-0c0d-41b2-8b78-fc871950df40/56b8c3a56c704d2890a631ab815d2572.mp4",
+      posterSrc:
+        "https://pub-d83eae9e98504d64a51e524435adbee7.r2.dev/library/8617dc6f-0c0d-41b2-8b78-fc871950df40/2c1822cb812b400eace0d5e4e43c7414.jpg",
+      durationSeconds: 15,
+    },
   },
 ];

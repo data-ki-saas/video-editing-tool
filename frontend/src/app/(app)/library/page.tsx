@@ -47,7 +47,9 @@ async function downloadVideo(video: LibraryVideo) {
 }
 
 async function shareVideo(video: LibraryVideo) {
-  const url = `${window.location.origin}/share/${video.id}`;
+  // Always the canonical custom domain, never the *.vercel.app origin the
+  // page may happen to be opened from.
+  const url = `${process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.myreels.in"}/share/${video.id}`;
   if (navigator.share) {
     try {
       await navigator.share({ title: video.projectName, url });
