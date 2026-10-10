@@ -79,7 +79,8 @@ export function localeForNicheLanguage(languageCode: string): string | null {
  * locale included, since English has no voiceLocalePrefix of its own). */
 export function nicheLanguageForVoiceLocale(localeOrVoiceId: string | null | undefined): string {
   if (!localeOrVoiceId) return "en";
-  const lower = localeOrVoiceId.toLowerCase();
+  // Premium ids are "sarvam:<speaker>:<locale>" -- the locale is the last part.
+  const lower = localeOrVoiceId.slice(localeOrVoiceId.lastIndexOf(":") + 1).toLowerCase();
   const match = NICHE_LANGUAGES.find((l) => l.voiceLocalePrefix && lower.startsWith(l.voiceLocalePrefix));
   return match?.code ?? "en";
 }

@@ -22,6 +22,13 @@ class ResourceItem:
 RESOURCES: list[ResourceItem] = [
     ResourceItem("voiceover_seconds", "AI voiceover", "second of audio", 1, lambda: settings.tts_cost_cents_per_second),
     ResourceItem(
+        "voiceover_sarvam_characters",
+        "Premium voiceover (Sarvam)",
+        "1,000 characters",
+        1000,
+        lambda: settings.sarvam_cost_cents_per_char * 1000,
+    ),
+    ResourceItem(
         "background_removal_video_seconds",
         "Background removal (video)",
         "second of video",
@@ -65,6 +72,8 @@ def resolve_key(event_type: str, provider: str, unit: str) -> str | None:
     including ones that cost us nothing (local avatar, uploads), since an
     admin may still want to charge for them -- so None only means an event
     type nothing records any more."""
+    if event_type == "voiceover" and unit == "characters":
+        return "voiceover_sarvam_characters"
     if event_type == "voiceover" and unit == "seconds":
         return "voiceover_seconds"
     if event_type == "background_removal":

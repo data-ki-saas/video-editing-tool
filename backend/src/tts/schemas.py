@@ -32,7 +32,14 @@ class VoiceOption(BaseModel):
     label: str
     locale: str
     gender: str
+    # "edge" (free) or "sarvam" (premium, spends credits).
+    provider: str = "edge"
 
 
 class VoicesResponse(BaseModel):
     voices: list[VoiceOption]
+    # Remaining Sarvam characters for the caller, or None when Sarvam isn't
+    # configured (its voices are then absent from `voices` too).
+    sarvam_credits: int | None = None
+    # Admins are never charged, so the UI shows "unlimited" instead of a balance.
+    sarvam_unlimited: bool = False

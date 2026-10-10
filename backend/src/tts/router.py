@@ -16,4 +16,4 @@ async def synthesize(
 
 @router.get("/voices", response_model=VoicesResponse)
 async def list_voices(user: CurrentUser = Depends(get_current_user)) -> VoicesResponse:
-    return service.list_voices()
+    return service.list_voices(user)

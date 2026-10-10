@@ -44,6 +44,7 @@ import { OverlayRectOverlay } from "./OverlayRectOverlay";
 import { CropRectOverlay } from "./CropRectOverlay";
 import { TagAutocompleteOverlay } from "./TagAutocompleteOverlay";
 import { DEFAULT_TTS_OVERLAY_RECT, type CropRect, type ResolvedTagAnchor, type TtsOverlay, type TtsWordTiming } from "@/lib/video/video_math";
+import { VoiceQualityToggle, voiceQualityForVoiceId, type VoiceQuality } from "@/components/VoiceQualityToggle";
 import { FeatureLockedError, listTtsVoices, resolveAvatarTag, synthesizeTts, type AvatarTagCapabilities, type TtsVoiceOption } from "@/lib/api";
 import { AVATAR_TAG_CATALOG, parseScriptTags, resolveTagAnchorsToTimings, type ParsedTagAnchor } from "@/lib/video/avatar/tags";
 import { getAudioDuration } from "@/lib/video/audio";
@@ -138,6 +139,9 @@ export function TtsOverlayDialog({
   const [startTimeSeconds, setStartTimeSeconds] = useState(editingOverlay?.startTimeSeconds ?? currentTimeSeconds);
 
   const [voices, setVoices] = useState<TtsVoiceOption[]>([]);
+  const [sarvamCredits, setSarvamCredits] = useState<number | null>(null);
+  const [sarvamUnlimited, setSarvamUnlimited] = useState(false);
+  const [quality, setQuality] = useState<VoiceQuality>(() => voiceQualityForVoiceId(editingOverlay?.voice));
   const [isLoadingVoices, setIsLoadingVoices] = useState(true);
   const [voicesError, setVoicesError] = useState<string | null>(null);
 
@@ -210,6 +214,8 @@ export function TtsOverlayDialog({
       .then((res) => {
         if (cancelled) return;
         setVoices(res.voices);
+        setSarvamCredits(res.sarvamCredits);
+        setSarvamUnlimited(res.sarvamUnlimited);
         setVoicesError(null);
       })
       .catch((err) => {
@@ -232,13 +238,15 @@ export function TtsOverlayDialog({
   // below, so this never fights the user's own selection.
   useEffect(() => {
     if (voices.length === 0) return;
+    const pool = voices.filter((v) => v.provider === quality);
+    if (pool.length === 0) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setVoice((prevVoice) => {
-      if (voices.some((v) => v.id === prevVoice && v.locale.toLowerCase().startsWith(language))) return prevVoice;
-      const forLanguage = voices.filter((v) => v.locale.toLowerCase().startsWith(language));
-      return (forLanguage[0] ?? voices[0])?.id ?? "";
+      if (pool.some((v) => v.id === prevVoice && v.locale.toLowerCase().startsWith(language))) return prevVoice;
+      const forLanguage = pool.filter((v) => v.locale.toLowerCase().startsWith(language));
+      return (forLanguage[0] ?? pool[0])?.id ?? "";
     });
-  }, [voices, language]);
+  }, [voices, language, quality]);
 
   async function handleGenerateSpeech() {
     const trimmed = text.trim();
@@ -284,8 +292,9 @@ export function TtsOverlayDialog({
   // Narrows the Voice select to the chosen language -- falls back to the
   // full catalog if that ever yields nothing, same defensive fallback the
   // niche wizard's own narrationVoicesForLanguage uses (dashboard/new/page.tsx).
-  const voicesForLanguageFiltered = voices.filter((v) => v.locale.toLowerCase().startsWith(language));
-  const voicesForLanguage = voicesForLanguageFiltered.length > 0 ? voicesForLanguageFiltered : voices;
+  const voicesOfQuality = voices.filter((v) => v.provider === quality);
+  const voicesForLanguageFiltered = voicesOfQuality.filter((v) => v.locale.toLowerCase().startsWith(language));
+  const voicesForLanguage = voicesForLanguageFiltered.length > 0 ? voicesForLanguageFiltered : voicesOfQuality;
 
   const trimmedText = text.trim();
   const canSave = Boolean(synthesis) && synthesizedText === trimmedText;
@@ -428,6 +437,8 @@ export function TtsOverlayDialog({
                 ))}
               </select>
             </label>
+
+            <VoiceQualityToggle value={quality} onChange={setQuality} credits={sarvamCredits} unlimited={sarvamUnlimited} />
 
             <label className="mb-2 flex flex-col gap-1 text-xs text-muted">
               Voice

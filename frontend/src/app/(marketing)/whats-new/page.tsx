@@ -22,11 +22,17 @@ interface ChangelogEntry {
 // Newest first -- add new entries to the TOP of this array as features ship.
 const ENTRIES: ChangelogEntry[] = [
   {
+    date: "2026-10-10",
+    title: "Premium Indian-language voices",
+    description:
+      "Voiceovers now have a Free / Premium switch. Premium uses Sarvam's natural-sounding voices for Hindi, Marathi, Punjabi, Bengali, Tamil, Odia and Indian English. Every account gets a free trial allowance of premium characters to try it out; the free voices stay unlimited as before.",
+    isLatest: true,
+  },
+  {
     date: "2026-10-09",
     title: "Stretch a video cutaway to loop it",
     description:
       "Drag the right edge of a video cutaway past its end and the footage plays again from the start to fill the extra time, with a thin line marking each restart. Drag it back in to shorten it and the video is simply cut off there. Everything after the cutaway slides along so nothing drifts out of place.",
-    isLatest: true,
   },
   {
     date: "2026-10-09",

@@ -30,6 +30,22 @@ class Settings(BaseSettings):
     # daily cap per user on voiceover generations.
     tts_daily_cap: int = 15
 
+    # Sarvam AI (Bulbul) -- the premium Indian-language TTS offered next to
+    # the free edge-tts voices. Left blank, Sarvam voices are hidden from the
+    # catalog entirely. Metered in characters against per-user prepaid credits
+    # (see user_credit_ledger, migration 0048): every account gets a one-time
+    # trial grant, further credits come from top-ups.
+    sarvam_api_key: str = ""
+    sarvam_model: str = "bulbul:v2"
+    sarvam_trial_credit_chars: int = 3000
+    # Abuse guardrail on top of the credit balance (uses usage.limits.reserve,
+    # so it also counts against the site-wide paid-provider budget).
+    sarvam_daily_cap: int = 30
+    # Sarvam list price is Rs 15 per 10,000 characters (~Rs 0.0015/char, about
+    # 0.0018 USD cents/char). Hand-maintained placeholder, like the rest of
+    # this block -- keep in sync with their pricing page.
+    sarvam_cost_cents_per_char: float = 0.0018
+
     # Abuse guardrail on FILING a support ticket (not replying to one --
     # see tickets/service.py's create_ticket) -- same fixed-daily-cap
     # precedent as tts_daily_cap above, backed by the same

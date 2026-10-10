@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { VoiceQualityToggle, type VoiceQuality } from "@/components/VoiceQualityToggle";
 import {
   type Asset,
   deleteAsset,
@@ -156,6 +157,9 @@ export function NewReelWizard({ onClose }: { onClose?: () => void } = {}) {
   // cap (see backend/src/core/config.py's tts_daily_cap) and a wizard-driven
   // reel shouldn't spend it without the creator choosing to.
   const [narrationVoice, setNarrationVoice] = useState("");
+  const [narrationQuality, setNarrationQuality] = useState<VoiceQuality>("edge");
+  const [sarvamCredits, setSarvamCredits] = useState<number | null>(null);
+  const [sarvamUnlimited, setSarvamUnlimited] = useState(false);
 
   // Review/generate
   const [generating, setGenerating] = useState(false);
@@ -185,11 +189,12 @@ export function NewReelWizard({ onClose }: { onClose?: () => void } = {}) {
   // hi-IN voices when nicheLanguage is "hi") -- falls back to the full
   // catalog if that ever yields nothing, e.g. a language without a matching
   // curated voice yet, so the picker is never left empty.
+  const narrationVoicesOfQuality = narrationVoices.filter((voice) => voice.provider === narrationQuality);
   const narrationVoicesForLanguage = (() => {
     const localePrefix = NICHE_LANGUAGES.find((l) => l.code === nicheLanguage)?.voiceLocalePrefix;
-    if (!localePrefix) return narrationVoices;
-    const filtered = narrationVoices.filter((voice) => voice.locale.toLowerCase().startsWith(localePrefix));
-    return filtered.length > 0 ? filtered : narrationVoices;
+    if (!localePrefix) return narrationVoicesOfQuality;
+    const filtered = narrationVoicesOfQuality.filter((voice) => voice.locale.toLowerCase().startsWith(localePrefix));
+    return filtered.length > 0 ? filtered : narrationVoicesOfQuality;
   })();
 
   // Fetches the voice catalog once the Review step is reached -- same
@@ -204,6 +209,8 @@ export function NewReelWizard({ onClose }: { onClose?: () => void } = {}) {
       .then((res) => {
         if (cancelled) return;
         setNarrationVoices(res.voices);
+        setSarvamCredits(res.sarvamCredits);
+        setSarvamUnlimited(res.sarvamUnlimited);
       })
       .catch((err) => {
         if (!cancelled) setNarrationVoicesError(err instanceof Error ? err.message : "Failed to load voices");
@@ -845,6 +852,15 @@ export function NewReelWizard({ onClose }: { onClose?: () => void } = {}) {
               <p className="mb-2 text-xs text-muted">
                 Read out over the reel as narration — “{resolvedNarrationScript()}”
               </p>
+              <VoiceQualityToggle
+                value={narrationQuality}
+                onChange={(next) => {
+                  setNarrationQuality(next);
+                  setNarrationVoice("");
+                }}
+                credits={sarvamCredits}
+                unlimited={sarvamUnlimited}
+              />
               <select
                 value={narrationVoice}
                 onChange={(e) => setNarrationVoice(e.target.value)}

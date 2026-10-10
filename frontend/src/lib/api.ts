@@ -126,7 +126,7 @@ export interface Asset {
   uploaded_by: string;
   filename: string;
   kind: AssetKind;
-  mime_type: "video/mp4" | "image/jpeg" | "image/png" | "audio/mpeg";
+  mime_type: "video/mp4" | "image/jpeg" | "image/png" | "audio/mpeg" | "audio/wav";
   size_bytes: number;
   // A presigned R2 URL, valid for a limited time (see the backend's
   // R2_SIGNED_URL_EXPIRES_SECONDS) -- not a permanent link. Re-fetch the
@@ -333,6 +333,8 @@ export interface TtsVoiceOption {
   label: string;
   locale: string;
   gender: string;
+  /** "edge" = free voices; "sarvam" = premium, spends Sarvam credits. */
+  provider: "edge" | "sarvam";
 }
 
 /** POST /api/tts/synthesize -- converts `text` to speech via the chosen
@@ -381,9 +383,10 @@ export async function synthesizeTts(
 
 /** GET /api/tts/voices -- the catalog of voices TtsOverlayDialog's own
  * <select> populates from, fetched fresh on mount rather than hardcoded. */
-export async function listTtsVoices(): Promise<{ voices: TtsVoiceOption[] }> {
+export async function listTtsVoices(): Promise<{ voices: TtsVoiceOption[]; sarvamCredits: number | null; sarvamUnlimited: boolean }> {
   const response = await apiFetch(`${API_BASE_URL}/api/tts/voices`, { headers: await authHeader() });
-  return handleResponse<{ voices: TtsVoiceOption[] }>(response);
+  const body = await handleResponse<{ voices: TtsVoiceOption[]; sarvam_credits: number | null; sarvam_unlimited?: boolean }>(response);
+  return { voices: body.voices, sarvamCredits: body.sarvam_credits, sarvamUnlimited: body.sarvam_unlimited ?? false };
 }
 
 // The HeyGen-backed talking-avatar-video API (generateAvatarVideo/

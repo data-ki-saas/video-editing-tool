@@ -24,7 +24,7 @@ from src.usage import limits
 logger = logging.getLogger(__name__)
 
 _ALLOWED_ASSET_TYPES = {"avatar", "video", "image", "audio"}
-_EXTENSION_BY_MIME = {"video/mp4": ".mp4", "image/jpeg": ".jpg", "image/png": ".png", "audio/mpeg": ".mp3"}
+_EXTENSION_BY_MIME = {"video/mp4": ".mp4", "image/jpeg": ".jpg", "image/png": ".png", "audio/mpeg": ".mp3", "audio/wav": ".wav"}
 # "1-4 lines" is enforced loosely: at most 4 newlines and a generous overall
 # length cap, rather than measuring rendered/wrapped lines -- there's no
 # layout context here to know how a line actually wraps.

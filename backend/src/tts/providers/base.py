@@ -22,6 +22,10 @@ class VoiceOption:
     label: str
     locale: str
     gender: str
+    # Which TTSProvider renders this voice (see tts/client.py). Voice ids are
+    # globally unique across providers, so synthesize() needs no provider
+    # argument -- it is resolved from the id.
+    provider: str = "edge"
 
 
 class TTSProvider(ABC):
