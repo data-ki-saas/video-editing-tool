@@ -199,9 +199,6 @@ export function HeroLanguageCarousel() {
                 ) : (
                   <PlaceholderPortrait label={label} />
                 )}
-                <p lang={card.locale} className="p-4 text-left text-sm leading-relaxed text-foreground">
-                  {card.tagline}
-                </p>
               </div>
               );
             })}
