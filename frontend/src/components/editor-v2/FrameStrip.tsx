@@ -122,6 +122,7 @@ import type { TimelineMarker } from "@/lib/projects";
 import {
   computeEffectiveCropRect,
   reprojectCropRect,
+  cropNeedsReprojection,
   computeEffectiveFlip,
   computeFlipSegments,
   computeProgress,
@@ -904,7 +905,7 @@ export function FrameStrip({
       // reprojectCropRect's own doc comment), and not when either aspect
       // ratio isn't known yet (still loading) -- falls back to the raw
       // authored rect in both cases, same as before this fix existed.
-      if (!entry || entry.kind === "image" || referenceAspectRatio === undefined || ownAspectRatio === undefined) {
+      if (!entry || !cropNeedsReprojection(entry.kind, zoomEffects, timestamp) || referenceAspectRatio === undefined || ownAspectRatio === undefined) {
         return authoredCrop;
       }
       return reprojectCropRect(authoredCrop, referenceAspectRatio, ownAspectRatio);

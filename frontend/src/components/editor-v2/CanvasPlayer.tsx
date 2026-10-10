@@ -91,6 +91,7 @@ import {
   computeEffectiveCropRect,
   findActiveZoomEffectIndex,
   reprojectCropRect,
+  cropNeedsReprojection,
   computeEffectiveFlip,
   skipTrimmedRanges,
   findActiveTextOverlays,
@@ -880,7 +881,7 @@ export const CanvasPlayer = forwardRef<
     const currentClipKind = loadedClipsRef.current[position.clipIndex]?.kind;
     const clipAspectRatio = image.width / image.height;
     const referenceAspectRatio = referenceFrameSizeRef.current.width / referenceFrameSizeRef.current.height;
-    const shouldReprojectForClip = hasAuthoredCrop && currentClipKind !== "image";
+    const shouldReprojectForClip = hasAuthoredCrop && cropNeedsReprojection(currentClipKind, zoomEffects, elapsedSeconds);
     const crop = shouldReprojectForClip ? reprojectCropRect(authoredCrop, referenceAspectRatio, clipAspectRatio) : authoredCrop;
 
     // Source rect: sampled from THIS frame's own natural size (clips can
@@ -1216,7 +1217,7 @@ export const CanvasPlayer = forwardRef<
         // Same re-projection rule as the outgoing clip's own `crop` above.
         const incomingClipKind = loadedClipsRef.current[cutTransitionBlend.toIndex]?.kind;
         const incomingCrop =
-          !hasAuthoredCrop || incomingClipKind === "image"
+          !hasAuthoredCrop || !cropNeedsReprojection(incomingClipKind, zoomEffects, incomingSyntheticElapsed)
             ? authoredIncomingCrop
             : reprojectCropRect(authoredIncomingCrop, referenceAspectRatio, incomingImage.width / incomingImage.height);
         const incomingSx = incomingCrop.x * incomingImage.width;

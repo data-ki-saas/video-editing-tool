@@ -349,6 +349,20 @@ export function findActiveZoomEffectIndex(zoomEffects: ZoomEffect[], timeSeconds
 }
 
 /**
+ * Whether the crop rect resolved at `timeSeconds` is in the SEQUENCE's
+ * reference-aspect space (so it must go through reprojectCropRect before
+ * being applied to this clip). Always true for a video clip. An image clip's
+ * own Ken Burns effect is already self-scoped -- but when no effect is
+ * active (an image with no motion, or the exact first instant, since
+ * findActiveZoomEffectIndex is strict at the start), computeEffectiveCropRect
+ * falls back to the base clip rectangle, which is reference-space too, and
+ * applying it verbatim to a differently-shaped photo squeezes/stretches it.
+ */
+export function cropNeedsReprojection(kind: string | undefined, zoomEffects: ZoomEffect[], timeSeconds: number): boolean {
+  return kind !== "image" || findActiveZoomEffectIndex(zoomEffects, timeSeconds) === -1;
+}
+
+/**
  * The crop rect that should actually be shown at `timeSeconds`, given the
  * clip rectangle -- the clip's fixed, ongoing property -- and whichever
  * zoom/pan effect (if any) is active at that instant. A zoom/pan is a

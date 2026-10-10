@@ -61,6 +61,7 @@ import {
   computeEffectiveCropRect,
   findActiveZoomEffectIndex,
   reprojectCropRect,
+  cropNeedsReprojection,
   computeEffectiveFlip,
   computeProgress,
   findActiveTextOverlays,
@@ -1147,7 +1148,7 @@ export async function exportVideoLocally(
         // segment's rect (always authored against the reference clip)
         // needs re-projecting here.
         const crop =
-          !hasClipRectangle || segment.kind === "image" || referenceAspectRatio === null
+          !hasClipRectangle || !cropNeedsReprojection(segment.kind, selections.zoomEffects, sourceTimeSeconds) || referenceAspectRatio === null
             ? authoredCrop
             : reprojectCropRect(authoredCrop, referenceAspectRatio, sourceWidth / sourceHeight);
         const sx = crop.x * sourceWidth;
@@ -1424,7 +1425,7 @@ export async function exportVideoLocally(
           const incomingSourceHeight = incomingSource instanceof HTMLVideoElement ? incomingSource.videoHeight : incomingSource.naturalHeight;
           const authoredIncomingCrop = computeEffectiveCropRect(baseCropRect, selections.zoomEffects, incomingSourceTimeSeconds);
           const incomingCrop =
-            !hasClipRectangle || toSegment.kind === "image" || referenceAspectRatio === null
+            !hasClipRectangle || !cropNeedsReprojection(toSegment.kind, selections.zoomEffects, incomingSourceTimeSeconds) || referenceAspectRatio === null
               ? authoredIncomingCrop
               : reprojectCropRect(authoredIncomingCrop, referenceAspectRatio, incomingSourceWidth / incomingSourceHeight);
           const incomingSx = incomingCrop.x * incomingSourceWidth;
