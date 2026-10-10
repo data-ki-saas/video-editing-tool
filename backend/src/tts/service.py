@@ -46,13 +46,19 @@ _SCRIPT_RANGES: list[tuple[str, int, int, frozenset[str]]] = [
 ]
 
 
+# The danda (।) and double danda (॥) live in the Devanagari block but are the
+# standard full stops in Gurmukhi, Bengali, Odia, etc. too, so they say nothing
+# about which script the text is in.
+_SHARED_PUNCTUATION = frozenset({0x0964, 0x0965})
+
+
 def _assert_script_matches_voice(text: str, voice: str) -> None:
     # Sarvam ids are "sarvam:<speaker>:<locale>"; edge ids start with the locale.
     voice_lang = (voice.split(":")[-1] if sarvam_provider.is_sarvam_voice(voice) else voice).split("-")[0].lower()
     for script_name, start, end, supported_langs in _SCRIPT_RANGES:
         if voice_lang in supported_langs:
             continue
-        if any(start <= ord(ch) <= end for ch in text):
+        if any(start <= ord(ch) <= end and ord(ch) not in _SHARED_PUNCTUATION for ch in text):
             raise HTTPException(
                 status_code=400,
                 detail=f"This voice can't read {script_name} script -- pick a voice for that language instead.",
