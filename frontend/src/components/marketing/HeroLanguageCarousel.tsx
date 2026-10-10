@@ -20,7 +20,7 @@ const SWIPE_THRESHOLD_PX = 40;
 function PlaceholderPortrait({ label }: { label: string }) {
   const gradientId = `hero-carousel-portrait-${useId().replace(/:/g, "")}`;
   return (
-    <div className="relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden bg-accent/10">
+    <div className="relative flex aspect-[9/16] w-full items-center justify-center overflow-hidden bg-accent/10">
       <svg viewBox="0 0 24 24" className="h-16 w-16 text-accent/50" aria-hidden>
         <defs>
           <linearGradient id={gradientId} x1="4" y1="4" x2="20" y2="20" gradientUnits="userSpaceOnUse">
@@ -54,7 +54,7 @@ function SampleReel({
   // off to the side of the track showing just the poster frame. Remounting on
   // activation restarts it from 0 each time the card comes back around.
   return (
-    <div className="relative aspect-[3/4] w-full overflow-hidden bg-black">
+    <div className="relative aspect-[9/16] w-full overflow-hidden bg-black">
       {active ? (
         <video src={video.src} poster={video.posterSrc} autoPlay muted loop playsInline className="h-full w-full object-cover" />
       ) : (
