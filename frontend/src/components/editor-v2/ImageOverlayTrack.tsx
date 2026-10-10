@@ -18,7 +18,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { ContextMenu, useContextMenu, type ContextMenuAction } from "./ContextMenu";
-import { SplitScreenOrientationIcon, SwapIcon, FramingIcon, PictureInPictureIcon, FullScreenIcon } from "@/components/icons/UIIcons";
+import { SplitScreenOrientationIcon, SwapIcon, FramingIcon, PencilIcon, PictureInPictureIcon, FullScreenIcon } from "@/components/icons/UIIcons";
 import { canMoveImageOverlayGroupLane, canMoveImageOverlayLane, findNextImageOverlayInRow } from "@/lib/video/transformations";
 import {
   isExclusiveLayout,
@@ -62,8 +62,8 @@ export interface ImageOverlayGroupHandlers {
   onMoveGroupLayer: (groupId: string, direction: "up" | "down") => void;
 }
 
-/** A group's own outline -- white so it reads over any of the three layout colours. */
-const GROUP_OUTLINE_CLASSNAME = "pointer-events-none absolute top-0 z-20 h-5 rounded-sm border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.45)]";
+/** A group's own outline -- fluorescent pink so it reads over any of the three layout colours. */
+const GROUP_OUTLINE_CLASSNAME = "pointer-events-none absolute top-0 z-20 h-5 rounded-sm border-2 border-[#ff1fd1] shadow-[0_0_0_1px_rgba(0,0,0,0.45),0_0_6px_1px_rgba(255,31,209,0.7)]";
 
 function ImageOverlaySegment({
   overlay,
@@ -319,6 +319,18 @@ function ImageOverlaySegment({
           className="pointer-events-auto z-10 shrink-0 rounded-sm bg-black/25 p-0.5 text-white hover:bg-black/50"
         >
           <FramingIcon className="h-2.5 w-2.5" />
+        </button>
+      )}
+      {!isGrouped && overlay.peep && (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={onEditPeep}
+          title="Edit peeps -- change this character's look"
+          aria-label="Edit peeps"
+          className="pointer-events-auto z-10 shrink-0 rounded-sm bg-black/25 p-0.5 text-white hover:bg-black/50"
+        >
+          <PencilIcon className="h-2.5 w-2.5" />
         </button>
       )}
       {overlay.colorFilterId && (

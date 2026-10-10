@@ -168,6 +168,17 @@ export function FramingIcon(props: IconProps) {
   );
 }
 
+// A pencil -- opens a peep overlay's own PeepEditDialog from its rail segment
+// (ImageOverlayTrack.tsx), next to its FramingIcon button.
+export function PencilIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z" />
+      <path d="M13.5 6.5l4 4" />
+    </svg>
+  );
+}
+
 // A small flag on a pole -- opens a VideoOverlayTrack segment's own
 // OverlaySourceStartDialog, next to its FramingIcon button.
 export function MarkerFlagIcon(props: IconProps) {
