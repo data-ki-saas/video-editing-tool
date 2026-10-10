@@ -20,17 +20,17 @@ FREE = CurrentUser(
 
 
 def test_voice_routing_and_odia_code():
-    assert isinstance(get_tts_provider("sarvam:anushka:hi-IN"), SarvamTTSProvider)
+    assert isinstance(get_tts_provider("sarvam:ritu:hi-IN"), SarvamTTSProvider)
     assert not isinstance(get_tts_provider("hi-IN-SwaraNeural"), SarvamTTSProvider)
-    assert parse_voice("sarvam:abhilash:or-IN") == ("abhilash", "or-IN")
+    assert parse_voice("sarvam:shubh:or-IN") == ("shubh", "or-IN")
     with pytest.raises(HTTPException):
         parse_voice("sarvam:nobody:hi-IN")
 
 
 def test_script_check_uses_sarvam_locale():
-    tts_service._assert_script_matches_voice("नमस्ते", "sarvam:anushka:hi-IN")
+    tts_service._assert_script_matches_voice("नमस्ते", "sarvam:ritu:hi-IN")
     with pytest.raises(HTTPException):
-        tts_service._assert_script_matches_voice("நன்றி", "sarvam:anushka:hi-IN")
+        tts_service._assert_script_matches_voice("நன்றி", "sarvam:ritu:hi-IN")
 
 
 def test_word_timings_cover_duration():
@@ -62,7 +62,7 @@ def sarvam_env(monkeypatch):
 async def test_spends_characters_then_calls_provider(sarvam_env):
     spent, refunded, mp = sarvam_env
     mp.setattr(tts_service, "get_tts_provider", lambda voice=None: _Provider())
-    await tts_service._synthesize_sarvam("p", "नमस्ते", "sarvam:anushka:hi-IN", 0, 0, FREE)
+    await tts_service._synthesize_sarvam("p", "नमस्ते", "sarvam:ritu:hi-IN", 0, 0, FREE)
     assert spent == [6] and refunded == []
 
 
@@ -70,16 +70,16 @@ async def test_refunds_when_provider_fails(sarvam_env):
     spent, refunded, mp = sarvam_env
     mp.setattr(tts_service, "get_tts_provider", lambda voice=None: _Provider(fail=True))
     with pytest.raises(HTTPException):
-        await tts_service._synthesize_sarvam("p", "hello", "sarvam:anushka:en-IN", 0, 0, FREE)
+        await tts_service._synthesize_sarvam("p", "hello", "sarvam:ritu:en-IN", 0, 0, FREE)
     assert spent == [5] and refunded == [5]
 
 
 async def test_rejects_over_limit_and_unconfigured(sarvam_env):
     _, _, mp = sarvam_env
     with pytest.raises(HTTPException) as exc:
-        await tts_service._synthesize_sarvam("p", "a" * (sarvam_provider.MAX_CHARS + 1), "sarvam:anushka:en-IN", 0, 0, FREE)
+        await tts_service._synthesize_sarvam("p", "a" * (sarvam_provider.MAX_CHARS + 1), "sarvam:ritu:en-IN", 0, 0, FREE)
     assert exc.value.status_code == 400
     mp.setattr(settings, "sarvam_api_key", "")
     with pytest.raises(HTTPException) as exc:
-        await tts_service._synthesize_sarvam("p", "hi", "sarvam:anushka:en-IN", 0, 0, FREE)
+        await tts_service._synthesize_sarvam("p", "hi", "sarvam:ritu:en-IN", 0, 0, FREE)
     assert exc.value.status_code == 503

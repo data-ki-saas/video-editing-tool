@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 _API_URL = "https://api.sarvam.ai/text-to-speech"
 
-# Sarvam rejects a single request over this many characters for bulbul:v2.
+# Sarvam rejects a single request over this many characters for bulbul.
 MAX_CHARS = 1500
 
 # Voice ids are "sarvam:<speaker>:<locale>" -- Sarvam speakers are language-
@@ -22,7 +22,10 @@ MAX_CHARS = 1500
 # edge_provider.py's language set; locale uses this app's "or-IN" for Odia,
 # which Sarvam spells "od-IN" -- see _SARVAM_LANGUAGE_CODES).
 ID_PREFIX = "sarvam:"
-_SPEAKERS = [("anushka", "Anushka", "female"), ("abhilash", "Abhilash", "male")]
+_SPEAKERS = [("ritu", "Ritu", "female"), ("shubh", "Shubh", "male")]
+# bulbul:v2 (anushka/abhilash) was retired by Sarvam; voice ids saved in
+# existing projects still resolve, onto the nearest v3 speaker.
+_LEGACY_SPEAKERS = {"anushka": "ritu", "abhilash": "shubh"}
 _LANGUAGES = [
     ("hi-IN", "Hindi"),
     ("en-IN", "Indian English"),
@@ -50,6 +53,11 @@ _VOICES = [
     for speaker, name, gender in _SPEAKERS
 ]
 _VOICE_IDS = {v.id for v in _VOICES}
+_LEGACY_ID_MAP = {
+    f"{ID_PREFIX}{old}:{locale}": f"{ID_PREFIX}{new}:{locale}"
+    for old, new in _LEGACY_SPEAKERS.items()
+    for locale, _ in _LANGUAGES
+}
 
 
 def is_sarvam_voice(voice_id: str) -> bool:
@@ -58,6 +66,7 @@ def is_sarvam_voice(voice_id: str) -> bool:
 
 def parse_voice(voice_id: str) -> tuple[str, str]:
     """Returns (speaker, locale) for a catalog voice id."""
+    voice_id = _LEGACY_ID_MAP.get(voice_id, voice_id)
     if voice_id not in _VOICE_IDS:
         raise HTTPException(status_code=400, detail="Unknown voice")
     _, speaker, locale = voice_id.split(":")
@@ -102,7 +111,6 @@ class SarvamTTSProvider(TTSProvider):
             "speaker": speaker,
             "model": settings.sarvam_model,
             "pace": max(0.5, min(2.0, 1 + rate / 100)),
-            "pitch": max(-0.75, min(0.75, pitch / 100)),
             "enable_preprocessing": True,
         }
         try:

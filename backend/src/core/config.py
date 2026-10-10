@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # (see user_credit_ledger, migration 0048): every account gets a one-time
     # trial grant, further credits come from top-ups.
     sarvam_api_key: str = ""
-    sarvam_model: str = "bulbul:v2"
+    sarvam_model: str = "bulbul:v3"
     sarvam_trial_credit_chars: int = 3000
     # Abuse guardrail on top of the credit balance (uses usage.limits.reserve,
     # so it also counts against the site-wide paid-provider budget).
