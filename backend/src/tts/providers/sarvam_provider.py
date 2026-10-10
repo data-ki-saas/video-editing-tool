@@ -31,6 +31,10 @@ _LANGUAGES = [
     ("mr-IN", "Marathi"),
     ("ta-IN", "Tamil"),
     ("or-IN", "Odia"),
+    ("te-IN", "Telugu"),
+    ("kn-IN", "Kannada"),
+    ("ml-IN", "Malayalam"),
+    ("gu-IN", "Gujarati"),
 ]
 _SARVAM_LANGUAGE_CODES = {"or-IN": "od-IN"}
 

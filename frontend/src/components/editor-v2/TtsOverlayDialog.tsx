@@ -248,6 +248,16 @@ export function TtsOverlayDialog({
     });
   }, [voices, language, quality]);
 
+  // Switching provider can leave the selected language without a voice
+  // (e.g. Telugu on Free) -- fall back to the first language it does have.
+  useEffect(() => {
+    const pool = voices.filter((v) => v.provider === quality);
+    if (pool.length === 0 || pool.some((v) => v.locale.toLowerCase().startsWith(language))) return;
+    const fallback = NICHE_LANGUAGES.find((l) => pool.some((v) => v.locale.toLowerCase().startsWith(l.code)));
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (fallback) setLanguage(fallback.code);
+  }, [voices, quality, language]);
+
   async function handleGenerateSpeech() {
     const trimmed = text.trim();
     if (!trimmed || !voice || isSynthesizing) return;
@@ -293,7 +303,13 @@ export function TtsOverlayDialog({
   // full catalog if that ever yields nothing, same defensive fallback the
   // niche wizard's own narrationVoicesForLanguage uses (dashboard/new/page.tsx).
   const voicesOfQuality = voices.filter((v) => v.provider === quality);
-  const voicesForLanguageFiltered = voicesOfQuality.filter((v) => v.locale.toLowerCase().startsWith(language));
+  // Only languages the chosen provider has a voice for (Sarvam covers more
+  // Indian languages than the free voices) -- everything until the catalog loads.
+  const languageOptions =
+    voicesOfQuality.length === 0
+      ? NICHE_LANGUAGES
+      : NICHE_LANGUAGES.filter((l) => voicesOfQuality.some((v) => v.locale.toLowerCase().startsWith(l.code)));
+  const voicesForLanguageFiltered =voicesOfQuality.filter((v) => v.locale.toLowerCase().startsWith(language));
   const voicesForLanguage = voicesForLanguageFiltered.length > 0 ? voicesForLanguageFiltered : voicesOfQuality;
 
   const trimmedText = text.trim();
@@ -423,6 +439,8 @@ export function TtsOverlayDialog({
               />
             </TagAutocompleteOverlay>
 
+            <VoiceQualityToggle value={quality} onChange={setQuality} credits={sarvamCredits} unlimited={sarvamUnlimited} />
+
             <label className="mb-2 flex flex-col gap-1 text-xs text-muted">
               Language
               <select
@@ -430,15 +448,13 @@ export function TtsOverlayDialog({
                 onChange={(e) => setLanguage(e.target.value)}
                 className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
               >
-                {NICHE_LANGUAGES.map((option) => (
+                {languageOptions.map((option) => (
                   <option key={option.code} value={option.code}>
                     {option.label}
                   </option>
                 ))}
               </select>
             </label>
-
-            <VoiceQualityToggle value={quality} onChange={setQuality} credits={sarvamCredits} unlimited={sarvamUnlimited} />
 
             <label className="mb-2 flex flex-col gap-1 text-xs text-muted">
               Voice

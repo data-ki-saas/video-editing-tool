@@ -74,6 +74,10 @@ _LANGUAGE_INFO: dict[str, tuple[str, str]] = {
     "bn": ("Bengali", "Bengali"),
     "ta": ("Tamil", "Tamil"),
     "or": ("Odia", "Odia"),
+    "te": ("Telugu", "Telugu"),
+    "kn": ("Kannada", "Kannada"),
+    "ml": ("Malayalam", "Malayalam"),
+    "gu": ("Gujarati", "Gujarati"),
 }
 
 

@@ -14,6 +14,10 @@ export const LANGUAGE_SCRIPTS: Record<string, { toScript: string; fromScheme: st
   bn: { toScript: "bengali", fromScheme: "itrans" },
   ta: { toScript: "tamil", fromScheme: "itrans_dravidian" },
   or: { toScript: "oriya", fromScheme: "itrans" },
+  te: { toScript: "telugu", fromScheme: "itrans_dravidian" },
+  kn: { toScript: "kannada", fromScheme: "itrans_dravidian" },
+  ml: { toScript: "malayalam", fromScheme: "itrans_dravidian" },
+  gu: { toScript: "gujarati", fromScheme: "itrans" },
 };
 
 /** Reads the 2-letter language prefix off a full BCP-47 locale (e.g.

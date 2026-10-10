@@ -60,6 +60,10 @@ export const NICHE_LANGUAGES: { code: string; label: string; voiceLocalePrefix: 
   { code: "bn", label: "বাংলা", voiceLocalePrefix: "bn" },
   { code: "ta", label: "தமிழ்", voiceLocalePrefix: "ta" },
   { code: "or", label: "ଓଡ଼ିଆ", voiceLocalePrefix: "or" },
+  { code: "te", label: "తెలుగు", voiceLocalePrefix: "te" },
+  { code: "kn", label: "ಕನ್ನಡ", voiceLocalePrefix: "kn" },
+  { code: "ml", label: "മലയാളം", voiceLocalePrefix: "ml" },
+  { code: "gu", label: "ગુજરાતી", voiceLocalePrefix: "gu" },
 ];
 
 /** Locale a TransliterateInput/TransliterateTextarea should target for a

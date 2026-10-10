@@ -39,6 +39,10 @@ _SCRIPT_RANGES: list[tuple[str, int, int, frozenset[str]]] = [
     ("Bengali", 0x0980, 0x09FF, frozenset({"bn"})),
     ("Odia", 0x0B00, 0x0B7F, frozenset({"or"})),
     ("Tamil", 0x0B80, 0x0BFF, frozenset({"ta"})),
+    ("Gujarati", 0x0A80, 0x0AFF, frozenset({"gu"})),
+    ("Telugu", 0x0C00, 0x0C7F, frozenset({"te"})),
+    ("Kannada", 0x0C80, 0x0CFF, frozenset({"kn"})),
+    ("Malayalam", 0x0D00, 0x0D7F, frozenset({"ml"})),
 ]
 
 
