@@ -260,7 +260,7 @@ export function TtsOverlayDialog({
 
   async function handleGenerateSpeech() {
     const trimmed = text.trim();
-    if (!trimmed || !voice || isSynthesizing) return;
+    if (!trimmed || !effectiveVoice || isSynthesizing) return;
     setIsSynthesizing(true);
     setSynthesisError(null);
     try {
@@ -278,7 +278,7 @@ export function TtsOverlayDialog({
         if (resolved) extraAnchors.push({ raw: tag.raw, layer: resolved.layer, id: resolved.id, beforeWordIndex: tag.beforeWordIndex });
       }
 
-      const result = await synthesizeTts(projectId, parsed.strippedText, voice);
+      const result = await synthesizeTts(projectId, parsed.strippedText, effectiveVoice);
       // The backend's own durationSeconds is a last-word-boundary-plus-padding
       // ESTIMATE (see edge_provider.py's own comment -- it deliberately has
       // no audio-decoding dependency), which can drift from the real mp3's
@@ -311,6 +311,9 @@ export function TtsOverlayDialog({
       : NICHE_LANGUAGES.filter((l) => voicesOfQuality.some((v) => v.locale.toLowerCase().startsWith(l.code)));
   const voicesForLanguageFiltered =voicesOfQuality.filter((v) => v.locale.toLowerCase().startsWith(language));
   const voicesForLanguage = voicesForLanguageFiltered.length > 0 ? voicesForLanguageFiltered : voicesOfQuality;
+  // What the Voice select actually shows -- `voice` can briefly lag it (or sit
+  // empty) after a provider/language switch, which must not disable Generate.
+  const effectiveVoice = voicesForLanguage.some((v) => v.id === voice) ? voice : (voicesForLanguage[0]?.id ?? "");
 
   const trimmedText = text.trim();
   const canSave = Boolean(synthesis) && synthesizedText === trimmedText;
@@ -320,7 +323,7 @@ export function TtsOverlayDialog({
     const overlay: TtsOverlay = {
       id: editingOverlay?.id ?? crypto.randomUUID(),
       text: trimmedText,
-      voice,
+      voice: effectiveVoice,
       assetId: synthesis.assetId,
       durationSeconds: synthesis.durationSeconds,
       // The real synthesized length at generation time -- TtsOverlayTrack's
@@ -459,7 +462,7 @@ export function TtsOverlayDialog({
             <label className="mb-2 flex flex-col gap-1 text-xs text-muted">
               Voice
               <select
-                value={voice}
+                value={effectiveVoice}
                 onChange={(e) => setVoice(e.target.value)}
                 disabled={isLoadingVoices || voicesForLanguage.length === 0}
                 className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground disabled:opacity-50"
@@ -533,7 +536,7 @@ export function TtsOverlayDialog({
               <button
                 type="button"
                 onClick={handleGenerateSpeech}
-                disabled={!trimmedText || !voice || isSynthesizing}
+                disabled={!trimmedText || !effectiveVoice || isSynthesizing}
                 className="flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
               >
                 {isSynthesizing ? "Generating…" : "Generate speech"}
