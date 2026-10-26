@@ -22,16 +22,34 @@ import { ContextMenu, useContextMenu } from "./ContextMenu";
 import { HelpTip } from "./HelpTip";
 import { startEditorTour } from "./GuidedTour";
 
+// Survives remounts: switching reels re-keys the whole editor (see
+// dashboard/[projectId]/page.tsx), which remounts this list. Seeding state
+// from the last-fetched list (then refreshing in the background) keeps the
+// panel from flashing "Loading…" on every switch.
+let cachedProjects: Project[] | null = null;
+
 export function ProjectList({ activeProjectId }: { activeProjectId: string }) {
   const router = useRouter();
-  const [projects, setProjects] = useState<Project[] | null>(null);
+  const [projects, setProjectsState] = useState<Project[] | null>(cachedProjects);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const { contextMenuState, openContextMenu, closeContextMenu } = useContextMenu();
 
+  const setProjects: typeof setProjectsState = (next) => {
+    setProjectsState((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      cachedProjects = value;
+      return value;
+    });
+  };
+
   useEffect(() => {
     listProjects()
-      .then(setProjects)
+      .then((list) => {
+        cachedProjects = list;
+        setProjectsState(list);
+        setError(null);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load your reels"));
   }, []);
 

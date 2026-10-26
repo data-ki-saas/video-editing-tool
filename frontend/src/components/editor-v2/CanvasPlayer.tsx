@@ -3002,6 +3002,20 @@ export const CanvasPlayer = forwardRef<
             object-fit, immune to the wrapper being squeezed on resize (see
             its comment). */}
         <canvas ref={canvasRef} className="absolute inset-0 h-full w-full object-contain" />
+        {/* Faint outline of the real frame rect: a blank (black) first frame
+            is otherwise indistinguishable from the black panel behind it, so
+            the reel looks like it isn't there. Own size-container so cqw/cqh
+            resolve against this box, sized to the canvas's exact letterboxed
+            area (same aspect as drawFrameAt's computeOutputDimensions). */}
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center" style={{ containerType: "size" }}>
+          <div
+            className="rounded-sm border border-white/25"
+            style={{
+              aspectRatio: String(outputAspectRatio),
+              width: `min(100cqw, calc(100cqh * ${outputAspectRatio}))`,
+            }}
+          />
+        </div>
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60">
             <ReelLoader stage={loadingStage} className="text-white" />

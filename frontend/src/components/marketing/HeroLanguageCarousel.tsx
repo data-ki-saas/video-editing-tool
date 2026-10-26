@@ -50,16 +50,30 @@ function SampleReel({
   label: string;
   active: boolean;
 }) {
-  // Only the on-screen card actually loads/plays the reel -- the others sit
-  // off to the side of the track showing just the poster frame. Remounting on
-  // activation restarts it from 0 each time the card comes back around.
+  // The poster <img> is always mounted so activating/deactivating a card never
+  // swaps the visible element (that swap caused a flicker). Only the on-screen
+  // card mounts the <video>, layered over the poster and faded in once it is
+  // actually playing. Remounting on activation restarts it from 0 each time
+  // the card comes back around.
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    if (!active) setPlaying(false);
+  }, [active]);
   return (
     <div className="relative aspect-[9/16] w-full overflow-hidden bg-black">
-      {active ? (
-        <video src={video.src} poster={video.posterSrc} autoPlay muted loop playsInline className="h-full w-full object-cover" />
-      ) : (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={video.posterSrc} alt="" className="h-full w-full object-cover" />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={video.posterSrc} alt="" className="absolute inset-0 h-full w-full object-cover" />
+      {active && (
+        <video
+          src={video.src}
+          poster={video.posterSrc}
+          autoPlay
+          muted
+          loop
+          playsInline
+          onPlaying={() => setPlaying(true)}
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${playing ? "opacity-100" : "opacity-0"}`}
+        />
       )}
       <span className="absolute bottom-2 right-2 rounded-full border border-border bg-surface/90 px-2.5 py-1 text-xs font-medium text-foreground">
         {label}
